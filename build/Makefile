@@ -18,18 +18,21 @@
 # .bib file (assumed to be in the source directory).
 #
 
-srcdir  = .
+srcdir  = ../src
 
 docs_with_bib = riscv-spec riscv-privileged 
 docs_without_bib =
 
-srcs = $(wildcard *.tex)
-figs = $(wildcard figs/*)
-bibs = riscv-spec.bib
+srcs = $(wildcard $(srcdir)/*.tex)
+figs = $(wildcard $(srcdir)/figs/*)
+bibs = $(srcdir)/riscv-spec.bib
 
 #=======================================================================
 # You shouldn't need to change anything below this
 #=======================================================================
+
+PDFLATEX := TEXINPUTS=$(srcdir): pdflatex
+BIBTEX := BIBINPUTS=$(srcdir): bibtex
 
 default : pdf
 
@@ -46,15 +49,15 @@ pdf : $(pdfs)
 open: $(pdfs)
 	open $(pdfs)
 
-$(pdfs_with_bib): %.pdf: %.tex $(srcs) $(figs) $(bibs)
-	pdflatex $*
-	bibtex $*
-	pdflatex $*
-	pdflatex $*
+$(pdfs_with_bib): %.pdf: $(srcdir)/%.tex $(srcs) $(figs) $(bibs)
+	$(PDFLATEX) $*
+	$(BIBTEX) $*
+	$(PDFLATEX) $*
+	$(PDFLATEX) $*
 
-$(pdfs_without_bib): %.pdf: %.tex $(srcs) $(figs)
-	pdflatex $*
-	pdflatex $*
+$(pdfs_without_bib): %.pdf: $(srcdir)/%.tex $(srcs) $(figs)
+	$(PDFLATEX) $*
+	$(PDFLATEX) $*
 
 junk += $(pdfs) *.aux *.log *.bbl *.blg *.toc *.out
 
