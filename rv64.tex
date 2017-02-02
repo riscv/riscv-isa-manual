@@ -1,0 +1,253 @@
+\chapter{RV64I Base Integer Instruction Set, Version 2.0}
+\label{rv64}
+
+This chapter describes the RV64I base integer instruction set, which
+builds upon the RV32I variant described in Chapter~\ref{rv32}.  This
+chapter presents only the differences with RV32I, so should be read in
+conjunction with the earlier chapter.
+
+\section{Register State}
+
+RV64I widens the integer registers and supported user address space to
+64 bits (XLEN=64 in Figure~\ref{gprs}).
+
+\section{Integer Computational Instructions}
+
+Additional instruction variants are provided to manipulate 32-bit
+values in RV64I, indicated by a `W' suffix to the opcode.  These
+``*W'' instructions ignore the upper 32 bits of their inputs and
+always produce 32-bit signed values, i.e. bits XLEN-1 through 31 are
+equal.  They cause an illegal instruction exception in RV32I.
+
+\begin{commentary}
+The compiler and calling convention maintain an invariant that all 32-bit
+values are held in a sign-extended format in 64-bit registers.  Even 32-bit
+unsigned integers extend bit 31 into bits 63 through 32.  Consequently,
+conversion between unsigned and signed 32-bit integers is a no-op,
+as is conversion from a signed 32-bit integer to a signed 64-bit
+integer.  Existing 64-bit wide SLTU and unsigned branch compares still operate
+correctly on unsigned 32-bit integers under this invariant.  Similarly,
+existing 64-bit wide logical operations on 32-bit sign-extended integers
+preserve the sign-extension property.  A few new instructions
+(ADD[I]W/SUBW/SxxW) are required for addition and shifts to ensure reasonable
+performance for 32-bit values.
+\end{commentary}
+
+\newpage
+\subsubsection*{Integer Register-Immediate Instructions}
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+I-immediate[11:0] & src & ADDIW  & dest & OP-IMM-32 \\
+\end{tabular}
+\end{center}
+
+ADDIW is an RV64I-only instruction that adds the sign-extended 12-bit
+immediate to register {\em rs1} and produces the proper sign-extension
+of a 32-bit result in {\em rd}.  Overflows are ignored and the result
+is the low 32 bits of the result sign-extended to 64 bits.  Note,
+ADDIW {\em rd, rs1, 0} writes the sign-extension of the lower 32 bits
+of register {\em rs1} into register {\em rd} (assembler pseudo-op
+SEXT.W).
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{R@{}W@{}R@{}R@{}R@{}R@{}O}
+\\
+\instbitrange{31}{26} &
+\multicolumn{1}{c}{\instbit{25}} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:6]} &
+\multicolumn{1}{|c|}{imm[5]} &
+\multicolumn{1}{|c|}{imm[4:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+6 & \multicolumn{1}{c}{1} & 5 & 5 & 3 & 5 & 7 \\
+000000 & shamt[5] & shamt[4:0]  & src & SLLI & dest & OP-IMM \\
+000000 & shamt[5] & shamt[4:0]  & src & SRLI & dest & OP-IMM \\
+010000 & shamt[5] & shamt[4:0]  & src & SRAI & dest & OP-IMM \\
+000000 &       0  & shamt[4:0]  & src & SLLIW & dest & OP-IMM-32 \\
+000000 &       0  & shamt[4:0]  & src & SRLIW & dest & OP-IMM-32 \\
+010000 &       0  & shamt[4:0]  & src & SRAIW & dest & OP-IMM-32 \\
+\end{tabular}
+\end{center}
+
+Shifts by a constant are encoded as a specialization of the I-type
+format using the same instruction opcode as RV32I.  The operand to be
+shifted is in {\em rs1}, and the shift amount is encoded in the lower
+6 bits of the I-immediate field for RV64I.  The right shift type is
+encoded in bit 30.  SLLI is a logical left shift (zeros are shifted
+into the lower bits); SRLI is a logical right shift (zeros are shifted
+into the upper bits); and SRAI is an arithmetic right shift (the
+original sign bit is copied into the vacated upper bits).  For RV32I,
+SLLI, SRLI, and SRAI generate an illegal instruction exception if
+$imm[5] \neq 0$.
+
+SLLIW, SRLIW, and SRAIW are RV64I-only instructions that are
+analogously defined but operate on 32-bit values and produce
+signed 32-bit results.  SLLIW, SRLIW, and SRAIW generate an illegal
+instruction exception if $imm[5] \neq 0$.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{U@{}R@{}O}
+\\
+\instbitrange{31}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[31:12]} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+20 & 5 & 7 \\
+U-immediate[31:12] & dest & LUI \\
+U-immediate[31:12] & dest & AUIPC
+\end{tabular}
+\end{center}
+
+
+LUI (load upper immediate) uses the same opcode as RV32I.  LUI places
+the 20-bit U-immediate into bits 31--12 of register {\em rd} and
+places zero in the lowest 12 bits.  The 32-bit result is
+sign-extended to 64 bits.
+
+AUIPC (add upper immediate to {\tt pc}) uses the same opcode as RV32I.
+AUIPC (add upper immediate to {\tt pc}) is used to build {\tt
+  pc}-relative addresses and uses the U-type format.  AUIPC appends 12
+low-order zero bits to the 20-bit U-immediate, sign-extends the result
+to 64 bits, then adds it to the {\tt pc} and places the result in
+register {\em rd}.
+
+\subsubsection*{Integer Register-Register Operations}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{S@{}R@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+0000000 & src2 & src1 & SLL/SRL     & dest & OP    \\
+0100000 & src2 & src1 & SRA         & dest & OP    \\
+0000000 & src2 & src1 & ADDW        & dest & OP-32    \\
+0000000 & src2 & src1 & SLLW/SRLW   & dest & OP-32    \\
+0100000 & src2 & src1 & SUBW/SRAW   & dest & OP-32    \\
+\end{tabular}
+\end{center}
+
+ADDW and SUBW are RV64I-only instructions that are defined analogously
+to ADD and SUB but operate on 32-bit values and produce signed 32-bit
+results.  Overflows are ignored, and the low 32-bits of the result is
+sign-extended to 64-bits and written to the destination register.
+
+SLL, SRL, and SRA perform logical left, logical right, and arithmetic
+right shifts on the value in register {\em rs1} by the shift amount
+held in register {\em rs2}.  In RV64I, only the low 6 bits of {\em
+  rs2} are considered for the shift amount.
+
+SLLW, SRLW, and SRAW are RV64I-only instructions that are analogously
+defined but operate on 32-bit values and produce signed 32-bit
+results.  The shift amount is given by {\em rs2[4:0]}.
+
+\section{Load and Store Instructions}
+
+RV64I extends the address space to 64 bits.  The execution environment
+will define what portions of the address space are legal to access.
+
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+offset[11:0] & base & width & dest & LOAD \\
+\end{tabular}
+\end{center}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:5]} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{imm[4:0]} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+offset[11:5] & src & base & width & offset[4:0] & STORE \\
+\end{tabular}
+\end{center}
+
+The LD instruction loads a 64-bit value from memory into register {\em
+  rd} for RV64I.
+
+The LW instruction loads a 32-bit value from memory and sign-extends
+this to 64 bits before storing it in register {\em rd} for RV64I.  The
+LWU instruction, on the other hand, zero-extends the 32-bit value from
+memory for RV64I.  LH and LHU are defined analogously for 16-bit
+values, as are LB and LBU for 8-bit values.  The SD, SW, SH, and SB
+instructions store 64-bit, 32-bit, 16-bit, and 8-bit values from the
+low bits of register {\em rs2} to memory respectively.
+
+\section{System Instructions}
+
+In RV64I, the CSR instructions can manipulate 64-bit CSRs.  In particular, the
+RDCYCLE, RDTIME, and RDINSTRET pseudo-instructions read the full 64 bits of
+the {\tt cycle}, {\tt time}, and {\tt instret} counters.  Hence, the RDCYCLEH,
+RDTIMEH, and RDINSTRETH instructions are not necessary and are illegal in
+RV64I.

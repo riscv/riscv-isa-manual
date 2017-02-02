@@ -1,0 +1,77 @@
+\chapter{Supervisor Binary Interface (SBI)}
+
+This chapter is a placeholder to describe the form of the SBIs we're
+envisioning for the RISC-V supervisor.
+
+The SBI captures the instructions that can be executed together with a
+set of SBI calls out to the supervisor execution environment (SEE) on
+a given platform.
+
+Several features that might normally handled by the supervisor
+operating system (OS) directly are handled via SBI calls to the SEE in
+RISC-V, including:
+
+\begin{itemize}
+
+\item Reset is handled by the SEE and once the machine is set up, the
+  OS kernel is mapped into virtual memory, and its entry point is called.
+
+\item Machine-check errors and other non-maskable interrupts are
+  handled by the SEE before vectoring into the OS if recovery is
+  possible.
+
+\item Some device drivers may be handled by the SEE, and managed via
+  virtual device calls over the SBI.
+
+\item The presence and version of supported instruction-set extensions
+  is obtained via an SBI call to return the configuration string
+  rather than a machine register.  This allows for an arbitrarily
+  large definition of instruction set extensions, and simplifies
+  virtualization where the returned machine configuration might be
+  modified to emulate different architectures on a given hardware
+  platform.
+
+\end{itemize}
+
+The SBI employs the same calling convention as the ABI specified in Volume
+I of this manual.  SBI entry points are located in the uppermost
+\wunits{2}{KiB} of the virtual address space, so that they may be invoked with
+a single {\tt jalr} instruction with {\tt x0} as the base register.
+
+Table~\ref{sbicalls} gives a preliminary list of SBI calls.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{| >{\ttfamily\catcode`_=12}l|p{8cm}|}
+\hline
+const char* sbi_get_config(void); & \parbox{8cm}{Get pointer to
+  configuration string.}\\ \hline
+size_t sbi_hart_id(void); & \parbox{8cm}{Get ID of current hart, in
+  range \\ {\tt [0, number\_harts - 1 ]}.} \\ \hline
+int sbi_send_ipi(size_t hart_id); & Send an interprocessor interrupt; returns 0 on success or -1 if hart ID is invalid. \\ \hline
+bool sbi_clear_ipi(void); & Clear local interprocessor interrupt. Returns 1 if an IPI was pending, else 0. \\ \hline
+void sbi_shutdown(void); & Terminate this supervisor-mode process. \\ \hline
+int sbi_console_putchar(uint8_t ch); & Write byte to debug console (blocking); returns 0 on success, else -1. \\ \hline
+int sbi_console_getchar(void); & Read byte from debug console; returns the byte on success, or -1 for failure. \\ \hline
+
+& \multirow{4}{*}{\parbox{8cm}{Instruct other harts to execute SFENCE.VM.  {\tt harts} points to a bitmask of remote hart IDs; NULL indicates all harts.  {\tt asid} holds the address-space ID; 0 indicates all address spaces.}} \\
+void sbi_remote_sfence_vm( & \\
+\ \ const uintptr_t* harts, size_t asid); & \\
+& \\ \hline
+
+void sbi_remote_sfence_vm_range(
+& \multirow{3}{*}{\parbox{8cm}{Like {\tt sbi\_remote\_sfence\_vm}, but only orders updates to leaf page tables mapping the range {\tt [start, start+size-1]}.}} \\
+\ \ const uintptr_t* harts, size_t asid, & \\
+\ \ uintptr_t start, uintptr_t size); & \\ \hline
+
+void sbi_remote_fence_i(
+& \multirow{2}{*}{\parbox{8cm}{Instruct remote harts to execute FENCE.I.  {\tt harts} is as with {\tt sbi\_remote\_sfence\_vm}.}} \\
+\ \ const uintptr_t* harts); & \\ \hline
+
+int sbi_mask_interrupt(int which); & Disable a PLIC interrupt line. Returns 0 if previously disabled, 1 if previously enabled, or -1 if {\tt which} is invalid. \\ \hline
+int sbi_unmask_interrupt(int which); & Enable a PLIC interrupt line. Return value is as with {\tt sbi\_mask\_interrupt}. \\ \hline
+\end{tabular}
+\end{center}
+\caption{SBI calls.}
+\label{sbicalls}
+\end{table*}

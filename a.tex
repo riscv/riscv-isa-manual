@@ -1,0 +1,379 @@
+\chapter{``A'' Standard Extension for Atomic Instructions, Version 2.0}
+\label{atomics}
+
+The standard atomic instruction extension is denoted by instruction
+subset name ``A'', and contains instructions that atomically
+read-modify-write memory to support synchronization between multiple
+RISC-V threads running in the same memory space.  The two forms of
+atomic instruction provided are load-reserved/store-conditional
+instructions and atomic fetch-and-op memory instructions.  Both types
+of atomic instruction support various memory consistency orderings
+including unordered, acquire, release, and sequentially consistent
+semantics.  These instructions allow RISC-V to support the RCsc memory
+consistency model~\cite{Gharachorloo90memoryconsistency}.
+
+\begin{commentary}
+After much debate, the language community and architecture community
+appear to have finally settled on release consistency as the standard
+memory consistency model and so the RISC-V atomic support is built
+around this model.
+\end{commentary}
+
+\section{Specifying Ordering of Atomic Instructions}
+
+The base RISC-V ISA has a relaxed memory model, with the FENCE
+instruction used to impose additional ordering constraints.  The
+address space is divided by the execution environment into memory and
+I/O domains, and the FENCE instruction provides options to order
+accesses to one or both of these two address domains.
+
+To provide more efficient support for release
+consistency~\cite{Gharachorloo90memoryconsistency}, each atomic
+instruction has two bits, {\em aq} and {\em rl}, used to specify
+additional memory ordering constraints as viewed by other RISC-V
+threads.  The bits order accesses to one of the two address domains,
+memory or I/O, depending on which address domain the atomic
+instruction is accessing.  No ordering constraint is implied to
+accesses to the other domain, and a FENCE instruction should be used
+to order across both domains.
+
+If both bits are clear, no additional ordering constraints are imposed
+on the atomic memory operation.  If only the {\em aq} bit is set, the
+atomic memory operation is treated as an {\em acquire} access, i.e.,
+no following memory operations on this RISC-V thread can be observed
+to take place before the acquire memory operation.  If only the {\em
+  rl} bit is set, the atomic memory operation is treated as a {\em
+  release} access, i.e., the release memory operation can not be
+observed to take place before any earlier memory operations on this
+RISC-V thread.  If both the {\em aq} and {\em rl} bits are set, the
+atomic memory operation is {\em sequentially consistent} and cannot be
+observed to happen before any earlier memory operations or after any
+later memory operations in the same RISC-V thread, and can only be
+observed by any other thread in the same global order of all
+sequentially consistent atomic memory operations to the same address
+domain.
+
+\begin{commentary}
+Theoretically, the definition of the {\em aq} and {\em rl} bits allows
+for implementations without global store atomicity.  When both {\em
+  aq} and {\em rl} bits are set, however, we require full sequential
+consistency for the atomic operation which implies global store
+atomicity in addition to both acquire and release semantics.  In
+practice, hardware systems are usually implemented with global store
+atomicity, embodied in local processor ordering rules together with
+single-writer cache coherence protocols.
+\end{commentary}
+
+\section{Load-Reserved/Store-Conditional Instructions}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{R@{}W@{}W@{}R@{}R@{}F@{}R@{}O}
+\\
+\instbitrange{31}{27} &
+\instbit{26} &
+\instbit{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct5} &
+\multicolumn{1}{c|}{aq} &
+\multicolumn{1}{c|}{rl} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+5 & 1 & 1 & 5 & 5 & 3 & 5 & 7 \\
+LR & \multicolumn{2}{c}{ordering} & 0   & addr & width & dest & AMO    \\
+SC & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+\end{tabular}
+\end{center}
+
+Complex atomic memory operations on a single memory word are performed
+with the load-reserved (LR) and store-conditional (SC) instructions.
+LR loads a word from the address in {\em rs1}, places the
+sign-extended value in {\em rd}, and registers a reservation on the
+memory address.  SC writes a word in {\em rs2} to the address in {\em
+  rs1}, provided a valid reservation still exists on that address.  SC
+writes zero to {\em rd} on success or a nonzero code on failure.
+
+\begin{commentary}
+Both compare-and-swap (CAS) and LR/SC can be used to build lock-free
+data structures.  After extensive discussion, we opted for LR/SC for
+several reasons: 1) CAS suffers from the ABA problem, which LR/SC
+avoids because it monitors all accesses to the address rather than
+only checking for changes in the data value; 2) CAS would also require
+a new integer instruction format to support three source operands
+(address, compare value, swap value) as well as a different memory
+system message format, which would complicate microarchitectures; 3)
+Furthermore, to avoid the ABA problem, other systems provide a
+double-wide CAS (DW-CAS) to allow a counter to be tested and
+incremented along with a data word. This requires reading five
+registers and writing two in one instruction, and also a new larger
+memory system message type, further complicating implementations; 4)
+LR/SC provides a more efficient implementation of many primitives as
+it only requires one load as opposed to two with CAS (one load before
+the CAS instruction to obtain a value for speculative computation,
+then a second load as part of the CAS instruction to check if value is
+unchanged before updating).
+
+The main disadvantage of LR/SC over CAS is livelock, which we avoid
+with an architected guarantee of eventual forward progress as
+described below.  Another concern is whether the influence of the
+current x86 architecture, with its DW-CAS, will complicate porting of
+synchronization libraries and other software that assumes DW-CAS is
+the basic machine primitive.  A possible mitigating factor is the
+recent addition of transactional memory instructions to x86, which
+might cause a move away from DW-CAS.
+\end{commentary}
+
+The failure code with value 1 is reserved to encode an unspecified
+failure.  Other failure codes are reserved at this time, and portable
+software should only assume the failure code will be non-zero.  LR and
+SC operate on naturally-aligned 64-bit (RV64 only) or 32-bit words in
+memory.  Misaligned addresses will generate misaligned address
+exceptions.
+
+\begin{commentary}
+We reserve a failure code of 1 to mean ``unspecified'' so that simple
+implementations may return this value using the existing mux required
+for the SLT/SLTU instructions.  More specific failure codes might be
+defined in future versions or extensions to the ISA.
+\end{commentary}
+
+\label{lrscseq}
+
+In the standard A extension, certain constrained LR/SC sequences are
+guaranteed to succeed eventually.  The static code for the LR/SC
+sequence plus the code to retry the sequence in case of failure must
+comprise at most 16 integer instructions placed sequentially in
+memory.  For the sequence to be guaranteed to eventually succeed, the
+dynamic code executed between the LR and SC instructions can only
+contain other instructions from the base ``I'' subset, excluding
+loads, stores, backward jumps or taken backward branches, FENCE,
+FENCE.I, and SYSTEM instructions.  The code to retry a failing LR/SC
+sequence can contain backward jumps and/or branches to repeat the
+LR/SC sequence, but otherwise has the same constraints.  The SC must
+be to the same address as the latest LR executed.  LR/SC sequences
+that do not meet these constraints might complete on some attempts on
+some implementations, but there is no guarantee of eventual success.
+
+\begin{commentary}
+One advantage of CAS is that it guarantees that some thread eventually
+makes progress, whereas an LR/SC atomic sequence could livelock
+indefinitely on some systems.  To avoid this concern, we added an
+architectural guarantee of forward progress to LR/SC atomic sequences.
+The restrictions on LR/SC sequence contents allows an implementation
+to capture a cache line on the LR and complete the LR/SC sequence by
+holding off remote cache interventions for a bounded short
+time. Interrupts and TLB misses might cause the reservation to be
+lost, but eventually the atomic sequence can complete.  We restricted
+the length of LR/SC sequences to fit within 64 contiguous instruction
+bytes in the base ISA to avoid undue restrictions on instruction cache
+and TLB size and associativity.  Similarly, we disallowed other loads
+and stores within the sequences to avoid restrictions on data cache
+associativity.  The restrictions on branches and jumps limits the time
+that can be spent in the sequence.  Floating-point operations and
+integer multiply/divide were disallowed to simplify the operating
+system's emulation of these instructions on implementations lacking
+appropriate hardware support.
+\end{commentary}
+
+An implementation can reserve an arbitrary subset of the memory space
+on each LR and multiple LR reservations might be active simultaneously
+for a single hart.  An SC can succeed if no accesses from other harts
+to the address can be observed to have occurred between the SC and
+the last LR in this hart to reserve the address.  Note this LR might
+have had a different address argument, but reserved the SC's address
+as part of the memory subset.  Following this model, in systems with
+memory translation, an SC is allowed to succeed if the earlier LR
+reserved the same location using an alias with a different virtual
+address, but is also allowed to fail if the virtual address is
+different.  The SC must fail if there is an observable memory access
+from another hart to the address, or if there is an intervening
+context switch on this hart, or if in the meantime the hart executed a
+privileged exception-return instruction.
+
+\begin{commentary}
+The specification explicitly allows implementations to support more
+powerful implementations with wider guarantees, provided they do not
+void the atomicity guarantees for the constrained sequences.
+\end{commentary}
+
+LR/SC can be used to construct lock-free data structures.  An example
+using LR/SC to implement a compare-and-swap function is shown in
+Figure~\ref{cas}.  If inlined, compare-and-swap functionality need
+only take three instructions.
+
+\begin{figure}[h!]
+\begin{center}
+\begin{verbatim}
+        # a0 holds address of memory location 
+        # a1 holds expected value
+        # a2 holds desired value
+        # a0 holds return value, 0 if successful, !0 otherwise
+    cas:
+        lr.w t0, (a0)        # Load original value.
+        bne t0, a1, fail     # Doesn't match, so fail.
+        sc.w a0, a2, (a0)    # Try to update.
+        jr ra                # Return.
+    fail:
+        li a0, 1             # Set return to failure.
+        jr ra                # Return.
+\end{verbatim}
+\end{center}
+\caption{Sample code for compare-and-swap function using LR/SC.}
+\label{cas}
+\end{figure}
+
+An SC instruction can never be observed by another RISC-V thread
+before the immediately preceding LR.  Due to the atomic nature of the
+LR/SC sequence, no memory operations from any thread can be observed
+to have occurred between the LR and a successful SC.  The LR/SC
+sequence can be given acquire semantics by setting the {\em aq} bit on
+the SC instruction.  The LR/SC sequence can be given release semantics
+by setting the {\em rl} bit on the LR instruction.  Setting both {\em
+  aq} and {\em rl} bits on the LR instruction, and setting the {\em
+  aq} bit on the SC instruction makes the LR/SC sequence sequentially
+consistent with respect to other sequentially consistent atomic
+operations.
+
+If neither bit is set on both LR and SC, the LR/SC sequence can be
+observed to occur before or after surrounding memory operations from
+the same RISC-V thread.  This can be appropriate when the LR/SC
+sequence is used to implement a parallel reduction operation.
+
+\begin{commentary}
+In general, a multi-word atomic primitive is desirable but there is
+still considerable debate about what form this should take, and
+guaranteeing forward progress adds complexity to a system.  Our
+current thoughts are to include a small limited-capacity transactional
+memory buffer along the lines of the original transactional memory
+proposals as an optional standard extension ``T''.
+\end{commentary}
+
+\section{Atomic Memory Operations}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}W@{}W@{}R@{}R@{}F@{}R@{}R}
+\\
+\instbitrange{31}{27} &
+\instbit{26} &
+\instbit{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct5} &
+\multicolumn{1}{c|}{aq} &
+\multicolumn{1}{c|}{rl} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+5 & 1 & 1 & 5 & 5 & 3 & 5 & 7 \\
+AMOSWAP.W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+AMOADD.W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+AMOAND.W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+AMOOR.W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+AMOXOR.W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+AMOMAX[U].W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+AMOMIN[U].W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
+\end{tabular}
+\end{center}
+
+\vspace{-0.1in} The atomic memory operation (AMO) instructions perform
+read-modify-write operations for multiprocessor synchronization and
+are encoded with an R-type instruction format.  These AMO instructions
+atomically load a data value from the address in {\em rs1}, place the
+value into register {\em rd}, apply a binary operator to the loaded
+value and the original value in {\em rs2}, then store the result back
+to the address in {\em rs1}. AMOs can either operate on 64-bit (RV64
+only) or 32-bit words in memory.  For RV64, 32-bit AMOs always
+sign-extend the value placed in {\em rd}. The address held in {\em
+  rs1} must be naturally aligned to the size of the operand (i.e.,
+eight-byte aligned for 64-bit words and four-byte aligned for 32-bit
+words).  If the address is not naturally aligned, a misaligned address
+exception will be generated.
+
+The operations supported are swap, integer add, logical AND, logical
+OR, logical XOR, and signed and unsigned integer maximum and minimum.
+Without ordering constraints, these AMOs can be used to implement
+parallel reduction operations, where typically the return value would
+be discarded by writing to {\tt x0}.
+
+\begin{commentary}
+We provided fetch-and-op style atomic primitives as they scale to
+highly parallel systems better than LR/SC or CAS.  A simple
+microarchitecture can implement AMOs using the LR/SC primitives.  More
+complex implementations might also implement AMOs at memory
+controllers, and can optimize away fetching the original value when
+the destination is {\tt x0}.
+\end{commentary}
+
+To help implement multiprocessor synchronization, the AMOs optionally
+provide release consistency semantics.  If the {\em aq} bit is set,
+then no later memory operations in this RISC-V thread can be observed
+to take place before the AMO.
+Conversely, if the {\em rl} bit is set, then other
+RISC-V threads will not observe the AMO before memory accesses
+preceding the AMO in this RISC-V thread.
+
+\begin{commentary}
+The AMOs were designed to implement the C11 and C++11 memory models
+efficiently.  Although the FENCE R, RW instruction suffices to
+implement the {\em acquire} operation and FENCE RW, W suffices to
+implement {\em release}, both imply additional unnecessary ordering as
+compared to AMOs with the corresponding {\em aq} or {\em rl} bit set.
+\end{commentary}
+
+AMOs can also be used to provide sequentially consistent loads and
+stores.  A sequentially consistent load can be implemented as an
+AMOADD of x0 with both {\em aq} and {\em rl} set. A sequentially
+consistent store can be implemented as an AMOSWAP that writes the old
+value to x0 and has both {\em aq} and {\em rl} set.
+
+An example code sequence for a critical section guarded by a
+test-and-set spinlock is shown in Figure~\ref{critical}.  Note the
+first AMO is marked {\em aq} to order the lock acquisition before the
+critical section, and the second AMO is marked {\em rl} to order
+the critical section before the lock relinquishment.
+
+\begin{figure}[h!]
+\begin{center}
+\begin{verbatim}
+        li           t0, 1        # Initialize swap value.
+    again:
+        amoswap.w.aq t0, t0, (a0) # Attempt to acquire lock.
+        bnez         t0, again    # Retry if held.
+        # ...
+        # Critical section.
+        # ...
+        amoswap.w.rl x0, x0, (a0) # Release lock by storing 0.
+\end{verbatim}
+\end{center}
+\caption{Sample code for mutual exclusion.  {\tt a0} contains the address of the lock.}
+\label{critical}
+\end{figure}
+
+\begin{commentary}
+We recommend the use of the AMO Swap idiom shown above for both lock
+acquire and release to simplify the implementation of speculative lock
+elision~\cite{Rajwar:2001:SLE}.
+
+At the risk of complicating the implementation of atomic operations,
+microarchitectures can elide the store within the acquire swap if the
+lock value matches the swap value, to avoid dirtying a cache line held
+in a shared or exclusive clean state.  The effect is similar to a
+test-and-test-and-set lock but with shorter code paths.
+\end{commentary}

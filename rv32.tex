@@ -1,0 +1,1359 @@
+\chapter{RV32I Base Integer Instruction Set, Version 2.0}
+\label{rv32}
+
+This chapter describes version 2.0 of the RV32I base integer
+instruction set.  Much of the commentary also applies to the RV64I
+variant.
+
+\begin{commentary}
+RV32I was designed to be sufficient to form a compiler target and to
+support modern operating system environments.  The ISA was also
+designed to reduce the hardware required in a minimal implementation.
+RV32I contains 47 unique instructions, though a simple implementation
+might cover the eight SCALL/SBREAK/CSRR* instructions with a single
+SYSTEM hardware instruction that always traps and might be able to
+implement the FENCE and FENCE.I instructions as NOPs, reducing
+hardware instruction count to 38 total.  RV32I can emulate almost any
+other ISA extension (except the A extension, which requires additional
+hardware support for atomicity).
+\end{commentary}
+
+\section{Programmers' Model for Base Integer Subset}
+
+Figure~\ref{gprs} shows the user-visible state for the base integer
+subset.  There are 31 general-purpose registers {\tt x1}--{\tt x31},
+which hold integer values.  Register {\tt x0} is hardwired to the
+constant 0.  There is no hardwired subroutine return address link
+register, but the standard software calling convention uses register
+{\tt x1} to hold the return address on a call.  For RV32, the {\tt x}
+registers are 32 bits wide, and for RV64, they are 64 bits wide.  This
+document uses the term XLEN to refer to the current width of an {\tt
+  x} register in bits (either 32 or 64).
+
+There is one additional user-visible register: the program counter {\tt pc}
+holds the address of the current instruction.
+
+\begin{commentary}
+The number of available architectural registers can have large impacts
+on code size, performance, and energy consumption.  Although 16
+registers would arguably be sufficient for an integer ISA running
+compiled code, it is impossible to encode a complete ISA with 16
+registers in 16-bit instructions using a 3-address format.  Although a
+2-address format would be possible, it would increase instruction
+count and lower efficiency.  We wanted to avoid intermediate
+instruction sizes (such as Xtensa's 24-bit instructions) to simplify
+base hardware implementations, and once a 32-bit instruction size was
+adopted, it was straightforward to support 32 integer registers.  A
+larger number of integer registers also helps performance on
+high-performance code, where there can be extensive use of loop
+unrolling, software pipelining, and cache tiling.
+
+For these reasons, we chose a conventional size of 32 integer
+registers for the base ISA.  Dynamic register usage tends to be
+dominated by a few frequently accessed registers, and regfile
+implementations can be optimized to reduce access energy for the
+frequently accessed registers~\cite{jtseng:sbbci}.  The optional
+compressed 16-bit instruction format mostly only accesses 8 registers
+and hence can provide a dense instruction encoding, while additional
+instruction-set extensions could support a much larger register space
+(either flat or hierarchical) if desired.
+
+For resource-constrained embedded applications, we have defined the
+RV32E subset, which only has 16 registers (Chapter~\ref{rv32e}).
+\end{commentary}
+
+\begin{figure}[H]
+{\footnotesize
+\begin{center}
+\begin{tabular}{p{2in}}
+\instbitrange{XLEN-1}{0}                                  \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ \ \ x0 / zero}}      \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x1\ \ \ \ \ }}            \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x2\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x3\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x4\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x5\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x6\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x7\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x8\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ \ x9\ \ \ \ \ }}       \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x10\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x11\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x12\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x13\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x14\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x15\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x16\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x17\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x18\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x19\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x20\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x21\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x22\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x23\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x24\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x25\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x26\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x27\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x28\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x29\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x30\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{\ \ \ x31\ \ \ \ \ }}        \\ \cline{1-1}
+\multicolumn{1}{c}{XLEN}                                  \\
+
+\instbitrange{XLEN-1}{0}                                  \\ \cline{1-1}
+\multicolumn{1}{|c|}{\reglabel{pc}}                         \\ \cline{1-1}
+\multicolumn{1}{c}{XLEN}                                  \\
+\end{tabular}
+\end{center}
+}
+\caption{RISC-V user-level base integer register state.}
+\label{gprs}
+\end{figure}
+
+\newpage
+
+\section{Base Instruction Formats}
+
+In the base ISA, there are four core instruction formats (R/I/S/U), as
+shown in Figure~\ref{fig:baseinstformats}.  All are a fixed 32 bits in
+length and must be aligned on a four-byte boundary in memory.  An
+instruction address misaligned exception is generated on a taken
+branch or unconditional jump if the target address is not four-byte
+aligned.  No instruction fetch misaligned exception is generated for a
+conditional branch that is not taken.
+
+\vspace{-0.2in}
+\begin{figure}[h]
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{1.2in}@{}p{0.8in}@{}p{0.8in}@{}p{0.6in}@{}p{0.8in}@{}p{1in}l}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\cline{1-6}
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} &
+R-type \\
+\cline{1-6}
+\\
+\cline{1-6}
+\multicolumn{2}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} &
+I-type \\
+\cline{1-6}
+\\
+\cline{1-6}
+\multicolumn{1}{|c|}{imm[11:5]} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{imm[4:0]} &
+\multicolumn{1}{c|}{opcode} &
+S-type \\
+\cline{1-6}
+\\
+\cline{1-6}
+\multicolumn{4}{|c|}{imm[31:12]} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} &
+U-type \\
+\cline{1-6}
+\end{tabular}
+\end{center}
+\caption{RISC-V base instruction formats.}
+\label{fig:baseinstformats}
+\end{figure}
+
+The RISC-V ISA keeps the source ({\em rs1} and {\em rs2}) and
+destination ({\em rd}) registers at the same position in all formats
+to simplify decoding.  Immediates are packed towards the leftmost
+available bits in the instruction and have been allocated to reduce
+hardware complexity.  In particular, the sign bit for all immediates
+is always in bit 31 of the instruction to speed sign-extension
+circuitry.  
+
+\begin{commentary}
+Decoding register specifiers is usually on the critical paths in
+implementations, and so the instruction format was chosen to keep all
+register specifiers at the same position in all formats at the expense
+of having to move immediate bits across formats (a property shared
+with RISC-IV aka. SPUR~\cite{spur-jsscc1989}).
+
+In practice, most immediates are either small or require all XLEN
+bits.  We chose an asymmetric immediate split (12 bits in regular
+instructions plus a special load upper immediate instruction with 20
+bits) to increase the opcode space available for regular instructions.
+In addition, these immediates are all sign-extended.  We did not
+observe a benefit to using zero-extension for some immediates and
+wanted to keep the ISA as simple as possible.
+\end{commentary}
+
+\section{Immediate Encoding Variants}
+
+There are a further two variants of the instruction formats (SB/UJ)
+based on the handling of immediates, as shown in
+Figure~\ref{fig:baseinstformatsimm}.
+
+\begin{figure}[h]
+\begin{small}
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{0.3in}@{}p{0.8in}@{}p{0.6in}@{}p{0.18in}@{}p{0.7in}@{}p{0.6in}@{}p{0.6in}@{}p{0.3in}@{}p{0.5in}l}
+\\
+\multicolumn{1}{c}{\instbit{31}} &
+\instbitrange{30}{25} &
+\instbitrange{24}{21} &
+\multicolumn{1}{c}{\instbit{20}} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{8} &
+\multicolumn{1}{c}{\instbit{7}} &
+\instbitrange{6}{0} \\
+\cline{1-9}
+\multicolumn{2}{|c|}{funct7} &
+\multicolumn{2}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{2}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} &
+R-type \\
+\cline{1-9}
+\\
+\cline{1-9}
+\multicolumn{4}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{2}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} &
+I-type \\
+\cline{1-9}
+\\
+\cline{1-9}
+\multicolumn{2}{|c|}{imm[11:5]} &
+\multicolumn{2}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{2}{c|}{imm[4:0]} &
+\multicolumn{1}{c|}{opcode} &
+S-type \\
+\cline{1-9}
+\\
+\cline{1-9}
+\multicolumn{1}{|c|}{imm[12]} &
+\multicolumn{1}{c|}{imm[10:5]} &
+\multicolumn{2}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{imm[4:1]} &
+\multicolumn{1}{c|}{imm[11]} &
+\multicolumn{1}{c|}{opcode} &
+SB-type \\
+\cline{1-9}
+\\
+\cline{1-9}
+\multicolumn{6}{|c|}{imm[31:12]} &
+\multicolumn{2}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} &
+U-type \\
+\cline{1-9}
+\\
+\cline{1-9}
+\multicolumn{1}{|c|}{imm[20]} &
+\multicolumn{2}{c|}{imm[10:1]} &
+\multicolumn{1}{c|}{imm[11]} &
+\multicolumn{2}{c|}{imm[19:12]} &
+\multicolumn{2}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} &
+UJ-type \\
+\cline{1-9}
+\end{tabular}
+\end{center}
+\end{small}
+\caption{RISC-V base instruction formats showing immediate variants.}
+\label{fig:baseinstformatsimm}
+\end{figure}
+
+In Figure~\ref{fig:baseinstformatsimm} each immediate
+subfield is labeled with the bit position (imm[{\em x}\,]) in the
+immediate value being produced, rather than the bit position within
+the instruction's immediate field as is usually done.
+Figure~\ref{fig:immtypes} shows the immediates produced by each of the
+base instruction formats, and is labeled to show which instruction
+bit (inst[{\em y}\,]) produces each bit of the immediate value.
+
+\begin{figure}[h]
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{0.2in}@{}p{1.2in}@{}p{1.0in}@{}p{0.2in}@{}p{0.7in}@{}p{0.7in}@{}p{0.2in}l}
+\\
+\multicolumn{1}{c}{\instbit{31}} &
+\instbitrange{30}{20} &
+\instbitrange{19}{12} &
+\multicolumn{1}{c}{\instbit{11}} &
+\instbitrange{10}{5} &
+\instbitrange{4}{1} &
+\multicolumn{1}{c}{\instbit{0}} &
+\\
+\cline{1-7}
+\multicolumn{4}{|c|}{--- inst[31] ---} &
+\multicolumn{1}{c|}{inst[30:25]} &
+\multicolumn{1}{c|}{inst[24:21]} &
+\multicolumn{1}{c|}{inst[20]} &
+I-immediate \\
+\cline{1-7}
+\\
+\cline{1-7}
+\multicolumn{4}{|c|}{--- inst[31] ---} &
+\multicolumn{1}{c|}{inst[30:25]} &
+\multicolumn{1}{c|}{inst[11:8]} &
+\multicolumn{1}{c|}{inst[7]} &
+S-immediate \\
+\cline{1-7}
+\\
+\cline{1-7}
+\multicolumn{3}{|c|}{--- inst[31] ---} &
+\multicolumn{1}{c|}{inst[7]} &
+\multicolumn{1}{c|}{inst[30:25]} &
+\multicolumn{1}{c|}{inst[11:8]} &
+\multicolumn{1}{c|}{0} &
+B-immediate \\
+\cline{1-7}
+\\
+\cline{1-7}
+\multicolumn{1}{|c|}{inst[31]} &
+\multicolumn{1}{c|}{inst[30:20]} &
+\multicolumn{1}{c|}{inst[19:12]} &
+\multicolumn{4}{c|}{--- 0 ---} &
+U-immediate \\
+\cline{1-7}
+\\
+\cline{1-7}
+\multicolumn{2}{|c|}{--- inst[31] ---} &
+\multicolumn{1}{c|}{inst[19:12]} &
+\multicolumn{1}{c|}{inst[20]} &
+\multicolumn{1}{c|}{inst[30:25]} &
+\multicolumn{1}{c|}{inst[24:21]} &
+\multicolumn{1}{c|}{0} &
+J-immediate \\
+\cline{1-7}
+\end{tabular}
+\end{center}
+\caption{Types of immediate produced by RISC-V instructions.  The fields are labeled with the
+  instruction bits used to construct their value.  Sign extension
+  always uses inst[31].}
+\label{fig:immtypes}
+\end{figure}
+
+The only difference between the S and SB formats is that the 12-bit
+immediate field is used to encode branch offsets in multiples of 2 in
+the SB format.  Instead of shifting all bits in the
+instruction-encoded immediate left by one in hardware as is
+conventionally done, the middle bits (imm[10:1]) and sign bit stay in
+fixed positions, while the lowest bit in S format (inst[7]) encodes a
+high-order bit in SB format.
+
+Similarly, the only difference between the U and UJ formats is
+that the 20-bit immediate is shifted left by 12 bits to form U
+immediates and by 1 bit to form J immediates.  The location of
+instruction bits in the U and UJ format immediates is chosen to
+maximize overlap with the other formats and with each other.
+
+\begin{commentary}
+Sign-extension is one of the most critical operations on immediates
+(particularly in RV64I), and in RISC-V the sign bit for all immediates
+is always held in bit 31 of the instruction to allow sign-extension to
+proceed in parallel with instruction decoding.
+
+Although more complex implementations might have separate adders for
+branch and jump calculations and so would not benefit from keeping the
+location of immediate bits constant across types of instruction, we
+wanted to reduce the hardware cost of the simplest implementations.
+By rotating bits in the instruction encoding of B and J immediates
+instead of using dynamic hardware muxes to multiply the immediate by
+2, we reduce instruction signal fanout and immediate mux costs by
+around a factor of 2.  The scrambled immediate encoding will add
+negligible time to static or ahead-of-time compilation.  For dynamic
+generation of instructions, there is some small additional
+overhead, but the most common short forward branches have
+straightforward immediate encodings.
+\end{commentary}
+
+\section{Integer Computational Instructions}
+
+Most integer computational instructions operate on XLEN bits of values
+held in the integer register file.  Integer computational instructions
+are either encoded as register-immediate operations using the I-type
+format or as register-register operations using the R-type format.
+The destination is register {\em rd} for both register-immediate and
+register-register instructions.  No integer computational instructions
+cause arithmetic exceptions.
+
+\begin{commentary}
+We did not include special instruction set support for overflow checks
+on integer arithmetic operations, as many overflow checks can be
+cheaply implemented using RISC-V branches.  Overflow checking for
+unsigned addition requires only a single additional branch instruction
+after the addition.  Similarly, signed array bounds checking requires
+only a single branch instruction.  Overflow checks for signed addition
+require several instructions depending on whether the addend is an
+immediate or a variable.  We considered adding branches that test if
+the sum of their signed register operands would overflow, but
+ultimately chose to omit these from the base ISA.
+\end{commentary}
+
+\subsubsection*{Integer Register-Immediate Instructions}
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+I-immediate[11:0] & src & ADDI/SLTI[U]  & dest & OP-IMM \\
+I-immediate[11:0] & src & ANDI/ORI/XORI & dest & OP-IMM \\
+\end{tabular}
+\end{center}
+ADDI adds the sign-extended 12-bit immediate to register {\em rs1}.
+Arithmetic overflow is ignored and the result is simply the low
+XLEN bits of the result.  ADDI {\em rd, rs1, 0} is used to implement the
+MV {\em rd, rs1} assembler pseudo-instruction.
+
+SLTI (set less than immediate) places the value 1 in register {\em rd}
+if register {\em rs1} is less than the sign-extended immediate when
+both are treated as signed numbers, else 0 is written to {\em rd}.
+SLTIU is similar but compares the values as unsigned numbers (i.e.,
+the immediate is first sign-extended to XLEN bits then treated as an
+unsigned number).  Note, SLTIU {\em rd}, {\em rs1}, 1 sets {\em rd}
+to 1 if {\em rs1} equals zero, otherwise sets {\em rd} to 0 (assembler
+pseudo-op SEQZ {\em rd, rs}).
+
+ANDI, ORI, XORI are logical operations that perform bitwise AND, OR,
+and XOR on register {\em rs1} and the sign-extended 12-bit immediate
+and place the result in {\em rd}.  Note, XORI {\em rd, rs1, -1}
+performs a bitwise logical inversion of register {\em rs1} (assembler
+pseudo-instruction NOT {\em rd, rs}).
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{S@{}R@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:5]} &
+\multicolumn{1}{c|}{imm[4:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+0000000 & shamt[4:0]  & src & SLLI & dest & OP-IMM \\
+0000000 & shamt[4:0]  & src & SRLI & dest & OP-IMM \\
+0100000 & shamt[4:0]  & src & SRAI & dest & OP-IMM \\
+\end{tabular}
+\end{center}
+
+Shifts by a constant are encoded as a specialization of the
+I-type format.  The operand to be shifted is in {\em rs1}, and the
+shift amount is encoded in the lower 5 bits of the I-immediate field.
+The right shift type is encoded in a high bit of the I-immediate.
+SLLI is a logical left shift (zeros are shifted into the lower bits);
+SRLI is a logical right shift (zeros are shifted into the upper bits);
+and SRAI is an arithmetic right shift (the original sign bit is copied
+into the vacated upper bits).
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{U@{}R@{}O}
+\\
+\instbitrange{31}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[31:12]} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+20 & 5 & 7 \\
+U-immediate[31:12] & dest & LUI \\
+U-immediate[31:12] & dest & AUIPC
+\end{tabular}
+\end{center}
+
+LUI (load upper immediate) is used to build 32-bit constants and uses
+the U-type format.  LUI places the U-immediate value in the top 20
+bits of the destination register {\em rd}, filling in the lowest 12
+bits with zeros.
+
+AUIPC (add upper immediate to {\tt pc}) is used to build {\tt pc}-relative
+addresses and uses the U-type format.  AUIPC forms a 32-bit offset from the
+20-bit U-immediate, filling in the lowest 12 bits with zeros, adds this offset
+to the {\tt pc}, then places the result in register {\em rd}.
+
+\begin{commentary}
+The AUIPC instruction supports two-instruction sequences to access
+arbitrary offsets from the PC for both control-flow transfers and data
+accesses.  The combination of an AUIPC and the 12-bit immediate in a
+JALR can transfer control to any 32-bit PC-relative address, while an
+AUIPC plus the 12-bit immediate offset in regular load or store
+instructions can access any 32-bit PC-relative data address.
+
+The current PC can be obtained by setting the U-immediate to 0.  Although
+a JAL +4 instruction could also be used to obtain the PC, it might cause
+pipeline breaks in simpler microarchitectures or pollute the BTB structures in
+more complex microarchitectures.
+\end{commentary}
+
+\subsubsection*{Integer Register-Register Operations}
+
+RV32I defines several arithmetic R-type operations.  All operations
+read the {\em rs1} and {\em rs2} registers as source operands and
+write the result into register {\em rd}.  The {\em funct7} and {\em
+  funct3} fields select the type of operation.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{S@{}R@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+0000000 & src2 & src1 & ADD/SLT/SLTU & dest & OP    \\
+0000000 & src2 & src1 & AND/OR/XOR  & dest & OP    \\
+0000000 & src2 & src1 & SLL/SRL     & dest & OP    \\
+0100000 & src2 & src1 & SUB/SRA     & dest & OP    \\
+\end{tabular}
+\end{center}
+
+ADD and SUB perform addition and subtraction respectively.  Overflows
+are ignored and the low XLEN bits of results are written to the
+destination.  SLT and SLTU perform signed and unsigned compares
+respectively, writing 1 to {\em rd} if $\mbox{\em rs1} < \mbox{\em
+  rs2}$, 0 otherwise.  Note, SLTU {\em rd}, {\em x0}, {\em rs2} sets
+{\em rd} to 1 if {\em rs2} is not equal to zero, otherwise sets {\em
+  rd} to zero (assembler pseudo-op SNEZ {\em rd, rs}).  AND, OR, and
+XOR perform bitwise logical operations.
+
+SLL, SRL, and SRA perform logical left, logical right, and arithmetic
+right shifts on the value in register {\em rs1} by the shift amount
+held in the lower 5 bits of register {\em rs2}.
+
+\subsubsection*{NOP Instruction}
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+0 & 0 & ADDI & 0 & OP-IMM \\
+\end{tabular}
+\end{center}
+
+The NOP instruction does not change any user-visible state, except
+for advancing the {\tt pc}.  NOP is encoded as ADDI {\em x0, x0, 0}.
+
+\begin{commentary}
+NOPs can be used to align code segments to microarchitecturally
+significant address boundaries, or to leave space for inline code
+modifications.  Although there are many possible ways to encode a NOP,
+we define a canonical NOP encoding to allow microarchitectural
+optimizations as well as for more readable disassembly output.
+\end{commentary}
+
+\section{Control Transfer Instructions}
+
+RV32I provides two types of control transfer instructions:
+unconditional jumps and conditional branches.  Control transfer
+instructions in RV32I do {\em not} have architecturally visible delay
+slots.
+
+\subsubsection*{Unconditional Jumps}
+
+\vspace{-0.1in} The jump and link (JAL) instruction uses the UJ-type
+format, where the J-immediate encodes a signed offset in multiples of
+2 bytes.  The offset is sign-extended and added to the {\tt pc}
+to form the jump target address.  Jumps can therefore target a
+$\pm$\wunits{1}{MiB} range. JAL stores the address of the instruction
+following the jump ({\tt pc}+4) into register {\em rd}.  The standard
+software calling convention uses {\tt x1} as the return address
+register and {\tt x5} as an alternate link register.
+
+Plain unconditional jumps (assembler pseudo-op J) are encoded as a JAL
+with {\em rd}={\tt x0}.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{W@{}E@{}W@{}R@{}R@{}O}
+\\
+\multicolumn{1}{c}{\instbit{31}} &
+\instbitrange{30}{21} &
+\multicolumn{1}{c}{\instbit{20}} &
+\instbitrange{19}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[20]} &
+\multicolumn{1}{c|}{imm[10:1]} &
+\multicolumn{1}{c|}{imm[11]} &
+\multicolumn{1}{c|}{imm[19:12]} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+1 & 10 & \multicolumn{1}{c}{1} & 8 & 5 & 7 \\
+\multicolumn{4}{c}{offset[20:1]} & dest & JAL \\
+\end{tabular}
+\end{center}
+
+The indirect jump instruction JALR (jump and link register) uses the
+I-type encoding.  The target address is obtained by adding the 12-bit
+signed I-immediate to the register {\em rs1}, then setting the
+least-significant bit of the result to zero.  The address of
+the instruction following the jump ({\tt pc}+4) is written to register
+{\em rd}.  Register {\tt x0} can be used as the destination if the
+result is not required.
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}F@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+offset[11:0] & base & 0 & dest & JALR \\
+\end{tabular}
+\end{center}
+
+The JAL and JALR instructions can generate a misaligned instruction
+fetch exception if the target address is not aligned to a four-byte
+boundary.
+
+\begin{commentary}
+The unconditional jump instructions all use PC-relative addressing to
+help support position-independent code.  The JALR instruction was
+defined to enable a two-instruction sequence to jump anywhere in a
+32-bit absolute address range.  A LUI instruction can first load {\em
+  rs1} with the upper 20 bits of a target address, then JALR can add
+in the lower bits. Similarly, AUIPC then JALR can jump
+anywhere in a 32-bit {\tt pc}-relative address range.
+
+Note that the JALR instruction does not treat the 12-bit immediate as
+multiples of 2 bytes, unlike the conditional branch instructions.
+This avoids one more immediate format in hardware.  In
+practice, most uses of JALR will have either a zero immediate or be
+paired with a LUI or AUIPC, so the slight reduction in range is not
+significant.
+
+The JALR instruction ignores the lowest bit of the calculated target
+address.  This both simplifies the hardware slightly and allows the
+low bit of function pointers to be used to store auxiliary
+information.  Although there is potentially a slight loss of error
+checking in this case, in practice jumps to an incorrect instruction
+address will usually quickly raise an exception.
+
+Instruction fetch misaligned exceptions are not possible on machines
+that support extensions with 16-bit aligned instructions, such as the
+compressed instruction set extension, C.
+
+Return-address prediction stacks are a common feature of high-performance
+instruction-fetch units.  We note that {\em rd} and {\em rs1} can be used to
+guide an implementation's instruction-fetch prediction logic, indicating
+whether JALR instructions should push ({\em rd}$=${\tt x1}/{\tt x5}), pop
+({\em rs1}$=${\tt x1}/{\tt x5}), or not touch (otherwise)
+a return-address stack.  Similarly, a JAL instruction should push the return
+address onto the return-address stack only when {\em rd}$=${\tt x1}/{\tt x5}.
+
+When used with a base {\em rs1}$=${\tt x0}, JALR can be used to implement
+a single instruction subroutine call to the lowest \wunits{2}{KiB} or highest
+\wunits{2}{KiB} address region from anywhere in the address space, which could
+be used to implement fast calls to a small runtime library.
+\end{commentary}
+
+\subsubsection*{Conditional Branches}
+
+All branch instructions use the SB-type instruction format.  The
+12-bit B-immediate encodes signed offsets in multiples of 2, and is
+added to the current {\tt pc} to give the target address.  The
+conditional branch range is $\pm$\wunits{4}{KiB}.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{W@{}R@{}F@{}F@{}R@{}R@{}F@{}S}
+\\
+\multicolumn{1}{c}{\instbit{31}} &
+\instbitrange{30}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{8} &
+\multicolumn{1}{c}{\instbit{7}} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[12]} &
+\multicolumn{1}{c|}{imm[10:5]} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{imm[4:1]} &
+\multicolumn{1}{c|}{imm[11]} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+1 & 6 & 5 & 5 & 3 & 4 & 1 & 7 \\
+\multicolumn{2}{c}{offset[12,10:5]} & src2 & src1 & BEQ/BNE & \multicolumn{2}{c}{offset[11,4:1]} & BRANCH \\
+\multicolumn{2}{c}{offset[12,10:5]} & src2 & src1 & BLT[U] & \multicolumn{2}{c}{offset[11,4:1]} & BRANCH \\
+\multicolumn{2}{c}{offset[12,10:5]} & src2 & src1 & BGE[U]  & \multicolumn{2}{c}{offset[11,4:1]} & BRANCH \\
+\end{tabular}
+\end{center}
+
+Branch instructions compare two registers.  BEQ and BNE take the
+branch if registers {\em rs1} and {\em rs2} are equal or unequal
+respectively.  BLT and BLTU take the branch if {\em rs1} is less than
+{\em rs2}, using signed and unsigned comparison respectively.  BGE and
+BGEU take the branch if {\em rs1} is greater than or equal to {\em rs2},
+using signed and unsigned comparison respectively. Note, BGT, BGTU,
+BLE, and BLEU can be synthesized by reversing the operands to BLT,
+BLTU, BGE, and BGEU, respectively.
+
+Software should be optimized such that the sequential code path is the
+most common path, with less-frequently taken code paths placed out of
+line.  Software should also assume that backward branches will be
+predicted taken and forward branches as not taken, at least the
+first time they are encountered.  Dynamic predictors should quickly
+learn any predictable branch behavior.
+
+Unlike some other architectures, the RISC-V jump (JAL with {\em
+  rd}={\tt x0}) instruction should always be used for unconditional
+branches instead of a conditional branch instruction with an always-true
+condition.  RISC-V jumps are also PC-relative and support a much
+wider offset range than branches, and will not pressure conditional
+branch prediction tables.
+
+\begin{commentary}
+The conditional branches were designed to include arithmetic
+comparison operations between two registers (as also done in PA-RISC
+and Xtensa ISA), rather than use condition codes (x86, ARM, SPARC,
+PowerPC), or to only compare one register against zero (Alpha, MIPS),
+or two registers only for equality (MIPS).  This design was motivated
+by the observation that a combined compare-and-branch instruction fits
+into a regular pipeline, avoids additional condition code state or use
+of a temporary register, and reduces static code size and dynamic
+instruction fetch traffic.  Another point is that comparisons against
+zero require non-trivial circuit delay (especially after the move to
+static logic in advanced processes) and so are almost as expensive as
+arithmetic magnitude compares.  Another advantage of a fused
+compare-and-branch instruction is that branches are observed earlier
+in the front-end instruction stream, and so can be predicted earlier.
+There is perhaps an advantage to a design with condition codes in the
+case where multiple branches can be taken based on the same condition
+codes, but we believe this case to be relatively rare.
+
+We considered but did not include static branch hints in the
+instruction encoding.  These can reduce the pressure on dynamic
+predictors, but require more instruction encoding space and
+software profiling for best results, and can result in poor
+performance if production runs do not match profiling runs.
+
+We considered but did not include conditional moves or predicated
+instructions, which can effectively replace unpredictable short
+forward branches.  Conditional moves are the simpler of the two, but
+are difficult to use with conditional code that might cause exceptions
+(memory accesses and floating-point operations).  Predication adds
+additional flag state to a system, additional instructions to set and
+clear flags, and additional encoding overhead on every instruction.
+Both conditional move and predicated instructions add complexity to
+out-of-order microarchitectures, adding an implicit third source
+operand due to the need to copy the original value of the destination
+architectural register into the renamed destination physical register
+if the predicate is false.  Also, static compile-time decisions to use
+predication instead of branches can result in lower performance on
+inputs not included in the compiler training set, especially given
+that unpredictable branches are rare, and becoming rarer as branch
+prediction techniques improve.
+
+We note that various microarchitectural techniques exist to
+dynamically convert unpredictable short forward branches into
+internally predicated code to avoid the cost of flushing pipelines on
+a branch mispredict~\cite{heil-tr1996,Klauser-1998,Kim-micro2005} and
+have been implemented in commercial processors~\cite{ibmpower7}.
+The simplest techniques just reduce the penalty of recovering from a
+mispredicted short forward branch by only flushing instructions in the
+branch shadow instead of the entire fetch pipeline, or by fetching
+instructions from both sides using wide instruction fetch or idle
+instruction fetch slots.  More complex techniques for out-of-order
+cores add internal predicates on instructions in the branch shadow,
+with the internal predicate value written by the branch instruction,
+allowing the branch and following instructions to be executed
+speculatively and out-of-order with respect to other code~\cite{ibmpower7}.
+\end{commentary}
+
+\section{Load and Store Instructions}
+
+RV32I is a load-store architecture, where only load and store
+instructions access memory and arithmetic instructions only operate on
+CPU registers.  RV32I provides a 32-bit user address space that is
+byte-addressed and little-endian.  The execution environment will
+define what portions of the address space are legal to access.  Loads
+with a destination of {\tt x0} must still raise any exceptions and
+action any other side effects even though the load value is discarded.
+
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}F@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+offset[11:0] & base & width & dest & LOAD \\
+\end{tabular}
+\end{center}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}O}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:5]} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{imm[4:0]} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+offset[11:5] & src & base & width & offset[4:0] & STORE \\
+\end{tabular}
+\end{center}
+
+Load and store instructions transfer a value between the registers and
+memory.  Loads are encoded in the I-type format and stores are
+S-type.  The effective byte address is obtained by adding register
+{\em rs1} to the sign-extended 12-bit offset.  Loads copy a value
+from memory to register {\em rd}.  Stores copy the value in register
+{\em rs2} to memory.
+
+The LW instruction loads a 32-bit value from memory into {\em rd}.  LH
+loads a 16-bit value from memory, then sign-extends to 32-bits before
+storing in {\tt rd}. LHU loads a 16-bit value from memory but then
+zero extends to 32-bits before storing in {\em rd}.  LB and LBU are
+defined analogously for 8-bit values.  The SW, SH, and SB instructions
+store 32-bit, 16-bit, and 8-bit values from the low bits of register
+{\em rs2} to memory.
+
+For best performance, the effective address for all loads and stores
+should be naturally aligned for each data type (i.e., on a four-byte
+boundary for 32-bit accesses, and a two-byte boundary for 16-bit
+accesses).  The base ISA supports misaligned accesses, but these might
+run extremely slowly depending on the implementation.  Furthermore,
+naturally aligned loads and stores are guaranteed to execute
+atomically, whereas misaligned loads and stores might not, and hence
+require additional synchronization to ensure atomicity.
+
+\begin{commentary}
+Misaligned accesses are occasionally required when porting legacy
+code, and are essential for good performance on many applications when
+using any form of packed-SIMD extension.  Our rationale for supporting
+misaligned accesses via the regular load and store instructions is to
+simplify the addition of misaligned hardware support.  One option
+would have been to disallow misaligned accesses in the base ISA and
+then provide some separate ISA support for misaligned accesses, either
+special instructions to help software handle misaligned accesses or a
+new hardware addressing mode for misaligned accesses.  Special
+instructions are difficult to use, complicate the ISA, and often add
+new processor state (e.g., SPARC VIS align address offset register) or
+complicate access to existing processor state (e.g., MIPS LWL/LWR
+partial register writes).  In addition, for loop-oriented packed-SIMD
+code, the extra overhead when operands are misaligned motivates
+software to provide multiple forms of loop depending on operand
+alignment, which complicates code generation and adds to loop startup
+overhead.  New misaligned hardware addressing modes take considerable
+space in the instruction encoding or require very simplified
+addressing modes (e.g., register indirect only).
+
+We do not mandate atomicity for misaligned accesses so simple
+implementations can just use a machine trap and software handler to
+handle some or all misaligned accesses.  If hardware misaligned support is
+provided, software can exploit this by simply using regular load and
+store instructions.  Hardware can then automatically optimize accesses
+depending on whether runtime addresses are aligned.
+\end{commentary}
+
+\section{Memory Model}
+
+The base RISC-V ISA supports multiple concurrent threads of execution
+within a single user address space.  Each RISC-V thread has its own
+user register state and program counter, and executes an independent
+sequential instruction stream.  The execution environment will define
+how RISC-V threads are created and managed.  RISC-V threads can
+communicate and synchronize with other threads either via calls to the
+execution environment, which are documented separately in the
+specification for each execution environment, or directly via the
+shared memory system.  RISC-V threads can also interact with I/O
+devices, and indirectly with each other, via loads and stores to
+portions of the address space assigned to I/O.
+
+In the base RISC-V ISA, each RISC-V thread observes its own memory
+operations as if they executed sequentially in program order.  RISC-V
+has a relaxed memory model between threads, requiring an explicit
+FENCE instruction to guarantee any specific ordering between memory
+operations from different RISC-V threads.  Chapter~\ref{atomics}
+describes the optional atomic memory instruction extensions ``A'',
+which provide additional synchronization operations.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{F@{}IIIIIIIIF@{}F@{}F@{}S}
+\\
+\instbitrange{31}{28} &
+\multicolumn{1}{c}{\instbit{27}} &
+\multicolumn{1}{c}{\instbit{26}} &
+\multicolumn{1}{c}{\instbit{25}} &
+\multicolumn{1}{c}{\instbit{24}} &
+\multicolumn{1}{c}{\instbit{23}} &
+\multicolumn{1}{c}{\instbit{22}} &
+\multicolumn{1}{c}{\instbit{21}} &
+\multicolumn{1}{c}{\instbit{20}} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{PI} &
+\multicolumn{1}{c|}{PO} &
+\multicolumn{1}{c|}{PR} &
+\multicolumn{1}{c|}{PW} &
+\multicolumn{1}{|c|}{SI} &
+\multicolumn{1}{c|}{SO} &
+\multicolumn{1}{c|}{SR} &
+\multicolumn{1}{c|}{SW} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+4 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 5 & 3 & 5 & 7 \\
+0 & \multicolumn{4}{c}{predecessor} & \multicolumn{4}{c}{successor} & 0 & FENCE & 0 & MISC-MEM \\
+\end{tabular}
+\end{center}
+
+The FENCE instruction is used to order device I/O and
+memory accesses as viewed by other RISC-V threads and external devices
+or coprocessors.  Any combination of device input (I), device output
+(O), memory reads (R), and memory writes (W) may be ordered with
+respect to any combination of the same.  Informally, no other RISC-V
+thread or external device can observe any operation in the {\em
+  successor} set following a FENCE before any operation in the {\em
+  predecessor} set preceding the FENCE.  The execution environment
+will define what I/O operations are possible, and in particular, which
+load and store instructions might be treated and ordered as device
+input and device output operations respectively rather than memory
+reads and writes.  For example, memory-mapped I/O devices will
+typically be accessed with uncached loads and stores that are ordered
+using the I and O bits rather than the R and W bits.  Instruction-set
+extensions might also describe new coprocessor I/O instructions that
+will also be ordered using the I and O bits in a FENCE.
+
+The unused fields in the FENCE instruction, {\em imm[11:8]}, {\em rs1}, and
+{\em rd}, are reserved for finer-grain fences in future extensions.  For
+forward compatibility, base implementations shall ignore these fields, and
+standard software shall zero these fields.
+
+\begin{commentary}
+We chose a relaxed memory model to allow high performance from simple machine
+implementations.  A relaxed memory model is also most compatible with likely
+future coprocessor or accelerator extensions.  We separate out I/O ordering
+from memory R/W ordering to avoid unnecessary serialization within
+a device-driver thread and also to support alternative non-memory paths to
+control added coprocessors or I/O devices.  Simple implementations may
+additionally ignore the {\em predecessor} and {\em successor} fields and
+always execute a conservative fence on all operations.
+\end{commentary}
+
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+0 & 0 & FENCE.I & 0 & MISC-MEM \\
+\end{tabular}
+\end{center}
+
+The FENCE.I instruction is used to synchronize the instruction and
+data streams.  RISC-V does not guarantee that stores to instruction
+memory will be made visible to instruction fetches on the same RISC-V
+thread until a FENCE.I instruction is executed.  A FENCE.I instruction
+only ensures that a subsequent instruction fetch on a RISC-V thread
+will see any previous data stores already visible to the same RISC-V
+thread.  FENCE.I does {\em not} ensure that other RISC-V threads'
+instruction fetches will observe the local thread's stores in a
+multiprocessor system. To make a store to instruction memory visible
+to all RISC-V threads, the writing thread has to execute a data FENCE
+before requesting that all remote RISC-V threads execute a FENCE.I.
+
+The unused fields in the FENCE.I instruction, {\em imm[11:0]}, {\em rs1}, and
+{\em rd}, are reserved for finer-grain fences in future extensions.  For
+forward compatibility, base implementations shall ignore these fields, and
+standard software shall zero these fields.
+
+\begin{commentary}
+The FENCE.I instruction was designed to support a wide variety of
+implementations.  A simple implementation can flush the local
+instruction cache and the instruction pipeline when the FENCE.I is
+executed.  A more complex implementation might snoop the instruction
+(data) cache on every data (instruction) cache miss, or use an
+inclusive unified private L2 cache to invalidate lines from the
+primary instruction cache when they are being written by a local store
+instruction.  If instruction and data caches are kept coherent in this
+way, then only the pipeline needs to be flushed at a FENCE.I.
+
+We considered but did not include a ``store instruction word''
+instruction (as in MAJC~\cite{majc}).  JIT compilers may generate a
+large trace of instructions before a single FENCE.I, and amortize any
+instruction cache snooping/invalidation overhead by writing translated
+instructions to memory regions that are known not to reside in the
+I-cache.
+\end{commentary}
+
+\section{Control and Status Register Instructions}
+
+SYSTEM instructions are used to access system functionality that might
+require privileged access and are encoded using the I-type instruction
+format.  These can be divided into two main classes: those that
+atomically read-modify-write control and status registers (CSRs), and
+all other potentially privileged instructions. CSR instructions are
+described in this section, with the two other user-level SYSTEM
+instructions described in the following section.
+
+\begin{commentary}
+The SYSTEM instructions are defined to allow simpler implementations
+to always trap to a single software trap handler.  More sophisticated
+implementations might execute more of each system instruction in
+hardware.
+\end{commentary}
+
+\subsubsection*{CSR Instructions}
+
+We define the full set of CSR instructions here, although in the standard
+user-level base ISA, only a handful of read-only counter CSRs are accessible.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{M@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{csr} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+source/dest  & source & CSRRW  & dest & SYSTEM \\
+source/dest  & source & CSRRS  & dest & SYSTEM \\
+source/dest  & source & CSRRC  & dest & SYSTEM \\
+source/dest  & zimm[4:0]   & CSRRWI & dest & SYSTEM \\
+source/dest  & zimm[4:0]   & CSRRSI & dest & SYSTEM \\
+source/dest  & zimm[4:0]   & CSRRCI & dest & SYSTEM \\
+\end{tabular}
+\end{center}
+
+The CSRRW (Atomic Read/Write CSR) instruction atomically swaps values
+in the CSRs and integer registers. CSRRW reads the old value of the
+CSR, zero-extends the value to XLEN bits, then writes it to integer
+register {\em rd}.  The initial value in {\em rs1} is written to the
+CSR.  If {\em rd}={\tt x0}, then the instruction shall not read the CSR
+and shall not cause any of the side-effects that might occur on a CSR
+read.
+
+The CSRRS (Atomic Read and Set Bits in CSR) instruction reads the
+value of the CSR, zero-extends the value to XLEN bits, and writes it
+to integer register {\em rd}.  The initial value in integer register
+{\em rs1} is treated as a bit mask that specifies bit positions to be
+set in the CSR.  Any bit that is high in {\em rs1} will cause the
+corresponding bit to be set in the CSR, if that CSR bit is writable.
+Other bits in the CSR are unaffected (though CSRs might have side
+effects when written).
+
+The CSRRC (Atomic Read and Clear Bits in CSR) instruction reads the
+value of the CSR, zero-extends the value to XLEN bits, and writes it
+to integer register {\em rd}.  The initial value in integer register
+{\em rs1} is treated as a bit mask that specifies bit positions to be
+cleared in the CSR.  Any bit that is high in {\em rs1} will cause the
+corresponding bit to be cleared in the CSR, if that CSR bit is
+writable.  Other bits in the CSR are unaffected.
+
+For both CSRRS and CSRRC, if {\em rs1}={\tt x0}, then the instruction
+will not write to the CSR at all, and so shall not cause any of the
+side effects that might otherwise occur on a CSR write, such as
+raising illegal instruction exceptions on accesses to read-only CSRs.
+Note that if {\em rs1} specifies a register holding a zero value other
+than {\tt x0}, the instruction will still attempt to write the
+unmodified value back to the CSR and will cause any attendant side effects.
+
+The CSRRWI, CSRRSI, and CSRRCI variants are similar to CSRRW, CSRRS,
+and CSRRC respectively, except they update the CSR using an XLEN-bit
+value obtained by zero-extending a 5-bit immediate (zimm[4:0]) field
+encoded in the {\em rs1} field instead of a value from an integer
+register.  For CSRRSI and CSRRCI, if the zimm[4:0] field is zero, then
+these instructions will not write to the CSR, and shall not cause any
+of the side effects that might otherwise occur on a CSR write.  For
+CSRRWI, if {\em rd}={\tt x0}, then the instruction shall not read the
+CSR and shall not cause any of the side-effects that might occur on a
+CSR read.
+
+Some CSRs, such as the instructions retired counter, {\tt instret}, may be
+modified as side effects of instruction execution.  In these cases, if a CSR
+access instruction reads a CSR, it reads the value prior to the execution of
+the instruction.  If a CSR access instruction writes a CSR, the update occurs
+after the execution of the instruction.  In particular, a value written to
+{\tt instret} by one instruction will be the value read by the following
+instruction (i.e., the increment of {\tt instret} caused by the first
+instruction retiring happens before the write of the new value).
+
+The assembler pseudo-instruction to read a CSR, CSRR {\em rd, csr}, is
+encoded as CSRRS {\em rd, csr, x0}.  The assembler pseudo-instruction
+to write a CSR, CSRW {\em csr, rs1}, is encoded as CSRRW {\em x0, csr,
+  rs1}, while CSRWI {\em csr, zimm}, is encoded as CSRRWI {\em x0,
+  csr, zimm}.
+
+Further assembler pseudo-instructions are defined to set and clear
+bits in the CSR when the old value is not required: CSRS/CSRC {\em
+  csr, rs1}; CSRSI/CSRCI {\em csr, zimm}.
+
+\subsubsection*{Timers and Counters}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{M@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{csr} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+RDCYCLE[H]   & 0 & CSRRS  & dest & SYSTEM \\
+RDTIME[H]    & 0 & CSRRS  & dest & SYSTEM \\
+RDINSTRET[H] & 0 & CSRRS  & dest & SYSTEM \\
+\end{tabular}
+\end{center}
+
+RV32I provides a number of 64-bit read-only user-level counters, which
+are mapped into the 12-bit CSR address space and accessed in 32-bit
+pieces using CSRRS instructions.
+
+The RDCYCLE pseudo-instruction reads the low XLEN bits of the {\tt
+  cycle} CSR which holds a count of the number of clock cycles
+executed by the processor on which the hardware thread is running from
+an arbitrary start time in the past.  RDCYCLEH is
+an RV32I-only instruction that reads bits 63--32 of the same cycle
+counter.  The underlying 64-bit counter should never overflow in
+practice.  The rate at which the cycle counter advances will depend on
+the implementation and operating environment.  The execution
+environment should provide a means to determine the current rate
+(cycles/second) at which the cycle counter is incrementing.
+
+The RDTIME pseudo-instruction reads the low XLEN bits of the {\tt
+  time} CSR, which counts wall-clock real time that has passed from an
+arbitrary start time in the past.  RDTIMEH is an RV32I-only instruction
+that reads bits 63--32 of the same real-time counter.  The underlying 64-bit
+counter should never overflow in practice.  The execution environment
+should provide a means of determining the period of the real-time
+counter (seconds/tick).  The period must be constant.  The
+real-time clocks of all hardware threads in a single user application
+should be synchronized to within one tick of the real-time clock.  The
+environment should provide a means to determine the accuracy of the
+clock.
+
+The RDINSTRET pseudo-instruction reads the low XLEN bits of the {\tt
+  instret} CSR, which counts the number of instructions retired by
+this hardware thread from some arbitrary start point in the past.
+RDINSTRETH is an RV32I-only instruction that reads bits 63--32 of the
+same instruction counter. The underlying 64-bit counter that should
+never overflow in practice.
+
+The following code sequence will read a valid 64-bit cycle counter value into
+{\tt x3}:{\tt x2}, even if the counter overflows between reading its upper
+and lower halves.
+
+\begin{figure}[h!]
+\begin{center}
+\begin{verbatim}
+    again:
+        rdcycleh     x3
+        rdcycle      x2
+        rdcycleh     x4
+        bne          x3, x4, again
+\end{verbatim}
+\end{center}
+\caption{Sample code for reading the 64-bit cycle counter in RV32.}
+\label{critical}
+\end{figure}
+
+\begin{commentary}
+We mandate these basic counters be provided in all implementations as
+they are essential for basic performance analysis, adaptive and
+dynamic optimization, and to allow an application to work with
+real-time streams.  Additional counters should be provided to help
+diagnose performance problems and these should be made accessible from
+user-level application code with low overhead.
+
+We required the counters be 64 bits wide, even on RV32, as otherwise
+it is very difficult for software to determine if values have
+overflowed.  For a low-end implementation, the upper 32 bits of each
+counter can be implemented using software counters incremented by a
+trap handler triggered by overflow of the lower 32 bits.  The sample
+code described above shows how the full 64-bit width value can be
+safely read using the individual 32-bit instructions.
+
+In some applications, it is important to be able to read multiple
+counters at the same instant in time.  When run under a multitasking
+environment, a user thread can suffer a context switch while
+attempting to read the counters.  One solution is for the user thread
+to read the real-time counter before and after reading the other
+counters to determine if a context switch occurred in the middle of the
+sequence, in which case the reads can be retried.  We considered
+adding output latches to allow a user thread to snapshot the counter
+values atomically, but this would increase the size of the user
+context, especially for implementations with a richer set of counters.
+\end{commentary}
+
+
+\section{Environment Call and Breakpoints}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{M@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct12} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+ECALL   & 0 & PRIV & 0 & SYSTEM \\
+EBREAK  & 0 & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+The ECALL instruction is used to make a request to the supporting
+execution environment, which is usually an operating system.  The ABI
+for the system will define how parameters for the environment request
+are passed, but usually these will be in defined locations in the
+integer register file.
+
+The EBREAK instruction is used by debuggers to cause control to be
+transferred back to a debugging environment.
+
+\begin{commentary}
+ECALL and EBREAK were previously named SCALL and SBREAK.  The
+instructions have the same functionality and encoding, but were
+renamed to reflect that they can be used more generally than to call a
+supervisor-level operating system or debugger.
+\end{commentary}
+

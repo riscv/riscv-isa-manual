@@ -1,0 +1,749 @@
+\chapter{``V'' Standard Extension for Vector Operations, Version 0.1}
+\label{sec:bits}
+
+This chapter presents a proposal for the RISC-V vector instruction set
+extension.  The vector extension supports a configurable vector unit,
+to tradeoff the number of architectural vector registers and supported
+element widths against available maximum vector length.  The vector
+extension is designed to allow the same binary code to work
+efficiently across a variety of hardware implementations varying in
+physical vector storage capacity and datapath parallelism.
+
+\begin{commentary}
+The vector extension is based on the style of vector register
+architecture introducted by Seymour Cray in the 1970s, as opposed to
+the earlier packed SIMD approach, introduced with the Lincoln Labs
+TX-2 in 1957 and now adopted by most other commerical instruction
+sets.
+
+The vector instruction set contains many features developed in earlier
+research projects, including the Berkeley T0 and VIRAM vector
+microprocessors, the MIT Scale vector-thread processor, and the
+Berkeley Maven and Hwacha projects.
+\end{commentary}
+
+\section{Vector Unit State}
+
+The additional vector unit architectural state consists of 32 vector
+data registers ({\tt v0}--{\tt v31}), 8 vector predicate registers
+({\tt vp0}-{\tt vp7}), and an XLEN-bit WARL vector length CSR, {\tt
+  vl}.  In addition, the current configuration of the vector unit is
+held in a set vector configuration CSRs ({\tt vcmaxw}, {\tt vctype},
+{\tt vcnpred}), as described below.  The implementation determines an
+available {\em maximum vector length} (MVL) for the current
+configuration held in the {\tt vcmaxw} and {\tt vcnpred} registers.
+There is also a 3-bit fixed-point rounding mode CSR {\tt vxrm}, and a
+single-bit fixed-point saturation status CSR {\tt vxsat}.
+
+\begin{table}
+  \centering
+  \begin{tabular}{|l|c|l|}
+    \hline
+    CSR name & Number & Base ISA \\
+    \hline
+    {\tt vl}    & 0x020 & RV32, RV64, RV128 \\
+    {\tt vxrm}  & 0x020 & RV32, RV64, RV128 \\
+    {\tt vxsat} & 0x020 & RV32, RV64, RV128 \\
+    {\tt vcsr}  & 0x020 & RV32, RV64, RV128 \\
+    \hline
+    {\tt vcnpred} & 0x020 & RV32, RV64, RV128 \\
+    \hline
+    {\tt vcmaxw}  & 0x020 & RV32, RV64, RV128 \\
+    {\tt vcmaxw1} & 0x020 & RV32 \\
+    {\tt vcmaxw2} & 0x020 & RV32, RV64 \\
+    {\tt vcmaxw3} & 0x020 & RV32 \\
+    \hline
+    {\tt vctype}  & 0x020 & RV32, RV64, RV128 \\
+    {\tt vctype1} & 0x020 & RV32 \\
+    {\tt vctype2} & 0x020 & RV32, RV64 \\
+    {\tt vctype3} & 0x020 & RV32 \\
+    \hline
+    {\tt vctypev0}  & 0x020 & RV32, RV64, RV128 \\
+      {\tt vctypev1}  & 0x020 & RV32, RV64, RV128 \\
+        ... \\
+      {\tt vctypev31}  & 0x020 & RV32, RV64, RV128 \\
+   \hline
+  \end{tabular}
+  \caption{Vector extension CSRs.}
+  \label{tab:vcsrs}
+\end{table}
+
+\section{Element Datatypes and Width}
+
+The datatypes and operations supported by the V extension depend upon
+the base scalar ISA and supported extensions, and may include 8-bit,
+16-bit, 32-bit, 64-bit, and 128-bit integer and fixed-point data types
+(X8, X16, X32, X64, and X128 respectively), and 16-bit, 32-bit,
+64-bit, and 128-bit floating-point types (F16, F32, F64, and F128
+respectively).  When the V extension is added, it must support the
+vector data element types implied by the supported scalar types as
+defined by Table~\ref{tab:velemtypes}.  The largest element width
+supported:
+\[ \mbox{\em ELEN} = max(\mbox{\em XLEN}, \mbox{\em FLEN}) \]
+
+\begin{commentary}
+  Compiler support for vectorization is greatly simplified when any
+  hardware-supported data types are supported by both scalar and
+  vector instructions.
+\end{commentary}
+
+\begin{table}
+  \centering
+\begin{tabular}{|l|l|}
+  \hline
+  \multicolumn{2}{|c|}{Supported Fixed-Point Widths} \\
+  \hline
+  RV32I  & X8, X16, X32 \\
+  RV64I  & X8, X16, X32, X64 \\
+  RV128I & X8, X16, X32, X64, X128 \\
+  \hline
+  \hline
+  \multicolumn{2}{|c|}{Supported Floating-Point Widths} \\
+  \hline
+  F      & F16, F32 \\
+  FD     & F16, F32, F64 \\
+  FDQ    & F16, F32, F64, F128 \\
+  \hline
+\end{tabular}
+\caption{Supported data element widths depending on base integer ISA
+  and supported floating-point extensions.  Note that supporting a
+  given floating-point width mandates support for all narrower
+  floating-point widths.}
+\label{tab:velemtypes}
+\end{table}
+
+Adding the vector extension to any machine with floating-point support
+adds support for the IEEE standard half-precision 16-bit
+floating-point data type.  This includes a set of scalar
+half-precision instructions described in
+Section~\ref{sec:scalarhalffloat}.  The scalar half-precision
+instructions follow the template for other floating-point precisions,
+but using the hitherto unused {\em fmt} field encoding of {\tt 10}.
+
+\begin{commentary}
+  We only support scalar half-precision floating-point types as part
+  of the vector extension, as the main benefits of half-precision are
+  obtained when using vector instructions that amortize per-operation
+  control overhead.  Not supporting a separate scalar half-precision
+  floating-point extension also reduces the number of standard
+  instruction-set variants.
+\end{commentary}
+
+\section{Vector Configuration Registers ({\tt vcmaxw}, {\tt
+    vctype}, {\tt vcp})}
+
+The vector unit must be configured before use.  Each architectural
+vector data register ({\tt v0}--{\tt v31}) is configured with the
+maximum number of bits allowed in each element of that vector data
+register, or can be disabled to free physical vector storage for other
+architectural vector data registers.  The number of available
+vector predicate registers can also be set independently.
+
+The available MVL depends on the configuration setting, but MVL must
+always have the same value for the same configuration parameters on a
+given implementation.  Implementations must provide an MVL of at least
+four elements for all supported configuration settings.
+
+Each vector data register's current maximum-width is held in a
+separate four-bit field in the {\tt vcmaxw} CSRs, encoded as shown in
+Table~\ref{tab:vcmaxw}.
+
+\begin{table}[hbt]
+  \centering
+  \begin{tabular}{|r|c|}
+    \hline
+    Width & Encoding \\
+    \hline
+    Disabled  & 0000 \\
+    8         & 1000  \\
+    16        & 1001  \\
+    32        & 1010  \\
+    64        & 1011  \\
+    128       & 1100  \\
+    \hline
+  \end{tabular}
+  \caption{Encoding of {\tt vcmaxw} fields. All other values are
+    reserved.}
+  \label{tab:vcmaxw}
+\end{table}
+
+\begin{commentary}
+  Several earlier vector machines had the ability to configure
+  physical vector register storage into a larger number of short
+   vectors or a shorter number of long vectors, in particular the
+  Fujitsu VP series~\cite{vp200}.
+\end{commentary}
+
+In addition, each vector data register has an associated dynamic type
+field that is held in a four-bit field in the {\tt vctype} CSRs,
+encoded as shown in Table~\ref{tab:vctype}.  The dynamic type field of
+a vector data register is constrained to only hold types that have
+equal or lesser width than the value in the corresponding {\tt vcmaxw}
+field for that vector data register.  Changes to {\tt vctype} do not
+alter MVL.
+
+\begin{table}[hbt]
+  \centering
+  \begin{tabular}{|l|c|c|}
+    \hline
+    Type & {\tt vctype} encoding & {\tt vcmaxw} equivalent\\
+    \hline
+    Disabled & 0000 & 0000 \\
+    F16      & 0001 & 1001 \\
+    F32      & 0010 & 1010 \\
+    F64      & 0011 & 1011 \\
+    F128     & 0100 & 1100 \\
+    X8       & 1000 & 1000  \\
+    X16      & 1001 & 1001  \\
+    X32      & 1010 & 1010  \\
+    X64      & 1011 & 1011  \\
+    X128     & 1100 & 1100  \\
+    \hline
+  \end{tabular}
+  \caption{Encoding of {\tt vctype} fields. The third column shows the
+    value that will be saved when writing to {\tt vcmaxw} fields. All
+    other values are reserved.}
+  \label{tab:vctype}
+\end{table}
+
+\begin{commentary}
+  Vector data registers have both a maximum element width and a
+  current element data type to support vector function calls, where
+  the caller does not know the types needed by the callee, as
+  described below.
+\end{commentary}
+
+To reduce configuration time, writes to a {\tt vcmaxw} field also
+write the corresponding {\tt vctype} field.  The {\tt vcmaxw} field
+can be written any value taken from the type encoding in
+Table~\ref{tab:vctype}, but only the width information as shown in
+Table~\ref{tab:vcmaxw} will be recorded in the {\tt vcmaxw} fields
+whereas the full type information will be recorded in the
+corresponding {\tt vctype} field.
+
+Attempting to write any {\tt vcmaxw} field with a width larger than
+that supported by the implementation will raise an illegal instruction
+exception.  Implementations are allowed to record a {\tt vcmaxw} value
+larger than the value requested.  In particular, an implementation may
+choose to hardwire {\tt vcmaxw} fields to the largest supported width.
+
+Attempting to write an unsupported type or a type that requires more
+than the current {\tt vcmaxw} width to a {\tt vctype} field will raise
+an exception.
+
+Any write to a field in the {\tt vcmaxw} register configures the
+vector unit and causes all vector data registers to be zeroed and all
+vector predicate registers to be set, and the vector length register
+{\tt vl} to be set to the maximum supported vector length.
+
+Any write to a {\tt vctype} field zeros only the associated vector
+data register, leaving the other vector unit state undisturbed.
+Attempting to write a type needing more bits than the corresponding
+{\tt vcmaxw} value to a {\tt vctype} field will raise an illegal
+instruction exception.
+
+\begin{commentary}
+  Vector registers are zeroed on reconfiguration to prevent security
+  holes and to avoid exposing differences between how different
+  implementations manage physical vector register storage.
+
+  In-order implementations will probaby use a flag bit per register to
+  mux in 0 instead of garbage values on each source until it is
+  overwritten.  For in-order machines, partial writes due to
+  predication or vector lengths less than MVL complicate this zeroing,
+  but these cases can be handled by adopting a hardware
+  read-modify-write, adding a zero bit per element, or a trap to
+  machine-mode trap handler if first write access after configuration
+  is partial.  Out-of-order machines can just point initial rename
+  table at physical zero register.
+\end{commentary}
+
+%% Can support larger number of architectural vector registers with
+%% future extensions.
+
+In RV128, {\tt vcmaxw} is a single CSR holding 32 4-bit width
+fields.  Bits $(4N+3)$--$(4N)$ hold the maximum width of vector data
+register $N$.  In RV64, the {\tt vcmaxw2} CSR provides access to the
+upper 64 bits of {\tt vcmaxw}.  In RV32, the {\tt vcmaxw1} CSR
+provides access to bits 63--32 of {\tt vcmaxw}, while {\tt vcmax3} CSR
+provides access to bits 127--96.
+
+The {\tt vcnpred} CSR contains a single 4-bit WLRL field giving the
+number of enabled architectural predicate registers, between 0 and 8.
+Any write to {\tt vcnpred} zeros all vector data registers, sets all
+bits in visible vector predicate registers, and sets the vector length
+register {\tt vl} to the maximum supported vector length.  Attempting
+to write a value larger than 8 to {\tt vcnpred} raises an illegal
+instruction exception.
+
+\section{Vector Length}
+
+The active vector length is held in the XLEN-bit WARL vector length
+CSR {\tt vl}, which can only hold values between 0 and MVL inclusive.
+Any writes to the maximum configuration registers ({\tt vcmaxw} or
+{\tt vcnpred}) cause {\tt vl} to be initialized with MVL.  Writes to
+{\tt vctype} do not affect {\tt vl}.
+
+The active vector length is usually written with the {\tt setvl}
+instruction, which is encoded as a {\tt csrrw} instruction to the {\tt
+  vl} CSR number.  The source argument to the {\tt csrrw} is the
+requested application vector length (AVL) as an unsigned XLEN-bit
+integer. The {\tt setvl} instruction calculates the value to assign to
+{\tt vl} according to Table~\ref{tab:vlcalc}.
+
+\begin{table}
+  \centering
+  \begin{tabular}{|c|c|}
+    \hline
+    AVL Value & {\tt vl} setting \\
+    \hline
+    AVL $\geq$ 2\,MVL & MVL \\
+    2\,MVL $>$ AVL $>$ MVL & $\lfloor$AVL$/2\rfloor$ \\
+    MVL $\geq$ AVL & AVL \\
+    \hline
+  \end{tabular}
+  \caption{Operation of {\tt setvl} instruction to set vector
+    length register {\tt vl} based on requested application vector
+    length (AVL) and current maximum vector length (MVL).}
+  \label{tab:vlcalc}
+\end{table}
+
+\begin{commentary}
+  The rules for setting the {\tt vl} register help keep vector
+  pipelines full over the last two iterations of a stripmined loop.
+  Similar rules were previously used in Cray-designed machines~\cite{crayx1asm}.
+\end{commentary}
+
+The {\tt vl} register is updated with the minimum of AVL and
+MVL, and this value is also returned as the result of the {\tt setvl}
+instruction.  Note that unlike a regular {\tt csrrw} instruction, the
+value returned is not the original CSR value but the modified value.
+
+\begin{commentary}
+  The idea of having implementation-defined vector length dates back
+  to at least the IBM 3090 Vector Facility~\cite{ibm370varch}, which
+  used a special ``Load Vector Count and Update'' (VLVCU) instruction
+  to control stripmine loops.  The {\tt setvl} instruction included
+  here is based on the simpler {\tt setvlr} instruction introduced by
+  Asanovi\'{c}~\cite{krstephd}.
+\end{commentary}
+
+The {\tt setvl} instruction is typically used at the start of every
+iteration of a stripmined loop to set the number of vector elements to
+operate on in the following loop iteration.  The current MVL can be
+obtained by performing a {\tt setvl} with a source argument that has
+all bits set (largest unsigned integer).
+
+No element operations are performed for any vector instruction when
+{\tt vl}=0.
+
+\begin{figure}[bt]
+  \centering
+\begin{verbatim}
+               # Vector-vector 32-bit add loop.
+               # Assume vector unit configured with correct types.
+               # a0 holds N
+               # a1 holds pointer to result vector
+               # a2 holds pointer to first source vector
+               # a3 holds pointer to second source vector.
+          loop:  setvl t0, a0
+                 vld v0, a2      # Load first vector
+                 sll t1, t0, 2   # multiply by bytes
+                 add a2, t1      # Bump pointer
+                 vld v1, a3      # Load second vector
+                 add a3, t1      # Bump pointer
+                 vadd v0, v1     # Add elements
+                 sub a0, t0      # Decrement elements completed
+                 vst  v0, a1     # Store result vector
+                 add a1, t1      # Bump pointer
+                 bnez a0, loop   # Any more?
+\end{verbatim}
+\caption{Example vector-vector add loop.}
+\label{fig:vvadd}
+\end{figure}
+
+\section{Rapid Configuration Instructions}
+
+It can take several instructions to set {\tt vcmaxw}, {\tt vctype} and
+{\tt vcnpred} to a given configuration.  To accelerate configuring the
+vector unit, specialized {\tt vcfg} instructions are added that are
+encoded as writes to CSRs with encoded immediate values that set
+multiple fields in the {\tt vcmaxw}, {\tt vctype}, and {\tt vncpred}
+configuration registers.
+
+The {\tt vcfgd} instruction is encoded as a CSRRW that takes a
+register value encoded as shown in Figure~\ref{fig:vdcfg}, and which
+returns the corresponding MVL in the destination register.  A
+corresponding {\tt vcfgdi} instruction is encoded as a CSRRWI that
+takes a 5-bit immediate value to set the configuration, and returns
+MVL in the destination register.
+
+\begin{commentary}
+  One of the primary uses of {\tt vcfgdi} is to configure the vector
+  unit with single-byte element vectors for use in {\tt memcpy} and
+  {\tt memset} routines.  A single instruction can configure the
+  vector unit for these operation.
+\end{commentary}
+
+The {\tt vcfgd} instruction also clears the {\tt vcnpred} register, so
+no predicate registers are allocated.
+
+\begin{figure}[hbt]
+  \centering
+  \begin{tabular}{p{2cm}p{2cm}ccc|c|c|c|c|c|c|c|l}
+    \cline{6-12}
+     &   &    &      &  & 0 & F64 & F32 & F16 & X32 & X16 & X8 & RV32 \\
+    \cline{6-12}
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} & 
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{2} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &  \\
+    \cline{2-12}
+     & \multicolumn{2}{|c|}{0} & \multicolumn{1}{c|}{F128} & \multicolumn{2}{c|}{X64} & F64 & F32 & F16 & X32 & X16 & X8 & RV64 \\
+    \cline{2-12}
+    \multicolumn{1}{c}{} &
+    \multicolumn{2}{c}{24} &
+    \multicolumn{1}{c}{5} & 
+    \multicolumn{2}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &  \\
+    \cline{1-12}
+    \multicolumn{2}{|c|}{0} & \multicolumn{1}{c|}{X128} &
+    \multicolumn{1}{c|}{F128} & \multicolumn{2}{c|}{X64} & F64 & F32 & F16 & X32 & X16 & X8 & RV128 \\
+    \cline{1-12}
+    \multicolumn{2}{c}{83} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} & 
+    \multicolumn{2}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &  \\
+  \end{tabular}
+  \caption{Format of the {\tt vcfgd} value for different base ISAs,
+    holding 5-bit vector register numbers for each supported
+    type. Fields must either contain 0 indicating no vector registers
+    are allocated for that type, or a vector register number greater
+    than all to the right.  All vector register numbers inbetween two
+    non-zero fields are allocated to the type with the higher vector
+    register number. }
+  \label{fig:vdcfg}
+\end{figure}
+
+The {\tt vcfgd} value specifies how many vector registers of each
+datatype are allocated, and is divided into 5-bit fields, one per
+supported datatype.  A value of 0 in a field indicates that no
+registers of that type are allocated.  A non-zero value indicates the
+highest vector
+
+Each 5-bit field in the {\tt vcfgd} value must contain either zero,
+indicating that no vector registers are allocated for that type, or a
+vector register number greater than all fields in lower bit positions,
+indicating the highest vector register containing the associated type.
+This encoding can compactly represent any arbitrary allocation of
+vector registers to data types, except that there must be at least two
+vector registers ({\tt v0} and {\tt v1}) allocated to the narrowest
+required type. An example allocation is shown in
+Figure~\ref{fig:vcfgdexample}.
+
+\begin{figure}
+  \centering
+  \begin{tabular}{|c|c|c|c|c|c|c|}
+    \hline
+     0 & F64 & F32 & F16 & X32 & X16 & X8 \\
+     \hline
+     \hline
+     0 & 18  & 12  & 0   &  1  &  0  & 0  \\
+    \hline
+  \end{tabular}
+  \\
+  \vspace{0.1in}
+  \begin{tabular}{|c|c|c|c|}
+    \hline
+    Vector registers & {\tt vcmaxw} & {\tt vctype} & Type \\
+    \hline
+    {\tt v31}--{\tt v19} & \tt 0000     & \tt 0000 & Disabled \\
+    {\tt v18}--{\tt v13} & \tt 1011     & \tt 0011 & F64 \\
+    {\tt v12}--{\tt v2}  & \tt 1010     & \tt 0010 & F32 \\
+    {\tt v1}--{\tt v0}   & \tt 1010     & \tt 1010 & X32 \\
+    \hline
+  \end{tabular}
+  \caption{Example use of {\tt vcfgd} value to set configuration.}
+  \label{fig:vcfgdexample}
+\end{figure}
+
+Separate {\tt vcfgp} and {\tt vcfgpi} instructions are provided, using
+the CSRRW and CSRRWI encodings respectively, that write the source
+value to the {\tt vcnpred} register and return the new MVL.  These
+writes also clear the vector data registers, set all bits in the
+allocated predicate registers, and set {\tt vl}=MVL. A {\tt vcfgp} or
+{\tt vcfgpi} instruction can be used after a {\tt vcfgd} to complete a
+reconfiguration of the vector unit.
+
+If a zero argument is given to {\tt vcgfd} the vector unit will be
+unconfigured with no enabled registers, and the value 0 will be
+returned for MVL.  Only the configuration registers {\tt vcmaxw} and
+{\tt vcnpred} can be accessed in this state, either directly or via
+{\tt vcfgd}, {\tt vcfgdi}, {\tt vcfgp}, or {\tt vcfgpi}
+instructions. Other vector instructions will raise an illegal
+instruction exception.
+
+To quickly change the individual types of a vector register, each
+vector data register $n$ has a dedicated CSR address to access its
+{\tt vctype} field, named {\tt vctypev}$n$.  The {\tt vcfgt} and {\tt
+  vcfgti} instructions are assembler pseudo-instructions for regular
+CSRRW and CSRRWI instructions that update the type fields and return
+the original value.  The {\tt vcfgti} instruction is typically used to
+change to a desired type while recording the previous type in one
+instruction, and the {\tt vcfgt} instruction is used to revert back to
+the saved type.
+
+
+
+%% # integer vector-scalar/scalar-vector operations use low-order bits of
+%% # scalar operand.
+
+%% 3130 9 8 7 6 5 4 3 2 120 9 8 7 6 5 4 3 2 110 9 8 7 6 5 4 3 2 1 0
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+%% |   func7     |   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+%% |   rs3   |fn2|   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+%% Uses two reserved opcodes in 32-bit space:
+%% VOP  = 10101 11
+%% VMEM = 11101 11
+
+%% VOP
+
+%% func3 (xs2, xs1, xf)
+
+%% mostly encodes which scalar values are accessed as with ROCC.
+
+%% xs2  - 1 = reads scalar rs2
+%% xs1  - 1 = reads scalar rs1
+%% xf   - 0=integer/1=float applies to both
+
+
+%% Integer arithmetic
+
+%% 3130 9 8 7 6 5 4 3 2 120 9 8 7 6 5 4 3 2 110 9 8 7 6 5 4 3 2 1 0
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+%% |   func7     |   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+%% # Integer add/sub
+%% # sign-extend smaller source
+%% # wraparound overflow into destination
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vadd.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vadd.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsub.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsub.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsub.sv vd, rs1, vs2
+%% # zero-extend smaller source
+%% # wraparound overflow into destination
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vaddu.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vaddu.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsubu.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsubu.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsubu.sv vd, rs1, vs2
+%% # Shifts use low bits of vsrc2, enough for src1 width
+%% # srl/a fills in zero/sign bits in destination
+%% # wraparound overflow into destination
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsll.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsll.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsll.sv vd, rs1, vs2 (less useful)
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsrl.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsrl.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsrl.sv vd, rs1, vs2 (table lookup)
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsra.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsra.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsra.vs vd, rs1, vs2 (less useful)
+%% # Logical ops
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vand.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vand.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vor.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vor.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vxor.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vxor.vs vd, vs2, rs1
+%% # Predicate setting (only pd = 0-7 valid)
+%% # smaller source is sign-extended
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpeq.vv pd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpeq.vs pd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpne.vv pd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpne.vs pd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vplt.vv pd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vplt.vs pd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vplt.sv pd, rs1, vs2
+%% # smaller source is zero-extended (not sure if needed for eq/neq)
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpequ.vv pd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpequ.vs pd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpneu.vv pd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpneu.vs pd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpltu.vv pd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpltu.vs pd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpltu.sv pd, rs1, vs2
+
+
+%% # Multiply/Divide
+%% vvmul vdest, vsrc1, vsrc2  # Signed multiply
+%% vsmul vdest, vsrc1, xsrc2  # Signed multiply
+
+%% vvmulh vdest, vsrc1, vsrc2  # Signed multiply
+%% vsmulh vdest, vsrc1, xsrc2  # Signed multiply
+
+%% vvmulu vdest, vsrc1, vsrc2  # Unsigned multiply
+%% vsmulu vdest, vsrc1, xsrc2  # Unsigned multiply
+
+%% vvmulhu vdest, vsrc1, vsrc2  # Unsigned multiply
+%% vsmulhu vdest, vsrc1, xsrc2  # Unsigned multiply
+
+%% vvmulsu vdest, vsrc1, vsrc2  # Signed-unsigned multiply
+%% vsmulsu vdest, vsrc1, xsrc2  # Signed-unsigned multiply
+%% svmulsu vdest, xsrc1, vsrc2  # Signed-unsigned multiply
+%% vvmulhsu vdest, vsrc1, vsrc2  # Signed-unsigned multiply
+%% vsmulhsu vdest, vsrc1, xsrc2  # Signed-unsigned multiply
+%% svmulhsu vdest, xsrc1, vsrc2  # Signed-unsigned multiply
+
+%% vvdiv vdest, vsrc1, vsrc2
+%% vsdiv vdest, vsrc1, xsrc2
+%% svdiv vdest, xsrc1, vsrc2
+
+%% vvdivu vdest, vsrc1, vsrc2
+%% vsdivu vdest, vsrc1, xsrc2
+%% svdivu vdest, xsrc1, vsrc2
+
+%% vvrem vdest, vsrc1, vsrc2
+%% vsrem vdest, vsrc1, xsrc2
+%% svrem vdest, xsrc1, vsrc2
+
+%% vvremu vdest, vsrc1, vsrc2
+%% vsremu vdest, vsrc1, xsrc2
+%% svremu vdest, xsrc1, vsrc2
+
+%% # Load/store, size/type given by destination register configuration
+
+%% 3130 9 8 7 6 5 4 3 2 120 9 8 7 6 5 4 3 2 110 9 8 7 6 5 4 3 2 1 0
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+%% |   func7     |   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
+%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+%% # Unit-stride
+%% # option to add post-increment to vld/vst using rs2 a la t0, but can do same with fusion
+%%  0 0 0 0 0 0 0 0 0 0 0 0    rs1    0 1 0    vd     1 1 1 0 1 1 1  vld vd, rs1
+%%  0 0 0 0 0 0 0 0 0 0 0 0    rs1    0 1 0    vd     1 1 1 0 1 1 1  vst vd, rs1
+%% # Constant-stride
+%% # Can add segments with immediate field in func7
+%%  0 0 0 0 0 0 0    rs2       rs1    1 1 0    vd     1 1 1 0 1 1 1  vlds vd, rs1, rs2
+%%  0 0 0 0 0 0 0    rs2       rs1    1 1 0    vd     1 1 1 0 1 1 1  vsts vd, rs1, rs2
+%% # Indexed (scatter/gather)
+%% # Scalar base + vector offsets
+%% # Can add segments with immediate field in func7
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vldx vd, rs1, vs2
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vstx vd, rs1, vs2
+%% # If A extension present:
+%% # Vector atomics use vector base address
+%% #  t = M[vs2]; M[vs2] = t op vs1; vd = t
+%% # must be matching integer 32b (W) or 64b (D) types in vs1 and vd
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoswap.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoswap.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoadd.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoadd.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoand.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoand.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoor.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoor.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamomax.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamomax.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamomaxu.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamomaxu.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamomin.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamomin.vs vd, vs2, rs1
+%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamominu.vv vd, vs2, vs1
+%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamominu.vs vd, vs2, rs1
+
+
+%% # Memory speculative options.  If permission fault (not just page
+%% # fault), then set sticky bit in predicate register vp1 rather than dying.
+
+
+
+
+%% # Example Code
+%% ----------------------------------------------------------------------
+
+%% memset(a0=dest, a1=c, a2=len)
+%%       csrwi vdcfg, 1    # One vector register of 8b
+%%       mv t1, a0         # Copy dest
+%%       beqz a1, loop     # Skip scalar move if a1=0 (could drop this instruction)
+%%       setvl t0, a2      # Set/find vector length
+%%       vmv.vs v0, a1     # Copy scalar a1 to elements of v0
+%% loop: setvl t0, a2      # Set/find vector length
+%%       vst t1, v0        # Set memory
+%%       sub a2, t0        # Decrement count
+%%       add t1, t0        # Bump pointer
+%%       bnez a2, loop     # Any more?
+%% done: vuncfg
+%%       j ra
+
+
+%% # With ai
+%% memset(a0=dest, a1=c, a2=len)
+%%       csrwi vdcfg, 1    # One vector register of 8b
+%%       mv t1, a0         # Copy dest
+%%       beqz a1, loop     # Skip scalar move if a1=0 (could drop this instruction)
+%%       setvl t0, a2      # Set/find vector length
+%%       vmv.vs v0, a1     # Copy scalar a1 to elements of v0
+%% loop: setvl t0, a2      # Set/find vector length
+%%       vstai t1, v0, t0  # Set memory
+%%       sub a2, t0        # Decrement count
+%%       bnez a2, loop     # Any more?
+%% done: vuncfg
+%%       j ra
+
+%% ----------------------------------------------------------------------
+
+%% memcpy(a0=dest, a1=src, a2=len)
+%%       csrwi vdcfg, 1    # One vector register of 8b
+%%       mv t2, a0         # Copy dest
+%% loop: setvl t0, a2      # Set/find vector length
+%%       vld v0, a1        # Load vector
+%%       add a1, t0        # Bump pointer (can fuse with vld)
+%%       sub a2, t0        # Decrement count
+%%       vst t2, a0        # Store vector
+%%       add t2, t0        # Bump pointer (can fuse with vst)
+%%       bnez a2, loop     # Any more?
+%% done: vuncfg
+%%       j ra
+
+%% # with ldai/stai
+%% memcpy(a0=dest, a1=src, a2=len)
+%%       csrwi vdcfg, 1    # One vector register of 8b
+%%       mv t2, a0         # Copy dest
+%% loop: setvl t0, a2      # Set/find vector length
+%%       vldai v0, a1, t0  # Load vector
+%%       sub a2, t0        # Decrement count
+%%       vstai t2, a0, t0  # Store vector
+%%       bnez a2, loop     # Any more?
+%% done: vuncfg
+%%       j ra
+
+
+

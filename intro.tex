@@ -1,0 +1,502 @@
+\chapter{Introduction}
+
+RISC-V (pronounced ``risk-five'') is a new instruction set
+architecture (ISA) that was originally designed to support computer
+architecture research and education, but which we now hope will also
+become a standard free and open architecture for industry
+implementations.  Our goals in defining RISC-V include:
+\vspace{-0.1in}
+\begin{itemize}
+\parskip 0pt
+\itemsep 1pt
+\item A completely {\em open} ISA that is freely available to
+  academia and industry.
+\item A {\em real} ISA suitable for direct native hardware implementation,
+  not just simulation or binary translation.
+\item An ISA that avoids ``over-architecting'' for a particular
+  microarchitecture style (e.g., microcoded, in-order, decoupled,
+  out-of-order) or implementation technology (e.g., full-custom, ASIC,
+  FPGA), but which allows efficient implementation in any of these.
+\item An ISA separated into a {\em small} base integer ISA, usable by
+  itself as a base for customized accelerators or for educational
+  purposes, and optional standard extensions, to support
+  general-purpose software development.
+\item Support for the revised 2008 IEEE-754 floating-point standard~\cite{ieee754-2008}.
+\item An ISA supporting extensive user-level ISA extensions and
+  specialized variants.
+\item Both 32-bit and 64-bit address space variants for
+  applications, operating system kernels, and hardware implementations.
+\item An ISA with support for highly-parallel multicore
+  or manycore implementations, including heterogeneous multiprocessors.
+\item Optional {\em variable-length instructions} to both expand available
+  instruction encoding space and to support an optional {\em dense
+  instruction encoding} for improved performance, static code size,
+  and energy efficiency.
+\item A fully virtualizable ISA to ease hypervisor development.
+\item An ISA that simplifies experiments with new supervisor-level and
+  hypervisor-level ISA designs.
+\end{itemize}
+\vspace{-0.1in}
+
+\begin{commentary}
+Commentary on our design decisions is formatted as in this paragraph,
+and can be skipped if the reader is only interested in the
+specification itself.
+\end{commentary}
+\begin{commentary}
+The name RISC-V was chosen to represent the fifth major RISC ISA
+design from UC Berkeley (RISC-I~\cite{riscI-isca1981},
+RISC-II~\cite{Katevenis:1983}, SOAR~\cite{Ungar:1984}, and
+SPUR~\cite{spur-jsscc1989} were the first four).  We also pun on the
+use of the Roman numeral ``V'' to signify ``variations'' and
+``vectors'', as support for a range of architecture research,
+including various data-parallel accelerators, is an explicit goal of
+the ISA design.
+\end{commentary}
+
+\begin{commentary}
+We developed RISC-V to support our own needs in research and
+education, where our group is particularly interested in actual
+hardware implementations of research ideas (we have completed eleven
+different silicon fabrications of RISC-V since the first edition of
+this specification), and in providing real implementations for
+students to explore in classes (RISC-V processor RTL designs have been
+used in multiple undergraduate and graduate classes at Berkeley).  In
+our current research, we are especially interested in the move towards
+specialized and heterogeneous accelerators, driven by the power
+constraints imposed by the end of conventional transistor scaling.  We
+wanted a highly flexible and extensible base ISA around which to build
+our research effort.
+
+A question we have been repeatedly asked is ``Why develop a new ISA?''
+The biggest obvious benefit of using an existing commercial ISA is the
+large and widely supported software ecosystem, both development tools
+and ported applications, which can be leveraged in research and
+teaching.  Other benefits include the existence of large amounts of
+documentation and tutorial examples.  However, our experience of using
+commercial instruction sets for research and teaching is that these
+benefits are smaller in practice, and do not outweigh the
+disadvantages:
+
+\begin{itemize}
+\item {\bf Commercial ISAs are proprietary.}  Except for SPARC V8,
+  which is an open IEEE standard~\cite{sparcieee1994}, most owners of
+  commercial ISAs carefully guard their intellectual property and do
+  not welcome freely available competitive implementations.  This is
+  much less of an issue for academic research and teaching using only
+  software simulators, but has been a major concern for groups wishing
+  to share actual RTL implementations.  It is also a major concern for
+  entities who do not want to trust the few sources of commercial ISA
+  implementations, but who are prohibited from creating their own
+  clean room implementations.  We cannot guarantee that all RISC-V
+  implementations will be free of third-party patent infringements,
+  but we can guarantee we will not attempt to sue a RISC-V
+  implementor.
+
+\item {\bf Commercial ISAs are only popular in certain market
+  domains.}  The most obvious examples at time of writing are that
+  the ARM architecture is not well supported in the server space, and
+  the Intel x86 architecture (or for that matter, almost every other
+  architecture) is not well supported in the mobile space, though both
+  Intel and ARM are attempting to enter each other's market segments.
+  Another example is ARC and Tensilica, which provide extensible cores
+  but are focused on the embedded space.  This market segmentation
+  dilutes the benefit of supporting a particular commercial ISA as in
+  practice the software ecosystem only exists for certain domains, and
+  has to be built for others.
+
+\item {\bf Commercial ISAs come and go.}  Previous research
+  infrastructures have been built around commercial ISAs that are no
+  longer popular (SPARC, MIPS) or even no longer in production
+  (Alpha).  These lose the benefit of an active software ecosystem,
+  and the lingering intellectual property issues around the ISA and
+  supporting tools interfere with the ability of interested third
+  parties to continue supporting the ISA.  An open ISA might also lose
+  popularity, but any interested party can continue using and
+  developing the ecosystem.
+
+\item {\bf Popular commercial ISAs are complex.}  The dominant
+  commercial ISAs (x86 and ARM) are both very complex to implement in
+  hardware to the level of supporting common software stacks and
+  operating systems.  Worse, nearly all the complexity is due to bad,
+  or at least outdated, ISA design decisions rather than features that
+  truly improve efficiency.
+
+\item {\bf Commercial ISAs alone are not enough to bring up
+  applications.}  Even if we expend the effort to implement a
+  commercial ISA, this is not enough to run existing applications for
+  that ISA.  Most applications need a complete ABI (application binary
+  interface) to run, not just the user-level ISA.  Most ABIs rely on
+  libraries, which in turn rely on operating system support.  To run an
+  existing operating system requires implementing the supervisor-level
+  ISA and device interfaces expected by the OS.  These are usually
+  much less well-specified and considerably more complex to
+  implement than the user-level ISA.
+
+\item {\bf Popular commercial ISAs were not designed for extensibility.}  The
+  dominant commercial ISAs were not particularly designed for
+  extensibility, and as a consequence have added considerable
+  instruction encoding complexity as their instruction sets have
+  grown.  Companies such as Tensilica (acquired by Cadence) and ARC
+  (acquired by Synopsys) have built ISAs and toolchains around
+  extensibility, but have focused on embedded applications rather than
+  general-purpose computing systems.
+
+\item {\bf A modified commercial ISA is a new ISA.} One of our main
+  goals is to support architecture research, including major ISA
+  extensions.  Even small extensions diminish the benefit of using a
+  standard ISA, as compilers have to be modified and applications
+  rebuilt from source code to use the extension.  Larger extensions
+  that introduce new architectural state also require modifications to
+  the operating system.  Ultimately, the modified commercial ISA
+  becomes a new ISA, but carries along all the legacy baggage of the
+  base ISA.
+\end{itemize}
+
+Our position is that the ISA is perhaps the most important interface
+in a computing system, and there is no reason that such an important
+interface should be proprietary.  The dominant commercial ISAs are
+based on instruction set concepts that were already well known over 30
+years ago.  Software developers should be able to target an open
+standard hardware target, and commercial processor designers should
+compete on implementation quality.
+
+We are far from the first to contemplate an open ISA design suitable
+for hardware implementation.  We also considered other existing open
+ISA designs, of which the closest to our goals was the OpenRISC
+architecture~\cite{openriscarch}.  We decided against adopting the
+OpenRISC ISA for several technical reasons:
+
+\begin{itemize}
+\item OpenRISC has condition codes and branch delay slots, which
+  complicate higher performance implementations.
+\item OpenRISC uses a fixed 32-bit encoding and 16-bit immediates,
+  which precludes a denser instruction encoding and limits space for
+  later expansion of the ISA.
+\item OpenRISC does not support the 2008 revision to the IEEE 754
+  floating-point standard.
+\item The OpenRISC 64-bit design had not been completed when we began.
+\end{itemize}
+
+By starting from a clean slate, we could design an ISA that met all of
+our goals, though of course, this took far more effort than we had
+planned at the outset.  We have now invested considerable effort in
+building up the RISC-V ISA infrastructure, including documentation,
+compiler tool chains, operating system ports, reference ISA
+simulators, FPGA implementations, efficient ASIC implementations,
+architecture test suites, and teaching materials. Since the last
+edition of this manual, there has been considerable uptake of the
+RISC-V ISA in both academia and industry, and we have created the
+non-profit RISC-V Foundation to protect and promote the standard.  The
+RISC-V Foundation website at \url{http://riscv.org} contains the latest
+information on the Foundation membership and various open-source
+projects using RISC-V.
+\end{commentary}
+
+The RISC-V manual is structured in two volumes.  This volume covers
+the user-level ISA design, including optional ISA extensions.  The
+second volume provides the privileged architecture.
+
+\begin{commentary}
+In this user-level manual, we aim to remove any dependence on
+particular microarchitectural features or on privileged architecture
+details.  This is both for clarity and to allow maximum flexibility
+for alternative implementations.
+\end{commentary}
+
+\section{RISC-V ISA Overview}
+
+The RISC-V ISA is defined as a base integer ISA, which must be present
+in any implementation, plus optional extensions to the base ISA.  The
+base integer ISA is very similar to that of the early RISC processors
+except with no branch delay slots and with support for optional
+variable-length instruction encodings.  The base is carefully
+restricted to a minimal set of instructions sufficient to provide a
+reasonable target for compilers, assemblers, linkers, and operating
+systems (with additional supervisor-level operations), and so provides
+a convenient ISA and software toolchain ``skeleton'' around which more
+customized processor ISAs can be built.
+
+Each base integer instruction set is characterized by the width of the
+integer registers and the corresponding size of the user address
+space.  There are two primary base integer variants, RV32I and RV64I,
+described in Chapters~\ref{rv32} and \ref{rv64}, which provide 32-bit
+or 64-bit user-level address spaces respectively.  Hardware
+implementations and operating systems might provide only one or both
+of RV32I and RV64I for user programs.  Chapter~\ref{rv32e} describes
+the RV32E subset variant of the RV32I base instruction set, which has
+been added to support small microcontrollers.  Chapter~\ref{rv128}
+describes a future RV128I variant of the base integer instruction set
+supporting a flat 128-bit user address space.
+
+\begin{commentary}
+Although 64-bit address spaces are a requirement for larger systems,
+we believe 32-bit address spaces will remain adequate for many
+embedded and client devices for decades to come and will be desirable
+to lower memory traffic and energy consumption.  In addition, 32-bit
+address spaces are sufficient for educational purposes.  A larger flat
+128-bit address space might eventually be required, so we ensured this
+could be accommodated within the RISC-V ISA framework.
+\end{commentary}
+
+The base integer ISA may be subset by a hardware implementation, but
+opcode traps and software emulation by a more privileged layer must
+then be used to implement functionality not provided by hardware.
+
+\begin{commentary}
+Subsets of the base integer ISA might be useful for pedagogical
+purposes, but the base has been defined such that there should be
+little incentive to subset a real hardware implementation beyond
+omitting support for misaligned memory accesses and treating all SYSTEM
+instructions as a single trap.
+\end{commentary}
+
+RISC-V has been designed to support extensive customization and
+specialization.  The base integer ISA can be extended with one or more
+optional instruction-set extensions, but the base integer instructions
+cannot be redefined.  We divide RISC-V instruction-set extensions
+into {\em standard} and {\em non-standard} extensions.  Standard
+extensions should be generally useful and should not conflict with
+other standard extensions.  Non-standard extensions may be highly
+specialized, or may conflict with other standard or non-standard
+extensions.  Instruction-set extensions may provide slightly different
+functionality depending on the width of the base integer instruction
+set.  Chapter~\ref{extensions} describes various ways of extending the
+RISC-V ISA.  We have also developed a naming convention for RISC-V
+base instructions and instruction-set extensions, described in detail
+in Chapter~\ref{naming}.
+
+To support more general software development, a set of standard
+extensions are defined to provide integer multiply/divide, atomic
+operations, and single and double-precision floating-point arithmetic.
+The base integer ISA is named ``I'' (prefixed by RV32 or RV64
+depending on integer register width), and contains integer
+computational instructions, integer loads, integer stores, and
+control-flow instructions, and is mandatory for all RISC-V
+implementations.  The standard integer multiplication and division
+extension is named ``M'', and adds instructions to multiply and divide
+values held in the integer registers.  The standard atomic instruction
+extension, denoted by ``A'', adds instructions that atomically read,
+modify, and write memory for inter-processor synchronization.  The
+standard single-precision floating-point extension, denoted by ``F'',
+adds floating-point registers, single-precision computational
+instructions, and single-precision loads and stores.  The standard
+double-precision floating-point extension, denoted by ``D'', expands
+the floating-point registers, and adds double-precision computational
+instructions, loads, and stores.  An integer base plus these four
+standard extensions (``IMAFD'') is given the abbreviation ``G'' and
+provides a general-purpose scalar instruction set.  RV32G and RV64G
+are currently the default target of our compiler toolchains.  Later
+chapters describe these and other planned standard RISC-V extensions.
+
+Beyond the base integer ISA and the standard extensions, it is rare
+that a new instruction will provide a significant benefit for all
+applications, although it may be very beneficial for a certain domain.
+As energy efficiency concerns are forcing greater specialization, we
+believe it is important to simplify the required portion of an ISA
+specification.  Whereas other architectures usually treat their ISA as
+a single entity, which changes to a new version as instructions are
+added over time, RISC-V will endeavor to keep the base and each
+standard extension constant over time, and instead layer new
+instructions as further optional extensions.  For example, the base
+integer ISAs will continue as fully supported standalone ISAs,
+regardless of any subsequent extensions.
+\begin{commentary}
+With the 2.0 release of the user ISA specification, we intend the
+``RV32IMAFD'' and ``RV64IMAFD''base and standard extensions
+(aka. ``RV32G'' and ``RV64G'') to remain constant for future
+development.
+\end{commentary}
+
+\section{Instruction Length Encoding}
+
+The base RISC-V ISA has fixed-length 32-bit instructions that must be
+naturally aligned on 32-bit boundaries.  However, the standard RISC-V
+encoding scheme is designed to support ISA extensions with
+variable-length instructions, where each instruction can be any number
+of 16-bit instruction {\em parcels} in length and parcels are
+naturally aligned on 16-bit boundaries.  The standard compressed ISA
+extension described in Chapter~\ref{compressed} reduces code size by
+providing compressed 16-bit instructions and relaxes the alignment
+constraints to allow all instructions (16 bit and 32 bit) to be
+aligned on any 16-bit boundary to improve code density.
+
+Figure~\ref{instlengthcode} illustrates the standard RISC-V
+instruction-length encoding convention.  All the 32-bit instructions
+in the base ISA have their lowest two bits set to {\tt 11}.  The
+optional compressed 16-bit instruction-set extensions have their
+lowest two bits equal to {\tt 00}, {\tt 01}, or {\tt 10}.  Standard
+instruction-set extensions encoded with more than 32 bits have
+additional low-order bits set to {\tt 1}, with the conventions for
+48-bit and 64-bit lengths shown in Figure~\ref{instlengthcode}.
+Instruction lengths between 80 bits and 176 bits are encoded using a
+3-bit field in bits [14:12] giving the number of 16-bit words in
+addition to the first 5$\times$16-bit words.  The encoding with bits
+[14:12] set to {\tt 111} is reserved for future longer instruction
+encodings.
+
+\begin{figure}[hb]
+{
+\begin{center}
+\begin{tabular}{ccccl}
+\cline{4-4}
+& & & \multicolumn{1}{|c|}{\tt xxxxxxxxxxxxxxaa} & 16-bit ({\tt aa}
+$\neq$ {\tt 11})\\
+\cline{4-4}
+\\
+\cline{3-4}
+& & \multicolumn{1}{|c|}{\tt xxxxxxxxxxxxxxxx}
+& \multicolumn{1}{c|}{\tt xxxxxxxxxxxbbb11} & 32-bit ({\tt bbb}
+$\neq$ {\tt 111}) \\
+\cline{3-4}
+\\
+\cline{2-4}
+\hspace{0.1in} 
+& \multicolumn{1}{c|}{$\cdot\cdot\cdot${\tt xxxx} }
+& \multicolumn{1}{c|}{\tt xxxxxxxxxxxxxxxx}
+& \multicolumn{1}{c|}{\tt xxxxxxxxxx011111} & 48-bit \\
+\cline{2-4}
+\\
+\cline{2-4}
+\hspace{0.1in} 
+& \multicolumn{1}{c|}{$\cdot\cdot\cdot${\tt xxxx} }
+& \multicolumn{1}{c|}{\tt xxxxxxxxxxxxxxxx}
+& \multicolumn{1}{c|}{\tt xxxxxxxxx0111111} & 64-bit \\
+\cline{2-4}
+\\
+\cline{2-4}
+\hspace{0.1in} 
+& \multicolumn{1}{c|}{$\cdot\cdot\cdot${\tt xxxx} }
+& \multicolumn{1}{c|}{\tt xxxxxxxxxxxxxxxx}
+& \multicolumn{1}{c|}{\tt xnnnxxxxx1111111} & (80+16*{\tt nnn})-bit,
+       {\tt nnn}$\neq${\tt 111} \\
+\cline{2-4}
+\\
+\cline{2-4}
+\hspace{0.1in} 
+& \multicolumn{1}{c|}{$\cdot\cdot\cdot${\tt xxxx} }
+& \multicolumn{1}{c|}{\tt xxxxxxxxxxxxxxxx}
+& \multicolumn{1}{c|}{\tt x111xxxxx1111111} & Reserved for $\geq$192-bits \\
+\cline{2-4}
+\\
+Byte Address: & \multicolumn{1}{r}{base+4} & \multicolumn{1}{r}{base+2} & \multicolumn{1}{r}{base} & \\
+ \end{tabular}
+\end{center}
+}
+\caption{RISC-V instruction length encoding.}
+\label{instlengthcode}
+\end{figure}
+
+\begin{commentary}
+Given the code size and energy savings of a compressed format, we
+wanted to build in support for a compressed format to the ISA encoding
+scheme rather than adding this as an afterthought, but to allow
+simpler implementations we didn't want to make the compressed format
+mandatory. We also wanted to optionally allow longer instructions to
+support experimentation and larger instruction-set extensions.
+Although our encoding convention required a tighter encoding of the
+core RISC-V ISA, this has several beneficial effects.
+
+An implementation of the standard G ISA need only hold the
+most-significant 30 bits in instruction caches (a 6.25\% saving).  On
+instruction cache refills, any instructions encountered with either
+low bit clear should be recoded into illegal 30-bit instructions
+before storing in the cache to preserve illegal instruction exception
+behavior.
+
+Perhaps more importantly, by condensing our base ISA into a subset of
+the 32-bit instruction word, we leave more space available for custom
+extensions.  In particular, the base RV32I ISA uses less than 1/8 of
+the encoding space in the 32-bit instruction word.  As described in
+Chapter~\ref{extensions}, an implementation that does not require
+support for the standard compressed instruction extension can map 3
+additional 30-bit instruction spaces into the 32-bit fixed-width
+format, while preserving support for standard $>=$32-bit
+instruction-set extensions.  Further, if the implementation also does
+not need instructions $>$32-bits in length, it can recover a further
+four major opcodes.
+\end{commentary}
+\begin{commentary}
+We consider it a feature that any length of instruction containing all
+zero bits is not legal, as this quickly traps erroneous jumps into
+zeroed memory regions. Similarly, we also reserve the instruction
+encoding containing all ones to be an illegal instruction, to catch
+the other common pattern observed with unprogrammed non-volatile
+memory devices, disconnected memory buses, or broken memory devices.
+\end{commentary}
+
+The base RISC-V ISA has a little-endian memory system, but
+non-standard variants can provide a big-endian or bi-endian memory
+system.  Instructions are stored in memory with each 16-bit parcel
+stored in a memory halfword according to the implementation's natural
+endianness. Parcels comprising one instruction are stored at
+increasing halfword addresses, with the lowest addressed parcel
+holding the lowest numbered bits in the instruction specification,
+i.e., instructions are always stored in a little-endian sequence of
+parcels regardless of the memory system endianness.  The code sequence
+in Figure~\ref{fig:storeinstruction} will store a 32-bit instruction
+to memory correctly regardless of memory system endianness.
+
+\begin{figure}[ht]
+\begin{verbatim}
+    // Store 32-bit instruction in x2 register to location pointed to by x3.
+    sh   x2, 0(x3)    // Store low bits of instruction in first parcel.
+    srli x2, x2, 16   // Move high bits down to low bits, overwriting x2.
+    sh   x2, 2(x3)    // Store high bits in second parcel.
+\end{verbatim}
+\caption{Recommended code sequence to store 32-bit instruction from register to
+  memory.  Operates correctly on both big- and little-endian
+  memory systems and avoids misaligned accesses when used with variable-length
+  instruction-set extensions.}
+\label{fig:storeinstruction}
+\end{figure}
+
+\begin{commentary}
+We chose little-endian byte ordering for the RISC-V memory system
+because little-endian systems are currently dominant commercially (all
+x86 systems; iOS, Android, and Windows for ARM).  A minor point is
+that we have also found little-endian memory systems to be more
+natural for hardware designers.  However, certain application areas,
+such as IP networking, operate on big-endian data structures, and so
+we leave open the possibility of non-standard big-endian or bi-endian
+systems.
+
+We have to fix the order in which instruction parcels are stored in
+memory, independent of memory system endianness, to ensure that the
+length-encoding bits always appear first in halfword address
+order. This allows the length of a variable-length instruction to be
+quickly determined by an instruction fetch unit by examining only the
+first few bits of the first 16-bit instruction parcel.  Once we had
+decided to fix on a little-endian memory system and instruction parcel
+ordering, this naturally led to placing the length-encoding bits in
+the LSB positions of the instruction format to avoid breaking up
+opcode fields.
+\end{commentary}
+
+\section{Exceptions, Traps, and Interrupts}
+
+We use the term {\em exception} to refer to an unusual condition
+occurring at run time associated with an instruction in the current
+RISC-V thread.  We use the term {\em trap} to refer to the synchronous
+transfer of control to a trap handler caused by an exceptional
+condition occurring within a RISC-V thread.  Trap handlers usually
+execute in a more privileged environment.
+
+We use the term {\em interrupt} to refer to an external event that
+occurs asynchronously to the current RISC-V thread. When an interrupt
+that must be serviced occurs, some instruction is selected to receive
+an interrupt exception and subsequently experiences a trap.
+
+The instruction descriptions in following chapters describe conditions
+that raise an exception during execution.  Whether and how these are
+converted into traps is dependent on the execution environment, though
+the expectation is that most environments will take a {\em precise}
+trap when an exception is signaled (except for floating-point
+exceptions, which, in the standard floating-point extensions, do not
+cause traps).
+
+\begin{commentary}
+Our use of ``exception'' and ``trap'' matches that in the IEEE-754
+floating-point standard.
+\end{commentary}
+
