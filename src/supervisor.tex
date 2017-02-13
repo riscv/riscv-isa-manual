@@ -3,11 +3,7 @@
 
 This chapter describes the RISC-V supervisor-level architecture, which
 contains a common core that is used with various supervisor-level
-address translation and protection schemes.  Supervisor-mode always
-operates inside a virtual memory scheme defined by the VM field in the
-machine-mode {\tt mstatus} register.  Supervisor-level code is written
-to a given VM scheme, and cannot change the VM scheme in use.
-
+address translation and protection schemes.
 Supervisor-level code relies on a supervisor execution environment to
 initialize the environment and enter the supervisor code at an entry
 point defined by the system binary interface (SBI).  The SBI also
@@ -452,14 +448,50 @@ of the instruction that caused the fault while {\tt sepc} will point
 to the beginning of the instruction.
 
 \subsection{Supervisor Page-Table Base Register ({\tt sptbr})}
+\label{sec:sptbr}
 
 The {\tt sptbr} register is an XLEN-bit read/write register formatted as shown
 in Figure~\ref{rv32ptbrreg} for RV32 and Figure~\ref{rv64ptbrreg}.  The {\tt
 sptbr} register is only present on systems supporting paged virtual-memory
 systems.  This register holds the physical page number (PPN) of the root page
-table, i.e., its supervisor physical address divided by \wunits{4}{KiB}, and
+table, i.e., its supervisor physical address divided by \wunits{4}{KiB};
 an address space identifier (ASID), which facilitates address-translation
-fences on a per-address-space basis.
+fences on a per-address-space basis; and the MODE field, which selects the
+current address-translation scheme.
+
+Table~\ref{tab:sptbr-mode} shows the encodings of the MODE field for RV32 and
+RV64.  When MODE=P, supervisor virtual addresses are equal to
+supervisor physical addresses, and there is no additional memory protection
+beyond the physical memory protection scheme described in
+Section~\ref{sec:pmp}.  The other valid settings for MODE---Sv32 for RV32, and
+Sv39 and Sv48 for RV64---are described in Sections~\ref{sec:sv32},
+\ref{sec:sv39}, and \ref{sec:sv48}, respectively.
+
+\begin{table}[h]
+\begin{center}
+\begin{tabular}{|c|c|l|}
+\hline
+Value  & Name & Description \\
+\hline
+\multicolumn{3}{|c|}{RV32} \\
+\hline
+0       & P     & No translation or protection. \\
+1       & Sv32  & Page-based 32-bit virtual addressing. \\
+\hline
+\multicolumn{3}{|c|}{RV64} \\
+\hline  
+0       & P     & No translation or protection. \\
+1--3    & ---   & {\em Reserved} \\
+4       & Sv39  & Page-based 32-bit virtual addressing. \\
+5       & Sv48  & Page-based 48-bit virtual addressing. \\
+6       & {\em Sv57} & {\em Reserved for page-based 57-bit virtual addressing.} \\
+7       & {\em Sv64} & {\em Reserved for page-based 64-bit virtual addressing.} \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encoding of {\tt sptbr} MODE field.}
+\label{tab:sptbr-mode}
+\end{table}
 
 The number of supervisor physical address bits is implementation-defined; any
 unimplemented address bits are hardwired to zero in the {\tt sptbr} register.
@@ -479,14 +511,16 @@ a context switch.
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}S@{}M}
-\instbitrange{31}{22} &
+\begin{tabular}{c@{}S@{}M}
+\instbit{31} &
+\instbitrange{30}{22} &
 \instbitrange{21}{0} \\
 \hline
+\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
 \multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
 \multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
 \hline
-10 & 22 \\
+1 & 9 & 22 \\
 \end{tabular}
 \end{center}
 }
@@ -497,20 +531,24 @@ a context switch.
 
 \begin{commentary}
 Storing a PPN in {\tt sptbr}, rather than a physical address, supports
-physical address spaces larger than $2^{\mbox{\scriptsize XLEN}}$.
+a physical address space larger than \wunits{4}{GiB} for RV32.
 \end{commentary}
 
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}E@{}U}
-\instbitrange{63}{38} &
+\begin{tabular}{@{}S@{}E@{}Y@{}K}
+\instbitrange{63}{61} &
+\instbitrange{60}{45} &
+\instbitrange{44}{38} &
 \instbitrange{37}{0} \\
 \hline
+\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
 \multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
+\multicolumn{1}{|c|}{\em Reserved} &
 \multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
 \hline
-26 & 38 \\
+3 & 16 & 7 & 38 \\
 \end{tabular}
 \end{center}
 }
@@ -623,28 +661,11 @@ Simpler implementations can ignore the ASID value in {\tt sptbr} and the
 virtual address in {\em rs1} and always perform a global fence.
 \end{commentary}
 
-\section{Supervisor Operation in Mbare Environment}
-
-When the Mbare environment is selected in the VM field of {\tt
-  mstatus} (Section~\ref{sec:vm}), supervisor-mode virtual addresses
-are truncated and mapped directly to supervisor-mode physical
-addresses.  Supervisor physical addresses are then checked using any
-physical memory protection structures (Section~\ref{sec:pmp}), before
-being directly converted to machine-level physical addresses.
-
-\section{Supervisor Operation in Base and Bounds Environments}
-
-When Mbb or Mbbid are selected in the VM field of {\tt mstatus}
-(Section~\ref{sec:vm}), supervisor-mode virtual addresses are
-translated and checked according to the appropriate machine-level base
-and bound registers.  The resulting supervisor-level physical
-addresses are then checked using any physical memory protection
-structures (Section~\ref{sec:pmp}), before being directly converted to
-machine-level physical addresses.
-
 \section{Sv32: Page-Based 32-bit Virtual-Memory Systems}
+\label{sec:sv32}
 
-When Sv32 is written to the VM field in the {\tt mstatus} register,
+When Sv32 is written to the MODE field in the {\tt sptbr} register
+(see Section~\ref{sec:sptbr}),
 the supervisor operates in a 32-bit paged virtual-memory system.  Sv32
 is supported on RV32 systems and is designed to include mechanisms
 sufficient for supporting modern Unix-based operating systems.
@@ -667,7 +688,7 @@ Sv32 implementations support a 32-bit virtual address space, divided
 into \wunits{4}{KiB} pages.  An Sv32 virtual address is partitioned
 into a virtual page number (VPN) and page offset, as shown in
 Figure~\ref{sv32va}.  When Sv32 virtual memory mode is selected in the
-VM field of the {\tt mstatus} register, supervisor virtual addresses
+MODE field of the {\tt sptbr} register, supervisor virtual addresses
 are translated into supervisor physical addresses via a two-level page
 table.  The 20-bit VPN is translated into a 22-bit physical page
 number (PPN), while the 12-bit page offset is untranslated.  The
@@ -877,6 +898,7 @@ given as follows:
 \end{enumerate}
 
 \section{Sv39: Page-Based 39-bit Virtual-Memory System}
+\label{sec:sv39}
 
 This section describes a simple paged virtual-memory system designed
 for RV64 systems, which supports 39-bit virtual address spaces.  The
@@ -1009,6 +1031,7 @@ The algorithm for virtual-to-physical address translation is the same as in
 Section~\ref{sv32algorithm}, except LEVELS equals 3 and PTESIZE equals 8.
 
 \section{Sv48: Page-Based 48-bit Virtual-Memory System}
+\label{sec:sv48}
 
 This section describes a simple paged virtual-memory system designed
 for RV64 systems, which supports 48-bit virtual address spaces.  Sv48
