@@ -866,27 +866,39 @@ address-translation caches when an SFENCE.VMA instruction is executed with
 {\em rs2}$\neq${\tt x0}.
 \end{commentary}
 
-Each leaf PTE maintains an accessed (A) and dirty (D) bit.  When a
-virtual page is read, written, or fetched from, the implementation
-sets the A bit in the corresponding PTE.  When a virtual page is
-written, the implementation additionally sets the D bit in the
-corresponding PTE.  The PTE updates are exact and are observed in
-program order by the local hart.  The ordering on loads and stores
-provided by FENCE instructions and the acquire/release bits on atomic
-instructions also orders the PTE updates associated with those loads
-and stores as observed by remote harts.
+Each leaf PTE contains an accessed (A) and dirty (D) bit.  The A bit indicates
+the virtual page has been read, written, or fetched from since the last time
+the A bit was cleared.  The D bit indicates the virtual page has been written
+since the last time the D bit was cleared.
+
+Two schemes to manage the A and D bits are permitted:
+\begin{itemize}
+\item When a virtual page is accessed and the A bit is clear, or is
+      written and the D bit is clear, the implementation sets the
+      corresponding bit in the PTE.  The PTE update must be atomic with
+      respect to other accesses to the PTE, and must atomically check
+      that the PTE is valid and grants sufficient permissions.  The
+      PTE update must be exact (i.e., not speculative), and observed
+      in program order by the local hart. The ordering on loads and stores
+      provided by FENCE instructions and the acquire/release bits on atomic
+      instructions also orders the PTE updates associated with those loads
+      and stores as observed by remote harts.
+\item When a virtual page is accessed and the A bit is clear, or is
+      written and the D bit is clear, an access exception is raised.
+\end{itemize}
+Standard supervisor software should be written to assume either or both
+PTE update schemes may be in effect.
 
 \begin{commentary}
-We have changed the behavior of the PTE updates to be exact and in
-program order on a hart.  This significantly simplifies the
-specification, and can be implemented with high performance.
+Mandating that the PTE updates to be exact, atomic, and in program order
+simplifies the specification, and makes the feature more useful for system
+software.  Simple implementations may instead generate access exceptions.
   
 The A and D bits are never cleared by the implementation.  If the
 supervisor software does not rely on accessed and/or dirty bits,
 e.g. if it does not swap memory pages to secondary storage or if the
 pages are being used to map I/O space, it should always set them to 1
-in the PTE.  The implementation can then avoid issuing memory accesses
-to set the bits.
+in the PTE to improve performance.
 \end{commentary}
 
 Any level of PTE may be a leaf PTE, so in addition to 4 KiB pages, Sv32
