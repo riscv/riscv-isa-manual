@@ -577,10 +577,16 @@ beyond the physical memory protection scheme described in
 Section~\ref{sec:pmp}.  In this case, the remaining fields in {\tt sptbr}
 have no effect.
 
-The other valid settings for MODE---Sv32 for RV32, and Sv39 and Sv48 for
-RV64---are described in Sections~\ref{sec:sv32}, \ref{sec:sv39}, and
-\ref{sec:sv48}, respectively.  For RV64, future uses of the reserved values
-for MODE may define different interpretations of {\tt sptbr} bits 60--0.
+For RV32, the only other valid setting for MODE is Sv32, a paged
+virtual-memory scheme described in Section~\ref{sec:sv32}.
+
+For RV64, four paged virtual-memory schemes are defined: Sv39, Sv48, Sv57, and
+Sv64, described in Sections~\ref{sec:sv39}, \ref{sec:sv48}, \ref{sec:sv57},
+and \ref{sec:sv64}, respectively.  The remaining MODE settings are reserved
+for future use and may define different interpretations of the other fields in
+{\tt sptbr}.  Implementations are not required to support all MODE settings,
+and if {\tt sptbr} is written with an unsupported MODE, the entire write has
+no effect; no fields in {\tt sptbr} are modified.
 
 \begin{table}[h]
 \begin{center}
@@ -823,7 +829,7 @@ before being directly converted to machine-level physical addresses.
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}E@{}O@{}Occcccccc}
+\begin{tabular}{@{}E@{}O@{}Fcccccccc}
 \instbitrange{31}{20} &
 \instbitrange{19}{10} &
 \instbitrange{9}{8} &
@@ -838,7 +844,7 @@ before being directly converted to machine-level physical addresses.
 \hline
 \multicolumn{1}{|c|}{PPN[1]} &
 \multicolumn{1}{c|}{PPN[0]} &
-\multicolumn{1}{c|}{\it Reserved for software} &
+\multicolumn{1}{c|}{RSW} &
 \multicolumn{1}{c|}{D} &
 \multicolumn{1}{c|}{A} &
 \multicolumn{1}{c|}{G} &
@@ -918,6 +924,9 @@ for multiple ASIDs.  Additionally, they need not be flushed from local
 address-translation caches when an SFENCE.VMA instruction is executed with
 {\em rs2}$\neq${\tt x0}.
 \end{commentary}
+
+The RSW field is reserved for use by supervisor software; the implementation
+shall ignore this field.
 
 Each leaf PTE contains an accessed (A) and dirty (D) bit.  The A bit indicates
 the virtual page has been read, written, or fetched from since the last time
@@ -1000,6 +1009,16 @@ for RV64 systems, which supports 39-bit virtual address spaces.  The
 design of Sv39 follows the overall scheme of Sv32, and this section
 details only the differences between the schemes.
 
+\begin{commentary}
+We specified four virtual memory systems for RV64 to relieve the tension
+between providing a large address space and minimizing address-translation
+cost.  For many systems, \wunits{512}{GiB} of virtual-address space is ample,
+and so Sv39 suffices.  Sv48, Sv57, and Sv64 increase the virtual address space
+to terabytes, petabytes, and exabytes, but increase the physical memory
+capacity dedicated to page tables, the latency of page-table traversals, and
+the size of hardware structures that store virtual addresses.
+\end{commentary}
+
 \subsection{Addressing and Memory Protection}
 
 Sv39 implementations support a 39-bit virtual address space, divided
@@ -1059,7 +1078,7 @@ is untranslated.
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}Y@{}Y@{}Y@{}Y@{}Scccccccc}
+\begin{tabular}{@{}Y@{}Y@{}Y@{}Y@{}Fcccccccc}
 \instbitrange{63}{48} &
 \instbitrange{47}{28} &
 \instbitrange{27}{19} &
@@ -1078,7 +1097,7 @@ is untranslated.
 \multicolumn{1}{c|}{PPN[2]} &
 \multicolumn{1}{c|}{PPN[1]} &
 \multicolumn{1}{c|}{PPN[0]} &
-\multicolumn{1}{c|}{\it Reserved for SW} &
+\multicolumn{1}{c|}{RSW} &
 \multicolumn{1}{c|}{D} &
 \multicolumn{1}{c|}{A} &
 \multicolumn{1}{c|}{G} &
@@ -1138,17 +1157,9 @@ differences between the two schemes.
 Implementations that support Sv48 should also support Sv39.
 
 \begin{commentary}
-We specified two virtual memory systems for RV64 to relieve the
-tension between providing a large address space and minimizing
-address-translation cost.  For many systems, \wunits{512}{GiB} of
-virtual-address space is ample, and so Sv39 suffices.  Sv48 increases
-the virtual address space to \wunits{256}{TiB} but increases the
-physical memory capacity dedicated to page tables, the latency of
-page-table traversals, and the size of hardware structures that store
-virtual addresses.
-
-Systems that support Sv48 can also support Sv39 at essentially no cost,
-and so should do so to support supervisor software that assumes Sv39.
+Systems that support Sv48 can also support Sv39 at essentially no cost, and so
+should do so to maintain compatibility with supervisor software that assumes
+Sv39.
 \end{commentary}
 
 \subsection{Addressing and Memory Protection}
@@ -1235,7 +1246,7 @@ is untranslated.
 \multicolumn{1}{c|}{PPN[2]} &
 \multicolumn{1}{c|}{PPN[1]} &
 \multicolumn{1}{c|}{PPN[0]} &
-\multicolumn{1}{c|}{\it Res. SW} &
+\multicolumn{1}{c|}{RSW} &
 \multicolumn{1}{c|}{D} &
 \multicolumn{1}{c|}{A} &
 \multicolumn{1}{c|}{G} &
@@ -1264,3 +1275,267 @@ physically aligned to a boundary equal to its size.
 The algorithm for virtual-to-physical address translation is the same
 as in Section~\ref{sv32algorithm}, except LEVELS equals 4 and PTESIZE
 equals 8.
+
+\section{Sv57: Page-Based 57-bit Virtual-Memory System}
+\label{sec:sv57}
+
+This section describes a simple paged virtual-memory system designed for RV64
+systems, which supports 57-bit virtual address spaces.  It closely follows the
+design of Sv39 and Sv48, simply adding an additional level of page table to
+the latter, and so this chapter only details the differences between the two
+schemes.
+
+Implementations that support Sv57 should also support Sv39 and Sv48.
+
+\subsection{Addressing and Memory Protection}
+
+Sv57 implementations support a 57-bit virtual address space, divided
+into \wunits{4}{KiB} pages.  An Sv57 address is partitioned as
+shown in Figure~\ref{sv57va}.  Load and store effective addresses,
+which are 64 bits, must have bits 63--57 all equal to bit 56, or else
+an access fault will occur.  The 45-bit VPN is translated into a
+38-bit PPN via a four-level page table, while the 12-bit page offset
+is untranslated.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}S@{}S@{}S@{}S@{}S@{}S}
+\instbitrange{56}{48} &
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[4]} &
+\multicolumn{1}{c|}{VPN[3]} &
+\multicolumn{1}{c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+9 & 9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 virtual address.}
+\label{sv57va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}F@{}S@{}S@{}S@{}S@{}S}
+\instbitrange{49}{48} &
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[4]} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+2 & 9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 physical address.}
+\label{sv57pa}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}Y@{}F@{}F@{}F@{}F@{}F@{}Fcccccccc}
+\instbitrange{63}{48} &
+\instbitrange{47}{46} &
+\instbitrange{45}{37} &
+\instbitrange{36}{28} &
+\instbitrange{27}{19} &
+\instbitrange{18}{10} &
+\instbitrange{9}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\it Reserved} &
+\multicolumn{1}{c|}{PPN[4]} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{RSW} &
+\multicolumn{1}{c|}{D} &
+\multicolumn{1}{c|}{A} &
+\multicolumn{1}{c|}{G} &
+\multicolumn{1}{c|}{U} &
+\multicolumn{1}{c|}{X} &
+\multicolumn{1}{c|}{W} &
+\multicolumn{1}{c|}{R} &
+\multicolumn{1}{c|}{V} \\
+\hline
+16 & 2 & 9 & 9 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 page table entry.}
+\label{sv57pte}
+\end{figure*}
+
+The PTE format for Sv57 is shown in Figure~\ref{sv57pte}.  Bits 9--0
+have the same meaning as for Sv32.  Any level of PTE may be a leaf
+PTE, so in addition to \wunits{4}{KiB} pages, Sv57 supports
+\wunits{2}{MiB} {\em megapages}, \wunits{1}{GiB} {\em gigapages},
+\wunits{512}{GiB} {\em terapages}, and \wunits{256}{TiB} {\em petapages},
+each of which must be virtually and
+physically aligned to a boundary equal to its size.
+
+The algorithm for virtual-to-physical address translation is the same
+as in Section~\ref{sv32algorithm}, except LEVELS equals 5 and PTESIZE
+equals 8.
+
+\section{Sv64: Page-Based 64-bit Virtual-Memory System}
+\label{sec:sv64}
+
+This section describes a simple paged virtual-memory system designed for RV64
+systems, which supports 64-bit virtual address spaces.  It closely follows the
+design of Sv39, Sv48, and Sv57, simply adding an additional level of page table to
+the latter, and so this chapter only details the differences between the two
+schemes.
+
+Implementations that support Sv64 should also support Sv39, Sv48, and Sv57.
+
+\subsection{Addressing and Memory Protection}
+
+Sv64 implementations support a 64-bit virtual address space, divided
+into \wunits{4}{KiB} pages.  An Sv64 address is partitioned as
+shown in Figure~\ref{sv64va}.  The 52-bit VPN is translated into a
+38-bit PPN via a four-level page table, while the 12-bit page offset
+is untranslated.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}Y@{}R@{}R@{}R@{}R@{}R@{}R}
+\instbitrange{63}{57} &
+\instbitrange{56}{48} &
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[5]} &
+\multicolumn{1}{c|}{VPN[4]} &
+\multicolumn{1}{c|}{VPN[3]} &
+\multicolumn{1}{c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+7 & 9 & 9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv64 virtual address.}
+\label{sv64va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}F@{}S@{}S@{}S@{}S@{}S}
+\instbitrange{49}{48} &
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[4]} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+2 & 9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv64 physical address.}
+\label{sv64pa}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}F@{}F@{}F@{}F@{}F@{}F@{}Fcccccccc}
+\instbitrange{63}{48} &
+\instbitrange{47}{46} &
+\instbitrange{45}{37} &
+\instbitrange{36}{28} &
+\instbitrange{27}{19} &
+\instbitrange{18}{10} &
+\instbitrange{9}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\it Reserved} &
+\multicolumn{1}{c|}{PPN[4]} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{RSW} &
+\multicolumn{1}{c|}{D} &
+\multicolumn{1}{c|}{A} &
+\multicolumn{1}{c|}{G} &
+\multicolumn{1}{c|}{U} &
+\multicolumn{1}{c|}{X} &
+\multicolumn{1}{c|}{W} &
+\multicolumn{1}{c|}{R} &
+\multicolumn{1}{c|}{V} \\
+\hline
+16 & 2 & 9 & 9 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv64 page table entry.}
+\label{sv64pte}
+\end{figure*}
+
+The PTE format for Sv64 is shown in Figure~\ref{sv64pte}.  Bits 9--0
+have the same meaning as for Sv32.  Any level of PTE may be a leaf
+PTE, so in addition to \wunits{4}{KiB} pages, Sv64 supports
+\wunits{2}{MiB} {\em megapages}, \wunits{1}{GiB} {\em gigapages},
+\wunits{512}{GiB} {\em terapages}, \wunits{256}{TiB} {\em petapages},
+and \wunits{128}{PiB} {\em exapages}, each of which must be virtually and
+physically aligned to a boundary equal to its size.
+
+The algorithm for virtual-to-physical address translation is the same
+as in Section~\ref{sv32algorithm}, except LEVELS equals 6, PTESIZE
+equals 8, and PPN[5]=0.
