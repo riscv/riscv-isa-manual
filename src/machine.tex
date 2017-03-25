@@ -47,10 +47,12 @@ mechanism.
 \label{misareg}
 \end{figure*}
 
-The MXL (Machine XLEN) field encodes the native base integer ISA width as
-shown in Table~\ref{misabase}.  The MXL field may be writable in
-implementations that support multiple base ISA widths.  The MXL field is
-always set to the widest supported ISA variant at reset.
+The MXL (Machine XLEN) field encodes the native base integer ISA width
+as shown in Table~\ref{misabase}.  The MXL field may be writable in
+implementations that support multiple base ISA widths.  The effective
+XLEN in M-mode, {\em M-XLEN}, is given by the setting of MXL, or has a
+fixed value if {\tt misa} is zero.  The MXL field is always set to the
+widest supported ISA variant at reset.
 
 \begin{table*}[h!]
 \begin{center}
@@ -69,11 +71,25 @@ MXL  & XLEN \\
 \end{table*}
 
 \begin{commentary}
-The base can be quickly ascertained using branches on the sign of the
-returned {\tt misa} value, and possibly a shift left by one and a
-second branch on the sign.  These checks can be written in assembly
-code without knowing the register width (XLEN) of the machine.
-The base width is given by $\mbox{XLEN}=2^{\mbox{MXL+4}}$.
+The base width can be quickly ascertained using branches on the sign
+of the returned {\tt misa} value, and possibly a shift left by one and
+a second branch on the sign.  These checks can be written in assembly
+code without knowing the register width (XLEN) of the machine.  The
+base width is given by $\mbox{XLEN}=2^{\mbox{MXL+4}}$.
+
+The base width can also be found if {\tt misa} is zero, by shifting a
+single bit left 16 bits a time to see when it becomes zero.
+\end{commentary}
+
+When MXL is set to a value less than the widest supported XLEN, all
+operations must ignore source operand register bits above the
+configured XLEN, and must sign-extend results to fill the entire
+widest supported XLEN in the destination register.
+
+\begin{commentary}
+We require that operations always fill the entire underlying hardware
+registers with defined values to avoid implementation-defined
+behavior.
 \end{commentary}
 
 The Extensions field encodes the presence of the standard extensions,
@@ -561,35 +577,36 @@ compact the register after removing these fields.
 \subsection{Base ISA Control in {\tt mstatus} Register}
 
 For RV64 and RV128 systems, the SXL and UXL fields are \warl\ fields
-that control the value of XLEN for S-mode and U-mode, respectively.
-The encoding of these fields is the same as the MXL field of {\tt
-  misa}, shown in Table~\ref{misabase}.  RV32 systems do not support
-SXL and UXL and always use XLEN=32 for S-mode and U-mode.
+that control the value of XLEN for S-mode and U-mode,
+respectively. The encoding of these fields is the same as the MXL
+field of {\tt misa}, shown in Table~\ref{misabase}.  The effective
+XLEN in S-mode and U-mode are termed {\em S-XLEN} and {\em U-XLEN}
+respectively.
 
-The SXL field is only implemented if S-mode is implemented, and is
-otherwise hard-wired to zero.  The allowed values for SXL may be a
-function of {\tt misa} and so changing {\tt misa} may cause SXL to
-change as a side effect.  An implementation must enforce that
-SXL$\leq$MXL.
+RV32 systems always have SXL and UXL fields hardwired to zero with
+S-XLEN~=~32 and U-XLEN~=~32.
 
-The UXL field is only implemented if U-mode is implemented, and is
-otherwise hard-wired to zero.  UXL may be a function of the value in
-{\tt misa}, and changing the value in {\tt misa} can change the value
-of UXL as a side effect. If S-mode is supported, the allowed values
-for UXL may additionally be a function of SXL, so changing SXL may
-cause UXL to change as a side effect.  An implementation must enforce
-that UXL$\leq$SXL$\leq$MXL.  When an instruction explicitly writes
-both SXL and UXL together (such as a CSR instruction that writes {\tt
-  mstatus}), the effect is as though SXL is written first, any side
-effects from changing SXL occur, and then UXL is written.  An
-implementation can implement UXL as a read-only copy of SXL.
+If S-mode is not supported then SXL is hardwired to zero.  If S-mode
+is supported but variable S-XLEN is not supported, then SXL is
+hardwired to zero and S-XLEN~=~M-XLEN.
+
+If U-mode is not supported, then UXL is hardwired to zero.  If
+variable U-XLEN is not supported, then UXL is hardwired to zero.  If
+U-mode and S-mode are supported but variable UXL is not supported,
+then U-XLEN~=~S-XLEN.  If U-mode is supported and S-mode is not
+supported and variable UXL is not supported, U-XLEN~=~M-XLEN.
+
+Whenever XLEN in any mode is set to a value less than the widest
+supported XLEN, all operations must ignore source operand register
+bits above the configured XLEN, and must sign-extend results to fill
+the entire widest supported XLEN in the destination register.
 
 \begin{commentary}
-The values in SXL and UXL can potentially depend on more than just the
-MXL field in {\tt misa}.  For example, if the S bit in {\tt misa} is
-writeable, then this can alter whether the SXL field affects the value
-of UXL. Future extensions to {\tt misa} might also cause such
-dependencies.
+To reduce hardware complexity, the architecture imposes no checks that
+lower-privilege modes have XLEN settings less than or equal to the
+next-higher privilege mode.  In practice, such settings would almost
+always be an error, but machine operation is well-defined even in this
+case.
 \end{commentary}
 
 \subsection{Memory Privilege in {\tt mstatus} Register}
