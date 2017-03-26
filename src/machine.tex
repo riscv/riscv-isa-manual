@@ -1686,13 +1686,26 @@ interrupt bit and scale the exception codes to index into a trap
 vector table.
 \end{commentary}
 
-\subsection{Machine Bad Address ({\tt mbadaddr}) Register}
+\subsection{Machine Bad Bits ({\tt mbadbits}) Register}
 
-{\tt mbadaddr} is an XLEN-bit read-write register formatted as shown in
-Figure~\ref{mbadaddrreg}. When a hardware breakpoint is triggered, or an
-instruction-fetch, load, or store address-misaligned or access exception
-occurs, {\tt mbadaddr} is written with the faulting address. {\tt mbadaddr} is
-not modified for other exceptions.
+The {\tt mbadbits} register is an XLEN-bit read-write register
+formatted as shown in Figure~\ref{mbadbitsreg}. When a hardware
+breakpoint is triggered, or an instruction-fetch, load, or store
+address-misaligned or access exception occurs, {\tt mbadbits} is
+written with the faulting address.  On an illegal instruction trap,
+{\tt mbadbits} is written with the first XLEN bits of the faulting
+instruction as described below.  {\tt mbadbits} is not modified for
+other exceptions.
+
+\begin{commentary}
+  The {\tt mbadbits} register replaces the {\tt mbadaddr} register in
+  the previous specification.  In addition to providing bad addresses,
+  the register can now provide the bad instruction that triggered an
+  illegal instruction trap (and may in future be used to return other
+  information).  Returning the instruction bits accelerates instruction emulation and also
+  removes some races that might be present when trying to emulate
+  illegal instructions.
+\end{commentary}  
 
 \begin{figure}[h!]
 {\footnotesize
@@ -1700,21 +1713,58 @@ not modified for other exceptions.
 \begin{tabular}{@{}J}
 \instbitrange{XLEN-1}{0} \\
 \hline
-\multicolumn{1}{|c|}{\tt mbadaddr} \\
+\multicolumn{1}{|c|}{\tt mbadbits} \\
 \hline
 XLEN \\
 \end{tabular}
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Machine bad address register.}
-\label{mbadaddrreg}
+\caption{Machine bad bits register.}
+\label{mbadbitsreg}
 \end{figure}
 
 For instruction-fetch access faults on RISC-V systems with
-variable-length instructions, {\tt mbadaddr} will point to the
-portion of the instruction that caused the fault while {\tt mepc} will
-point to the beginning of the instruction.
+variable-length instructions, {\tt mbadbits} will contain a pointer to
+the portion of the instruction that caused the fault while {\tt mepc}
+will point to the beginning of the instruction.
+
+The {\tt mbadbits} register can optionally also be used to return the
+faulting instruction bits on an illegal instruction exception ({\tt
+  mepc} points to the faulting instruction in memory).
+
+If this feature is not provided, then {\tt mbadbits} is set to zero on
+an illegal instruction fault.
+
+If the feature is provided, after an illegal instruction trap, {\tt
+  mbadbits} will contain the entire faulting instruction provided the
+instruction is no longer than XLEN bits.  If the instruction is less
+than XLEN bits long, the upper bits of {\tt mbadbits} are cleared to
+zero. If the instruction is more than XLEN bits long, {\tt mbadbits}
+will contain the first XLEN bits of the instruction.
+
+\begin{commentary}
+  Capturing the faulting instruction in {\tt mbadinst} reduces the
+  overhead of instruction emulation, potentially avoiding several
+  partial instruction loads if the instruction is misaligned, and
+  likely data cache misses or slow uncached accesses when loads are
+  used to fetch the instruction into a data register.  There is also a
+  problem of atomicity if another agent is manipulating the
+  instruction memory, as might occur in a dynamic translation system.
+
+  A requirement is that the entire instruction (or at least the first
+  XLEN bits) are fetched into {\tt mbadbits} before taking the trap.
+  This should not constrain implementations, which would typically
+  fetch the entire instruction before attempting to decode the
+  instruction, and avoids complicating software handlers.
+
+  A value of zero in {\tt mbadbits} signifies either that the feature is
+  not supported, or an illegal zero instruction was fetched.  A load
+  from the instruction memory pointed to by {\tt mepc} can be used to
+  distinguish these two cases (or alternatively, the system
+  configuration information can be interrogated to install the
+  appropriate trap handling before runtime).
+\end{commentary}
 
 \section{Machine-Mode Privileged Instructions}
 
