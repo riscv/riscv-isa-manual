@@ -538,8 +538,13 @@ so is only guaranteed to hold supported exception codes.
   0         & 6               & AMO address misaligned \\
   0         & 7               & Store/AMO access fault \\
   0         & 8               & Environment call \\
-  0         & $\ge$9          & {\em Reserved} \\ \hline
-
+  0         & 9--11           & {\em Reserved} \\
+  0         & 12              & Instruction page fault \\
+  0         & 13              & Load page fault \\
+  0         & 14              & {\em Reserved} \\
+  0         & 15              & Store/AMO page fault \\
+  0         & $\ge$16         & {\em Reserved} \\
+  \hline
 \end{tabular}
 \end{center}
 \caption{Supervisor cause register ({\tt scause}) values after trap.}
@@ -550,7 +555,7 @@ so is only guaranteed to hold supported exception codes.
 
 {\tt sbadbits} is an XLEN-bit read/write register formatted as shown in
 Figure~\ref{badvaddrreg}.  When a hardware breakpoint is triggered, or
-an instruction-fetch, load, or store access exception occurs,
+an instruction-fetch, load, or store access or page-fault exception occurs,
 or an instruction-fetch or AMO address-misaligned exception occurs,
 {\tt sbadbits} is written with the faulting address.  {\tt sbadbits}
 is not modified for other exceptions.
@@ -572,7 +577,7 @@ XLEN \\
 \label{badvaddrreg}
 \end{figure}
 
-For instruction fetch access faults on RISC-V systems with
+For instruction-fetch access faults and page faults on RISC-V systems with
 variable-length instructions, {\tt sbadbits} will point to the portion
 of the instruction that caused the fault while {\tt sepc} will point
 to the beginning of the instruction.
@@ -1025,7 +1030,7 @@ Two schemes to manage the A and D bits are permitted:
       instructions also orders the PTE updates associated with those loads
       and stores as observed by remote harts.
 \item When a virtual page is accessed and the A bit is clear, or is
-      written and the D bit is clear, an access exception is raised.
+      written and the D bit is clear, a page-fault exception is raised.
 \end{itemize}
 Standard supervisor software should be written to assume either or both
 PTE update schemes may be in effect.
@@ -1033,7 +1038,7 @@ PTE update schemes may be in effect.
 \begin{commentary}
 Mandating that the PTE updates to be exact, atomic, and in program order
 simplifies the specification, and makes the feature more useful for system
-software.  Simple implementations may instead generate access exceptions.
+software.  Simple implementations may instead generate page-fault exceptions.
   
 The A and D bits are never cleared by the implementation.  If the
 supervisor software does not rely on accessed and/or dirty bits,
@@ -1056,22 +1061,43 @@ follows:
 
 \item Let $a$ be ${\tt sptbr}.ppn \times \textrm{PAGESIZE}$, and let $i=\textrm{LEVELS} - 1$. (For Sv32, PAGESIZE=$2^{12}$ and LEVELS=2.)
 
-\item Let $pte$ be the value of the PTE at address $a+va.vpn[i]\times \textrm{PTESIZE}$. (For Sv32, PTESIZE=4.)
+\item Let $pte$ be the value of the PTE at address
+  $a+va.vpn[i]\times \textrm{PTESIZE}$. (For Sv32, PTESIZE=4.)
+  If accessing $pte$ violates a PMA or PMP check, raise a
+  load access exception.
 
-\item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, stop and raise an access exception.
+\item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, stop and raise a page-fault exception.
 
 \item Otherwise, the PTE is valid.
-If $pte.r=1$ or $pte.x=1$, go to step 5.
-Otherwise, this PTE is a pointer to the next level of the page table.  Let
-$i=i-1$.  If $i<0$, stop and raise an access exception.  Otherwise, let
-$a=pte.ppn \times \textrm{PAGESIZE}$ and go to step 2.
+  If $pte.r=1$ or $pte.x=1$, go to step 5.
+  Otherwise, this PTE is a pointer to the next level of the page table.  Let
+  $i=i-1$.  If $i<0$, stop and raise a page-fault exception.  Otherwise, let
+  $a=pte.ppn \times \textrm{PAGESIZE}$ and go to step 2.
 
 \item A leaf PTE has been found.  Determine if the requested memory access is
-allowed by the $pte.r$, $pte.w$, and $pte.x$ bits.
-If not, stop and raise an access exception.
-Otherwise, the translation is successful.  Set $pte.a$ to 1, and, if the
-memory access is a store, set $pte.d$ to 1. The translated physical address is
-given as follows:
+  allowed by the $pte.r$, $pte.w$, $pte.x$, and $pte.u$ bits, given the
+  current privilege mode and the value of the SUM and MXR fields of
+  the {\tt mstatus} register.  If not, stop and raise a page-fault exception.
+
+\item If $pte.a=0$, perform either of the following two actions:
+  \begin{itemize}
+    \item Atomically with respect to the permission check in step 5,
+      set $pte.a$ to 1. If this access violates a PMA or PMP check, raise
+      a store access exception.
+    \item Raise a page-fault exception.
+  \end{itemize}
+
+\item If the memory access is a store and $pte.d=0$, perform either of the
+  following two actions:
+  \begin{itemize}
+    \item Atomically with respect to the permission check in step 5 and
+      the access to $pte.a$ in step 6, set $pte.d$ to 1. If this access
+      violates a PMA or PMP check, raise a store access exception.
+    \item Raise a page-fault exception.
+  \end{itemize}
+
+\item The translation is successful. The translated physical address is
+  given as follows:
 \begin{itemize}
 \item $\textit{pa.pgoff} = \textit{va.pgoff}$.
 \item If $i>0$, then this is a superpage translation and $pa.ppn[i-1:0]=va.vpn[i-1:0]$.
@@ -1104,7 +1130,7 @@ Sv39 implementations support a 39-bit virtual address space, divided
 into \wunits{4}{KiB} pages.  An Sv39 address is partitioned as
 shown in Figure~\ref{sv39va}.  Load and store effective addresses,
 which are 64 bits, must have bits 63--39 all equal to bit 38, or else
-an access fault will occur.  The 27-bit VPN is translated into a
+a page-fault exception will occur.  The 27-bit VPN is translated into a
 44-bit PPN via a three-level page table, while the 12-bit page offset
 is untranslated.
 
@@ -1247,7 +1273,7 @@ Sv48 implementations support a 48-bit virtual address space, divided
 into \wunits{4}{KiB} pages.  An Sv48 address is partitioned as
 shown in Figure~\ref{sv48va}.  Load and store effective addresses,
 which are 64 bits, must have bits 63--48 all equal to bit 47, or else
-an access fault will occur.  The 36-bit VPN is translated into a
+a page-fault exception will occur.  The 36-bit VPN is translated into a
 44-bit PPN via a four-level page table, while the 12-bit page offset
 is untranslated.
 
