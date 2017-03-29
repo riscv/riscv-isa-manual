@@ -2315,7 +2315,7 @@ The granularity of PMP access control settings are platform-specific and
 within a platform may vary by physical memory region, but the standard PMP
 encoding supports regions as small as four bytes.  Certain regions' privileges
 can be hardwired---for example, some regions might only ever be visible in
-machine mode but no lower-privilege layers.
+machine mode but in no lower-privilege layers.
 
 \begin{commentary}
 Platforms vary widely in demands for physical memory protection, and
@@ -2326,33 +2326,201 @@ instead of the scheme described in this section.
 PMP checks are applied to all accesses when the hart is running in
 S or U modes, and for loads and stores when the MPRV bit is set in
 the {\tt mstatus} register and the MPP field in the {\tt mstatus}
-register contains S or U.  Optionally, PMP checks may additionally
-apply to all M-mode accesses, and the PMP registers themselves may
+register contains S or U.  PMP checks are also applied to page-table
+accesses for virtual-address translation, which implicitly have
+S-mode privilege.  Optionally, PMP checks may additionally
+apply to M-mode accesses, and the PMP registers themselves may
 be locked so that M-mode software cannot change them without a system
 reset.  PMP violations are always trapped precisely at the processor.
 
 \subsection{Physical Memory Protection CSRs}
 
-PMP configurations are described by an 8-bit configuratoin register and one
-XLEN-bit address register.  Some PMP settings additionally use the address
-register associated with the next-lowest numbered PMP entry.  Up to 16 PMP
-entries are supported.
+PMP entries are described by an 8-bit configuration register and one XLEN-bit
+address register.  Some PMP settings additionally use the address register
+associated with the preceding PMP entry.  Up to 16 PMP entries are supported.
 
-Figure~\ref{pmpaddr} shows the layout of one of the PMP address registers
-{\tt pmpaddr0}--{\tt pmpaddr15}.  A PMP address register encodes
-bits 33--2 of a 34-bit physical address for RV32, and bits 55--2 of a 56-bit
-physical address for RV64.
+The PMP configuration registers are densely packed into CSRs to minimize
+context-switch time.  For RV32, four CSRs, {\tt pmpcfg0}--{\tt pmpcfg3},
+hold the configurations for the 16 PMP entries, as shown in
+Figure~\ref{pmpcfg-rv32}.  For RV64, {\tt pmpcfg0} and {\tt pmpcfg2} hold
+the configurations for the 16 PMP entries, as shown in
+Figure~\ref{pmpcfg-rv64}.
 
 \begin{commentary}
-The Sv32 page-based virtual-memory scheme described in Section~\ref{sec:sv32}
-supports 34-bit physical addresses for RV32, so the PMP scheme must support
-addresses wider than XLEN for RV32.
+RV64 systems use {\tt pmpcfg2}, rather than {\tt pmpcfg1}, to hold
+configurations for PMP entries 8--15.  This design reduces the cost of
+supporting multiple M-XLEN values, since the configurations for PMP
+entries 8--11 appear in {\tt pmpcfg2}[31:0] for both RV32 and RV64.
 \end{commentary}
 
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}I@{}I@{}W@{}I@{}I@{}I@{}I@{}I}
+\begin{tabular}{@{}Y@{}Y@{}Y@{}Yl}
+\instbitrange{31}{24} &
+\instbitrange{23}{16} &
+\instbitrange{15}{8} &
+\instbitrange{7}{0} & \\
+\cline{1-4}
+\multicolumn{1}{|c|}{pmp3cfg} &
+\multicolumn{1}{c|}{pmp2cfg} &
+\multicolumn{1}{c|}{pmp1cfg} &
+\multicolumn{1}{c|}{pmp0cfg} &
+\tt pmpcfg0 \\
+\cline{1-4}
+8 & 8 & 8 & 8 & \\
+\instbitrange{31}{24} &
+\instbitrange{23}{16} &
+\instbitrange{15}{8} &
+\instbitrange{7}{0} & \\
+\cline{1-4}
+\multicolumn{1}{|c|}{pmp7cfg} &
+\multicolumn{1}{c|}{pmp6cfg} &
+\multicolumn{1}{c|}{pmp5cfg} &
+\multicolumn{1}{c|}{pmp4cfg} &
+\tt pmpcfg1 \\
+\cline{1-4}
+8 & 8 & 8 & 8 & \\
+\instbitrange{31}{24} &
+\instbitrange{23}{16} &
+\instbitrange{15}{8} &
+\instbitrange{7}{0} & \\
+\cline{1-4}
+\multicolumn{1}{|c|}{pmp11cfg} &
+\multicolumn{1}{c|}{pmp10cfg} &
+\multicolumn{1}{c|}{pmp9cfg} &
+\multicolumn{1}{c|}{pmp8cfg} &
+\tt pmpcfg2 \\
+\cline{1-4}
+8 & 8 & 8 & 8 & \\
+\instbitrange{31}{24} &
+\instbitrange{23}{16} &
+\instbitrange{15}{8} &
+\instbitrange{7}{0} & \\
+\cline{1-4}
+\multicolumn{1}{|c|}{pmp15cfg} &
+\multicolumn{1}{c|}{pmp14cfg} &
+\multicolumn{1}{c|}{pmp13cfg} &
+\multicolumn{1}{c|}{pmp12cfg} &
+\tt pmpcfg3 \\
+\cline{1-4}
+8 & 8 & 8 & 8 & \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{RV32 PMP configuration CSR layout.}
+\label{pmpcfg-rv32}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}Y@{}Y@{}Y@{}Y@{}Y@{}Y@{}Y@{}Yl}
+\instbitrange{63}{56} &
+\instbitrange{55}{48} &
+\instbitrange{47}{40} &
+\instbitrange{39}{32} &
+\instbitrange{31}{24} &
+\instbitrange{23}{16} &
+\instbitrange{15}{8} &
+\instbitrange{7}{0} & \\
+\cline{1-8}
+\multicolumn{1}{|c|}{pmp7cfg} &
+\multicolumn{1}{c|}{pmp6cfg} &
+\multicolumn{1}{c|}{pmp5cfg} &
+\multicolumn{1}{c|}{pmp4cfg} &
+\multicolumn{1}{c|}{pmp3cfg} &
+\multicolumn{1}{c|}{pmp2cfg} &
+\multicolumn{1}{c|}{pmp1cfg} &
+\multicolumn{1}{c|}{pmp0cfg} &
+\tt pmpcfg0 \\
+\cline{1-8}
+8 & 8 & 8 & 8 & 8 & 8 & 8 & 8 & \\
+\instbitrange{63}{56} &
+\instbitrange{55}{48} &
+\instbitrange{47}{40} &
+\instbitrange{39}{32} &
+\instbitrange{31}{24} &
+\instbitrange{23}{16} &
+\instbitrange{15}{8} &
+\instbitrange{7}{0} & \\
+\cline{1-8}
+\multicolumn{1}{|c|}{pmp15cfg} &
+\multicolumn{1}{c|}{pmp14cfg} &
+\multicolumn{1}{c|}{pmp13cfg} &
+\multicolumn{1}{c|}{pmp12cfg} &
+\multicolumn{1}{c|}{pmp11cfg} &
+\multicolumn{1}{c|}{pmp10cfg} &
+\multicolumn{1}{c|}{pmp9cfg} &
+\multicolumn{1}{c|}{pmp8cfg} &
+\tt pmpcfg2 \\
+\cline{1-8}
+8 & 8 & 8 & 8 & 8 & 8 & 8 & 8 & \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{RV64 PMP configuration CSR layout.}
+\label{pmpcfg-rv64}
+\end{figure}
+
+The PMP address registers are CSRs named {\tt pmpaddr0}--{\tt pmpaddr15}.
+Each PMP address register encodes bits 33--2 of a 34-bit physical address for
+RV32, as shown in Figure~\ref{pmpaddr-rv32}.  For RV64, each PMP address
+register encodes bits 55--2 of a 56-bit physical address, as shown in
+Figure~\ref{pmpaddr-rv64}.  Not all physical address bits may be implemented,
+and so the {\tt pmpaddr} registers are \warl.
+
+\begin{commentary}
+The Sv32 page-based virtual-memory scheme described in Section~\ref{sec:sv32}
+supports 34-bit physical addresses for RV32, so the PMP scheme must support
+addresses wider than XLEN for RV32.
+The Sv39 and Sv48 page-based virtual-memory schemes described in
+Sections~\ref{sec:sv39} and~\ref{sec:sv48} support a 56-bit physical address
+space, so the RV64 PMP address registers impose the same limit.
+\end{commentary}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{31}{0} \\
+\hline
+\multicolumn{1}{|c|}{address[33:2] (\warl)} \\
+\hline
+32 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{PMP address register format, RV32.}
+\label{pmpaddr-rv32}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}F@{}J}
+\instbitrange{63}{54} &
+\instbitrange{53}{0} \\
+\hline
+\multicolumn{1}{|c|}{\wiri} &
+\multicolumn{1}{c|}{address[55:2] (\warl)} \\
+\hline
+32 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{PMP address register format, RV64.}
+\label{pmpaddr-rv64}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{YYSYYYY}
 \instbit{7} &
 \instbit{6} &
 \instbitrange{5}{4} &
@@ -2361,13 +2529,13 @@ addresses wider than XLEN for RV32.
 \instbit{1} &
 \instbit{0} \\
 \hline
-\multicolumn{1}{|c|}{L} &
-\multicolumn{1}{c|}{E} &
-\multicolumn{1}{c|}{A} &
-\multicolumn{1}{c|}{M} &
-\multicolumn{1}{c|}{X} &
-\multicolumn{1}{c|}{W} &
-\multicolumn{1}{c|}{R}
+\multicolumn{1}{|c|}{L (\warl)} &
+\multicolumn{1}{c|}{E (\warl)} &
+\multicolumn{1}{c|}{A (\warl)} &
+\multicolumn{1}{c|}{M (\warl)} &
+\multicolumn{1}{c|}{X (\warl)} &
+\multicolumn{1}{c|}{W (\warl)} &
+\multicolumn{1}{c|}{R (\warl)}
 \\
 \hline
 1 & 1 & 2 & 1 & 1 & 1 & 1 \\
@@ -2387,15 +2555,16 @@ The R, W, and X bits, when set, indicate that the PMP entry permits read,
 write, and instruction execution, respectively.  When one of these bits is
 clear, the corresponding access type is denied.
 
-The M bit indicates whether the PMP entry applies to M-mode.  When set, the
-PMP entry is enforced for all privilege modes.  When clear, the PMP entry
-applies only to S and U modes.
+The M bit indicates whether the R/W/X permissions are enforced on
+M-mode accesses.  When the M bit is set, these permissions are enforced for all privilege
+modes.  When the M bit is clear, any M-mode access matching this PMP entry
+will succeed, and the R/W/X permissions apply only to S and U modes.
 
 \subsubsection*{Address Matching}
 
 The A field in a PMP entry's configuration register encodes the
 address-matching mode of the associated PMP address register.  As
-Figure~\ref{pmpcfg-a} shows, two address-matching modes are supported:
+Table~\ref{pmpcfg-a} shows, two address-matching modes are supported:
 naturally aligned power-of-2 regions (NAPOT), including the special case of
 naturally aligned four-byte regions (NA4); and the top boundary of an
 arbitrary range (TOR).  These modes support four-byte granularity.
@@ -2417,25 +2586,38 @@ A & Name & Description \\
 \label{pmpcfg-a}
 \end{table*}
 
-Figure~\ref{pmpcfg-napot}
-shows how the configuration and address registers encode naturally aligned
-power-of-2 ranges.  
+NAPOT ranges make use of the low-order bits of the associated address register
+to encode the size of the range, as shown in Table~\ref{pmpcfg-napot}.
+
+\begin{table*}[h!]
+\begin{center}
+  \begin{tabular}{|c|c|l|}
+  \hline
+  \tt pmpaddr    & {\tt pmpcfg}.A & Match type and size \\
+  \hline
+  \tt aaaa...aaaa & NA4   & 4-byte NAPOT range \\
+  \tt aaaa...aaa0 & NAPOT & 8-byte NAPOT range \\
+  \tt aaaa...aa01 & NAPOT & 16-byte NAPOT range \\
+  \tt aaaa...a011 & NAPOT & 32-byte NAPOT range \\
+  \multicolumn{1}{|c|}{\ldots} &  \ldots  & \multicolumn{1}{|c|}{\ldots} \\
+  \tt aa01...1111 & NAPOT & $2^{XLEN}$-byte NAPOT range \\
+  \tt a011...1111 & NAPOT & $2^{XLEN+1}$-byte NAPOT range \\
+  \tt 0111...1111 & NAPOT & $2^{XLEN+2}$-byte NAPOT range \\
+  \hline
+  \end{tabular}
+\end{center}
+\caption{NAPOT range encoding in PMP address and configuration registers.}
+\label{pmpcfg-napot}
+\end{table*}
 
 If TOR is selected, the associated address register forms the top
-of the address range, and the next-lowest-numbered PMP address register forms
+of the address range, and the preceding PMP address register forms
 the bottom of the address range.  If PMP entry $i$'s A field is set to TOR,
 the entry matches addresses in the range
 $\left[{\tt pmpaddr}_{i-1},~{\tt pmpaddr}_i\right)$.
 If PMP entry 0's A field is set to TOR, zero is used for the lower bound,
 such that the entry matches addresses in the range
 $\left[0,~{\tt pmpaddr}_i\right)$.
-
-The PMP configuration registers are densely packed into CSRs to minimize
-context-switch time.  For RV32, four CSRs, {\tt pmpcfg0}--{\tt pmpcfg3},
-hold the configuration for the 16 PMP entries, as shown in
-Figure~\ref{pmpcfg-rv32}.  For RV64, {\tt pmpcfg0} and {\tt pmpcfg2} hold
-the configuration settings for the 16 PMP entries, as shown in
-Figure~\ref{pmpcfg-rv64}.
 
 \subsubsection*{Locking}
 
@@ -2447,6 +2629,9 @@ If PMP entry $i$ is locked, writes to its configuration register and writes
 to {\tt pmpaddr}$i$ are ignored.  Additionally, if PMP entry $i$'s A field
 is set to TOR, writes to {\tt pmpaddr}$i-1$ are ignored.
 
+For forward compatibility, standard software should not lock PMPs that are
+disabled (E=0).  The PMP configuration E=0/L=1 is reserved for future use.
+
 \subsubsection*{Priority and Matching Logic}
 
 PMP entries are statically prioritized.  The lowest-numbered PMP entry that
@@ -2454,13 +2639,24 @@ matches any byte of an access determines whether that access succeeds or
 fails.  The matching PMP entry must match all bytes of an access, or the
 access fails, irrespective of the M, R, W, and X bits.  For example, if a PMP
 entry is configured to match the four-byte range {\tt 0xC}--{\tt 0xF}, then an
-8-byte access to the range {\tt 0x8}--{\tt 0xF} will match with that PMP
-entry, but the access will fail.
+8-byte access to the range {\tt 0x8}--{\tt 0xF} will fail, assuming that
+PMP entry is the highest-priority entry that matches those addresses.
 
 If a PMP entry matches all bytes of an access, then the M, R, W, and X bits
-determine whether the access succeeds or fails.  If the M bit is clear,
-any matching M-mode access will succeed.  Otherwise, if the M bit is set
+determine whether the access succeeds or fails.  If the M bit is clear and
+the privilege mode of the access is M, the access succeeds.
+Otherwise, if the M bit is set
 or the privilege mode of the access is S or U, then the access succeeds
-if and only if the corresponding R, W, or X bit is set.
+only if the corresponding R, W, or X bit is set.
 
-Failed accesses generate a load, store, or instruction access exception.
+If no PMP entry matches an M-mode access, the access succeeds.  If no PMP
+entry matches an S-mode or U-mode access, but at least one PMP entry is
+implemented, the access fails.
+
+Failed accesses generate a load, store, or instruction access exception.  Note
+that a single instruction may generate multiple accesses, which may not be
+mutually atomic.  An access exception is generated if at least one access
+generated by an instruction fails, though other accesses generated by that
+instruction may succeed with visible side effects.  In particular, misaligned
+loads, stores, and instruction fetches may be decomposed into multiple
+accesses, as will instructions that reference virtual memory.
