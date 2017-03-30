@@ -2327,11 +2327,13 @@ PMP checks are applied to all accesses when the hart is running in
 S or U modes, and for loads and stores when the MPRV bit is set in
 the {\tt mstatus} register and the MPP field in the {\tt mstatus}
 register contains S or U.  PMP checks are also applied to page-table
-accesses for virtual-address translation, which implicitly have
-S-mode privilege.  Optionally, PMP checks may additionally
-apply to M-mode accesses, and the PMP registers themselves may
-be locked so that M-mode software cannot change them without a system
-reset.  PMP violations are always trapped precisely at the processor.
+accesses for virtual-address translation, for which the effective
+privilege mode is S.  Optionally, PMP checks may additionally apply
+to M-mode accesses, in which case the PMP registers themselves are
+locked, so that even M-mode software cannot change them without
+a system reset.
+
+PMP violations are always trapped precisely at the processor.
 
 \subsection{Physical Memory Protection CSRs}
 
@@ -2346,7 +2348,7 @@ context-switch time.  For RV32, four CSRs, {\tt pmpcfg0}--{\tt pmpcfg3}, hold
 the configurations {\tt pmp0cfg}--{\tt pmp15cfg} for the 16 PMP entries, as
 shown in Figure~\ref{pmpcfg-rv32}.  For RV64, {\tt pmpcfg0} and {\tt pmpcfg2}
 hold the configurations for the 16 PMP entries, as shown in
-Figure~\ref{pmpcfg-rv64}, and {\tt pmpcfg1} and {\tt pmpcfg3} are illegal.
+Figure~\ref{pmpcfg-rv64}; {\tt pmpcfg1} and {\tt pmpcfg3} are illegal.
 
 \begin{commentary}
 RV64 systems use {\tt pmpcfg2}, rather than {\tt pmpcfg1}, to hold
@@ -2519,28 +2521,32 @@ space, so the RV64 PMP address registers impose the same limit.
 \label{pmpaddr-rv64}
 \end{figure}
 
+Figure~\ref{pmpcfg} shows the layout of a PMP configuration register.  The R,
+W, and X bits, when set, indicate that the PMP entry permits read, write, and
+instruction execution, respectively.  When one of these bits is clear, the
+corresponding access type is denied.  The remaining two fields, A and L, are
+described in the following sections.
+
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{YYSYYYY}
+\begin{tabular}{YSSYYY}
 \instbit{7} &
-\instbit{6} &
-\instbitrange{5}{4} &
-\instbit{3} &
+\instbitrange{6}{5} &
+\instbitrange{4}{3} &
 \instbit{2} &
 \instbit{1} &
 \instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{L (\warl)} &
-\multicolumn{1}{c|}{E (\warl)} &
+\multicolumn{1}{c|}{\wiri} &
 \multicolumn{1}{c|}{A (\warl)} &
-\multicolumn{1}{c|}{M (\warl)} &
 \multicolumn{1}{c|}{X (\warl)} &
 \multicolumn{1}{c|}{W (\warl)} &
 \multicolumn{1}{c|}{R (\warl)}
 \\
 \hline
-1 & 1 & 2 & 1 & 1 & 1 & 1 \\
+1 & 2 & 2 & 1 & 1 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -2549,26 +2555,14 @@ space, so the RV64 PMP address registers impose the same limit.
 \label{pmpcfg}
 \end{figure}
 
-Figure~\ref{pmpcfg} shows the layout of a PMP configuration register.  The E
-bit indicates this PMP entry is enabled.  If E=0, this entry will never match
-an address.
-
-The R, W, and X bits, when set, indicate that the PMP entry permits read,
-write, and instruction execution, respectively.  When one of these bits is
-clear, the corresponding access type is denied.
-
-The M bit indicates whether the R/W/X permissions are enforced on
-M-mode accesses.  When the M bit is set, these permissions are enforced for all privilege
-modes.  When the M bit is clear, any M-mode access matching this PMP entry
-will succeed, and the R/W/X permissions apply only to S and U modes.
-
 \subsubsection*{Address Matching}
 
 The A field in a PMP entry's configuration register encodes the
-address-matching mode of the associated PMP address register.  As
-Table~\ref{pmpcfg-a} shows, two address-matching modes are supported:
-naturally aligned power-of-2 regions (NAPOT), including the special case of
-naturally aligned four-byte regions (NA4); and the top boundary of an
+address-matching mode of the associated PMP address register.  The encoding of
+this field is shown in Table~\ref{pmpcfg-a}.  When A=0, this PMP entry is
+disabled and matches no addresses.  Two other address-matching modes are
+supported: naturally aligned power-of-2 regions (NAPOT), including the special
+case of naturally aligned four-byte regions (NA4); and the top boundary of an
 arbitrary range (TOR).  These modes support four-byte granularity.
 
 \begin{table*}[h!]
@@ -2577,10 +2571,10 @@ arbitrary range (TOR).  These modes support four-byte granularity.
 \hline
 A & Name & Description \\
 \hline
-0 & NA4   & Naturally aligned four-byte region \\
-1 & NAPOT & Naturally aligned power-of-two region, $\ge$8 bytes \\
-2 & TOR   & Top of range \\
-3 & ---   & {\em Reserved} \\
+0 & OFF   & Null region (disabled) \\
+1 & TOR   & Top of range \\
+2 & NA4   & Naturally aligned four-byte region \\
+3 & NAPOT & Naturally aligned power-of-two region, $\ge$8 bytes \\
 \hline
 \end{tabular}
 \end{center}
@@ -2612,44 +2606,43 @@ to encode the size of the range, as shown in Table~\ref{pmpcfg-napot}.
 \label{pmpcfg-napot}
 \end{table*}
 
-If TOR is selected, the associated address register forms the top
-of the address range, and the preceding PMP address register forms
-the bottom of the address range.  If PMP entry $i$'s A field is set to TOR,
-the entry matches addresses in the range
-$\left[{\tt pmpaddr}_{i-1},~{\tt pmpaddr}_i\right)$.
-If PMP entry 0's A field is set to TOR, zero is used for the lower bound,
-such that the entry matches addresses in the range
-$\left[0,~{\tt pmpaddr}_i\right)$.
+If TOR is selected, the associated address register forms the top of the
+address range, and the preceding PMP address register forms the bottom of the
+address range.  If PMP entry $i$'s A field is set to TOR, the entry matches
+any address $a$ such that ${\tt pmpaddr}_{i-1}\leq a < {\tt pmpaddr}_i$.  If
+PMP entry 0's A field is set to TOR, zero is used for the lower bound, and so
+it matches any address $a < {\tt pmpaddr}_0$.
 
-\subsubsection*{Locking}
+\subsubsection*{Locking and Privilege Mode}
 
-The L bit in a PMP entry's configuration register indicates that this entry is
-locked, i.e., writes to this PMP entry and associated address registers are
-ignored.  Locked PMPs may only be unlocked with a system reset.
+The L bit indicates that the PMP entry is locked, i.e., writes to the
+configuration register and associated address registers are ignored.  Locked
+PMP entries may only be unlocked with a system reset.  If PMP entry $i$ is
+locked, writes to {\tt pmp}$i${\tt cfg} and {\tt pmpaddr}$i$ are ignored.
+Additionally, if {\tt pmp}$i${\tt cfg}.A is set to TOR, writes to {\tt
+pmpaddr}$i$-1 are ignored.
 
-If PMP entry $i$ is locked, writes to its configuration register and writes
-to {\tt pmpaddr}$i$ are ignored.  Additionally, if PMP entry $i$'s A field
-is set to TOR, writes to {\tt pmpaddr}$i-1$ are ignored.
-
-For forward compatibility, standard software should not lock PMPs that are
-disabled (E=0).  The PMP configuration E=0/L=1 is reserved for future use.
+In addition to locking the PMP entry, the L bit indicates whether the R/W/X
+permissions are enforced on M-mode accesses.  When the L bit is set, these
+permissions are enforced for all privilege modes.  When the L bit is clear,
+any M-mode access matching the PMP entry will succeed; the R/W/X
+permissions apply only to S and U modes.
 
 \subsubsection*{Priority and Matching Logic}
 
 PMP entries are statically prioritized.  The lowest-numbered PMP entry that
 matches any byte of an access determines whether that access succeeds or
 fails.  The matching PMP entry must match all bytes of an access, or the
-access fails, irrespective of the M, R, W, and X bits.  For example, if a PMP
+access fails, irrespective of the L, R, W, and X bits.  For example, if a PMP
 entry is configured to match the four-byte range {\tt 0xC}--{\tt 0xF}, then an
 8-byte access to the range {\tt 0x8}--{\tt 0xF} will fail, assuming that
 PMP entry is the highest-priority entry that matches those addresses.
 
-If a PMP entry matches all bytes of an access, then the M, R, W, and X bits
-determine whether the access succeeds or fails.  If the M bit is clear and
-the privilege mode of the access is M, the access succeeds.
-Otherwise, if the M bit is set
-or the privilege mode of the access is S or U, then the access succeeds
-only if the corresponding R, W, or X bit is set.
+If a PMP entry matches all bytes of an access, then the L, R, W, and X bits
+determine whether the access succeeds or fails.  If the L bit is clear and the
+privilege mode of the access is M, the access succeeds.  Otherwise, if the
+L bit is set or the privilege mode of the access is S or U, then the access
+succeeds only if the R, W, or X bit corresponding to the access type is set.
 
 If no PMP entry matches an M-mode access, the access succeeds.  If no PMP
 entry matches an S-mode or U-mode access, but at least one PMP entry is
@@ -2659,14 +2652,13 @@ Failed accesses generate a load, store, or instruction access exception.  Note
 that a single instruction may generate multiple accesses, which may not be
 mutually atomic.  An access exception is generated if at least one access
 generated by an instruction fails, though other accesses generated by that
-instruction may succeed with visible side effects.  In particular,
-instructions that reference virtual memory are decomposed into multiple
-accesses.
+instruction may succeed with visible side effects.  Notably, instructions that
+reference virtual memory are decomposed into multiple accesses.
 
 On some implementations, misaligned loads, stores, and instruction fetches may
 also be decomposed into multiple accesses, some of which may succeed before an
-access exception is raised.  Notably, the portion of a misaligned store that
-passes the PMP check may become visible, even if another portion fails the PMP
-check.  The same behavior may manifest for floating-point stores wider than
-XLEN bits (e.g., the FSD instruction in RV32D), even when the store address is
-naturally aligned.
+access exception occurs.  In particular, a portion of a misaligned store
+that passes the PMP check may become visible, even if another portion fails
+the PMP check.  The same behavior may manifest for floating-point stores wider
+than XLEN bits (e.g., the FSD instruction in RV32D), even when the store
+address is naturally aligned.
