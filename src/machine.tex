@@ -938,17 +938,18 @@ interrupts, unless the interrupt results in a user-level context swap.
 \subsection{Machine Trap-Vector Base-Address Register ({\tt mtvec})}
 
 The {\tt mtvec} register is an XLEN-bit read/write register that holds
-the base address of the M-mode trap vector.
+trap vector configuration, consisting of a vector base address (BASE) and a
+vector mode (MODE).
 
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{J@{}F}
+\begin{tabular}{J@{}S}
 \instbitrange{XLEN-1}{2} &
 \instbitrange{1}{0} \\
 \hline
-\multicolumn{1}{|c|}{Trap-Vector Base Address (\warl)} & 
-\multicolumn{1}{c|}{0} \\
+\multicolumn{1}{|c|}{BASE[XLEN-1:2] (\warl)} & 
+\multicolumn{1}{c|}{MODE (\warl)} \\
 \hline
 XLEN-2 & 2 \\
 \end{tabular}
@@ -961,11 +962,9 @@ XLEN-2 & 2 \\
 
 The {\tt mtvec} register must always be implemented, but can contain
 a hardwired read-only value.  If {\tt mtvec} is writable, the set of values
-the register may hold can vary by implementation.  The value in the {\tt
-mtvec} register must always be aligned on a 4-byte boundary (the low two bits
-are always zero).  The value returned by reading a variable {\tt mtvec}
-register should always match the value used to generate the handler PC address
-when handling traps.
+the register may hold can vary by implementation.  The value in the BASE field
+must always be aligned on a 4-byte boundary, and the MODE field may impose
+additional alignment constraints on the value in the BASE field.
 
 \begin{commentary}
 We allow for considerable flexibility in implementation of the trap
@@ -974,17 +973,41 @@ implementations with a large number of state bits, but on the other
 hand, we wish to allow flexibility for larger systems.
 \end{commentary}
 
-By default, all traps into machine mode cause the {\tt pc} to be set to the
-value in {\tt mtvec}.  Additional trap vector entry points can be defined by
-implementations to allow more rapid identification and service of certain trap
-causes.
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|r|c|l|}
+\hline
+Value & Name & Description \\
+\hline	 
+0      & Direct   & All exceptions set {\tt pc} to BASE. \\
+1      & Vectored & Asynchronous interrups set {\tt pc} to BASE+4$\times$cause. \\
+$\ge$2 & --- & {\em Reserved} \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encoding of {\tt mtvec} MODE field.}
+\label{mtvec-mode}
+\end{table*}
 
-The location of the reset vector and non-maskable interrupt vector are
-implementation-defined.
+The encoding of the MODE field is shown in Table~\ref{mtvec-mode}.  When
+MODE=Direct, all traps into machine mode cause the {\tt pc} to be set to the
+address in the BASE field.  When MODE=Vectored, all synchronous exceptions
+into machine mode cause the {\tt pc} to be set to the address in the BASE
+field, whereas interrupts cause the {\tt pc} to be set to the address in
+the BASE field plus four times the interrupt cause number.  For example,
+a machine-mode timer interrupt (see Table~\ref{mcauses}) causes the {\tt pc}
+to be set to BASE+{\tt 0x1c}.
 
 \begin{commentary}
-Reset, NMI vectors, and other interrupt vector default locations are
-given in a platform specification.
+When vectored interrupts are enabled, interrupt cause 0, which corresponds to
+user-mode software interrupts, are vectored to the same location as
+synchronous exceptions.  This ambiguity does not arise in practice, since
+user-mode software interrupts are either disabled or delegated to
+a less-privileged mode.
+\end{commentary}
+
+\begin{commentary}
+Reset and NMI vector locations are given in a platform specification.
 \end{commentary}
 
 \subsection{Machine Trap Delegation Registers ({\tt medeleg} and {\tt mideleg})}
