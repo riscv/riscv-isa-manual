@@ -10,13 +10,97 @@ the base single-precision instruction subset F.
 \section{D Register State}
 
 The D extension widens the 32 floating-point registers, {\tt f0}--{\tt
-f31}, to 64 bits (FLEN=64 in Figure~\ref{fprs}).
+  f31}, to 64 bits (FLEN=64 in Figure~\ref{fprs}).  The {\tt f}
+registers can now hold either 32-bit or 64-bit floating-point values
+as described below in Section~\ref{nanboxing}.
+
+\begin{commentary}
+FLEN can be 32, 64, or 128 depending on which of the F, D, and Q
+extensions are supported.  There can be up to four different
+floating-point precisions supported, including H, F, D, and Q.
+Half-precision H scalar values are only supported if the V vector
+extension is supported.
+\end{commentary}
+
+\section{NaN Boxing of Narrower Values}
+\label{nanboxing}
+
+When multiple floating-point precisions are supported, then valid
+values of narrower $n$-bit types, $n<$FLEN, are represented in the
+lower $n$ bits of an FLEN-bit NaN value, in a process termed
+NaN-boxing.  The upper bits of a valid NaN-boxed value must be all 1s.
+Valid NaN-boxed $n$-bit values therefore appear as negative quiet NaNs
+(qNaNs) when viewed as any wider $m$-bit value, $n < m \leq$FLEN.
+
+\begin{commentary}
+Software might not know the current type of data stored in a
+floating-point register but has to be able to save and restore the
+register values, hence the result of using wider operations to
+transfer narrower values has to be defined.  A common case is for
+callee-save registers, but a standard convention is also desirable for
+features including varargs, user-level threading libraries, virtual
+machine migration, and debugging.
+\end{commentary}
+
+Floating-point $n$-bit transfer operations move external values held
+in IEEE standard formats into and out of the {\tt f} registers, and
+comprise floating-point loads and stores (FL$n$/FS$n$) and
+floating-point move instructions (FMV.$n$.X/FMV.X.$n$).  A narrower
+$n$-bit transfer, $n<$FLEN, into the {\tt f} registers will create a
+valid NaN-boxed value by setting all upper FLEN$-n$ bits of the
+destination {\tt f} register to 1.
+
+Floating-point compute and sign-injection operations calculate results
+based on the FLEN-bit values held in the {\tt f} registers.  A narrow
+$n$-bit operation, where $n<$FLEN, checks that input operands are
+correctly NaN-boxed, i.e., all upper FLEN$-n$ bits are 1.  If so, the
+$n$ least-significant bits of the input are used as the input value,
+otherwise the input value is treated as an $n$-bit canonical NaN.  An
+$n$-bit floating-point result is written to the $n$ least-significant
+bits of the destination {\tt f} register, with all 1s written to the
+uppermost FLEN$-n$ bits to yield a legal NaN-boxed value.
+
+\begin{commentary}
+Earlier versions of this document did not define the behavior of
+feeding the results of narrower or wider operands into an operation,
+except to require that wider saves and restores would preserve the
+value of a narrower operand.  The new definition removes this
+implementation-specific behavior, while still accomodating both
+non-recoded and recoded implementations of the floating-point unit.
+The new definition also helps catch software errors by propagating
+NaNs if values are used incorrectly.
+
+Non-recoded implementations unpack and pack the operands to IEEE
+standard format on the input and output of every floating-point
+operation.  The NaN-boxing cost to a non-recoded implementation is
+primarily in checking if the upper bits of a narrower operation
+represent a legal NaN-boxed value, and in writing all 1s to the upper
+bits of a result.
+
+Recoded implementations use a more convenient internal format to
+represent floating-point values, with an added exponent bit to allow
+all values to be held normalized.  The cost to the recoded
+implementation is primarily the extra tagging needed to track the
+internal types and sign bits, but this can be done without adding new
+state bits by recoding NaNs internally in the exponent field.  Small
+modifications are needed to the pipelines used to transfer values in
+and out of the recoded format, but the datapath and latency costs are
+minimal.  The recoding process has to handle shifting of input
+subnormal values for wide operands in any case, and extracting the
+NaN-boxed value is a similar process to normalization except for
+skipping over leading-1 bits instead of skipping over leading-0 bits,
+allowing the datapath muxing to be shared.
+\end{commentary}
 
 \section{Double-Precision Load and Store Instructions}
 
 The FLD instruction loads a double-precision floating-point value from
 memory into floating-point register {\em rd}.  FSD stores a double-precision
 value from the floating-point registers to memory.
+\begin{commentary}
+The double-precision value may be a NaN-boxed single-precision value.
+\end{commentary}
+
 \vspace{-0.2in}
 \begin{center}
 \begin{tabular}{M@{}R@{}F@{}R@{}O}
@@ -60,20 +144,6 @@ offset[11:0] & base & D & dest & LOAD-FP \\
 offset[11:5] & src & base & D & offset[4:0] & STORE-FP \\
 \end{tabular}
 \end{center}
-
-If a floating-point register holds a single-precision value, it is
-guaranteed that a FSD of that register will place a value into memory
-that when reloaded with a FLD will recreate the original
-single-precision value in a register.  The data format that is
-stored in memory is undefined beyond having this property.
-
-\begin{commentary}
-User-level code might not know the current type of data stored in a
-floating-point register but has to be able to save and restore the
-register values.  A common case is for callee-save registers, but this
-is also essential to implement varargs and user-level threading
-libraries.
-\end{commentary}
 
 FLD and FSD are only guaranteed to execute atomically if the effective address
 is naturally aligned and XLEN$\geq$64.
@@ -221,12 +291,6 @@ Floating-point to floating-point sign-injection instructions, FSGNJ.D,
 FSGNJN.D, and FSGNJX.D are defined analogously to the single-precision
 sign-injection instruction.
 
-For FSGNJ.D, if {\em rs1} and {\em rs2} are the same register, which contains
-a single-precision floating-point value, the single-precision value will be
-correctly copied to {\em rd}.  If {\em rs1} and {\em rs2} are not the same,
-the result is undefined.  For FSGNJN.D and FSGNJX.D, the result is undefined
-for any single-precision inputs.
-
 \vspace{-0.2in}
 \begin{center}
 \begin{tabular}{R@{}F@{}R@{}R@{}F@{}R@{}O}
@@ -256,13 +320,9 @@ For RV64 only, instructions are provided to move bit patterns between
 the floating-point and integer registers.  FMV.X.D moves the
 double-precision value in floating-point register {\em rs1} to a
 representation in IEEE 754-2008 standard encoding in integer register
-{\em rd}.  If the last value written to the source floating-point
-register was a single-precision floating-point value, then the value
-returned by FMV.X.D is undefined beyond having the property that
-moving the value back to a floating-point register will recreate the
-original single-precision value.  FMV.D.X moves the double-precision
-value encoded in IEEE 754-2008 standard encoding from the integer
-register {\em rs1} to the floating-point register {\em rd}.
+{\em rd}.  FMV.D.X moves the double-precision value encoded in IEEE
+754-2008 standard encoding from the integer register {\em rs1} to the
+floating-point register {\em rd}.
 
 \vspace{-0.2in}
 \begin{center}
