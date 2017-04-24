@@ -642,6 +642,15 @@ following the jump ({\tt pc}+4) into register {\em rd}.  The standard
 software calling convention uses {\tt x1} as the return address
 register and {\tt x5} as an alternate link register.
 
+\begin{commentary}
+The alternate link register supports calling millicode routines (e.g.,
+those to save and restore registers in compressed code) while
+preserving the regular return address register.  The register {\tt x5}
+was chosen as the alternate link register as it maps to a temporary in
+the standard calling convention, and has an encoding that is only one
+bit different than the regular link register.
+\end{commentary}
+
 Plain unconditional jumps (assembler pseudo-op J) are encoded as a JAL
 with {\em rd}={\tt x0}.
 
@@ -719,14 +728,6 @@ information.  Although there is potentially a slight loss of error
 checking in this case, in practice jumps to an incorrect instruction
 address will usually quickly raise an exception.
 
-Return-address prediction stacks are a common feature of high-performance
-instruction-fetch units.  We note that {\em rd} and {\em rs1} can be used to
-guide an implementation's instruction-fetch prediction logic, indicating
-whether JALR instructions should push ({\em rd}$=${\tt x1}/{\tt x5}), pop
-({\em rs1}$=${\tt x1}/{\tt x5}), or not touch (otherwise)
-a return-address stack.  Similarly, a JAL instruction should push the return
-address onto the return-address stack only when {\em rd}$=${\tt x1}/{\tt x5}.
-
 When used with a base {\em rs1}$=${\tt x0}, JALR can be used to implement
 a single instruction subroutine call to the lowest \wunits{2}{KiB} or highest
 \wunits{2}{KiB} address region from anywhere in the address space, which could
@@ -741,6 +742,46 @@ boundary.
 Instruction fetch misaligned exceptions are not possible on machines
 that support extensions with 16-bit aligned instructions, such as the
 compressed instruction set extension, C.
+\end{commentary}
+
+Return-address prediction stacks are a common feature of
+high-performance instruction-fetch units, but require accurate
+detection of instructions used for procedure calls and returns to be
+effective.  For RISC-V, hints as to the instructions usage are encoded
+implicitly via the register numbers used.  A JAL instruction should
+push the return address onto a return-address stack (RAS) only when
+{\em rd}$=${\tt x1}/{\tt x5}.  JALR instructions should push/pop a
+RAS as shown in the Table~\ref{rashints}.
+\begin{table}[hbt]
+\centering
+\begin{tabular}{|c|c|c|l|}
+  \hline
+  \em rd & \em rs1 & {\em rs1}$=${\em rd} & RAS action \\
+  \hline
+  !{\em link} & !{\em link} & - & none \\
+  !{\em link} &  {\em link} & - & pop \\
+   {\em link} & !{\em link} & - & push  \\
+   {\em link} &  {\em link} & 0 & push and pop \\
+   {\em link} &  {\em link} & 1 & push \\
+   \hline
+\end{tabular}
+\caption{Return-address stack prediction hints encoded in register
+  specifiers used in the instruction.  In the above, {\em link} is
+  true when the register is either {\tt x1} or {\tt x5}.}
+\label{rashints}
+\end{table}
+
+\begin{commentary}
+Some other ISAs added explicit hint bits ot the encoding.  We use
+implicit hinting tied to register numbers and calling convention to
+reduce the encoding space used for these hints.
+
+When two different link registers ({\tt x1} and {\tt x5}) are given as
+{\em rs1} and {\em rd}, then the RAS is both pushed and popped to
+support coroutines.  If {\em rs1} and {\em rd} are the same link
+register (either {\tt x1} or {\tt x5}), the RAS is only pushed to
+enable macro-op fusion of the sequence:\linebreak
+{\tt lui ra, imm20; jalr ra, ra, imm11}
 \end{commentary}
 
 \subsubsection*{Conditional Branches}
