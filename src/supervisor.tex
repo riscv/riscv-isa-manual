@@ -188,11 +188,15 @@ sstatus} is equivalent to reading or writing the homonymous field in
 
 \subsection{Base ISA Control in {\tt sstatus} Register}
 
-The UXL field controls the value of XLEN for U-mode.  The encoding of UXL is the
-same as that of the MXL field of {\tt misa}, shown in Table~\ref{misabase}.
-This field only exists for RV64 and RV128; RV32 machines always use RV32 for
-U-mode.  An implementation may limit the values to which UXL can be set, but
-U-mode XLEN must not exceed S-mode XLEN.
+The UXL field controls the value of XLEN for U-mode, termed {\em U-XLEN},
+which may differ from the value of XLEN for S-mode, termed {\em S-XLEN}.  The
+encoding of UXL is the same as that of the MXL field of {\tt misa}, shown in
+Table~\ref{misabase}.  This field only exists for RV64 and RV128; RV32
+machines always use RV32 for U-mode.  UXL is a \warl\ field, and an
+implementation may hard-wire UXL to zero, in which case U-XLEN~=~S-XLEN.  If
+U-XLEN~$\ne$~S-XLEN, instructions executed in the narrower mode must ignore
+source register operand bits above the configured XLEN, and must sign-extend
+results to fill the widest supported XLEN in the destination register.
 
 \subsection{Memory Privilege in {\tt sstatus} Register}
 \label{sec:sum}
@@ -745,9 +749,13 @@ Value  & Name & Description \\
 The number of supervisor physical address bits is implementation-defined; any
 unimplemented address bits are hardwired to zero in the {\tt satp} register.
 The number of ASID bits is also implementation-defined and may be zero.  The
-number of implemented ASID bits may be determined by writing one to every bit
-position in the ASID field, then reading back the value in {\tt satp} to see
-which bit positions in the ASID field hold a one.
+number of implemented ASID bits, termed {\mbox {\em ASIDLEN}}, may be
+determined by writing one to every bit position in the ASID field, then
+reading back the value in {\tt satp} to see which bit positions in the ASID
+field hold a one.  The least-significant bits of ASID are implemented first:
+that is, if ASIDLEN~$>$~0, ASID[ASIDLEN-1:0] is writable.  The maximal value
+of ASIDLEN, termed ASIDMAX, is 9 for Sv32 or 16 for Sv39 and Sv48
+
 
 \begin{commentary}
 For many applications, the choice of page size has a substantial
@@ -869,6 +877,12 @@ SFENCE.VMA depends on {\em rs1} and {\em rs2} as follows:
       space identified by integer register {\em rs2}.
       Accesses to global mappings are not ordered.
 \end{itemize}
+
+When {\em rs2}$\neq${\tt x0}, bits XLEN-1:ASIDMAX of the value held in {\em
+rs2} are reserved for future use and should be zeroed by software and ignored
+by current implementations.  Furthermore, if ASIDLEN~$<$~ASIDMAX, the
+implementation shall ignore bits ASIDMAX-1:ASIDLEN of the value held in {\em
+rs2}.
 
 \begin{commentary}
 Simpler implementations can ignore the virtual address in {\em rs1} and
