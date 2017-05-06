@@ -1017,23 +1017,37 @@ depending on whether runtime addresses are aligned.
 
 \section{Memory Model}
 
-The base RISC-V ISA supports multiple concurrent threads of execution
-within a single user address space.  Each RISC-V thread has its own
-user register state and program counter, and executes an independent
-sequential instruction stream.  The execution environment will define
-how RISC-V threads are created and managed.  RISC-V threads can
-communicate and synchronize with other threads either via calls to the
-execution environment, which are documented separately in the
-specification for each execution environment, or directly via the
-shared memory system.  RISC-V threads can also interact with I/O
-devices, and indirectly with each other, via loads and stores to
-portions of the address space assigned to I/O.
+\begin{commentary}
+This section is out of date as the RISC-V memory model is currently
+under revision to ensure it can efficiently support current
+programming language memory models.  The revised base memory model
+will contain further ordering constraints, including at least that
+loads to the same address from the same hart cannot be reordered, and
+that syntactic data dependencies between instructions are respected.
+\end{commentary}
 
-In the base RISC-V ISA, each RISC-V thread observes its own memory
+The base RISC-V ISA supports multiple concurrent threads of execution
+within a single user address space.  Each RISC-V hardware thread, or
+{\em hart}, has its own user register state and program counter, and
+executes an independent sequential instruction stream.  The execution
+environment will define how RISC-V harts are created and managed.
+RISC-V harts can communicate and synchronize with other harts either
+via calls to the execution environment, which are documented
+separately in the specification for each execution environment, or
+directly via the shared memory system.  RISC-V harts can also interact
+with I/O devices, and indirectly with each other, via loads and stores
+to portions of the address space assigned to I/O.
+
+\begin{commentary}
+  We use the term {\em hart} to unambiguously and concisely describe a
+  hardware thread as opposed to software-managed thread contexts.
+\end{commentary}
+
+In the base RISC-V ISA, each RISC-V hart observes its own memory
 operations as if they executed sequentially in program order.  RISC-V
-has a relaxed memory model between threads, requiring an explicit
-FENCE instruction to guarantee any specific ordering between memory
-operations from different RISC-V threads.  Chapter~\ref{atomics}
+has a relaxed memory model between harts, requiring an explicit
+FENCE instruction to guarantee ordering between memory
+operations from different RISC-V harts.  Chapter~\ref{atomics}
 describes the optional atomic memory instruction extensions ``A'',
 which provide additional synchronization operations.
 
@@ -1075,11 +1089,11 @@ which provide additional synchronization operations.
 \end{center}
 
 The FENCE instruction is used to order device I/O and
-memory accesses as viewed by other RISC-V threads and external devices
+memory accesses as viewed by other RISC-V harts and external devices
 or coprocessors.  Any combination of device input (I), device output
 (O), memory reads (R), and memory writes (W) may be ordered with
 respect to any combination of the same.  Informally, no other RISC-V
-thread or external device can observe any operation in the {\em
+hart or external device can observe any operation in the {\em
   successor} set following a FENCE before any operation in the {\em
   predecessor} set preceding the FENCE.  The execution environment
 will define what I/O operations are possible, and in particular, which
@@ -1097,14 +1111,18 @@ forward compatibility, base implementations shall ignore these fields, and
 standard software shall zero these fields.
 
 \begin{commentary}
-We chose a relaxed memory model to allow high performance from simple machine
-implementations.  A relaxed memory model is also most compatible with likely
-future coprocessor or accelerator extensions.  We separate out I/O ordering
-from memory R/W ordering to avoid unnecessary serialization within
-a device-driver thread and also to support alternative non-memory paths to
-control added coprocessors or I/O devices.  Simple implementations may
-additionally ignore the {\em predecessor} and {\em successor} fields and
-always execute a conservative fence on all operations.
+We chose a relaxed memory model to allow high performance from simple
+machine implementations, however a completely relaxed memory model is
+too weak to support programming language memory models and so the
+memory model is being tightened.
+
+A relaxed memory model is also most compatible with likely future
+coprocessor or accelerator extensions.  We separate out I/O ordering
+from memory R/W ordering to avoid unnecessary serialization within a
+device-driver hart and also to support alternative non-memory paths
+to control added coprocessors or I/O devices.  Simple implementations
+may additionally ignore the {\em predecessor} and {\em successor}
+fields and always execute a conservative fence on all operations.
 \end{commentary}
 
 \vspace{-0.4in}
@@ -1131,14 +1149,14 @@ always execute a conservative fence on all operations.
 The FENCE.I instruction is used to synchronize the instruction and
 data streams.  RISC-V does not guarantee that stores to instruction
 memory will be made visible to instruction fetches on the same RISC-V
-thread until a FENCE.I instruction is executed.  A FENCE.I instruction
-only ensures that a subsequent instruction fetch on a RISC-V thread
+hart until a FENCE.I instruction is executed.  A FENCE.I instruction
+only ensures that a subsequent instruction fetch on a RISC-V hart
 will see any previous data stores already visible to the same RISC-V
-thread.  FENCE.I does {\em not} ensure that other RISC-V threads'
-instruction fetches will observe the local thread's stores in a
+hart.  FENCE.I does {\em not} ensure that other RISC-V harts'
+instruction fetches will observe the local hart's stores in a
 multiprocessor system. To make a store to instruction memory visible
-to all RISC-V threads, the writing thread has to execute a data FENCE
-before requesting that all remote RISC-V threads execute a FENCE.I.
+to all RISC-V harts, the writing hart has to execute a data FENCE
+before requesting that all remote RISC-V harts execute a FENCE.I.
 
 The unused fields in the FENCE.I instruction, {\em imm[11:0]}, {\em rs1}, and
 {\em rd}, are reserved for finer-grain fences in future extensions.  For
@@ -1306,7 +1324,7 @@ pieces using CSRRS instructions.
 
 The RDCYCLE pseudo-instruction reads the low XLEN bits of the {\tt
   cycle} CSR which holds a count of the number of clock cycles
-executed by the processor on which the hardware thread is running from
+executed by the processor core on which the hart is running from
 an arbitrary start time in the past.  RDCYCLEH is
 an RV32I-only instruction that reads bits 63--32 of the same cycle
 counter.  The underlying 64-bit counter should never overflow in
@@ -1322,17 +1340,17 @@ that reads bits 63--32 of the same real-time counter.  The underlying 64-bit
 counter should never overflow in practice.  The execution environment
 should provide a means of determining the period of the real-time
 counter (seconds/tick).  The period must be constant.  The
-real-time clocks of all hardware threads in a single user application
+real-time clocks of all harts in a single user application
 should be synchronized to within one tick of the real-time clock.  The
 environment should provide a means to determine the accuracy of the
 clock.
 
 The RDINSTRET pseudo-instruction reads the low XLEN bits of the {\tt
   instret} CSR, which counts the number of instructions retired by
-this hardware thread from some arbitrary start point in the past.
-RDINSTRETH is an RV32I-only instruction that reads bits 63--32 of the
-same instruction counter. The underlying 64-bit counter that should
-never overflow in practice.
+this hart from some arbitrary start point in the past.  RDINSTRETH is
+an RV32I-only instruction that reads bits 63--32 of the same
+instruction counter. The underlying 64-bit counter that should never
+overflow in practice.
 
 The following code sequence will read a valid 64-bit cycle counter value into
 {\tt x3}:{\tt x2}, even if the counter overflows between reading its upper
