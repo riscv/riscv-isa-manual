@@ -1,0 +1,124 @@
+\chapter{``N'' Standard Extension for User-Level Interrupts, Version 1.1}
+\label{chap:n}
+
+\begin{commentary}
+  This is a placeholder for a more complete writeup of the N
+  extension, and to form a basis for discussion.
+\end{commentary}
+
+This chapter presents a proposal for adding RISC-V user-level
+interrupt and exception handling.  When the N extension is present,
+and the outer execution environment has delegated designated
+interrupts and exceptions to user-level, then hardware can transfer
+control directly to a user-level trap handler without invoking the
+outer execution environment.
+
+\begin{commentary}
+User-level interrupts are primarily intended to support secure
+embedded systems with only M-mode and U-mode present, but can also be
+supported in systems running Unix-like operating systems to support
+user-level trap handling.
+
+When used in an Unix environment, the user-level interrupts would
+likely not replace conventional signal handling, but could be used as
+a building block for further extensions that generate user-level
+events such as garbage collection barriers, integer overflow,
+floating-point traps.
+\end{commentary}
+
+\section{Additional CSRs}
+
+The user-visible CSRs added to support the N extension are listed in
+Table~\ref{tab:ncsrs}.
+
+\begin{table}[hbt]
+  \centering
+  \begin{tabular}{|l|l|l|}
+    \hline
+    Number   & Name           & Description \\
+    \hline
+    \tt 0x000 & \tt ustatus    & User status register. \\
+    \tt 0x004 & \tt uie        & User interrupt-enable register. \\
+    \tt 0x005 & \tt utvec      & User trap handler base address. \\
+    \tt 0x040 & \tt uscratch   & Scratch register for user trap handlers. \\
+    \tt 0x041 & \tt uepc       & User exception program counter. \\
+    \tt 0x042 & \tt ucause     & User trap cause. \\
+    \tt 0x043 & \tt utval      & User bad address or instruction. \\
+    \tt 0x044 & \tt uip        & User interrupt pending. \\
+    \hline
+  \end{tabular}
+  \caption{CSRs for N extension.}
+  \label{tab:ncsrs}
+\end{table}
+
+\section{User Status Register ({\tt ustatus})}
+
+The {\tt ustatus} register is an XLEN-bit read/write register
+formatted as shown in Figure~\ref{ustatusreg}.  The {\tt ustatus}
+register keeps track of and controls the hart's current operating
+state.
+
+\begin{figure*}[h!]
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{KccFc}
+\\
+\instbitrange{XLEN}{5} &
+\instbit{4} &
+\instbitrange{3}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{UPIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UIE} \\
+\hline
+XLEN-5 & 1 & 3 & 1 \\
+\end{tabular}
+\end{center}
+\vspace{-0.1in}
+\caption{User-mode status register ({\tt ustatus}).}
+\label{ustatusreg}
+\end{figure*}
+
+The user interrupt-enable bit UIE disables user-level interrupts when
+clear. The value of UIE is copied into UPIE when a user-level trap is
+taken, and the value of UIE is set to zero to provide atomicity for
+the user-level trap handler.
+
+\begin{commentary}
+  There is no UPP bit to hold the previous privilege mode as it can
+  only be user mode.
+\end{commentary}
+
+The URET instructions is used to return from traps in U-mode, and URET
+copies UPIE into UIE, then sets UPIE.
+\begin{commentary}
+  UPIE is set after the UPIE/UIE stack is popped to enable interrupts
+  and help catch coding errors.
+\end{commentary}
+
+\section{Other CSRs}
+The remaining CSRs function in an analogous way to the trap handling
+registers defined for M-mode and S-mode.
+
+\begin{commentary}
+  A more complete writeup to follow.
+\end{commentary}
+
+\section{N Extension Instructions}
+
+The URET instruction is added to perform the analogous function to
+MRET and SRET.
+
+\section{Reducing Context-Swap Overhead}
+
+The user-level interrupt-handling registers add considerable state to
+the user-level context, yet will usually rarely be active in normal
+use.  In particular, {\tt uepc}, {\tt ucause}, and {\tt utval} are
+only valid during execution of a trap handler.
+
+An NS field can be added to {\tt mstatus} and {\tt sstatus} following
+the format of the FS and XS fields to reduce context-switch overhead
+when the values are not live.  Execution of URET will place the {\tt
+  uepc}, {\tt ucause}, and {\tt utval} back into initial state.
