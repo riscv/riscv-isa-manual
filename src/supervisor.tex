@@ -222,12 +222,9 @@ SUM.
 
 \subsection{Supervisor Trap Vector Base Address Register ({\tt stvec})}
 
-The {\tt stvec} register is an XLEN-bit read/write register that holds the
-base address of the S-mode trap vector.  When an exception occurs, the {\tt
-pc} is set to {\tt stvec}.  The {\tt stvec} register is always aligned to
-a 4-byte boundary.  The two least-significant bits of the {\tt stvec} register
-are \wlrl\ and reserved for future use; standard software must only write
-zeros to these bits.
+The {\tt stvec} register is an XLEN-bit read/write register that holds
+trap vector configuration, consisting of a vector base address (BASE) and a
+vector mode (MODE).
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -236,8 +233,8 @@ zeros to these bits.
 \instbitrange{XLEN-1}{2} &
 \instbitrange{1}{0} \\
 \hline
-\multicolumn{1}{|c|}{\tt Trap Vector Base Address} & 
-\multicolumn{1}{c|}{0 (\wlrl)} \\
+\multicolumn{1}{|c|}{BASE[XLEN-1:2] (\wlrl)} & 
+\multicolumn{1}{c|}{MODE (\warl)} \\
 \hline
 XLEN-2 & 2 \\
 \end{tabular}
@@ -247,6 +244,46 @@ XLEN-2 & 2 \\
 \caption{Supervisor trap vector base address register ({\tt stvec}).}
 \label{stvecreg}
 \end{figure*}
+
+The BASE field in {\tt stvec} is a \warl\ field that can hold any valid virtual
+or physical address, subject to the following alignment constraints: the
+address must always be at least 4-byte aligned, and the MODE
+setting may impose additional alignment constraints on the value in the BASE
+field.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|r|c|l|}
+\hline
+Value & Name & Description \\
+\hline	 
+0      & Direct   & All exceptions set {\tt pc} to BASE. \\
+1      & Vectored & Asynchronous interrupts set {\tt pc} to BASE+4$\times$cause. \\
+$\ge$2 & --- & {\em Reserved} \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encoding of {\tt stvec} MODE field.}
+\label{stvec-mode}
+\end{table*}
+
+The encoding of the MODE field is shown in Table~\ref{stvec-mode}.  When
+MODE=Direct, all traps into supervisor mode cause the {\tt pc} to be set to the
+address in the BASE field.  When MODE=Vectored, all synchronous exceptions
+into supervisor mode cause the {\tt pc} to be set to the address in the BASE
+field, whereas interrupts cause the {\tt pc} to be set to the address in
+the BASE field plus four times the interrupt cause number.  For example,
+a supervisor-mode timer interrupt (see Table~\ref{scauses}) causes the {\tt pc}
+to be set to BASE+{\tt 0x14}.
+Setting MODE=Vectored may impose an additional alignment constraint on BASE,
+requiring up to $4\times$XLEN-byte alignment.
+
+\begin{commentary}
+When vectored interrupts are enabled, interrupt cause 0, which corresponds to
+user-mode software interrupts, are vectored to the same location as
+synchronous exceptions.  This ambiguity does not arise in practice, since
+user-mode software interrupts are either disabled or delegated to user mode.
+\end{commentary}
 
 \subsection{Supervisor Interrupt Registers ({\tt sip} and {\tt sie})}
 
