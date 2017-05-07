@@ -117,11 +117,16 @@ RV32E subset, which only has 16 registers (Chapter~\ref{rv32e}).
 
 In the base ISA, there are four core instruction formats (R/I/S/U), as
 shown in Figure~\ref{fig:baseinstformats}.  All are a fixed 32 bits in
-length and must be aligned on a four-byte boundary in memory.  An
-instruction address misaligned exception is generated on a taken
-branch or unconditional jump if the target address is not four-byte
-aligned.  No instruction fetch misaligned exception is generated for a
-conditional branch that is not taken.
+length and must be aligned on a four-byte boundary in memory.  An instruction address misaligned exception is generated on a
+taken branch or unconditional jump if the target address is not
+four-byte aligned.  No instruction fetch misaligned exception is
+generated for a conditional branch that is not taken.
+
+\begin{commentary}
+The alignment constraint for base ISA instructions is relaxed to a
+two-byte boundary when instruction extensions with 16-bit lengths or
+other odd multiples of 16-bit lengths are added.
+\end{commentary}
 
 \vspace{-0.2in}
 \begin{figure}[h]
@@ -172,17 +177,21 @@ U-type \\
 \cline{1-6}
 \end{tabular}
 \end{center}
-\caption{RISC-V base instruction formats.}
+\caption{RISC-V base instruction formats.  Each immediate subfield is
+  labeled with the bit position (imm[{\em x}\,]) in the immediate
+  value being produced, rather than the bit position within the
+  instruction's immediate field as is usually done.  }
 \label{fig:baseinstformats}
 \end{figure}
 
 The RISC-V ISA keeps the source ({\em rs1} and {\em rs2}) and
 destination ({\em rd}) registers at the same position in all formats
-to simplify decoding.  Immediates are packed towards the leftmost
-available bits in the instruction and have been allocated to reduce
-hardware complexity.  In particular, the sign bit for all immediates
-is always in bit 31 of the instruction to speed sign-extension
-circuitry.  
+to simplify decoding.  Except for the 5-bit immediates used in CSR
+instructions (Section~\ref{sec:csrinsts}), immediates are always
+sign-extended, and are generally packed towards the leftmost available
+bits in the instruction and have been allocated to reduce hardware
+complexity.  In particular, the sign bit for all immediates is always
+in bit 31 of the instruction to speed sign-extension circuitry.
 
 \begin{commentary}
 Decoding register specifiers is usually on the critical paths in
@@ -195,16 +204,31 @@ In practice, most immediates are either small or require all XLEN
 bits.  We chose an asymmetric immediate split (12 bits in regular
 instructions plus a special load upper immediate instruction with 20
 bits) to increase the opcode space available for regular instructions.
-In addition, these immediates are all sign-extended.  We did not
-observe a benefit to using zero-extension for some immediates and
-wanted to keep the ISA as simple as possible.
+
+Immediates are sign-extended because we did not observe a benefit to
+using zero-extension for some immediates as in the MIPS ISA and wanted
+to keep the ISA as simple as possible.
 \end{commentary}
 
 \section{Immediate Encoding Variants}
 
-There are a further two variants of the instruction formats (SB/UJ)
+There are a further two variants of the instruction formats (B/J)
 based on the handling of immediates, as shown in
 Figure~\ref{fig:baseinstformatsimm}.
+
+The only difference between the S and B formats is that the 12-bit
+immediate field is used to encode branch offsets in multiples of 2 in
+the B format.  Instead of shifting all bits in the
+instruction-encoded immediate left by one in hardware as is
+conventionally done, the middle bits (imm[10:1]) and sign bit stay in
+fixed positions, while the lowest bit in S format (inst[7]) encodes a
+high-order bit in B format.
+
+Similarly, the only difference between the U and J formats is
+that the 20-bit immediate is shifted left by 12 bits to form U
+immediates and by 1 bit to form J immediates.  The location of
+instruction bits in the U and UJ format immediates is chosen to
+maximize overlap with the other formats and with each other.
 
 \begin{figure}[h]
 \begin{small}
@@ -259,7 +283,7 @@ S-type \\
 \multicolumn{1}{c|}{imm[4:1]} &
 \multicolumn{1}{c|}{imm[11]} &
 \multicolumn{1}{c|}{opcode} &
-SB-type \\
+B-type \\
 \cline{1-9}
 \\
 \cline{1-9}
@@ -276,7 +300,7 @@ U-type \\
 \multicolumn{2}{c|}{imm[19:12]} &
 \multicolumn{2}{c|}{rd} &
 \multicolumn{1}{c|}{opcode} &
-UJ-type \\
+J-type \\
 \cline{1-9}
 \end{tabular}
 \end{center}
@@ -285,10 +309,6 @@ UJ-type \\
 \label{fig:baseinstformatsimm}
 \end{figure}
 
-In Figure~\ref{fig:baseinstformatsimm} each immediate
-subfield is labeled with the bit position (imm[{\em x}\,]) in the
-immediate value being produced, rather than the bit position within
-the instruction's immediate field as is usually done.
 Figure~\ref{fig:immtypes} shows the immediates produced by each of the
 base instruction formats, and is labeled to show which instruction
 bit (inst[{\em y}\,]) produces each bit of the immediate value.
@@ -355,20 +375,6 @@ J-immediate \\
   always uses inst[31].}
 \label{fig:immtypes}
 \end{figure}
-
-The only difference between the S and SB formats is that the 12-bit
-immediate field is used to encode branch offsets in multiples of 2 in
-the SB format.  Instead of shifting all bits in the
-instruction-encoded immediate left by one in hardware as is
-conventionally done, the middle bits (imm[10:1]) and sign bit stay in
-fixed positions, while the lowest bit in S format (inst[7]) encodes a
-high-order bit in SB format.
-
-Similarly, the only difference between the U and UJ formats is
-that the 20-bit immediate is shifted left by 12 bits to form U
-immediates and by 1 bit to form J immediates.  The location of
-instruction bits in the U and UJ format immediates is chosen to
-maximize overlap with the other formats and with each other.
 
 \begin{commentary}
 Sign-extension is one of the most critical operations on immediates
@@ -1183,6 +1189,7 @@ I-cache.
 \end{commentary}
 
 \section{Control and Status Register Instructions}
+\label{sec:csrinsts}
 
 SYSTEM instructions are used to access system functionality that might
 require privileged access and are encoded using the I-type instruction
@@ -1224,9 +1231,9 @@ user-level base ISA, only a handful of read-only counter CSRs are accessible.
 source/dest  & source & CSRRW  & dest & SYSTEM \\
 source/dest  & source & CSRRS  & dest & SYSTEM \\
 source/dest  & source & CSRRC  & dest & SYSTEM \\
-source/dest  & zimm[4:0]   & CSRRWI & dest & SYSTEM \\
-source/dest  & zimm[4:0]   & CSRRSI & dest & SYSTEM \\
-source/dest  & zimm[4:0]   & CSRRCI & dest & SYSTEM \\
+source/dest  & uimm[4:0]   & CSRRWI & dest & SYSTEM \\
+source/dest  & uimm[4:0]   & CSRRSI & dest & SYSTEM \\
+source/dest  & uimm[4:0]   & CSRRCI & dest & SYSTEM \\
 \end{tabular}
 \end{center}
 
@@ -1265,9 +1272,9 @@ unmodified value back to the CSR and will cause any attendant side effects.
 
 The CSRRWI, CSRRSI, and CSRRCI variants are similar to CSRRW, CSRRS,
 and CSRRC respectively, except they update the CSR using an XLEN-bit
-value obtained by zero-extending a 5-bit immediate (zimm[4:0]) field
+value obtained by zero-extending a 5-bit unsigned immediate (uimm[4:0]) field
 encoded in the {\em rs1} field instead of a value from an integer
-register.  For CSRRSI and CSRRCI, if the zimm[4:0] field is zero, then
+register.  For CSRRSI and CSRRCI, if the uimm[4:0] field is zero, then
 these instructions will not write to the CSR, and shall not cause any
 of the side effects that might otherwise occur on a CSR write.  For
 CSRRWI, if {\em rd}={\tt x0}, then the instruction shall not read the
@@ -1286,12 +1293,12 @@ instruction retiring happens before the write of the new value).
 The assembler pseudo-instruction to read a CSR, CSRR {\em rd, csr}, is
 encoded as CSRRS {\em rd, csr, x0}.  The assembler pseudo-instruction
 to write a CSR, CSRW {\em csr, rs1}, is encoded as CSRRW {\em x0, csr,
-  rs1}, while CSRWI {\em csr, zimm}, is encoded as CSRRWI {\em x0,
-  csr, zimm}.
+  rs1}, while CSRWI {\em csr, uimm}, is encoded as CSRRWI {\em x0,
+  csr, uimm}.
 
 Further assembler pseudo-instructions are defined to set and clear
 bits in the CSR when the old value is not required: CSRS/CSRC {\em
-  csr, rs1}; CSRSI/CSRCI {\em csr, zimm}.
+  csr, rs1}; CSRSI/CSRCI {\em csr, uimm}.
 
 \subsubsection*{Timers and Counters}
 
