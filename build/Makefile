@@ -1,8 +1,8 @@
 #=======================================================================
-# Makefile for generating latex documents
+# Makefile for generating LaTeX documents
 #-----------------------------------------------------------------------
 #
-# This is a simple makefile for generating latex documents. It will
+# This is a simple makefile for generating LaTeX documents. It will
 # run bibtex, generate eps from xfig figures, and make pdfs. The
 # makefile supports builds in non-source directories: just make a
 # build directory, copy the makefile there, and change the srcdir
