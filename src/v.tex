@@ -1,4 +1,4 @@
-\chapter{``V'' Standard Extension for Vector Operations, Version 0.3}
+\chapter{``V'' Standard Extension for Vector Operations, Version 0.3-DRAFT}
 \label{sec:bits}
 
 This chapter presents a proposal for the RISC-V vector instruction set
@@ -8,7 +8,10 @@ element widths against available maximum vector length.  The vector
 extension is designed to allow the same binary code to work
 efficiently across a variety of hardware implementations varying in
 physical vector storage capacity and datapath spatial and/or temporal
-parallelism.
+parallelism.  The base vector extension is intended to provide general
+support for data-parallel execution within the 32-bit encoding space,
+with later vector extensions supporting richer functionality for
+certain domains.
 
 \begin{commentary}
 The vector extension is based on the style of vector register
@@ -29,22 +32,28 @@ The additional vector unit architectural state consists of 32 vector
 data registers ({\tt v0}--{\tt v31}), 8 vector predicate registers
 ({\tt vp0}-{\tt vp7}), and an XLEN-bit WARL vector length CSR, {\tt
   vl}.  In addition, the current configuration of the vector unit is
-held in a set of vector configuration CSRs ({\tt vtype0}--{\tt vtype7}
+held in a set of vector configuration CSRs ({\tt vdcfg0}--{\tt vdcfg7}
 and {\tt vnp}), as described below.  The implementation determines an
 available {\em maximum vector length} (MVL) for the current
-configuration held in the {\tt vtype} and {\tt vnp} registers.  There
+configuration held in the {\tt vdcfg} and {\tt vnp} registers.  There
 is also a 3-bit fixed-point rounding mode CSR {\tt vxrm}, and a
 single-bit fixed-point saturation status CSR {\tt vxsat}.
 
-The {\tt vcsr} CSR alias provides combined access to the {\tt vl},
-{\tt vxrm}, {\tt vxsat}, and {\tt vnp} fields to reduce context switch
-time.
-
 \begin{commentary}
-{\bf Discussion: The components of vcsr might not need separate CSR
-  addresses, depending on how they're accessed via other non-CSR
-  instructions.}
+  Future vector extensions using wider instruction encodings can
+  support more architectural vector registers. For example, 256
+  architectural vector registers in a 64 bit encoding.
 \end{commentary}
+
+The {\tt vcs} CSR alias provides combined access to the {\tt vl}, {\tt
+  vxrm}, {\tt vxsat}, and {\tt vnp} fields to reduce context switch
+time.  The {\tt vcs} register also includes a configuration mode field
+to support future extended configuration modes.
+
+\begin{discussion}
+The components of vcs might not need separate CSR addresses,
+depending on how they're accessed via other non-CSR instructions.
+\end{discussion}
 
 \begin{table}
   \centering
@@ -52,26 +61,62 @@ time.
     \hline
     CSR name & Number & Base ISA & Description\\
     \hline
+    {\tt vcs}  & TBD & RV32, RV64, RV128 & Vector control-status register\\
     {\tt vl}    & TBD & RV32, RV64, RV128 & Active vector length\\
     {\tt vxrm}  & TBD & RV32, RV64, RV128 & Vector fixed-point rounding mode\\
     {\tt vxsat} & TBD & RV32, RV64, RV128 & Vector fixed-point saturation flag \\
-    {\tt vcsr}  & TBD & RV32, RV64, RV128 & Vector control-status register\\
     \hline
     {\tt vnp} & TBD & RV32, RV64, RV128 & Number of vector predicate registers\\
     \hline
-    {\tt vtype0} & TBD & RV32, RV64, RV128 & \multirow{8}{*}{Vector data register types}\\
-    {\tt vtype1} & TBD & RV32 &\\
-    {\tt vtype2} & TBD & RV32, RV64 &\\
-    {\tt vtype3} & TBD & RV32 &\\
-    {\tt vtype4}  & TBD & RV32, RV64, RV128 &\\
-    {\tt vtype5} & TBD & RV32 &\\
-    {\tt vtype6} & TBD & RV32, RV64 &\\
-    {\tt vtype7} & TBD & RV32 &\\
+    {\tt vdcfg0} & TBD & RV32, RV64, RV128 & \multirow{8}{*}{Vector
+      data register configuration}\\
+    {\tt vdcfg1} & TBD & RV32 &\\
+    {\tt vdcfg2} & TBD & RV32, RV64 &\\
+    {\tt vdcfg3} & TBD & RV32 &\\
+    {\tt vdcfg4}  & TBD & RV32, RV64, RV128 &\\
+    {\tt vdcfg5} & TBD & RV32 &\\
+    {\tt vdcfg6} & TBD & RV32, RV64 &\\
+    {\tt vdcfg7} & TBD & RV32 &\\
     \hline
   \end{tabular}
   \caption{Vector extension CSRs.}
   \label{tab:vcsrs}
 \end{table}
+
+The vector unit must be configured before use.  Each architectural
+vector data register ({\tt v0}--{\tt v31}) is configured with the bit
+width and type of each element of that vector data register, or can be
+disabled to free physical vector storage for other architectural
+vector data registers.  The number of available vector predicate
+registers can also be set independently, from 0 to 8.
+
+\begin{commentary}
+  Several earlier vector machines had the ability to configure
+  physical vector register storage into a larger number of short
+   vectors or a shorter number of long vectors, in particular the
+  Fujitsu VP series~\cite{vp200}.
+\end{commentary}
+
+The available MVL depends on the configuration setting, but MVL must
+always have the same value for the same configuration parameters on a
+given implementation.  Implementations must provide an MVL of at least
+four elements for all supported configuration settings.
+
+\begin{commentary}
+  Specifying a minimum MVL allows operations on known-short vectors to
+  be expressed without requiring stripmining instructions.
+\end{commentary}
+
+\begin{discussion}
+Both min(MVL) and max(MVL) might be better expressed as part of a
+profile.
+\end{discussion}
+
+Each vector data register's current configuration is described with an
+8-bit encoding split into a 3-bit current maximum-width field {\tt
+  vemaxw}$n$\, and a 5-bit type field {\tt vetype}$n$, held in the
+{\tt vdcfg}$x$ CSRs.  The configuration state is also accessible via
+other specialized vector configuration instructions.
 
 \section{Element Datatypes and Width}
 
@@ -120,6 +165,11 @@ supported:
 \label{tab:velemtypes}
 \end{table}
 
+\begin{commentary}
+  Future vector extensions might expand the set of supported
+  datatypes, including custom application-specific datatypes.
+\end{commentary}
+
 Adding the vector extension to any machine with floating-point support
 adds support for the IEEE standard half-precision 16-bit
 floating-point data type.  This includes a set of scalar
@@ -133,39 +183,8 @@ but using the hitherto unused {\em fmt} field encoding of {\tt 10}.
   instructions into their own named extension.
 \end{commentary}
 
-\section{Vector Data Configuration Registers ({\tt vtype}$x$)}
 
-The vector unit must be configured before use.  Each architectural
-vector data register ({\tt v0}--{\tt v31}) is configured with the bit
-width and type of each element of that vector data register, or can be
-disabled to free physical vector storage for other architectural
-vector data registers.  The number of available vector predicate
-registers can also be set independently, from 0 to 8.
-
-\begin{commentary}
-  Several earlier vector machines had the ability to configure
-  physical vector register storage into a larger number of short
-   vectors or a shorter number of long vectors, in particular the
-  Fujitsu VP series~\cite{vp200}.
-\end{commentary}
-
-The available MVL depends on the configuration setting, but MVL must
-always have the same value for the same configuration parameters on a
-given implementation.  Implementations must provide an MVL of at least
-four elements for all supported configuration settings.
-
-\begin{commentary}
-  Specifying a minimum MVL allows operations on known-short vectors to
-  be expressed without requiring stripmining instructions.
-
-  {\bf Discussion: Both min(MVL) and max(MVL) might be better
-    expressed as part of a profile.}
-\end{commentary}
-
-Each vector data register's current configuration is described with an
-8-bit encoding split into a 3-bit current maximum-width field {\tt
-  vemaxw}$n$\, and a 5-bit type field {\tt vetype}$n$, held in the
-{\tt vtype}$x$ CSRs.
+\section{Vector Element Width ({\tt vemaxw}$n$)}
 
 The current maximum element width for vector data register $n$ is held
 in a three-bit field, {\tt vemaxw}$n$, encoded as shown in
@@ -192,16 +211,81 @@ Table~\ref{tab:vemaxw}.
   \label{tab:vemaxw}
 \end{table}
 
+\begin{commentary}
+Future extensions might increase the supported vector element widths
+beyond those of the base scalar ISA, or support smaller non-power-of-2
+widths.  At least one of the remaining width values should be reserved
+to support a width-encoding escape to support this larger range of
+width values.
+\end{commentary}
+
+\begin{commentary}
+Three broad classes of implementation can be distinguished by how they
+handle {\tt vemaxw}$n$ settings.
+
+The simplest is {\em max-width-per-implementation} (MWPI), where the
+vector unit is organized in fixed ELEN-width physical lanes, and
+changes to {\tt vemaxw}$n$ settings simply cause portions of the
+physical registers and datapath to be disabled for operations narrower
+than ELEN bits.
+
+The next most complex implementation, {\em
+  max-width-per-configuration} (MWPC), uses the maximum width across
+all {\tt vemaxw}$n$ settings in a dynamic configuration to divide the
+physical register storage and datapaths.  For example, a MWPC machine
+with ELEN=64 might subdivide physical lanes into 32-bit datapaths if
+no {\tt vemaxw}$n$ setting is greater than 32.  Operations on
+sub-32-bit quantities would disable appropriate portions of the
+physical registers and functional units in each 32-bit lane.  Several
+early vector supercomputers, including the CDC
+Star-100~\cite{cdcstart100}, provided a similar facility to divide
+64-bit physical vector lanes into narrower 32-bit lanes.
+
+The most complex implementations are {\em max-width-per-register}
+(MWPR), which reduce wasted space in the physical register files by
+packing elements in each vector register according to the individual
+{\tt vemaxw}$n$ settings and which within one configuration can
+execute instructions with narrower datatypes at higher rates than for
+wider datatypes.  The Berkeley Hwacha vector
+engine~\cite{hwachatr,mixedprecision} is an example microarchitecture
+with this property.
+\end{commentary}
+
+Any write to any {\tt vemaxw}$n$ field configures the entire vector
+unit and causes all vector data registers to be zeroed and all vector
+predicate registers to be set, and the vector length register {\tt vl}
+to be set to the maximum supported vector length.
+
+\begin{commentary}
+  Vector registers are zeroed on reconfiguration to prevent security
+  holes and to avoid exposing differences between how different
+  implementations manage physical vector register storage.
+
+  In-order implementations will probaby use a flag bit per register to
+  mux in 0 instead of garbage values on each source until it is
+  overwritten.  For in-order machines, vector lengths less than MVL
+  complicate this zeroing, but these cases can be handled by adding a
+  zero bit per element or element group.  Machines with vector
+  register renaming can just initialize the rename table to point
+  entries at a physical zero register.
+\end{commentary}
+
 If a vector data register is disabled, then any vector instruction
 that attempts to access that vector data register will raise an
-illegal instruction exception.
+illegal instruction exception.  Attempting to write any {\tt
+  vemaxw}$n$ with an unsupported value will raise an illegal
+instruction exception.
 
-In addition, the current element type of vector data register $n$ is
-held in a five-bit {\tt vetype}$n$ field encoded as shown in
+\section{Vector Element Type ({\tt vetype}$n$)}
+
+The current element type of vector data register $n$ is held in a
+five-bit {\tt vetype}$n$ field encoded as shown in
 Table~\ref{tab:vetype}.  The element type {\tt vetype}$n$ of a vector
 data register is constrained to have equal or lesser width than the
-value in the corresponding {\tt vemaxw}$n$ field.  Changes to {\tt
-  vetype}$n$ do not alter MVL.
+value in the corresponding {\tt vemaxw}$n$ field.  A write to a {\tt
+  vetype}$n$ field zeros the associated vector data register {\tt
+  v}$n$, but leaves other vector unit state undisturbed.  Changes to
+{\tt vetype}$n$ do not alter MVL.
 
 \begin{table}[hbt]
   \centering
@@ -252,128 +336,60 @@ value in the corresponding {\tt vemaxw}$n$ field.  Changes to {\tt
 \begin{commentary}
   Vector data registers have both a maximum element width and a
   current element data type to allow the same vector data register to
-  be allocated to different types during execution provided the
+  be changed to different types during execution provided the
   maximum width is not exceeded.  This reduces register pressure and
   helps support vector function calls, where the caller does not know
   the types needed by the callee, as described below.
 \end{commentary}
 
 \begin{commentary}
-Three broad classes of implementation can be distinguished by how they
-handle {\tt vemaxw}$n$ settings.
-
-The simplest is {\em max-width-per-implementation} (MWPI), where the
-vector unit is organized in fixed ELEN-width physical lanes, and
-changes to {\tt vemaxw}$n$ settings simply cause portions of the
-physical registers and datapath to be disabled for operations narrower
-than ELEN bits.
-
-The next most complex implementation, {\em
-  max-width-per-configuration} (MWPC), uses the maximum width across
-all {\tt vemaxw}$n$ settings in a dynamic configuration to divide the
-physical register storage and datapaths.  For example, a MWPC machine
-with ELEN=64 might subdivide physical lanes into 32-bit datapaths if
-no {\tt vemaxw}$n$ setting is greater than 32.  Operations on
-sub-32-bit quantities would disable appropriate portions of the
-physical registers and functional units in each 32-bit lane.  Several
-early vector supercomputers, including the CDC
-Star-100~\cite{cdcstart100}, provided a similar facility to divide
-64-bit physical vector lanes into narrower 32-bit lanes.
-
-The most complex implementations are {\em max-width-per-register}
-(MWPR), which reduce wasted space in the physical register files by
-packing elements in each vector register according to the individual
-{\tt vemaxw}$n$ settings and which within one configuration can
-execute instructions with narrower datatypes at higher rates than for
-wider datatypes.  The Berkeley Hwacha vector
-engine~\cite{hwachatr,mixedprecision} is an example microarchitecture
-with this property.
+  The set of supported types might be greatly increased with future
+  extensions.  For example (and not limited to), new scalar types in
+  new number systems, a complex type with real and imaginary
+  components, a key-value type, or an application-specific structure
+  type with multiple consitituent fields.  Auxiliary type
+  configuration state might be required in these cases.
 \end{commentary}
 
-Attempting to write any {\tt vemaxw}$n$ with an unsupported value will
-raise an illegal instruction exception.  Attempting to write an
-unsupported type or a type that requires more than the current {\tt
-  vemaxw} width to a {\tt vetype} field will raise an illegal
-instruction exception.
+Attempting to write an unsupported type or a type that requires more
+than the current {\tt vemaxw} width to a {\tt vetype} field will raise
+an illegal instruction exception.
 
 \begin{commentary}
 Implementations must still raise an exception for a {\tt vetype}$n$
 setting that is greater than the architectural {\tt vemaxw}$n$ width,
 even if they internally implement a larger physical {\tt vemaxw}$n$
 that could accomodate the {\tt vetype}$n$ request.
-
-{\bf Discussion: We can either have 1) implementations raise
-  exceptions whenever illegal values are written to {\tt vemaxw} and
-  {\tt vetype} fields (current design), 2) raise exceptions at use if
-  config holds illegal values, 3) make the fields WARL so silently
-  reduce to supported types with no exceptions.  Option 2 could
-  complicate vector unit context switch code by having more cases to
-  check, while Option 3 could make debugging more difficult by
-  allowing code to run with reduced precision or incorrect types.}
 \end{commentary}
 
-Any write to any {\tt vemaxw}$n$ field configures the entire
-vector unit and causes all vector data registers to be zeroed and all
-vector predicate registers to be set, and the vector length register
-{\tt vl} to be set to the maximum supported vector length.
-
-Any write to a {\tt vetype}$n$ field zeros only the
-associated vector data register {\tt v}$n$, leaving the other vector
-unit state undisturbed.
-
-\begin{commentary}
-  Vector registers are zeroed on reconfiguration to prevent security
-  holes and to avoid exposing differences between how different
-  implementations manage physical vector register storage.
-
-  In-order implementations will probaby use a flag bit per register to
-  mux in 0 instead of garbage values on each source until it is
-  overwritten.  For in-order machines, partial writes due to
-  predication or vector lengths less than MVL complicate this zeroing,
-  but these cases can be handled by adopting a hardware
-  read-modify-write, adding a zero bit per element or element group,
-  or a trap to machine-mode trap handler if first write access after
-  configuration is a partial write.  Machines with vector register
-  renaming can just initialize the rename table to point entries at a
-  physical zero register.
-\end{commentary}
-
-%% Can support larger number of architectural vector registers with
-%% future extensions.
-
-The vector data register configuration requires 256 bits of state (32
-vector data registers each with a 3-bit {\tt vemaxw}$n$ field and a
-5-bit {\tt vetype}$n$ field), and is held in the {\tt vtype CSRs}.
-
-RV128 has two vector configuration CSRs: {\tt vtype0} accesses
-configuration data for {\tt v0}--{\tt v15} with bits $8n$ to $8n+4$
-holding {\tt vetype}$n$ and bits $8n+5$ to $8n+7$ holding {\tt
-  vemaxw}$n$, while {\tt vtype4} similarly accesses configuration data
-for {\tt v16}--{\tt v31}.
-
-In RV64, {\tt vtype2} CSR provides access to the upper 64 bits of {\tt
-  vtype0} and {\tt vtype6} provides access to the upper 64 bits of
-{\tt vtype4}.  In RV32, the {\tt vtype1}, {\tt vtype3}, {\tt vtype5}
-and {\tt vtype7} CSRs provides access to the upper bits of {\tt
-  vtype0}, {\tt vtype2}, {\tt vtype4} and {\tt vtype6} respectively.
+\begin{discussion}
+We can either have 1) implementations raise exceptions whenever
+illegal values are written to {\tt vemaxw} and {\tt vetype} fields
+(current design), 2) raise exceptions at use if config holds illegal
+values, 3) make the fields WARL so silently reduce to supported types
+with no exceptions.  Option 2 could complicate vector unit context
+switch code by having more cases to check, while Option 3 could make
+debugging more difficult by allowing code to run with reduced
+precision or incorrect types.
+\end{discussion}
 
 \section{Vector Predicate Configuration Register ({\tt vnp})}
 
-The {\tt vnp} CSR contains a single 4-bit WARL field giving the number
-of enabled architectural predicate registers, between 0 and 8.  Any
-write to {\tt vnp} zeros all vector data registers, sets all bits in
-visible vector predicate registers, and sets the vector length
-register {\tt vl} to the maximum supported vector length.  Attempting
-to write a value larger than 8 to {\tt vnp} raises an illegal
-instruction exception.
+The {\tt vnp} CSR holds a single 4-bit value giving the number of
+enabled architectural predicate registers, between 0 and 8.  Any write
+to {\tt vnp} zeros all vector data registers, sets all bits in visible
+vector predicate registers, and sets the vector length register {\tt
+  vl} to the maximum supported vector length.  Attempting to write a
+value larger than 8 to {\tt vnp} raises an illegal instruction
+exception.
 
-\begin{commentary}
-{\bf Discussion: The number of vector predicate registers supported in
+\begin{discussion}
+The number of vector predicate registers supported in
   base ISA could be changed.  The base encoding could support up to 32
   predicate registers, but it is not clear these would be used
   frequently enough to warrant increased the architectural cost for
-  all implementations.}
-\end{commentary}
+  all implementations.
+\end{discussion}
 
 When {\tt vnp} is 0, any instruction that reads a vector predicate
 register other than {\tt vp0} will raise an illegal instruction
@@ -381,6 +397,76 @@ exception, while reads of {\tt vp0} will return all ones to provide
 unpredicated execution.  When {\tt vnp} is 0, any instruction that
 attempts to write any vector predicate register will raise an illegal
 instruction exception.
+
+\section{Vector Data Configuration Registers ({\tt vdcfg0}--{\tt vdcfg7})}
+
+The vector data register configuration requires 256 bits of state (32
+vector data registers each with a 3-bit {\tt vemaxw}$n$ field and a
+5-bit {\tt vetype}$n$ field), and is held in the {\tt vdcfg CSRs}.
+
+RV128 has two vector configuration CSRs: {\tt vdcfg0} holds
+configuration data for {\tt v0}--{\tt v15} with bits $8n$ to $8n+4$
+holding {\tt vetype}$n$ and bits $8n+5$ to $8n+7$ holding {\tt
+  vemaxw}$n$, while {\tt vdcfg4} similarly holds configuration data
+for {\tt v16}--{\tt v31}.
+
+In RV64, the {\tt vdcfg2} CSR provides access to the upper 64 bits of {\tt
+  vdcfg0} and {\tt vdcfg6} provides access to the upper 64 bits of
+{\tt vdcfg4}.  In RV32, the {\tt vdcfg1}, {\tt vdcfg3}, {\tt vdcfg5}
+and {\tt vdcfg7} CSRs provides access to the upper bits of {\tt
+  vdcfg0}, {\tt vdcfg2}, {\tt vdcfg4} and {\tt vdcfg6} respectively.
+
+Any CSR write to a {\tt vdcfg}$x$ register zeros all {\tt vdcfg}$y$
+registers, for $y>x$, and also zeros the {\tt vnp} register.  As a
+result configuration data should be written from the {\tt vdcfg0} CSR
+upwards, followed by the {\tt vnp} setting if non-zero.
+
+\begin{commentary}
+  Zeroing higher-numbered {\tt vdcfg}$y$ registers allows more rapid
+  reconfiguration of the vector register file via CSR writes, and
+  provides backward-compatibility for extensions that increase the
+  number of possible architectural vector registers.  This choice does
+  prevent the use of CSRRW instructions to swap the configuration
+  context.
+\end{commentary}
+
+\begin{commentary}
+Additional instructions are provided to support more rapid changes to
+the vector unit configuration as described below. These directly
+affect the {\tt vemaxw}$n$ and {\tt vetype}$n$ fields and do not
+necessarily have the same side effects as the CSR writes through the
+{\tt vdcfg}$n$ addresses.
+\end{commentary}
+
+
+\section{Legal Vector Unit Configurations}
+
+To simplify hardware configuration calculations and to reduce software
+context-switch complexity, vector unit configurations are constrained
+to have non-disabled architectural vector registers numbered
+contiguously starting at {\tt v0}.  Also, {\tt vemaxw}$m$ must be
+greater than or equal to {\tt vemaxw}$n$, for $m > n$, i.e.,
+configured element widths must increase monotonically with
+architectural vector register number.  An exception will be raised if
+any instruction tries to change {\tt vemax}$n$ in a way that violates
+this constraint.
+
+\begin{commentary}
+  During a software vector-context save, the software handler can stop
+  searching for active architectural registers after encountering the
+  first disabled vector register.  Hardware to calculate physical
+  register allocation might be slightly simplified with this
+  constraint, and might be able to pack register storage more tightly
+  with monotonically increasing element size.
+
+  In a vector-function calling convention, higher-numbered registers
+  are usually made available to the callee, and must usually be a
+  wider, often ELEN-width, element.  The context that configures the
+  vector unit might have known-narrower element types and can save
+  storage by confguring the lower-numbered architectural vector
+  registers accordingly.
+\end{commentary}
+
 
 \section{Vector Instruction Formats}
 
@@ -451,10 +537,11 @@ vector-scalar variants.  Vector-vector instructions take the first
 operand from the vector register specified by {\em rs1} and the second
 operand from the vector register specified by {\em rs2}.
 
-For most vector-scalar instructions, the type of the vector operand
-specified by {\em rs2} decides whether the integer or floating-point
-scalar register file is accessed using the {\em rs1} register
-specifier to give the first operand.
+For vector-scalar operations, the {\em rs1} field specifies the scalar
+register to be accessed.  For most vector-scalar instructions, the
+type of the vector operand specified by {\em rs2} indicates whether
+the integer or floating-point scalar register file is accessed using
+the {\em rs1} register specifier.
 
 Some non-commutative vector-scalar instructions (such as sub) are
 provided in two forms, with the scalar value used as the second
@@ -465,9 +552,6 @@ operand.
   the base encoding, whenever an instruction has a single scalar
   source operand, it is encoded in the {\tt rs1} field.
 \end{commentary}
-
-A third vector instruction format to support vector-immediate
-instructions is under consideration.
 
 \section{Polymorphic Vector Instructions}
 
@@ -481,187 +565,263 @@ operation if both vector source operands and the vector destination
 are 16-bit floats.
 
 The polymorphic encoding also naturally supports operations with mixed
-precisions on the input and output.
+precisions on the input and output, and also supports extending the
+instruction set with new types without necessarily increasing the
+opcode space.
 
-The base vector extension only mandates that implementations provide
-the following set of operations.  For integer operations, only
-computations of the form:
-\begin{verbatim}
-Vector-scalar integer
-   src1    src2         dest
-   XLEN    X             X  (e.g., 64b + 32b -> 32b)
-   XLEN    X            2X  (e.g., 64b + 8b  -> 16b)
+Not all combinations of source and destination argument types need be
+supported.  The base vector extension mandates only that
+implementations provide a subset of combinations of types on inputs
+and outputs.  Table~\ref{tab:vtypemix} shows the general rules for
+integer and floating-point instructions, but the detailed instruction
+listing should be consulted for accurate information.
 
-Vector-vector integer
-   src1    src2         dest
-    X       X            X  (e.g., 32b + 32b -> 32b)
-    X       X           2X  (e.g., 16b + 16b -> 32b)
-   2X       X           2X  (e.g., 64b + 32b -> 64b)
-\end{verbatim}
+\begin{table}
+  \centering
+  \begin{tabular}{|r|r|r|r|r|}
+    \hline
+    \multicolumn{1}{|c|}{Src1} &
+    \multicolumn{1}{c|}{Src2} &
+    \multicolumn{1}{c|}{Src3} &
+    \multicolumn{1}{c|}{Dest} &
+    \multicolumn{1}{c|}{Example} \\
+    \hline
+    \hline
+    \multicolumn{5}{|c|}{Integer vector-scalar}\\
+    \hline
+    XLEN &   X & - &  X & 64b + 32b $\rightarrow$ 32b \\
+    XLEN &   X & - & 2X & 64b + 8b  $\rightarrow$ 16b \\
+    \hline
+    \hline
+    \multicolumn{5}{|c|}{Integer vector-vector}\\
+    \hline
+      X &  X & - &   X & 32b + 32b $\rightarrow$ 32b \\
+      X &  X & - &  2X & 16b + 16b $\rightarrow$ 32b \\
+     2X &  X & - &  2X & 64b + 32b $\rightarrow$ 64b \\
+    \hline
+    \hline
+    \multicolumn{5}{|c|}{Floating-point vector-scalar}\\
+    \hline
+     F &  F & -  &  F &  64b + 64b $\rightarrow$ 64b \\
+     F &  F & F  &  F &  32b $\times$ 32b + 32b $\rightarrow$ 32b \\
+     F &  F & -  & 2F &  32b + 32b $\rightarrow$ 64b \\
+     F &  F & 2F & 2F &  32b $\times$ 32b + 64b $\rightarrow$ 64b \\
+    \hline
+    \hline
+    \multicolumn{5}{|c|}{Floating-point vector-vector}\\
+    \hline
+      F &  F  & - &   F & 32b + 32b $\rightarrow$ 32b \\
+      F &  F  & - &  2F & 16b + 16b $\rightarrow$ 32b \\
+     2F &  F  & - &  2F & 64b + 32b $\rightarrow$ 64b \\
+      F &  F & F  &  F &  64b $\times$ 64b + 64b $\rightarrow$ 64b \\
+      F &  F & 2F & 2F &  16b $\times$ 16b + 32b $\rightarrow$ 32b \\
+    \hline
+  \end{tabular}
+  \caption{General rules for supported types per instruction in base
+    vector extension.  X represents the number of bits in an integer
+    type and F represents the number of bits in a floating-point type.
+    Individual instruction types will provide more detailed listings.
+    Note that the type of a scalar floating-point operand can never be
+    different from that of the vector in Src2, hence the Src1=2F case
+    is missing from vector-scalar operations.}
+  \label{tab:vtypemix}
+\end{table}
+
+A general rule in the base vector instruction set is that the
+destination precision is never less than any source operand, except
+for explicit type-conversion instructions.  Another general rule is
+that the input operands can only be the same width or half the width
+of the destination operand except for the scalar operand in integer
+vector-scalar instructions, which is always XLEN wide.  Also, src2 is
+never larger than src1 or src3.
+
 Integer computations of mixed-precision values always aligns values by
 their LSB, and sign or zero-extends any smaller value according to its
-type.  Note a scalar integer value is already XLEN bits wide, and as
-wide as any possible integer vector value.
-\newpage
-For floating-point operations, all computations of the form:
-\begin{verbatim}
-Vector-scalar FP
-   src1    src2   src3  dest
-   F       F            F
-   F       F           2F (e.g.,32b scalar * 32b vector ->  64b vector - no round)
-   F       F      F     F (FMADD homogeneous)
-   F       F     2F    2F (FMADD with double-wide accumulator)
- 
- (2F       F           2F -  Can't be supported as no way to encode type)
+type.  The result is truncated to fit in the destination type.  Note a
+scalar integer value is already XLEN bits wide, and as wide as any
+possible integer vector value.
 
-Vector-vector FP
-   src1    src2   src3  dest
-   F       F             F
-   F       F            2F
-  2F       F            2F (e.g., 64b + 32b -> 64b)
-
-   F       F      F      F
-   F       F     2F     2F
-\end{verbatim}
-
-{\bf These tables will be expanded for each instruction type.}
+Floating-point computations on mixed-precision values acts as if the
+calculations are performed exactly then rounded once to the
+destination format.
 
 \section{Rapid Configuration Instructions}
 
-\note{This section is obsolete with the addition of unsigned types,
-  and needs to be reworked.  The new instructions will no longer use
-  CSR aliases as in previous proposal, however, to avoid using up CSR
-  addresses.}
+It can take several CSR instructions to set up the {\tt vdcfg} and
+{\tt vnp} CSRs for a given configuration.  Specialized configuration
+instructions are provided to quickly set up common configurations in
+the {\tt vdcfg} and {\tt vnp} CSRs.
 
-It can take several instructions to set up the {\tt vtype} and {\tt
-  vnp} CSRs for a given configuration.  To accelerate configuring
-the vector unit, specialized {\tt vcfg} instructions are added that
-set multiple fields in the {\tt vtype} and {\tt vncpred} CSRs.
+The {\tt vsetdcfg} instruction takes a scalar register value encoded as
+shown in Figure~\ref{fig:vdcfg}, and returns the corresponding MVL in
+the destination register.  The {\tt vsetdcfg} and {\tt vsetdcfgi}
+instructions also clear the {\tt vnp} register, so no predicate
+registers are allocated.
 
+\begin{discussion}
+  For now, only a 32-bit value supporting up to three different vector
+  data types is supported by the {\tt vsetdcfg} instruction.  RV64 and
+  RV128 could support larger number of types, though it's not clear if
+  the hardware cost (area, latency) to support a larger number of
+  different types is justified.
+\end{discussion}
 
-The {\tt vcfgd} instruction takes a register value encoded as shown in
-Figure~\ref{fig:vdcfg}, and returns the corresponding MVL in the
-destination register.  A corresponding {\tt vcfgdi} instruction takes
-a 5-bit immediate value to set the configuration, and returns MVL in
-the destination register.
-
-The {\tt vcfgd} and {\tt vcfgdi} instructions also clear the {\tt
-  vnp} register, so no predicate registers are allocated.
-
-\begin{figure}[hbt]
+\begin{figure}[b]
   \centering
-  \begin{tabular}{p{2cm}p{2cm}ccc|c|c|c|c|c|c|c|l}
+  \begin{tabular}{p{1cm}p{1cm}ccc|c|c|c|c|c|c|c|l}
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} & 
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{mode} &
+    \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{} &  \\
     \cline{6-12}
-     &   &    &      &  & 0 & F64 & F32 & F16 & X32 & X16 & X8 & RV32 \\
+    & & & & &
+    \tt type2 & \tt ntype2 &
+    \tt type1 & \tt ntype1 &
+    0 &
+    \tt type0 & \tt ntype0 &  \\
     \cline{6-12}
     \multicolumn{1}{c}{} &
     \multicolumn{1}{c}{} &
     \multicolumn{1}{c}{} &
     \multicolumn{1}{c}{} & 
     \multicolumn{1}{c}{} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
+    \multicolumn{1}{c}{5} &
     \multicolumn{1}{c}{2} &
     \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
     \multicolumn{1}{c}{5} &  \\
-    \cline{2-12}
-     & \multicolumn{2}{|c|}{0} & \multicolumn{1}{c|}{F128} & \multicolumn{2}{c|}{X64} & F64 & F32 & F16 & X32 & X16 & X8 & RV64 \\
-    \cline{2-12}
-    \multicolumn{1}{c}{} &
-    \multicolumn{2}{c}{24} &
-    \multicolumn{1}{c}{5} & 
-    \multicolumn{2}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &  \\
-    \cline{1-12}
-    \multicolumn{2}{|c|}{0} & \multicolumn{1}{c|}{X128} &
-    \multicolumn{1}{c|}{F128} & \multicolumn{2}{c|}{X64} & F64 & F32 & F16 & X32 & X16 & X8 & RV128 \\
-    \cline{1-12}
-    \multicolumn{2}{c}{83} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} & 
-    \multicolumn{2}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &
-    \multicolumn{1}{c}{5} &  \\
+    %% \cline{2-12}
+    %% & \multicolumn{1}{|c|}{0} & F128 &
+    %% \multicolumn{1}{c|}{type3} & \multicolumn{1}{c|}{\#type3} &
+    %% type2 & \#type2 & type1 & \#type1 & 0 & type0 & \#type0 & RV64 \\
+    %% \cline{2-12}
+    %% & & &
+    %% \multicolumn{1}{c}{} &
+    %% \multicolumn{1}{c}{24} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{2} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &  \\
+    %% \cline{1-12}
+    %% \multicolumn{1}{|c|}{0} & \multicolumn{1}{c|}{X128} &
+    %% \multicolumn{1}{c|}{F128} & X64 & F64 & F32 & F16 & X32 & X16 & X8 & RV128 \\
+    %% \cline{1-12}
+    %% \multicolumn{1}{c}{83} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{2} &
+    %% \multicolumn{1}{c}{5} &
+    %% \multicolumn{1}{c}{5} &  \\
   \end{tabular}
-  \caption{Format of the {\tt vcfgd} value for different base ISAs,
-    holding 5-bit vector register numbers for each supported
-    type. Fields must either contain 0 indicating no vector registers
-    are allocated for that type, or a vector register number greater
-    than all to the right.  All vector register numbers between two
-    non-zero fields are allocated to the type with the higher vector
-    register number. }
+  \caption{Format of the {\tt vsetdcfg} value.  The value contains
+    three pairs of a 5-bit type and a 5-bit number of registers
+    to create of that type. A value of 0 for the number of a type
+    indicates that 32 registers should be allocated.  A value of 0 for
+    the type indicates this pair should be skipped.  The types must be
+    of monotonically increasing size from type0 to type2. }
   \label{fig:vdcfg}
 \end{figure}
 
-The {\tt vcfgd} value specifies how many vector registers of each
-datatype are allocated, and is divided into 5-bit fields, one per
-supported datatype.  A value of 0 in a field indicates that no
-registers of that type are allocated.  A non-zero value indicates the
-highest vector
+The {\tt vsetdcfg} value specifies how many vector registers of each
+datatype are allocated, and is divided into a 2-bit mode field and
+pairs of 5-bit fields for each data type in the configuration.
 
-Each 5-bit field in the {\tt vcfgd} value must contain either zero,
-indicating that no vector registers are allocated for that type, or a
-vector register number greater than all fields in lower bit positions,
-indicating the highest vector register containing the associated type.
-This encoding can compactly represent any arbitrary allocation of
-vector registers to data types, except that there must be at least two
-vector registers ({\tt v0} and {\tt v1}) allocated to the narrowest
-required type. An example allocation is shown in
-Figure~\ref{fig:vcfgdexample}.
+The 2-bit mode field indicates the configuration mode of the vector
+unit and is zero for the base vector extension.
 
-\begin{figure}
-  \centering
-  \begin{tabular}{|c|c|c|c|c|c|c|}
-    \hline
-     0 & F64 & F32 & F16 & X32 & X16 & X8 \\
-     \hline
-     \hline
-     0 & 18  & 12  & 0   &  1  &  0  & 0  \\
-    \hline
-  \end{tabular}
-  \\
-  \vspace{0.1in}
-  \begin{tabular}{|c|c|c|c|}
-    \hline
-    Vector registers & {\tt vemaxw} & {\tt vetype} & Type \\
-    \hline
-    {\tt v31}--{\tt v19} & \tt 000     & \tt 00000 & Disabled \\
-    {\tt v18}--{\tt v13} & \tt 111     & \tt 01111 & F64 \\
-    {\tt v12}--{\tt v2}  & \tt 110     & \tt 01110 & F32 \\
-    {\tt v1}--{\tt v0}   & \tt 110     & \tt 10110 & X32 \\
-    \hline
-  \end{tabular}
-  \caption{Example use of {\tt vcfgd} value to set configuration.}
-  \label{fig:vcfgdexample}
-\end{figure}
+\begin{commentary}
+  The standard vector extension operating mode configures the vector
+  unit into some number of vector registers, each with some number of
+  elements of types supported by the scalar unit.
 
-Separate {\tt vcfgp} and {\tt vcfgpi} instructions are provided that
-write the source value to the {\tt vnp} register and return the
+  At least one alternative mode is planned, where the vector unit is
+  configured as some number of registers each holding a single large
+  element, e.g., 256 bits.  This would be the base for cryptographic
+  operations, or other coprocessors that operated on large structures.
+
+  Other modes can be used to reconfigure the vector unit register file
+  and functional units for other domain-specific purposes.
+\end{commentary}
+
+Each datatype pair contains a 5-bit {\tt type}$x$ value encoded as a
+{\tt vetype}$n$ value, and a 5-bit {\tt ntype}$x$ for the number of
+registers to allocate for that type. If the {\tt type0} field is
+non-zero, the {\tt vsetdcfg} instruction will configure the first {\tt
+  ntype0} vector data registers to have {\tt vetype}$n$ values of {\tt
+  type0} with {\tt vemaxw}$n$ values set accordingly as shown in
+Table~\ref{tab:vetype}.  If the {\tt type0} value is 0, the datatype
+pair is skipped.  If the {\tt type1} field is non-zero, then the next
+{\tt ntype1} vector registers are configured to be of the type given
+in {\tt type1}.  Similarly for the {\tt type2} pair.
+
+A value of zero in a {\tt type}$x$ field indicates this datatype pair
+should be ignored.  A value of zero in a {\tt ntype}$x$ field
+indicates 32 registers should be allocated for the corresponding type.
+
+\begin{commentary}
+Zero values are skipped to simplify setting a configuration with two
+different data types, where a single LUI instruction can set the upper
+20 bits leaving the low bits zero.
+
+A single 12-bit immediate value is sufficient to create a
+configuration with some number of vector registers with a single given
+datatype.
+
+A compressed C.LI with a zero-extended 5-bit immediate can create a
+configuration with 32 vector registers of a given datatype.
+\end{commentary}
+
+A corresponding {\tt vsetdcfgi} instruction takes a 12-bit immediate
+value to set the configuration instead of a scalar value, but
+otherwise is identical to the {\tt vsetcfgd} instruction.
+
+\begin{discussion}
+It is not clear how many immediate bits will be made available for the
+{\tt vsetdcfgi} instruction.  If encoding space is available for both
+12 immediate bits and a source register specifier, then {\tt
+  vsetdcgfi} can be defined to read the source register, OR in the
+bits in the immediate, then create a configuration.  In this case,
+there is no need for a separate {\tt vsetdcfg} instruction.
+\end{discussion}
+
+The configuration value given must result in a legal configuration or
+else an illegal instruction exception will be raised.
+
+If a zero argument is given to {\tt vsetdcfg} the vector unit will be
+disabled and the value 0 will be returned for MVL.  This instruction
+({\tt vsetdcfg x0, x0}) is given the assembly pseudo-code {\tt
+  vdisable}.
+
+Separate {\tt vsetpcfg} and {\tt vsetpcfgi} instructions are provided
+that write the source value to the {\tt vnp} register and return the
 new MVL.  These writes also clear the vector data registers, set all
 bits in the allocated predicate registers, and set {\tt vl}=MVL. A
-{\tt vcfgp} or {\tt vcfgpi} instruction can be used after a {\tt
-  vcfgd} to complete a reconfiguration of the vector unit.
+{\tt vsetpcfg} or {\tt vsetpcfgi} instruction can be used after a {\tt
+  vsetdcfg} to complete a reconfiguration of the vector unit.
 
-If a zero argument is given to {\tt vcgfd} the vector unit will be
-unconfigured with no enabled registers, and the value 0 will be
-returned for MVL.  Only the configuration registers {\tt vemaxw} and
-{\tt vnp} can be accessed in this state, either directly or via
-{\tt vcfgd}, {\tt vcfgdi}, {\tt vcfgp}, or {\tt vcfgpi}
-instructions. Other vector instructions will raise an illegal
-instruction exception.
+\begin{discussion}
+  If {\tt vnp} is made accessible as a separate CSR, the {\tt setpcfg}
+  and {\tt setpcfgi} instructions are less useful.  The only advantage
+  over a CSR instruction is that they return MVL, which is rarely
+  needed, and which can be obtained via that {\tt setvl} instruction.
+\end{discussion}
 
-\section{Vector Type Change Instructions}
+\section{Vector-Type-Change Instructions}
 
 To quickly change the individual types of a vector register, {\tt
   vetyperw} and {\tt vetyperwi} instructions are provided to change
@@ -677,9 +837,10 @@ the destination vector register.
 
 The active vector length is held in the XLEN-bit WARL vector length
 CSR {\tt vl}, which can only hold values between 0 and MVL inclusive.
-Any writes to the maximum configuration registers ({\tt vemaxw}$n$ or
-{\tt vnp}) cause {\tt vl} to be initialized with MVL.  Writes to
-{\tt vetype}$n$ do not affect {\tt vl}.
+Any writes to the configuration registers ({\tt vdcfg}$x$ or {\tt
+  vnp}) cause {\tt vl} to be initialized with MVL. Changes to {\tt
+  vetype}$n$ via vector-type-change instructions do not affect {\tt
+  vl}.
 
 The active vector length is usually set via the {\tt setvl}
 instruction.  The source argument to the {\tt setvl} is the requested
@@ -690,7 +851,7 @@ is also returned as the result of the {\tt setvl} instruction.
 
 \begin{commentary}
 Earlier drafts encoded {\tt setvl} using a modified CSRRW instruction
-whereas it is now encoded as a separate instruction.
+whereas it is now encoded as a separate new instruction.
 \end{commentary}
 
 \begin{table}
@@ -714,10 +875,12 @@ whereas it is now encoded as a separate instruction.
   The rules for setting the {\tt vl} register help keep vector
   pipelines full over the last two iterations of a stripmined loop.
   Similar rules were previously used in Cray-designed machines~\cite{crayx1asm}.
-
-  {\bf Discussion: There are multiple possible rules for setting VL, and we could
-  give implementations freedom to use different VL setting rules.}
 \end{commentary}
+
+\begin{discussion}
+  There are multiple possible rules for setting VL, and we could give
+  implementations freedom to use different VL setting rules.
+\end{discussion}
 
 \begin{commentary}
   The idea of having implementation-defined vector length dates back
@@ -775,8 +938,9 @@ No element operations are performed for any vector instruction when
                  # a1 holds pointer to result vector
                  # a2 holds pointer to first source vector
                  # a3 holds pointer to second source vector
-                 li t0, 2*VREGF32
-                 vcfg t0         # Configure with two 32-bit float vectors
+                 li t0, (2<<VNTYPE0|VREGF32)
+                 vsetdcfg t0     # Configure with two 32-bit float vectors
+
           loop:  setvl t0, a0    # Set length, get how many elements in strip
                  vld v0, a2      # Load first vector
                  sll t1, t0, 2   # Multiply length by 4 to get bytes
@@ -788,6 +952,7 @@ No element operations are performed for any vector instruction when
                  vst  v0, a1     # Store result vector
                  add a1, t1      # Bump pointer
                  bnez a0, loop   # Any more?
+
                  vdisable        # Turn off vector unit
 \end{verbatim}
 \caption{Example vector-vector add loop.}
@@ -811,12 +976,12 @@ predicate register.
   single predicate instruction, the current scheme provides more
   flexibility.
 
-  For unpredicated code, when there are no vector predicate registers
-  enabled, {\tt vp0} returns all set bits when read.  So, the
-  assembler convention is to assume {\tt vp0} as the predicate
-  register when no predicate register is explicitly given.  The
-  assembler can support a strict operands option to require the vector
-  predicate register is explicitly specified.
+  When there are no vector predicate registers enabled, {\tt vp0}
+  returns all set bits when read.  So, the assembler convention is to
+  assume {\tt vp0} as the predicate register when no predicate
+  register is explicitly given.  The assembler can support a strict
+  operands option to require the vector predicate register is
+  explicitly specified.
 \end{commentary}
 
 At element positions where the selected predicate register bit is
@@ -825,304 +990,230 @@ not change architectural state or generate exceptions), except to
 write a zero to the element position in the destination vector
 register.
 
+\begin{discussion}
+  The previous proposal (undisturb) left the destination vector
+  unchanged at element positions where the predicate bit is false,
+  whereas the current plan-of-record (zero) writes zero to the
+  destination where the predicate bit is false.
+
+  The advantage of the undisturb option is that it can require fewer
+  instructions and fewer architectural registers for many common code
+  sequences.  For in-order machines without register renaming, the
+  undisturb operation simply disables writes to the destination
+  elements, except for vector registers that have not been written
+  since configuration time. Typically an extra zero bit per vector
+  register or element group will be added to represent a zeroed
+  register instead of actually zeroing state at configuration time.
+  For predicated undisturb writes to these uninitialized registers,
+  the predicated false elements must be explicity written with zeros
+  on each element group and the zero bit is then cleared down.
+  However, in a machine with vector register renaming, undisturb does
+  imply an additional read of the original destination register to
+  write the value into the new physical destination register when the
+  predicate is false.  This additional read port will often be cheaper
+  than in a scalar machine as vector machines often time-multiplex
+  read ports, and the additional read can be skipped when the
+  predicate registers are disabled ({\tt vnp}=0) or when the source is
+  known to be zero after configuration, but still adds complexity to a
+  design.
+
+  The advantage of the zero option is that a machine with vector
+  register renaming does not need to read the original destination
+  vector register and so a read port is saved.  The disadvantage of
+  the zero option is that more instructions and architectural
+  registers are required for common code sequences, and simpler
+  microarchitectures without register renaming are penalized by
+  requiring longer code sequences and greater register pressure.  In
+  particular, vector merge instructions are required to collect
+  results from two divergent control paths, and each vector merge has
+  to read two vector values and write a vector result.  Whether the
+  zero option saves total register file traffic in an register-renamed
+  microarchitecture depends on the ratio of a) internal temporary
+  writes, to b) writes creating values that are live out of each basic
+  block, and also to the frequency of control flow merges.
+
+  Overall, the zero option removes significant complexity from the
+  renamed machines while reducing efficiency somewhat for the
+  non-renamed machines, and is the current plan-of-record.
+\end{discussion}
+
+{\bf The following sections are preliminary notes.}
+
+\section{Predicate Operations}
+
+All the standard logical operations are defined on predicate
+registers.
+
 \begin{commentary}
-  {\bf Discussion: The previous proposal left the destination vector
-    unchanged at element positions where the predicate bit was false.
-    }
+  The predicate operations have effectively three inputs, the two
+  register specifiers rs1 and rs2, plus the predicate specifier {\tt
+    vp0} or {\tt vp1}.  There are 256 possible logic operations on
+  three bits of input, so can specify with an 8-bit immediate
+  providing the lookup table.
+\end{commentary}
+
+A predicate swap operation is defined to exchange the values of two
+predicate registers.  This is used to work around the lack of
+predicate register specifiers in the base vector ISA.
+
+\begin{verbatim}
+     vpswap vp0, vp5  # Exchange values in vp0 and vp5.
+\end{verbatim}
+
+\begin{commentary}
+  The predicate swap can be performed with just rename table updates
+  in a renamed architecture.  Non-renamed machines will have to
+  explicitly copy the values.
+\end{commentary}
+
+\begin{discussion}
+  Not clear if the swap is really needed, or if explicit moves into
+  {\tt vp0} and {\tt vp1} will suffice.
+\end{discussion}
+
+The predicate operations include operations to support software
+vector-length speculation for vectorization of while loops.
+
+\begin{commentary}
+  The general scheme is described in Chapter 6 of \cite{krstephd}.
+\end{commentary}
+
+\section{Vector Load/Store Instructions}
+
+Three vector load/store addressing modes are supported, unit-stride,
+constant stride, and indexed (scatter/gather).  Each addressing mode
+has a 7-bit unsigned immediate offset that is scaled by the element
+type.
+
+The unit-stride address mode takes a scalar base byte address, adds
+the scaled immediate, then generates a contiguous set of element
+addresses for loads or stores.
+
+\begin{commentary}
+  The primary use of immediates in unit-stride loads is to generate
+  overlapping unit-stride loads for convolution operations.
+\end{commentary}
+
+The constant-stride address mode takes a scalar base byte address, a
+stride value encoded in bytes, and adds a scaled immediate value.
+
+\begin{commentary}
+  The stride value is in bytes to allow a single stride register to be
+  used to support operations on arrays-of-structures, where not all
+  elements in each structure have the same size.  The immediate value
+  is still scaled by element size to increase reach, given that
+  element types will be naturally aligned.
+\end{commentary}
+
+The indexed address mode takes a scalar base byte address and a vector
+of byte offsets.  The scalar base address and the immediate value are
+added to element of the offset vector to give a vector of addresses
+used in a scatter/gather.
+
+Indexed stores are provided in three types.  Unordered, ordered, and
+reverse-ordered.  The unordered indexed stores might update the same
+memory location from two different elements in an unspecified order.
+The ordered stores always update memory locations in increasing vector
+element order.  The reverse-ordered stores always update memory
+locations in decreasing memory order.
+
+\begin{commentary}
+  The reverse-ordered stores support vectorization of software memory
+  disambiguation techniques.  A reverse-ordered store of element id
+  into a hash table indexed by a hash on a store access address,
+  followed by a read of the hash table using a load access address and
+  a comparison against the original element id, will indicate if
+  there's a potential RAW hazard with an earlier loop iteration.
+\end{commentary}
+
+\begin{discussion}
+  Not clear if there is sufficient realizable improvement for
+  supporting unordered stores over ordered stores.
+\end{discussion}
+
+Vector loads/stores have a simple memory model, where each vector
+load/store is observed to complete sequentially in program order ony
+the local hart, i.e., a vector load on a hart will observe all earlier
+vector stores on the same hart, and no later vector stores.
+
+Vector loads are available in a length-speculative form that writes
+predicate register {\tt vp1} in addition to the destination vector
+data register.  These instructions raise an illegal instruction
+exception if {\tt vp1} is not configured.  For elements that do not
+generate a permissions fault, the length-speculative vector loads
+operate as normally except to also clear the bit in {\tt vp1}.  If an
+element encounters a permission fault, a zero is written to the
+destination vector register element and the {\tt vp1} bit is set to a
+1.  Implementations may treat elements past the first faulting element
+as also causing a fault even if they might not cause a permissions
+fault when accessed alone.
+
+Once software determines the active vector length, it should check if
+any loads within the active vector length caused a fault, and in this
+case, generate a non-length-speculative load to trigger reporting of
+the error.
+
+\begin{commentary}
+  Length-speculative vector loads are required to vectorize while
+  loops, with data-dependent exits (e.g. strlen).
+
+  The only faults ignored by the length-speculative vector loads are
+  ones that would have resulted in a permissions violation.  Page
+  faults and other virtualization-related faults should be handled
+  invisibly to the user thread by the execution environment.
+
+  A malicious program can use length-speculative vector loads to probe
+  accessible address space without fear of a fatal fault.
+\end{commentary}
+
+\section{Vector Select}
+
+A vector select produces a new result data vector by gathering
+elements from one source data vector at the element locations
+specified by a second source index vector.  Data source and
+destination vector types must agree.  The index vector can have any
+integer type.  Legal element indices can range from 0 to current
+MAXVL.  Indices out of this range raise an illegal instruction
+exception.
+
+\begin{verbatim}
+  # vindices holds values from 0..MAXVL
+  vselect  vdest, vsrc, vindices
+\end{verbatim}
+
+\section{Reductions}
+
+Reductions are supported via a vector extract instruction that takes
+elements starting from the middle of one vector and places these at
+the beginning of a second vector register.  This supports a
+recursive-halving reduction approach for any binary associative
+operator.
+
+\begin{commentary}
+  A similar vector register extract instruction was added to the Cray
+  C90 after memory latency grew too large for the memory-memory
+  reductions used in earlier Crays.
+
+  The vector unit microarchitecture can be optimized for the
+  power-of-2 sized element offsets used for reductions.
 \end{commentary}
 
 
-%% *dest memcpy(a0, *src, *dest)
-%%   vcfgd 1*X8
-%%
-%    mv t1, a0     
-%% loop:
-%%   setvl t0, t1
-%%   vld v0, a1
-%%   add a1, t0
-%%   vst v0, a2
-%%   add a2, t0
-%%   sub t1, t0
-%%   bnez t1, loop
-%%
-%%   vdisable
-%% done:
-%%   j ra
+\section{Fixed-Point Support}
 
-%% *dest memcpy(a0, *src, *dest)
-%%   vcfgd 1*X8
-%%
-%    mv t1, a0     
-%% loop:
-%%   setvl t0, t1
-%%   vldai v0, a1, t0
-%%   vstai v0, a2, t0
-%%   sub t1, t0
-%%   bnez t1, loop
-%%
-%%   vdisable
-%% done:
-%%   j ra
+Clip instruction supports scaling, rounding, and clipping to
+destination type.  Rounding set by CSR fixed-point rounding mode
+(truncate, jam, round-up, round-nearest-even).  Clipping set by CSR
+clip mode (wrap, saturate).
 
+Add with average, rounding set by rounding mode.
 
-%% memzero, n=a0, dest=a1
-%%   vcfgd 1*X8
-%%
-%% loop:
-%%   setvl t0, a0
-%%   vst v0, a1
-%%   add a1, t0
-%%   sub a0, t0
-%%   bnez a0, loop
-%%
-%%   vdisable
-%% done:
-%%   j ra
+Multiply with same size source and destination types, with some result
+scaling values (+1, 0, -1, -8?) and rounding and clipping according to
+CSR mode.
 
-%% # copy #x bytes from a to b
-%% vcfgd 1*X8
+Accumulate with carry into predicate register to support larger
+precise dot-products.
 
-%% vld v0, ra
-%% vst v0, rb
-
-%% vdisable
-
-%% ELEN*4 = 16B for RV32, 32B for RV64
-
-%% vbld v0, ra, a0  # configure with 2*X8U vectors, pass vector length
-%% vbst v0, rb, a0  
-
-
-%% # integer vector-scalar/scalar-vector operations use low-order bits of
-%% # scalar operand.
-
-%% 3130 9 8 7 6 5 4 3 2 120 9 8 7 6 5 4 3 2 110 9 8 7 6 5 4 3 2 1 0
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-%% |   func7     |   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-%% |   rs3   |fn2|   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-%% Uses two reserved opcodes in 32-bit space:
-%% VOP  = 10101 11
-%% VMEM = 11101 11
-
-%% VOP
-
-%% func3 (xs2, xs1, xf)
-
-%% mostly encodes which scalar values are accessed as with ROCC.
-
-%% xs2  - 1 = reads scalar rs2
-%% xs1  - 1 = reads scalar rs1
-%% xf   - 0=integer/1=float applies to both
-
-
-%% Integer arithmetic
-
-%% 3130 9 8 7 6 5 4 3 2 120 9 8 7 6 5 4 3 2 110 9 8 7 6 5 4 3 2 1 0
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-%% |   func7     |   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-%% # Integer add/sub
-%% # sign-extend smaller source
-%% # wraparound overflow into destination
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vadd.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vadd.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsub.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsub.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsub.sv vd, rs1, vs2
-%% # zero-extend smaller source
-%% # wraparound overflow into destination
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vaddu.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vaddu.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsubu.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsubu.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsubu.sv vd, rs1, vs2
-%% # Shifts use low bits of vsrc2, enough for src1 width
-%% # srl/a fills in zero/sign bits in destination
-%% # wraparound overflow into destination
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsll.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsll.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsll.sv vd, rs1, vs2 (less useful)
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsrl.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsrl.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsrl.sv vd, rs1, vs2 (table lookup)
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vsra.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsra.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vsra.vs vd, rs1, vs2 (less useful)
-%% # Logical ops
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vand.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vand.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vor.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vor.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    vd     1 0 1 0 1 1 1  vxor.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 0 1 0 1 1 1  vxor.vs vd, vs2, rs1
-%% # Predicate setting (only pd = 0-7 valid)
-%% # smaller source is sign-extended
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpeq.vv pd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpeq.vs pd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpne.vv pd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpne.vs pd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vplt.vv pd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vplt.vs pd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vplt.sv pd, rs1, vs2
-%% # smaller source is zero-extended (not sure if needed for eq/neq)
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpequ.vv pd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpequ.vs pd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpneu.vv pd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpneu.vs pd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 0 0    pd     1 0 1 0 1 1 1  vpltu.vv pd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpltu.vs pd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    pd     1 0 1 0 1 1 1  vpltu.sv pd, rs1, vs2
-
-
-%% # Multiply/Divide
-%% vvmul vdest, vsrc1, vsrc2  # Signed multiply
-%% vsmul vdest, vsrc1, xsrc2  # Signed multiply
-
-%% vvmulh vdest, vsrc1, vsrc2  # Signed multiply
-%% vsmulh vdest, vsrc1, xsrc2  # Signed multiply
-
-%% vvmulu vdest, vsrc1, vsrc2  # Unsigned multiply
-%% vsmulu vdest, vsrc1, xsrc2  # Unsigned multiply
-
-%% vvmulhu vdest, vsrc1, vsrc2  # Unsigned multiply
-%% vsmulhu vdest, vsrc1, xsrc2  # Unsigned multiply
-
-%% vvmulsu vdest, vsrc1, vsrc2  # Signed-unsigned multiply
-%% vsmulsu vdest, vsrc1, xsrc2  # Signed-unsigned multiply
-%% svmulsu vdest, xsrc1, vsrc2  # Signed-unsigned multiply
-%% vvmulhsu vdest, vsrc1, vsrc2  # Signed-unsigned multiply
-%% vsmulhsu vdest, vsrc1, xsrc2  # Signed-unsigned multiply
-%% svmulhsu vdest, xsrc1, vsrc2  # Signed-unsigned multiply
-
-%% vvdiv vdest, vsrc1, vsrc2
-%% vsdiv vdest, vsrc1, xsrc2
-%% svdiv vdest, xsrc1, vsrc2
-
-%% vvdivu vdest, vsrc1, vsrc2
-%% vsdivu vdest, vsrc1, xsrc2
-%% svdivu vdest, xsrc1, vsrc2
-
-%% vvrem vdest, vsrc1, vsrc2
-%% vsrem vdest, vsrc1, xsrc2
-%% svrem vdest, xsrc1, vsrc2
-
-%% vvremu vdest, vsrc1, vsrc2
-%% vsremu vdest, vsrc1, xsrc2
-%% svremu vdest, xsrc1, vsrc2
-
-%% # Load/store, size/type given by destination register configuration
-
-%% 3130 9 8 7 6 5 4 3 2 120 9 8 7 6 5 4 3 2 110 9 8 7 6 5 4 3 2 1 0
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-%% |   func7     |   rs2   |   rs1   |func3|   rd    | opcode  |1 1|
-%% +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-%% # Unit-stride
-%% # option to add post-increment to vld/vst using rs2 a la t0, but can do same with fusion
-%%  0 0 0 0 0 0 0 0 0 0 0 0    rs1    0 1 0    vd     1 1 1 0 1 1 1  vld vd, rs1
-%%  0 0 0 0 0 0 0 0 0 0 0 0    rs1    0 1 0    vd     1 1 1 0 1 1 1  vst vd, rs1
-%% # Constant-stride
-%% # Can add segments with immediate field in func7
-%%  0 0 0 0 0 0 0    rs2       rs1    1 1 0    vd     1 1 1 0 1 1 1  vlds vd, rs1, rs2
-%%  0 0 0 0 0 0 0    rs2       rs1    1 1 0    vd     1 1 1 0 1 1 1  vsts vd, rs1, rs2
-%% # Indexed (scatter/gather)
-%% # Scalar base + vector offsets
-%% # Can add segments with immediate field in func7
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vldx vd, rs1, vs2
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vstx vd, rs1, vs2
-%% # If A extension present:
-%% # Vector atomics use vector base address
-%% #  t = M[vs2]; M[vs2] = t op vs1; vd = t
-%% # must be matching integer 32b (W) or 64b (D) types in vs1 and vd
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoswap.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoswap.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoadd.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoadd.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoand.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoand.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoor.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoor.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamoxor.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamomax.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamomax.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamomaxu.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamomaxu.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamomin.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamomin.vs vd, vs2, rs1
-%%  0 0 0 0 0 0 0    vs2       vs1    0 1 0    vd     1 1 1 0 1 1 1  vamominu.vv vd, vs2, vs1
-%%  0 0 0 0 0 0 0    vs2       rs1    0 1 0    vd     1 1 1 0 1 1 1  vamominu.vs vd, vs2, rs1
-
-
-%% # Memory speculative options.  If permission fault (not just page
-%% # fault), then set sticky bit in predicate register vp1 rather than dying.
-
-
-
-
-%% # Example Code
-%% ----------------------------------------------------------------------
-
-%% memset(a0=dest, a1=c, a2=len)
-%%       csrwi vdcfg, 1    # One vector register of 8b
-%%       mv t1, a0         # Copy dest
-%%       beqz a1, loop     # Skip scalar move if a1=0 (could drop this instruction)
-%%       setvl t0, a2      # Set/find vector length
-%%       vmv.vs v0, a1     # Copy scalar a1 to elements of v0
-%% loop: setvl t0, a2      # Set/find vector length
-%%       vst t1, v0        # Set memory
-%%       sub a2, t0        # Decrement count
-%%       add t1, t0        # Bump pointer
-%%       bnez a2, loop     # Any more?
-%% done: vuncfg
-%%       j ra
-
-
-%% # With ai
-%% memset(a0=dest, a1=c, a2=len)
-%%       csrwi vdcfg, 1    # One vector register of 8b
-%%       mv t1, a0         # Copy dest
-%%       beqz a1, loop     # Skip scalar move if a1=0 (could drop this instruction)
-%%       setvl t0, a2      # Set/find vector length
-%%       vmv.vs v0, a1     # Copy scalar a1 to elements of v0
-%% loop: setvl t0, a2      # Set/find vector length
-%%       vstai t1, v0, t0  # Set memory
-%%       sub a2, t0        # Decrement count
-%%       bnez a2, loop     # Any more?
-%% done: vuncfg
-%%       j ra
-
-%% ----------------------------------------------------------------------
-
-%% memcpy(a0=dest, a1=src, a2=len)
-%%       csrwi vdcfg, 1    # One vector register of 8b
-%%       mv t2, a0         # Copy dest
-%% loop: setvl t0, a2      # Set/find vector length
-%%       vld v0, a1        # Load vector
-%%       add a1, t0        # Bump pointer (can fuse with vld)
-%%       sub a2, t0        # Decrement count
-%%       vst t2, a0        # Store vector
-%%       add t2, t0        # Bump pointer (can fuse with vst)
-%%       bnez a2, loop     # Any more?
-%% done: vuncfg
-%%       j ra
-
-%% # with ldai/stai
-%% memcpy(a0=dest, a1=src, a2=len)
-%%       csrwi vdcfg, 1    # One vector register of 8b
-%%       mv t2, a0         # Copy dest
-%% loop: setvl t0, a2      # Set/find vector length
-%%       vldai v0, a1, t0  # Load vector
-%%       sub a2, t0        # Decrement count
-%%       vstai t2, a0, t0  # Store vector
-%%       bnez a2, loop     # Any more?
-%% done: vuncfg
-%%       j ra
-
-
+\section{Optional Transcendental Support}
 
