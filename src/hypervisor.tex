@@ -206,11 +206,10 @@ Table~\ref{h-sprv} enumerates the cases.
 \label{h-sprv}
 \end{table*}
 
-When SPV=1, however, two-level translation swaps the usual meaning of
-{\tt satp} and {\tt bsatp}. {\tt bsatp} provides the virtual address to
-guest-physical address mapping, as well as the S-level ASID; {\tt satp}
-provides the guest-physical to machine-physical mapping and the HS-level
-ASID.
+When SPV=1, two-level translation uses the {\tt bsatp} register (instead
+of {\tt satp} to retrieve the virtual to guest-physical mapping, as
+well as the S-level ASID; as usual, {\tt hatp} provides the guest-physical
+to machine-physical mapping and the HS-level ASID.
 
 \begin{commentary}
 For simplicity, SPRV is in effect even when in S-mode or U-mode, but in normal
@@ -269,6 +268,71 @@ to U-mode by setting the corresponding bit in {\tt sedeleg} or {\tt sideleg}.
 When V=0 and the N extension for user-mode interrupts is implemented, any trap
 that has been delegated to HS-mode can be further delegated to U-mode by
 setting the corresponding bit in {\tt sedeleg} or {\tt sideleg}.
+
+\subsection{Hypervisor Address Translation and Protection Register ({\tt hatp})}
+
+The {\tt hatp} register is an XLEN-bit read/write register formatted as shown
+in Figure~\ref{rv32hatpreg} for RV32 and Figure~\ref{rv64hatpreg}  for RV64.
+The interpretation of the MODE, ASID, and PPN fields is the same as for
+{\tt satp}.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{c@{}E@{}K}
+\instbit{31} &
+\instbitrange{30}{22} &
+\instbitrange{21}{0} \\
+\hline
+\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
+\multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
+\multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
+\hline
+1 & 9 & 22 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{RV32 hypervisor address translation and protection register {\tt hatp}.}
+\label{rv32hatpreg}
+\end{figure}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}S@{}T@{}U}
+\instbitrange{63}{60} &
+\instbitrange{59}{44} &
+\instbitrange{43}{0} \\
+\hline
+\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
+\multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
+\multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
+\hline
+4 & 16 & 44 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{RV64 hypervisor address translation and protection register {\tt hatp}, for MODE
+values Bare, Sv39, and Sv48.}
+\label{rv64hatpreg}
+\end{figure*}
+
+The {\tt hatp} register is only active when second-level translation
+is in effect, namely when either V=1 or SPRV=1 and SPV=1.  The first
+level of translation comes from {\tt satp} when V=1, or from {\tt
+bsatp} when SPRV=1 and SPV=1.  Any physical address that is accessed
+by the hart to retrieve a page table entry, or that is specified in
+the leaf page table entry, is treated as a {\em guest physical address}
+and goes through a second stage of translation.  The second stage of
+translation uses paging structures described by {\tt hatp}.
+
+If MODE is 0 in {\tt hatp}, second-level translation uses an identity
+mapping from guest-physical to machine-physical addresses.  However,
+it is {\em not} entirely disabled.  In particular, when SPRV=1 and SPV=1,
+conversion of virtual addresses to guest physical addresses will use
+{\tt bsatp} rather than {\tt satp}.
 
 \subsection{Background Supervisor Status ({\tt bsstatus}) Register}
 
@@ -610,14 +674,10 @@ When V=0, the {\tt bsatp} register holds the S-mode guest's version of the
 V=1, or vice-versa), the implementation swaps the contents of {\tt bsatp} and
 {\tt satp}.
 
-{\tt bsatp} affects the behavior of the machine when two-level address
-translation is active.  When V=1, it controls the translation of guest
-physical addresses to machine physical addresses.  When V=0, but SPRV=1
-and SPV=1, it controls the translation of guest virtual addresses to
-guest physical addresses.
-
-The interpretation of the MODE, ASID, and PPN
-fields is the same as for {\tt satp}.
+{\tt bsatp} only affects the behavior of the machine when SPRV=1 and SPV=1.
+In that case, second-level translation uses {\tt bsatp} to translate
+guest virtual addresses to guest physical addresses, and {\tt hatp} to
+translate guest physical addresses to machine-physical addresses
 
 \begin{figure}[h!]
 {\footnotesize
@@ -845,19 +905,17 @@ and protection is in effect.  For any virtual memory access, the original
 virtual address is first converted
 by S-level address translation, as controlled by the {\tt satp} register, into
 a {\em guest physical address}.  The guest physical address is then
-converted by HS-level address translation, as controlled by the {\tt bsatp}
+converted by HS-level address translation, as controlled by the {\tt hatp}
 register, into a {\em machine physical address}.
 Although there is no option to disable two-level address translation when V=1,
 either level of translation can be effectively disabled by zeroing the
-corresponding {\tt satp} or {\tt bsatp} register.
+corresponding {\tt satp} or {\tt hatp} register.
 
 Two-level address translation and protection is also in effect if V=0 but
-SPRV=1 and SPV=1.  In that case, the process is the same but the roles
-of {\tt satp} and {\tt bsatp} are inverted.  The original virtual address
-is first converted by S-level address translation (now controlled by the
-{\tt bsatp} register) into a guest physical address.  The guest physical
-address is then converted by HS-level address translation (now controlled
-by the {\tt satp} register, into a {\em machine physical address}.
+SPRV=1 and SPV=1.  In that case, the process is the same except that
+S-level address translation is controlled by the {\tt bsatp} register.
+The guest physical address is then converted by HS-level address translation
+as usual, under control of of the {\tt hatp}.
 
 For the purposes of HS-level address translation and protection, all memory
 accesses made with V=1---including those made by the S-level
@@ -912,7 +970,8 @@ addresses and is in effect regardless of virtualization mode.
 
 When two-level address translation is in effect, there are separate
 HS-level and S-level ASIDs.  HS-level ASIDs share the ASID space with
-regular one-level page tables.
+regular one-level page tables.  The ASID field of {\tt hatp} provides the
+{\em active HS-level ASID}.
 
 \begin{commentary}
 	The processor may cache guest-physical to machine-physical
@@ -923,8 +982,7 @@ regular one-level page tables.
 	need to introduce an HFENCE.VMA instruction.  However, unless
 	there is a 1:1 correspondence between guest physical addresses
 	and host virtual addresses, the hypervisor must use different
-	ASIDs for virtualized guests and U-mode programs, even if
-	MODE is zero for the virtualized guest.
+	ASIDs in {\tt hatp} and {\tt satp}, even if MODE is zero.
 \end{commentary}
 
 While second-level translation is in effect, the ASID in {\tt satp}
@@ -933,7 +991,8 @@ or {\tt bsatp} (respectively when V=1, or when SPRV=1 and SPV=1) is a
 addresses to guest physical addresses.  S-level ASIDs are combined with
 the active HS-level ASID to form a {\em combined ASID}; combined ASIDs
 identify translations from guest virtual addresses to machine physical
-addresses.
+addresses.  As part of a combined ASID, the active HS-level ASID may be used
+to cache S-level translations even if MODE is zero in {\tt hatp}.
 
 \subsection{Memory-Management Fences}
 
