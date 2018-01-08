@@ -908,20 +908,79 @@ entry must not have its U bit set, unless overridden by {\tt sstatus}.SUM.
 Machine-level physical memory protection applies to machine physical
 addresses and is in effect regardless of virtualization mode.
 
+\subsection{Address-space IDs}
+
+When two-level address translation is in effect, there are separate
+HS-level and S-level ASIDs.  HS-level ASIDs share the ASID space with
+regular one-level page tables.
+
+\begin{commentary}
+	The processor may cache guest-physical to machine-physical
+	translations in the TLB under the active HS-level ASID.
+
+	Sharing the ASID space between one-level translations and
+	guest-physical to machine-physical translations removes the
+	need to introduce an HFENCE.VMA instruction.  However, unless
+	there is a 1:1 correspondence between guest physical addresses
+	and host virtual addresses, the hypervisor must use different
+	ASIDs for virtualized guests and U-mode programs, even if
+	MODE is zero for the virtualized guest.
+\end{commentary}
+
+While second-level translation is in effect, the ASID in {\tt satp}
+or {\tt bsatp} (respectively when V=1, or when SPRV=1 and SPV=1) is a
+{\em S-level ASID}.  S-level ASIDs identify translations from guest virtual
+addresses to guest physical addresses.  S-level ASIDs are combined with
+the active HS-level ASID to form a {\em combined ASID}; combined ASIDs
+identify translations from guest virtual addresses to machine physical
+addresses.
+
 \subsection{Memory-Management Fences}
 
 The behavior of the SFENCE.VMA instruction is affected by the current
 virtualization mode V.  When V=0, the virtual-address argument is an HS-level
 virtual address, and the ASID argument is an HS-level ASID.  If either argument
 is provided, the instruction orders stores only to HS-level address-translation
-structures with subsequent address translations.  If neither argument is
-provided, the instruction orders stores to all HS-level and S-level address-translation structures
-with subsequent address translations.
+structures with subsequent address translations; in addition, if the HS-level
+ASID is provided, SFENCE.VMA will only order reads and writes for the
+combined ASIDs formed by the provided HS-level ASID and any S-level ASID.
+If neither argument is provided, the instruction orders stores to all
+HS-level and S-level address-translation structures with subsequent
+address translations.
 
 When V=1, the virtual-address argument to SFENCE.VMA is a guest virtual
 address, and the ASID argument is an S-level ASID.  The instruction
 orders stores only to the S-level address-translation structures within the
-HS-level address-space specified by the {\tt bsatp} register.
+HS-level address-space specified by the {\tt bsatp} register.  More precisely,
+SFENCE.VMA will only order reads and writes for:
+\begin{itemize}
+	\item if {\em rs2}={\tt x0}, the combined ASIDs formed by
+		the active HS-level ASID and any S-level ASID;
+	\item if {\em rs2}$\neq${\tt x0}, the combined ASID formed by
+		the active HS-level ASID and the S-level ASID
+		specified in {\em rs2}.
+\end{itemize}
+
+\begin{commentary}
+	Simplified implementations are possible where the processor doesn't
+	store combined ASIDs in the TLB.  For example:
+	\begin{itemize}
+		\item The processor may cache guest-virtual to
+			machine-physical translations in the TLB under
+			the active HS-level ASID.  In this case,
+			every write to {\tt satp} while V=1 acts
+			as a fence for the active HS-level ASID, and
+			SFENCE.VMA while V=1 must behave as if {\em
+			rs2} specified the active HS-level ASID.
+		\item The processor may cache guest-virtual to
+			machine-physical translations in the TLB under
+			the active S-level ASID; in this case, the
+			implementation must flush the TLB completely
+			every time V changes.
+	\end{itemize}
+	In either case, the processor must not use cached translations
+	while SPRV=1 and SPV=1.
+\end{commentary}
 
 When V=0, attempts to execute SFENCE.VMA in U-mode or when {\tt mstatus}.TSR=1
 raise an illegal instruction exception.  When V=1, attempts to execute
