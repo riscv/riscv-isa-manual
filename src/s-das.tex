@@ -1,0 +1,201 @@
+\chapter{``Sdas'' Standard Extension for Disjoint User/Supervisor
+  Address Spaces, Version 0.1}
+\label{s:das}
+
+This chapter describes the Sdas standard extension for disjoint user and
+supervisor address spaces.  Two operating modes are defined: {\em unified
+  addressing mode} is the traditional model, where the supervisor is mapped
+into the user address space and isolated only by page permissions, and {\em
+  disjoint addressing mode}, where the user and supervisor address spaces
+use independent page tables.
+
+All CSRs defined in this extension must be implemented if this extension is
+implemented.
+
+\section{Supervisor CSRs}
+
+This extension adds one CSR to the supervisor CSR set, modifies the
+interpretation of {\tt satp}, and adds two bits to {\tt sstatus}.
+
+\subsection{Supervisor Address Translation and Protection ({\tt satp}) Register}
+\label{s:das:satp}
+
+The {\tt satp} CSR controls address translation in S-mode and retains its
+format from the baseline supervisor support.
+
+For backwards compatibility, writes to {\tt satp} also write the same value
+to {\tt suatp}.  The CSR read-modify-write instructions may either read the
+value from {\tt satp}, modify it and write it to both {\tt satp} and {\tt
+  suatp} or independently modify both {\tt satp} and {\tt suatp}.
+Supervisors that use disjoint addressing mode must ensure that {\tt suatp}
+is reloaded with a known value after performing a read-modify-write on {\tt
+  satp}.  Supervisors that use unified addressing mode will observe no
+difference, since {\tt satp} and {\tt suatp} will at all times contain the
+same value if only {\tt satp} is written.
+
+\subsection{Supervisor-controlled User Address Translation and Protection
+  ({\tt suatp}) Register}
+\label{s:das:suatp}
+
+The {\tt suatp} CSR controls address translation in U-mode and shares the
+same format as the {\tt satp} CSR.  The MODE field in {\tt suatp} must be
+written with the same value as the MODE field in {\tt satp} by supervisors
+using disjoint addressing mode; values different from MODE in {\tt satp}
+are reserved for future extensions that permit user and supervisor address
+spaces to use different paging depths.  Supervisors that use unified
+addressing mode will implicitly set the MODE fields in both {\tt suatp} and
+{\tt satp} to the same value when they write to the {\tt satp} CSR.
+
+If the MODE field in {\tt suatp} contains an illegal value, all user
+translations will fault.  Implementations must permit the MODE fields in
+{\tt satp} and {\tt suatp} to contain the same value.  Future extension may
+standardize other permitted values.
+
+\begin{commentary}
+The choice of retaining CSR 0x180 as {\tt satp} was driven by concerns for
+backwards compatibility and hardware simplicity.  This choice permits
+hardware to always operate in disjoint addressing mode, while unified
+addressing mode is provided by also writing {\tt suatp} when {\tt satp} is
+written.  A supervisor using disjoint addressing mode will write {\tt satp}
+once and then write {\tt suatp} on every task switch.  A supervisor that
+does not support disjoint addressing mode will write {\tt satp} on every
+task switch.
+\end{commentary}
+
+\subsection{Supervisor Status ({\tt sstatus}) Register}
+\label{s:das:SSU-SLU}
+
+Two one-bit fields are added to {\tt sstatus} (and therefore also to {\tt
+  mstatus} and any other CSRs that contain {\tt sstatus}) to provide S-mode
+software with easy access to disjoint user address spaces.
+
+\begin{figure*}[h!]
+{\footnotesize
+  \begin{center}
+    \setlength{\tabcolsep}{4pt}
+    \begin{tabular}{cccc}
+      \\
+      \instbit{} &
+      \instbit{24} &
+      \instbit{23} &
+      \instbit{} \\
+      \hline
+      \multicolumn{1}{c|}{$\cdots$} &
+      \multicolumn{1}{c|}{{\tt SSU}} &
+      \multicolumn{1}{c|}{{\tt SLU}} &
+      \multicolumn{1}{c}{$\cdots$} \\
+      \hline
+      & 1 & 1 & \\
+    \end{tabular}
+  \end{center}
+}
+\vspace{-0.1in}
+\caption{Additional Fields in {\tt sstatus}}
+\label{s:das:sstatus}
+\end{figure*}
+
+Implementations supporting disjoint addressing mode must implement SLU and
+SSU.  Implementations not supporting disjoint addressing mode must hardwire
+these bits to zero, as the fields are \wpri\ otherwise.
+
+The SSU and SLU bits affect instructions using a specific major opcode:
+\begin{compactitem}
+\item SLU (Supervisor Load from User memory) affects LOAD instructions
+\item SSU (Supervisor Store to User memory) affects STORE instructions
+\end{compactitem}
+
+The SLU bit also affects LQ on RV128, even though LQ is encoded using the
+MISC-MEM major opcode because LOAD is full.
+
+\section {Supervisor Instructions}
+
+\subsection{Supervisor Memory-Management Fence Instruction}
+\label{s:das:sfence.vma}
+
+The SFENCE.VMA instruction defined in Section~\ref{sec:sfence.vma} is
+modified when this extension is implemented.
+
+When {\em rs2}$\neq${\tt x0}, bits XLEN-1:ASIDMAX+1 of the value held in
+{\em rs2} are reserved for future use and should be zeroed by software and
+ignored by current implementations.  Bit ASIDMAX is used to select the
+supervisor address space if disjoint addressing mode is in use.  If
+disjoint addressing mode is in use ({\tt satp}$\neq${\tt suatp}), the fence
+applies to the supervisor address space if bit ASIDMAX is set and to the
+user address space if bit ASIDMAX is clear.  If unified addressing mode is
+in use ({\tt satp}={\tt suatp}), the fence is applied to both address
+spaces independently and bit ASIDMAX is ignored.
+
+\section{Implementation Requirements}
+
+Implementations supporting disjoint addressing mode must bifurcate ASID
+space into disjoint user and supervisor sections.  User and supervisor
+ASIDs are unrelated and independent for all implemented ASID numbers.
+
+Each user ASID must appear to have an independent MMU and
+microarchitectural address translation resources must be partitioned
+between user ASIDs such that activity in or presence of one user ASID has
+no effect whatsoever on activity in other user ASIDs, excepting memory bus
+contention and other effects also observable with fully-independent
+processors.
+
+Supervisor ASIDs are not required to have similar isolation, since
+supervisors that use disjoint addressing mode will probably use only one or
+a few ASIDs and the other supervisor ASID resources should remain
+available.  A supervisor using unified addressing mode will effectively
+replicate its mappings across all supervisor ASIDs.
+
+Each user ASID must be isolated from all supervisor ASIDs, just as each
+user ASID must be isolated from all other user ASIDs.
+
+The virtualization extension uses second-level translation with guest
+accesses translated as user accesses in the hypervisor; these second-level
+translations are considered to occur in a user ASID and therefore guest
+virtual machines benefit from the user ASID isolation guarantees.
+
+\begin{commentary}
+These requirements are intended to forbid side channels between user
+processes or guest virtual machines that would otherwise leak information.
+Fully closing all side channels in the memory subsystem would be extremely
+expensive, which is the rationale for permitting interactions that can
+occur in a system with fully-independent processors.
+\end{commentary}
+
+The {\em scope} of an ASID is defined as the set of harts where loading an
+\{ASID, PPN\} tuple into an address translation and protection CSR can
+conflict with cached translations associated with an \{ASID, PPN'\} tuple.
+The narrowest possible ASID scope is {\em hart-local}: two harts may have
+different root pages for the same ASID without conflict.  The widest
+possible scope is {\em global}: ASID numbers must be unique within the
+system.
+
+User ASIDs have implementation-defined scope and may have global scope
+provided that the implementation provides at least as many ASIDs as S-mode
+harts.  Otherwise, user ASIDs must have narrower scope either limited to
+some group of harts or be local to a single hart.
+
+Supervisor ASIDs are always hart-local.  Supervisors are explicitly
+permitted to reduce remapping overhead by using per-hart root page tables
+with a single ASID.
+
+\begin{commentary}
+Supervisors can use both the SSU and SLU fields and virtual memory aliasing
+to access user memory.  The requirement that supervisor ASIDs be local to a
+hart allows a supervisor to use per-hart root page tables and avoid
+synchronization overhead when configuring alias mappings for access to user
+address spaces.
+\end{commentary}
+
+\section{Effect of Disjoint Address Spaces on Page Translations}
+
+The PTE U bit is honored in both address spaces, even though the supervisor
+address space is entirely inaccessible to user mode.  This allows
+supervisors that maintain direct-mapped windows into physical memory to
+mark pages allocated to user space as user pages, permitting inadvertent
+accesses to be caught using SUM without making those mappings visible to
+user programs.
+
+All user translations are performed using the page tables from {\tt suatp}.
+Except when modified by the SSU and SLU flags in {\tt sstatus}, all
+supervisor translations are performed from the page tables from {\tt satp}.
+The rule that a write to CSR 0x180 writes both {\tt satp} and {\tt suatp}
+preserves backwards compatibility.
