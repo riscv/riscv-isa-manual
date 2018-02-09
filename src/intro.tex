@@ -56,13 +56,111 @@ the ISA design.
 
 The RISC-V manual is structured in two volumes.  This volume covers
 the user-level ISA design, including optional ISA extensions.  The
-second volume provides the privileged architecture.
+second volume provides the privileged architecture.  This user-level
+manual could more correctly be named the ``unprivileged'' ISA manual,
+as any implemented user-level instructions are generally available and
+usable in all privilege modes, though behavior might vary depending on
+privilege mode.
 
 \begin{commentary}
-In this user-level manual, we aim to remove any dependence on
+In the user-level ISA design, we tried to remove any dependence on
 particular microarchitectural features or on privileged architecture
-details.  This is both for clarity and to allow maximum flexibility
-for alternative implementations.
+details.  This is both for simplicity and to allow maximum flexibility
+for alternative microarchitecture or privileged architecture
+implementations.
+\end{commentary}
+
+\section{RISC-V Platform Terminology}
+
+A RISC-V platform can contain one or more RISC-V-compatible
+processing cores together with other non-RISC-V-compatible cores,
+fixed-function accelerators, various physical memory structures, I/O
+devices, and an interconnect structure to allow the components to
+communicate.
+
+A component is termed a {\em core} if it contains an independent
+instruction fetch unit.  A RISC-V-compatible core might support
+multiple RISC-V-compatible hardware threads, or {\em harts}, through
+multithreading.
+
+A RISC-V core might have additional specialized instruction set
+extensions or an added {\em coprocessor}.  We use the term {\em
+  coprocessor} to refer to a unit that is attached to a RISC-V core
+and is mostly sequenced by a RISC-V instruction stream, but which
+contains additional architectural state and instruction-set
+extensions, and possibly some limited autonomy relative to the
+primary RISC-V instruction stream.
+
+We use the term {\em accelerator} to refer to either a
+non-programmable fixed-function unit or a core that can operate
+autonomously but is specialized for certain tasks.  In RISC-V systems,
+we expect many programmable accelerators will be RISC-V-based cores
+with specialized instruction-set extensions and/or customized
+coprocessors.  An important class of RISC-V accelerators are I/O
+accelerators, which offload I/O processing tasks from the main
+application cores.
+
+The system-level organization of a RISC-V hardware platform can range
+from a single-core microcontroller to a many-thousand-node cluster of
+shared-memory manycore server nodes.  Even small systems-on-a-chip
+might be structured as a hierarchy of multicomputers and/or
+multiprocessors to modularize development effort or to provide secure
+isolation between subsystems.
+
+\section{Execution Environments and Harts}
+
+The behavior of a RISC-V program depends on the execution environment
+in which it runs.  The execution environment defines the initial state
+of the program, the number and type of harts in the environment, the
+accessibility and attributes of memory and I/O regions, the behavior
+of all legal instructions executed on each hart, and the handling of
+any interruts or exceptions raised during execution including
+environment calls.  The implementation of a RISC-V execution
+environment can be pure hardware, pure software, or a combination of
+hardware and software.  For example, opcode traps and software
+emulation can be used to implement functionality not provided in
+hardware.  Examples of execution environments include:
+\begin{itemize}
+  \item ``bare metal'' embedded hardware platforms where harts are
+    directly implemented by physical processor threads and
+    instructions have full access to the physical address space
+  \item RISC-V operating systems that provide multiple user-level
+    execution environments by multiplexing user-level harts onto
+    available physical processor threads and by controlling access to
+    memory via virtual memory
+  \item RISC-V hypervisors that provide multiple supervisor-level
+    execution environments for guest operating systems
+  \item RISC-V emulators, such as QEMU or rv8, which emulate RISC-V
+    harts on an underlying x86 system, and which can provide either a
+    user-level or a supervisor-level execution environment
+\end{itemize}
+
+From the perspective of software running in a given execution
+environment, a hart is a resource that independently fetches and
+executes RISC-V instructions within that execution environment.  In
+this respect, a hart behaves like a hardware thread resource even if
+time-multiplexed onto real hardware by the execution environment.
+
+\begin{commentary}
+The term hart was introduced in the work on
+Lithe~\cite{lithe-pan-hotpar09,lithe-pan-pldi10} to provide a term to
+represent an abstract execution resource as opposed to a software
+thread programming abstraction.
+
+The important distinction between a hardware thread (hart) and a
+software thread context is that the software running inside an
+execution environment is not responsible for causing progress of each
+of its harts; that is the responsibility of the outer execution
+environment.  So the environment's harts operate like hardware threads
+from the perspective of the software inside the execution environment.
+
+An execution environment implementation might time-multiplex a set of
+guest harts onto fewer host harts provided by its own execution
+environment but must do so in a way that guest harts operate like
+independent hardware threads.  In particular, if there are more guest
+harts than host harts then the execution environment must be able to
+preempt the guest harts and must not wait indefinitely for guest
+software on a guest hart to "yield" control of the guest hart.
 \end{commentary}
 
 \section{RISC-V ISA Overview}
@@ -82,15 +180,13 @@ Each base integer instruction set is characterized by the width of the
 integer registers and the corresponding size of the user address
 space.  There are two primary base integer variants, RV32I and RV64I,
 described in Chapters~\ref{rv32} and \ref{rv64}, which provide 32-bit
-or 64-bit user-level address spaces respectively.  Hardware
-implementations and operating systems might provide only one or both
-of RV32I and RV64I for user programs.  Chapter~\ref{rv32e} describes
-the RV32E subset variant of the RV32I base instruction set, which has
-been added to support small microcontrollers.  Chapter~\ref{rv128}
-describes a future RV128I variant of the base integer instruction set
-supporting a flat 128-bit user address space.  The base integer
-instruction sets use a two's-complement representation for signed
-integer values.
+or 64-bit user-level address spaces respectively.  Chapter~\ref{rv32e}
+describes the RV32E subset variant of the RV32I base instruction set,
+which has been added to support small microcontrollers.
+Chapter~\ref{rv128} sketches a future RV128I variant of the base
+integer instruction set supporting a flat 128-bit user address space.
+The base integer instruction sets use a two's-complement
+representation for signed integer values.
 
 \begin{commentary}
 Although 64-bit address spaces are a requirement for larger systems,
@@ -102,27 +198,22 @@ address spaces are sufficient for educational purposes.  A larger flat
 could be accommodated within the RISC-V ISA framework.
 \end{commentary}
 
-The base integer ISA may be subset by a hardware implementation, but
-opcode traps and software emulation by a more privileged layer must
-then be used to implement functionality not provided by hardware.
-
-\begin{commentary}
-Subsets of the base integer ISA might be useful for pedagogical
-purposes, but the base has been defined such that there should be
-little incentive to subset a real hardware implementation beyond
-omitting support for misaligned memory accesses and treating all SYSTEM
-instructions as a single trap.
-\end{commentary}
-
 RISC-V has been designed to support extensive customization and
-specialization.  The base integer ISA can be extended with one or more
-optional instruction-set extensions, but the base integer instructions
-cannot be redefined.  We divide RISC-V instruction-set extensions
-into {\em standard} and {\em non-standard} extensions.  Standard
-extensions should be generally useful and should not conflict with
-other standard extensions.  Non-standard extensions may be highly
-specialized, or may conflict with other standard or non-standard
-extensions.  Instruction-set extensions may provide slightly different
+specialization.  Each base integer ISA can be extended with one or
+more optional instruction-set extensions, and we divide each RISC-V
+instruction-set encoding space (and related encoding spaces such as
+the CSRs) into three disjoint categories: {\em standard}, {\em
+  reserved}, and {\em custom}.  Standard encodings are defined by the
+Foundation, and shall not conflict with other standard extensions for
+the same base ISA.  Reserved encodings are currently not defined but
+are saved for future standard extensions.  We use the term {\em
+  non-standard} to describe an extension that is not defined by the
+Foundation.  Custom encodings shall never be used for standard
+extensions and are made available for vendor-specific non-standard
+extensions.  We use the term {\em non-conforming} to describe a
+non-standard extension that uses either a standard or a reserved
+encoding (i.e., custom extensions are {\em not} non-conforming).
+Instruction-set extensions may provide slightly different
 functionality depending on the width of the base integer instruction
 set.  Chapter~\ref{extensions} describes various ways of extending the
 RISC-V ISA.  We have also developed a naming convention for RISC-V
@@ -135,41 +226,34 @@ operations, and single and double-precision floating-point arithmetic.
 The base integer ISA is named ``I'' (prefixed by RV32 or RV64
 depending on integer register width), and contains integer
 computational instructions, integer loads, integer stores, and
-control-flow instructions, and is mandatory for all RISC-V
-implementations.  The standard integer multiplication and division
-extension is named ``M'', and adds instructions to multiply and divide
-values held in the integer registers.  The standard atomic instruction
-extension, denoted by ``A'', adds instructions that atomically read,
-modify, and write memory for inter-processor synchronization.  The
-standard single-precision floating-point extension, denoted by ``F'',
-adds floating-point registers, single-precision computational
-instructions, and single-precision loads and stores.  The standard
-double-precision floating-point extension, denoted by ``D'', expands
-the floating-point registers, and adds double-precision computational
-instructions, loads, and stores.  An integer base plus these four
-standard extensions (``IMAFD'') is given the abbreviation ``G'' and
-provides a general-purpose scalar instruction set.  RV32G and RV64G
-are currently the default target of our compiler toolchains.  Later
-chapters describe these and other planned standard RISC-V extensions.
+control-flow instructions.  The standard integer multiplication and
+division extension is named ``M'', and adds instructions to multiply
+and divide values held in the integer registers.  The standard atomic
+instruction extension, denoted by ``A'', adds instructions that
+atomically read, modify, and write memory for inter-processor
+synchronization.  The standard single-precision floating-point
+extension, denoted by ``F'', adds floating-point registers,
+single-precision computational instructions, and single-precision
+loads and stores.  The standard double-precision floating-point
+extension, denoted by ``D'', expands the floating-point registers, and
+adds double-precision computational instructions, loads, and stores.
+An integer base plus these four standard extensions (``IMAFD'') is
+given the abbreviation ``G'' and provides a general-purpose scalar
+instruction set.  The standard ``C'' compressed instruction extension
+provides narrower 16-bit forms of common instructions.
 
-Beyond the base integer ISA and the standard extensions, it is rare
-that a new instruction will provide a significant benefit for all
-applications, although it may be very beneficial for a certain domain.
-As energy efficiency concerns are forcing greater specialization, we
-believe it is important to simplify the required portion of an ISA
-specification.  Whereas other architectures usually treat their ISA as
-a single entity, which changes to a new version as instructions are
-added over time, RISC-V will endeavor to keep the base and each
-standard extension constant over time, and instead layer new
-instructions as further optional extensions.  For example, the base
-integer ISAs will continue as fully supported standalone ISAs,
+Beyond the base integer ISA and the standard GC extensions, we believe
+it is rare that a new instruction will provide a significant benefit
+for all applications, although it may be very beneficial for a certain
+domain.  As energy efficiency concerns are forcing greater
+specialization, we believe it is important to simplify the required
+portion of an ISA specification.  Whereas other architectures usually
+treat their ISA as a single entity, which changes to a new version as
+instructions are added over time, RISC-V will endeavor to keep the
+base and each standard extension constant over time, and instead layer
+new instructions as further optional extensions.  For example, the
+base integer ISAs will continue as fully supported standalone ISAs,
 regardless of any subsequent extensions.
-\begin{commentary}
-With the 2.0 release of the user ISA specification, we intend the
-``RV32IMAFD'' and ``RV64IMAFD''base and standard extensions
-(aka. ``RV32G'' and ``RV64G'') to remain constant for future
-development.
-\end{commentary}
 
 \section{Instruction Length Encoding}
 
@@ -184,14 +268,11 @@ providing compressed 16-bit instructions and relaxes the alignment
 constraints to allow all instructions (16 bit and 32 bit) to be
 aligned on any 16-bit boundary to improve code density.
 
-We use the term ILEN to refer to the maximum instruction length supported
-by an implementation, which is always a multiple of 16 bits.  For
-implementations supporting only the base instruction set, ILEN is 32 bits.
-Implementations supporting longer instructions have larger values of ILEN.
-ILEN is implied from the set of extensions implemented, or can be
-explicitly defined in the platform configuration if an implementation is
-designed to support an extension that uses longer instructions via software
-emulation but does not actually decode longer instructions in hardware.
+We use the term ILEN (measured in bits) to refer to the maximum
+instruction length supported by an implementation, and which is always
+a multiple of 16 bits.  For implementations supporting only a base
+instruction set, ILEN is 32 bits.  Implementations supporting longer
+instructions have larger values of ILEN.
 
 Figure~\ref{instlengthcode} illustrates the standard RISC-V
 instruction-length encoding convention.  All the 32-bit instructions
