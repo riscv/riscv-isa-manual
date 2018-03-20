@@ -43,12 +43,13 @@ and the Berkeley Maven~\cite{} and Hwacha~\cite{} projects.
 
 \section{Vector Unit State}
 
-The additional vector unit architectural state includes 32 vector data
+The additional vector unit architectural state includes 32 vector
 registers ({\tt v0}--{\tt v31}), and an XLEN-bit WARL vector length
-CSR, {\tt vl}.  Each vector data register has an associated 16-bit
-configuration field {\tt vtype}$n$ described below. A 6-bit global
-maximum element width register {\tt vmaxew} defines the maximum number
-of bits of storage in every element of every active vector register.
+CSR, {\tt vl}.  Each vector register {\tt v}$n$ has an associated
+16-bit configuration field {\tt vtype}$n$ described below. A 6-bit
+global maximum element width register {\tt vmaxew} defines the maximum
+number of bits of storage in every element of every active vector
+register.
 
 \begin{commentary}
   Future vector extensions using wider instruction encodings can
@@ -76,21 +77,20 @@ depending on how they're accessed via other non-CSR instructions.
 \section{Vector Unit Type Configuration Register ({\tt vtype}$n$)}
 
 The vector unit must be configured before use.  Each architectural
-vector data register, {\tt v}$n$, is configured via 16 bits of vector
-type configuration state {\tt vtype}$n$, which can be accessed via
-vector configuration ({\tt vcfg}) CSRs and other rapid vector
-configuration instructions as described below.  The vector register
-type configuration encodes the overall organization, or {\em shape},
-of the elements in each vector register (e.g., scalar versus 1-D
-vector), as well as the bitwidth and numeric representation of each
-element.  As shown in Figure~\ref{fig:vtype}, the 16-bit {\tt
-  vtype}$n$ encoding is divided into a 5-bit current shape field {\tt
-  vshape}$n$, a 5-bit representation field {\tt verep}$n$, and a 6-bit
-element bit-width field {\tt vew}$n$\, held in the {\tt vcfg}$x$ CSRs.
-The combination of an element numeric representation and an element
-bitwidth is called an element {\em format}.  Each vector register can
-also be disabled to free physical vector storage for other
-architectural vector data registers.
+vector register, {\tt v}$n$, is configured via 16 bits of vector type
+configuration state {\tt vtype}$n$, which can be accessed via vector
+configuration ({\tt vcfg}) CSRs and other rapid vector configuration
+instructions as described below.  The vector register type
+configuration encodes the overall organization, or {\em shape}, of the
+elements in each vector register (e.g., scalar versus 1-D vector), as
+well as the bitwidth and numeric representation of each element.  As
+shown in Figure~\ref{fig:vtype}, the 16-bit {\tt vtype}$n$ encoding is
+divided into a 5-bit current shape field {\tt vshape}$n$, a 5-bit
+representation field {\tt verep}$n$, and a 6-bit element bit-width
+field {\tt vew}$n$\, held in the {\tt vcfg}$x$ CSRs.  The combination
+of an element numeric representation and an element bitwidth is called
+an element {\em format}.  Each vector register can also be disabled to
+free physical vector storage for other architectural vector registers.
 
 \begin{figure}[htb]
 \begin{center}
@@ -136,7 +136,7 @@ set to either scalar or vector.
         {\tt vshape} & Shape \\
         \hline
         00000  & scalar  \\
-        00100  & 1-D vector {\tt vl}  \\
+        00100  & 1-D vector, length controlled by {\tt vl}  \\
         \hline
         \multicolumn{2}{|c|}{All other encodings reserved}\\
         \hline
@@ -194,7 +194,7 @@ set to either scalar or vector.
 \section{Representation Encoding}
 
 The 5-bit {\tt verep}$n$ register sets the numeric representation of
-each element of the vector data register.  In the base vector
+each element of the vector register.  In the base vector
 extension, the representation can be set to unsigned integer,
 two's-complement signed integer, or floating-point.  The
 floating-point representations follow the IEEE 754 standards.
@@ -262,12 +262,16 @@ floating-point representations follow the IEEE 754 standards.
 
 \section{Element Bitwidth}
 
-Each vector data register, {\tt v}$n$, has a 6-bit element width
+Each vector register, {\tt v}$n$, has a 6-bit element width
 register, {\tt vew}$n$, to specify the number of bits for each element
-of the current type in the vector data register.
+of the current type in the vector register.
 
+The largest element width supported is
+termed ELEN, and is defined to be the larger of the supported integer
+and floating-point type widths:
+\[ \mbox{\em ELEN} = max(\mbox{\em XLEN}, \mbox{\em FLEN}) \]
 For the base vector ISA, the bit width can be set at any power of two
-between 8 and max(XLEN,FLEN)
+between 8 and ELEN.
 
 \begin{table}[hbt]
   \centering
@@ -344,7 +348,7 @@ between 8 and max(XLEN,FLEN)
      be supported.  Bit widths in steps of 2 between 16 to 32 (i.e.,
      16, 18, 20, ...).  Bit widths in steps of 4 between 32 to 64
      (i.e., 32, 36, 40, ...).  Bit widths in steps of 8 between 64 and
-     129 (i.e., 64, 72, 80,...).  For bit widths greater than 128, all
+     128 (i.e., 64, 72, 80,...).  For bit widths greater than 128, all
      powers-of-two up to 16384 and all widths 1.5$\times$ greater are
      supported (128, 384, 512, 768,...).  }
    \label{tab:extvew}
@@ -359,6 +363,46 @@ between 8 and max(XLEN,FLEN)
     8, 12, 16, 24, 32, and 48.  An RV64 system with 4 bits of state
     can represent {\em disabled}, 4, 8, 12, 16, 24, 32, 48, 64, 96,
     128, 256, 512, 1024.
+\end{commentary}
+
+\clearpage
+
+\section{Base Vector Extension Supported Types}
+
+The types supported by the base V extension depend upon the base
+scalar ISA and supported extensions.  When the base V extension is
+added to a base scalar ISA, it must support the vector data element
+types implied by the supported scalar types as defined by
+Table~\ref{tab:velemtypes}.
+
+\begin{table}[hbt]
+  \centering
+\begin{tabular}{|l|l|}
+  \hline
+  \multicolumn{2}{|c|}{Supported Fixed-Point Formats} \\
+  \hline
+  RV32I  & I8, U8, I16, U16, I32, U32 \\
+  RV64I  & I8, U8, I16, U16, I32, U32, I64, U64 \\
+  RV128I & I8, U8, I16, U16, I32, U32, I64, U64, I128, U128 \\
+  \hline
+  \hline
+  \multicolumn{2}{|c|}{Supported Floating-Point Formats} \\
+  \hline
+  F      & F16, F32 \\
+  FD     & F16, F32, F64 \\
+  FDQ    & F16, F32, F64, F128 \\
+  \hline
+\end{tabular}
+\caption{Supported data element formats depending on base integer ISA
+  and supported floating-point extensions.  I$x$ indicates a signed
+  integer of $x$ bits, U$x$ indicates an unsigned integer of $x$ bits,
+  and F$x$ indicates an IEEE floating-point number of $x$ bits.}
+\label{tab:velemtypes}
+\end{table}
+
+\begin{commentary}
+  Future vector extensions might expand the set of supported
+  datatypes, including custom application-specific datatypes.
 \end{commentary}
 
 \clearpage
@@ -385,7 +429,61 @@ If {\tt vmaxew} is zero, then the per-element vector element widths
 of the associated vector register {\tt v}$n$.
 
 If {\tt vmaxew} is non-zero, it sets the largest element width that
-can be supported in any vector register element.
+can be supported in any vector register element in the current
+configuration.
+
+\clearpage
+
+\section{Vector Configuration Registers ({\tt vcfg0}--{\tt vcfg15})}
+
+The vector type configuration requires 512 bits of state (32 vector
+registers each with 16-bit {\tt vtype}$n$ field) that can be accessed
+via the {\tt vcfg CSRs}.
+
+RV128 uses four vector configuration CSRs: {\tt vcfg0} holds
+configuration data for {\tt v0}--{\tt v7} with bits $16n$ to $16n+15$
+holding {\tt vtype}$n$, while {\tt vcfg4}, {\tt vcfg8} and {\tt
+  vcfg12} similarly holds configuration data for {\tt v8}--{\tt v15},
+  {\tt v16}--{\tt v23}, and {\tt v24}--{\tt v31} respectively.
+
+In RV64, the {\tt vcfg2} CSR provides access to the upper 64 bits of {\tt
+  vcfg0} and {\tt vcfg6} provides access to the upper 64 bits of
+{\tt vcfg4}.  In RV32, the {\tt vcfg1}, {\tt vcfg3}, {\tt vcfg5}
+and {\tt vcfg7} CSRs provides access to the upper bits of {\tt
+  vcfg0}, {\tt vcfg2}, {\tt vcfg4} and {\tt vcfg6} respectively.
+
+Any CSR write to a {\tt vcfg}$x$ register zeros all {\tt vcfg}$y$
+registers, for $y>x$.  As a result configuration data should be
+written from the {\tt vcfg0} CSR upwards.
+
+\begin{commentary}
+  Zeroing higher-numbered {\tt vcfg}$y$ registers allows more rapid
+  reconfiguration of the vector register file via CSR writes, and
+  provides backward-compatibility for extensions that increase the
+  number of possible architectural vector registers.  This choice does
+  prevent the use of CSRRW instructions to swap the configuration
+  context; an entire old configuration must be read out before a new
+  configuration is written in.
+\end{commentary}
+
+Additional instructions are provided to support more rapid changes to
+the vector unit configuration as described below.
+
+\section{Legal Vector Unit Configurations}
+
+To simplify hardware configuration calculations and to reduce software
+context-switch complexity, vector unit configurations are constrained
+to have non-disabled architectural vector registers numbered
+contiguously starting at {\tt v0}.  An exception will be raised if an
+instruction tries to change {\tt vtype}$n$ in a way that violates this
+constraint.
+
+\begin{commentary}
+  During a software vector-context save, the software handler can stop
+  searching for active architectural registers after encountering the
+  first disabled vector register.  Hardware to calculate physical
+  register allocation is also simplified with this constraint.
+\end{commentary}
 
 \clearpage
 
@@ -458,7 +556,7 @@ parameters on a given hart.
 
 \begin{discussion}
   A separate mechanism for supporting fixed vector lengths should be
-  designed.
+  designed, possibly as part of an optional extension.
 \end{discussion}
 
 Any change to the vector configuration that might change MVL cause the
@@ -467,7 +565,7 @@ entire vector unit state to be zeroed.  Any write to the global {\tt
 the value in {\tt vmaxew} is unchanged.
 
 If {\tt vmaxew} is non-zero, any write to an individual {\tt vew}$n$
-register that would set the width greater than {\tt vmaxew} raised an
+register that would set the width greater than {\tt vmaxew} raises an
 illegal instruction exception and leaves the vector unit state
 unchanged.
 
@@ -478,27 +576,14 @@ vector unit state unchanged.  The vector register data is zeroed even
 if {\tt vew}$n$ would be unchanged by the write.
 
 If {\tt vmaxew} is zero, then any write to an individual {\tt vew}$n$
-register zeros the associated {\tt v}$n$ data register.  In addition,
+register zeros the associated {\tt v}$n$ vector register.  In addition,
 any write that changes the value in {\tt vew}$n$, zeros the entire vector
 unit state.
 
 \begin{commentary}
   The state is zeroed to hide implementation-dependent bit mappings
-  and to provide additional security when context swapping.
-\end{commentary}
-
-Each vector register can be reconfigured dynamically to hold different
-formats without zeroing the entire vector unit state provided that: if
-{\tt vmaxew} is zero, the bit-width of the new format is the same as
-the current {\tt vew}; or if {\tt vmaxew} is non-zero, the format does
-not require more than {\tt vmaxew} bits.  Any change to a vector
-register's format zeros the affected vector data register.
-
-
-\begin{commentary}
-  Vector registers are zeroed on reconfiguration to prevent security
-  holes and to avoid exposing differences between how different
-  implementations manage physical vector register storage.
+  and to provide additional security when context swapping.  Zero is
+  also a convenient initial value for some loops.
 
   In-order implementations will probaby use a flag bit per register to
   mux in 0 instead of garbage values on each source until it is
@@ -509,15 +594,22 @@ register's format zeros the affected vector data register.
   entries at a physical zero register.
 \end{commentary}
 
-If a vector data register is disabled, then any vector instruction
-that attempts to access that vector data register will raise an
+Each vector register can be reconfigured dynamically to hold different
+formats without zeroing the entire vector unit state provided that: if
+{\tt vmaxew} is zero, the bit-width of the new format is the same as
+the current {\tt vew}; or if {\tt vmaxew} is non-zero, the format does
+not require more than {\tt vmaxew} bits.  Any change to a vector
+register's format zeros the affected vector register.
+
+If a vector register is disabled, then any vector instruction
+that attempts to access that vector register will raise an
 illegal instruction exception.  Attempting to write any {\tt
   vmaxew}$n$ with an unsupported value will raise an illegal
 instruction exception.
 
 \begin{commentary}
-  Vector data registers have both a maximum element width and a
-  current element data type to allow the same vector data register to
+  Vector registers have both a maximum element width and a
+  current element data type to allow the same vector register to
   be changed to different types during execution provided the
   maximum width is not exceeded.  This reduces register pressure and
   helps support vector function calls, where the caller does not know
@@ -589,156 +681,7 @@ with this property.
 
 \clearpage
 
-\section{Base Vector Extension Supported Formats}
-
-The formats and operations supported by the base V extension depend
-upon the base scalar ISA and supported extensions, and may include
-8-bit, 16-bit, 32-bit, 64-bit, and 128-bit integer and fixed-point
-data types (I8/U8, I16/U16, I32/U32, I64/U64, and X128/U128
-respectively, where U indicates unsigned), and 16-bit, 32-bit, 64-bit,
-and 128-bit floating-point types (F16, F32, F64, and F128
-respectively).  When the V extension is added, it must support the
-vector data element types implied by the supported scalar types as
-defined by Table~\ref{tab:velemtypes}.  The largest element width
-supported is termed ELEN, and is defined to be the larger of the
-supported integer and floating-point type widths:
-\[ \mbox{\em ELEN} = max(\mbox{\em XLEN}, \mbox{\em FLEN}) \]
-
-\begin{commentary}
-  Compiler support for vectorization is greatly simplified when any
-  hardware-supported data formats are supported by both scalar and
-  vector instructions.
-\end{commentary}
-
-\begin{table}[hbt]
-  \centering
-\begin{tabular}{|l|l|}
-  \hline
-  \multicolumn{2}{|c|}{Supported Fixed-Point Formats} \\
-  \hline
-  RV32I  & I8, U8, I16, U16, I32, U32 \\
-  RV64I  & I8, U8, I16, U16, I32, U32, I64, U64 \\
-  RV128I & I8, U8, I16, U16, I32, U32, I64, U64, I128, U128 \\
-  \hline
-  \hline
-  \multicolumn{2}{|c|}{Supported Floating-Point Formats} \\
-  \hline
-  F      & F16, F32 \\
-  FD     & F16, F32, F64 \\
-  FDQ    & F16, F32, F64, F128 \\
-  \hline
-\end{tabular}
-\caption{Supported data element formats depending on base integer ISA
-  and supported floating-point extensions.  Note that the V extension
-  mandates that if a given scalar floating-point width is supported,
-  then the same and all narrower floating-point widths must be
-  supported in the vector unit.}
-\label{tab:velemtypes}
-\end{table}
-
-\begin{commentary}
-  Future vector extensions might expand the set of supported
-  datatypes, including custom application-specific datatypes.
-\end{commentary}
-
-\section{Vector Predicate Configuration Register ({\tt vnp})}
-
-The {\tt vnp} CSR holds a single 4-bit value giving the number of
-enabled architectural predicate registers, between 0 and 8.  Any write
-to {\tt vnp} zeros all vector data registers, sets all bits in visible
-vector predicate registers, and sets the vector length register {\tt
-  vl} to the maximum supported vector length.  Attempting to write a
-value larger than 8 to {\tt vnp} raises an illegal instruction
-exception.
-
-\begin{discussion}
-The number of vector predicate registers supported in
-  base ISA could be changed.  The base encoding could support up to 32
-  predicate registers, but it is not clear these would be used
-  frequently enough to warrant increased the architectural cost for
-  all implementations.
-  
-  roger: we should force the minimum number of vp registers to 2, so that vp0
-   and vp1 are always available to the compiler. This would work nicer with
-   the encoding that has a bit that allows selecting vp0 or vp1.
-\end{discussion}
-
-When {\tt vnp} is 0, any instruction that reads a vector predicate
-register other than {\tt vp0} will raise an illegal instruction
-exception, while reads of {\tt vp0} will return all ones to provide
-unpredicated execution.  When {\tt vnp} is 0, any instruction that
-attempts to write any vector predicate register will raise an illegal
-instruction exception.
-
-\section{Vector Data Configuration Registers ({\tt vcfg0}--{\tt vcfg7})}
-
-The vector data register configuration requires 256 bits of state (32
-vector data registers each with a 3-bit {\tt vmaxew}$n$ field and a
-5-bit {\tt vetype}$n$ field), and is held in the {\tt vcfg CSRs}.
-
-RV128 has two vector configuration CSRs: {\tt vcfg0} holds
-configuration data for {\tt v0}--{\tt v15} with bits $8n$ to $8n+4$
-holding {\tt vetype}$n$ and bits $8n+5$ to $8n+7$ holding {\tt
-  vmaxew}$n$, while {\tt vcfg4} similarly holds configuration data
-for {\tt v16}--{\tt v31}.
-
-In RV64, the {\tt vcfg2} CSR provides access to the upper 64 bits of {\tt
-  vcfg0} and {\tt vcfg6} provides access to the upper 64 bits of
-{\tt vcfg4}.  In RV32, the {\tt vcfg1}, {\tt vcfg3}, {\tt vcfg5}
-and {\tt vcfg7} CSRs provides access to the upper bits of {\tt
-  vcfg0}, {\tt vcfg2}, {\tt vcfg4} and {\tt vcfg6} respectively.
-
-Any CSR write to a {\tt vcfg}$x$ register zeros all {\tt vcfg}$y$
-registers, for $y>x$, and also zeros the {\tt vnp} register.  As a
-result configuration data should be written from the {\tt vcfg0} CSR
-upwards, followed by the {\tt vnp} setting if non-zero.
-
-\begin{commentary}
-  Zeroing higher-numbered {\tt vcfg}$y$ registers allows more rapid
-  reconfiguration of the vector register file via CSR writes, and
-  provides backward-compatibility for extensions that increase the
-  number of possible architectural vector registers.  This choice does
-  prevent the use of CSRRW instructions to swap the configuration
-  context.
-\end{commentary}
-
-\begin{commentary}
-Additional instructions are provided to support more rapid changes to
-the vector unit configuration as described below. These directly
-affect the {\tt vmaxew}$n$ and {\tt vetype}$n$ fields and do not
-necessarily have the same side effects as the CSR writes through the
-{\tt vcfg}$n$ addresses.
-\end{commentary}
-
-
-\section{Legal Vector Unit Configurations}
-
-To simplify hardware configuration calculations and to reduce software
-context-switch complexity, vector unit configurations are constrained
-to have non-disabled architectural vector registers numbered
-contiguously starting at {\tt v0}.  Also, {\tt vmaxew}$m$ must be
-greater than or equal to {\tt vmaxew}$n$, for $m > n$, i.e.,
-configured element widths must increase monotonically with
-architectural vector register number.  An exception will be raised if
-any instruction tries to change {\tt vemax}$n$ in a way that violates
-this constraint.
-
-\begin{commentary}
-  During a software vector-context save, the software handler can stop
-  searching for active architectural registers after encountering the
-  first disabled vector register.  Hardware to calculate physical
-  register allocation might be slightly simplified with this
-  constraint, and might be able to pack register storage more tightly
-  with monotonically increasing element size.
-
-  In a vector-function calling convention, higher-numbered registers
-  are usually made available to the callee, and must usually be a
-  wider, often ELEN-width, element.  The context that configures the
-  vector unit might have known-narrower element types and can save
-  storage by confguring the lower-numbered architectural vector
-  registers accordingly.
-\end{commentary}
-
+{\bf Following Sections are out-of-date.}
 
 \section{Vector Instruction Formats}
 
