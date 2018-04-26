@@ -1074,22 +1074,23 @@ By default, all traps at any privilege level are handled in machine
 mode, though a machine-mode handler can redirect traps back to the
 appropriate level with the MRET instruction (Section~\ref{otherpriv}).
 To increase performance, implementations can provide individual
-read/write bits within {\tt medeleg} and {\tt mideleg} to indicate
+read/write bits within the machine exception delegation register ({\tt medeleg})
+and the machine interrupt delegation register ({\tt mideleg}) to indicate
 that certain exceptions and interrupts should be processed directly by
-a lower privilege level.  The machine exception delegation register
-({\tt medeleg}) and machine interrupt delegation register ({\tt
-  mideleg}) are MXLEN-bit read/write registers.
+a lower privilege level. Traps never transition from a more-privileged mode to a
+less-privileged mode, but a bit set in {\tt medeleg} or {\tt mideleg} will
+generally delegate the corresponding trap to the appropriate mode's handler.
 
-In systems with all three privilege modes (M/S/U), setting a bit in
-{\tt medeleg} or {\tt mideleg} will delegate the corresponding trap in
-S-mode or U-mode to the S-mode trap handler. If U-mode traps are
-supported, S-mode may in turn set corresponding bits in the {\tt
-  sedeleg} and {\tt sideleg} registers to delegate traps that occur in
-U-mode to the U-mode trap handler.
+In systems with all three privilege modes (M/S/U), a bit set in
+{\tt medeleg} or {\tt mideleg} will delegate the corresponding trap that occurs
+in S-mode or U-mode to the S-mode trap handler. If U-mode traps are supported,
+S-mode may set corresponding bits in the {\tt sedeleg} and {\tt sideleg}
+registers to delegate traps that occur in U-mode to the U-mode trap handler.
 
 In systems with two privilege modes (M/U) and support for U-mode
 traps, setting a bit in {\tt medeleg} or {\tt mideleg} will
-delegate the corresponding trap in U-mode to the U-mode trap handler.
+delegate the corresponding trap that occurs in U-mode to the U-mode trap
+handler.
 
 In systems with only M-mode, or with both M-mode and U-mode but
 without U-mode trap support, the {\tt medeleg} and {\tt mideleg}
@@ -1100,7 +1101,6 @@ registers should not exist.
   is no reason to require they return zero in those cases, as the {\tt
     misa} register indicates whether they exist.
 \end{commentary}
-
 
 When a trap is delegated to a less-privileged mode {\em x}, the
 {\em x}\,{\tt cause} register is written with the trap cause; the
@@ -1137,6 +1137,8 @@ executing in M-mode.  By contrast, if {\tt mideleg}[5] is clear, STIs can
 be taken in any mode and regardless of current mode will transfer control to
 M-mode.
 
+Both {\tt medeleg} and {\tt mideleg} are MXLEN-bit read/write registers.
+
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
@@ -1155,20 +1157,44 @@ MXLEN \\
 \end{figure}
 
 {\tt medeleg} has a bit position allocated for every synchronous exception
-shown in Table~\ref{mcauses}, with the index of the bit position equal to the
-value returned in the {\tt mcause} register (i.e., setting bit 8 allows
-user-mode environment calls to be delegated to a lower-privilege trap
-handler).
+shown in Table~\ref{mcauses}. The bit indices correspond to the exception trap
+codes returned in the {\tt mcause} register (i.e., setting bit 8 allows
+user-mode environment calls to be delegated to a lower-privilege trap handler).
 
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}U}
-\instbitrange{MXLEN-1}{0} \\
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{Rcccccccccccc}
+\instbitrange{MXLEN-1}{12} &
+\instbit{11} &
+\instbit{10} &
+\instbit{9} &
+\instbit{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
 \hline
-\multicolumn{1}{|c|}{Interrupts (\warl)} \\
+\multicolumn{1}{|c|}{\wiri} &
+\multicolumn{1}{c|}{MEID} &
+\multicolumn{1}{c|}{\wiri} &
+\multicolumn{1}{c|}{SEID} &
+\multicolumn{1}{c|}{UEID} &
+\multicolumn{1}{c|}{MTID} &
+\multicolumn{1}{c|}{\wiri} &
+\multicolumn{1}{c|}{STID} &
+\multicolumn{1}{c|}{UTID} &
+\multicolumn{1}{c|}{MSID} &
+\multicolumn{1}{c|}{\wiri} &
+\multicolumn{1}{c|}{SSID} &
+\multicolumn{1}{c|}{USID} \\
 \hline
-MXLEN \\
+MXLEN-12 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -1177,9 +1203,11 @@ MXLEN \\
 \label{midelegreg}
 \end{figure}
 
-{\tt mideleg} holds trap delegation bits for individual interrupts, with the
-layout of bits matching those in the {\tt mip} register (i.e., STIP interrupt
-delegation control is located in bit 5).
+{\tt mideleg} has a bit position allocated for every interrupt described in
+Table~\ref{mcauses}. The bit indices correspond to the interrupt trap
+codes returned in the {\tt mcause} register (i.e., setting bit 5 allows
+STIP interrupts to be delegated to a lower-privilege trap handler). The
+layout of bits matches that of the {\tt mip} and {\tt mie} registers.
 
 Some exceptions cannot occur at less privileged modes, and corresponding
 {\em x}\,{\tt edeleg} bits should be hardwired to zero.  In particular,
@@ -1190,7 +1218,9 @@ Some exceptions cannot occur at less privileged modes, and corresponding
 The {\tt mip} register is an MXLEN-bit read/write register containing
 information on pending interrupts, while {\tt mie} is the
 corresponding MXLEN-bit read/write register containing interrupt enable
-bits.  Only the bits corresponding to lower-privilege software
+bits. Their layout is the same as the {\tt mideleg} register, with bit
+indices corresponding to the interrupt trap codes of Table~\ref{mcauses}.
+Only the bits corresponding to lower-privilege software
 interrupts (USIP, SSIP), timer interrupts (UTIP, STIP),
 and external interrupts (UEIP, SEIP) in {\tt mip}
 are writable through this CSR address; the remaining bits are
@@ -1891,7 +1921,7 @@ codes.
 \begin{tabular}{|r|r|l|l|}
 
   \hline
-  Interrupt & Exception Code  & Description \\
+  Interrupt & Trap Code  & Description \\
   \hline	 
   1         & 0               & User software interrupt \\
   1         & 1               & Supervisor software interrupt \\
