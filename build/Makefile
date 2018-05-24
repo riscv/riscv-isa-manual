@@ -31,7 +31,7 @@ bibs = $(srcdir)/riscv-spec.bib
 # You shouldn't need to change anything below this
 #=======================================================================
 
-PDFLATEX := TEXINPUTS=$(srcdir): pdflatex
+PDFLATEX := TEXINPUTS=$(srcdir): pdflatex -interaction=nonstopmode -halt-on-error
 BIBTEX := BIBINPUTS=$(srcdir): bibtex
 
 default : pdf
