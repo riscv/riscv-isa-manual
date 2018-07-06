@@ -11,13 +11,14 @@ runs.  The hypervisor extension also adds another level of address translation,
 from guest virtual addresses to host virtual addresses, to virtualize the
 memory and memory-mapped I/O subsystems for a guest operating system.  HS-mode
 acts the same as S-mode, but with additional instructions and CSRs that control
-the new level of address translation and support hosting an S-mode guest.
+the new level of address translation and support hosting a guest OS in virtual
+S-mode (VS-mode).
 Regular S-mode operating systems can execute without modification either in
-HS-mode or as S-mode guests.
+HS-mode or as VS-mode guests.
 
 In HS-mode, an OS or hypervisor interacts with the machine through the same
 SBI as an OS normally does from S-mode.  An HS-mode hypervisor is expected to
-implement the SBI for its S-mode guest.
+implement the SBI for its VS-mode guest.
 
 The hypervisor extension is enabled by setting bit 7 in the {\tt misa} CSR,
 which corresponds to the letter H.  When {\tt misa}[7] is clear, the hart
@@ -48,9 +49,11 @@ Hypervisors can support nested virtualization analogously.
 \section{Privilege Modes}
 
 The current {\em virtualization mode}, denoted V, indicates whether the hart
-is currently executing in a guest.  When V=1, the hart is either in S-mode, or
-in U-mode under an OS running as an S-mode guest.  When V=0, the hart is
-either in M-mode, in HS-mode, or in U-mode under an OS running in HS-mode.
+is currently executing in a guest.
+When V=1, the hart is either in virtual S-mode (VS-mode), or in virtual U-mode
+(VU-mode) under a guest OS running in VS-mode.
+When V=0, the hart is either in M-mode, in HS-mode, or in U-mode under an OS
+running in HS-mode.
 The virtualization mode also indicates whether two-level address translation
 is active (V=1) or inactive (V=0).  Table~\ref{h-operating-modes} lists the
 possible operating modes of a RISC-V hart with the hypervisor extension.
@@ -65,8 +68,8 @@ possible operating modes of a RISC-V hart with the hypervisor extension.
    0              & 1         & HS-mode & Hypervisor-extended supervisor mode & Off \\
    0              & 3         & M-mode  & Machine mode & Off \\
   \hline
-   1              & 0         & U-mode  & User mode & On \\
-   1              & 1         & S-mode  & Supervisor mode & On \\
+   1              & 0         & VU-mode & Virtual user mode & On \\
+   1              & 1         & VS-mode & Virtual supervisor mode & On \\
   \hline
  \end{tabular}
 \end{center}
@@ -78,8 +81,8 @@ possible operating modes of a RISC-V hart with the hypervisor extension.
 
 An OS or hypervisor running in HS-mode uses the supervisor CSRs to interact with the exception,
 interrupt, and address-translation subsystems.
-Additional CSRs are provided to HS-mode, but not to S-mode, to control
-the behavior of an S-mode guest:
+Additional CSRs are provided to HS-mode, but not to VS-mode, to control
+the behavior of a VS-mode guest:
 {\tt hvtval}, {\tt hstatus}, {\tt hedeleg}, and
 {\tt hideleg}.
 
@@ -88,11 +91,12 @@ the existing {\em foreground} supervisor CSRs.  For example, the {\tt
 bsstatus} CSR is the background copy of the foreground {\tt sstatus} CSR.
 When transitioning between virtualization modes (V=0 to V=1, or vice-versa),
 the implementation swaps the background supervisor CSRs with their foreground
-counterparts.  When V=0, the background supervisor CSRs contain the S-mode
-guest's version of those CSRs, and the foreground supervisor CSRs contain
+counterparts.  When V=0, the background supervisor CSRs contain VS-mode's
+version of those CSRs, and the foreground supervisor CSRs contain
 HS-mode's version.  When V=1, the background supervisor CSRs contain HS-mode's
-version, and the foreground supervisor CSRs contain the S-mode guest's
-version.  The background registers are accessible to HS-mode, but not to S-mode.
+version, and the foreground supervisor CSRs contain VS-mode's
+version.  The background registers are accessible to HS-mode, but not to
+VS-mode.
 
 In this section, we use the term {\em HSXLEN} to refer to the effective XLEN
 when executing in HS-mode.
@@ -127,7 +131,7 @@ HSXLEN \\
 The {\tt hstatus} register is an HSXLEN-bit read/write register
 formatted as shown in Figure~\ref{hstatusreg}.  The {\tt hstatus}
 register provides facilities analogous to the {\tt mstatus} register
-that track and control the exception behavior of an S-mode guest.
+that track and control the exception behavior of a VS-mode guest.
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -168,7 +172,7 @@ HSXLEN-23 & 1 & 1 & 1 & 2 & 1 & 6 & 1 & 1 & 9 \\
 
 The {\tt hstatus} fields VTSR, VTW, and VTVM are defined analogously to the
 {\tt mstatus} fields TSR, TW, and TVM, but affect the trapping behavior of the
-SRET, WFI, and virtual-memory management instructions in the S-mode guest
+SRET, WFI, and virtual-memory management instructions in the VS-mode guest
 only.
 
 The SPV bit (Supervisor Previous Virtualization Mode) is written by the implementation
@@ -183,7 +187,8 @@ is taken into HS-mode.  On an access fault, or on a page fault due to HS-level a
 translation, STL is set to 0.  For any other trap into HS-mode, STL is set to the value
 of V at the time of the trap.
 
-The SPRV bit modifies the privilege with which loads and stores execute.
+The SPRV bit modifies the privilege with which loads and stores execute when
+not in M-mode.
 When SPRV=0, translation and protection behave as normal.  When SPRV=1,
 load and store memory addresses are translated and protected as though
 the current privilege mode were set to {\tt sstatus}.SPP and the current
@@ -198,8 +203,8 @@ Table~\ref{h-sprv} enumerates the cases.
    0    & --  & --  & Normal access; current privilege and virtualization modes apply. \\ \hline
    1    & 0   & 0   & U-level access with HS-level translation and protection only. \\ \hline
    1    & 0   & 1   & HS-level access with HS-level translation and protection only. \\ \hline
-   1    & 1   & 0   & U-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the S translation level only if readable at the HS translation level. \\ \hline
-   1    & 1   & 1   & S-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the S translation level only if readable at the HS translation level. {\tt bsstatus}.SUM applies instead of {\tt sstatus}.SUM. \\ \hline
+   1    & 1   & 0   & VU-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. \\ \hline
+   1    & 1   & 1   & VS-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. {\tt bsstatus}.SUM applies instead of {\tt sstatus}.SUM. \\ \hline
  \end{tabular}
 \end{center}
 \caption{Effect on load and store translation and protection under SPRV.}
@@ -207,8 +212,8 @@ Table~\ref{h-sprv} enumerates the cases.
 \end{table*}
 
 \begin{commentary}
-For simplicity, SPRV is in effect even when in S-mode or U-mode, but in normal
-use will only be enabled for short sequences in HS-mode.
+For simplicity, SPRV is in effect even when in U-mode, VS-mode, or VU-mode, but
+in normal use will only be enabled for short sequences in HS-mode.
 \end{commentary}
 
 \subsection{Hypervisor Trap Delegation Registers ({\tt hedeleg} and {\tt hideleg})}
@@ -216,7 +221,7 @@ use will only be enabled for short sequences in HS-mode.
 By default, all traps at any privilege level are handled in M-mode, though
 M-mode usually uses the {\tt medeleg} and {\tt mideleg} CSRs to delegate
 some traps to HS-mode.  The {\tt hedeleg} and {\tt hideleg} CSRs allow these
-traps to be further delegated to an S-mode guest; their layout is the same
+traps to be further delegated to a VS-mode guest; their layout is the same
 as {\tt medeleg} and {\tt mideleg}.
 
 \begin{figure}[h!]
@@ -255,10 +260,10 @@ HSXLEN \\
 
 The {\tt hedeleg} and {\tt hideleg} registers are only active when V=1.  When
 V=1, any trap that has been delegated to HS-mode (using {\tt medeleg} or {\tt
-mideleg}) is further delegated to S-mode if the corresponding {\tt hedeleg} or
+mideleg}) is further delegated to VS-mode if the corresponding {\tt hedeleg} or
 {\tt hideleg} bit is set.  If the N extension for user-mode interrupts
-is implemented, the S-mode guest may further delegate the interrupt
-to U-mode by setting the corresponding bit in {\tt sedeleg} or {\tt sideleg}.
+is implemented, the VS-mode guest may further delegate the interrupt
+to VU-mode by setting the corresponding bit in {\tt sedeleg} or {\tt sideleg}.
 
 When V=0 and the N extension for user-mode interrupts is implemented, any trap
 that has been delegated to HS-mode can be further delegated to U-mode by
@@ -268,7 +273,7 @@ setting the corresponding bit in {\tt sedeleg} or {\tt sideleg}.
 
 The {\tt bsstatus} register is an HSXLEN-bit read/write register formatted as
 shown in Figure~\ref{bsstatusreg}.  When V=0, the {\tt bsstatus} register
-holds the S-mode guest's version of several fields of the {\tt sstatus}
+holds VS-mode's version of several fields of the {\tt sstatus}
 register: UXL, MXR, SUM, FS, SPP, SPIE, and SIE.  When V=1, {\tt bsstatus}
 holds HS-mode's version of these fields.  When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps
@@ -343,14 +348,14 @@ HSXLEN-34 & 2 & 12 & 1 & 1 & \\
 \subsection{Background Supervisor Interrupt Registers ({\tt bsip} and {\tt bsie})}
 
 The {\tt bsip} register is an HSXLEN-bit read/write register formatted as shown
-in Figure~\ref{bsipreg}.  When V=0, the {\tt bsip} register holds the S-mode
-guest's version of the {\tt sip} register.  When V=1, {\tt bsip} holds
+in Figure~\ref{bsipreg}.  When V=0, the {\tt bsip} register holds VS-mode's
+version of the {\tt sip} register.  When V=1, {\tt bsip} holds
 HS-mode's version of the {\tt sip} register.  When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps the
 defined fields of {\tt bsip} with their counterparts in {\tt sip}.  The
 other fields in {\tt sip} are unchanged.
 
-\note{AW: Need to describe how {\tt bsip}.SEIP interacts with PLIC.  I think {\tt bsip}.SEIP should purely be a read-write storage bit to emulate the PLIC for S-mode; the PLIC should not be wired into {\tt bsip}.SEIP.}
+\note{AW: Need to describe how {\tt bsip}.SEIP interacts with PLIC.  I think {\tt bsip}.SEIP should purely be a read-write storage bit to emulate the PLIC for VS-mode; the PLIC should not be wired into {\tt bsip}.SEIP.}
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -383,8 +388,8 @@ HSXLEN-10 & 1 & 3 & 1 & 3 & 1 & 1 \\
 \end{figure*}
 
 The {\tt bsie} register is an HSXLEN-bit read/write register formatted as shown
-in Figure~\ref{bsiereg}.  When V=0, the {\tt bsie} register holds the S-mode
-guest's version of the {\tt sie} register.  When V=1, {\tt bsie} holds
+in Figure~\ref{bsiereg}.  When V=0, the {\tt bsie} register holds VS-mode's
+version of the {\tt sie} register.  When V=1, {\tt bsie} holds
 HS-mode's version of the {\tt sie} register. When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps the
 defined fields of {\tt bsie} with their counterparts in {\tt sie}.  The
@@ -436,8 +441,8 @@ registers ({\tt ustatus}, {\tt utvec}, etc.) if that feature is enabled.
 \subsection{Background Supervisor Trap Vector Base Address Register ({\tt bstvec})}
 
 The {\tt bstvec} register is an HSXLEN-bit read/write register formatted as shown
-in Figure~\ref{bstvecreg}.  When V=0, the {\tt bstvec} register holds the
-S-mode guest's version of the {\tt stvec} register.  When V=1, {\tt bstvec}
+in Figure~\ref{bstvecreg}.  When V=0, the {\tt bstvec} register holds VS-mode's
+version of the {\tt stvec} register.  When V=1, {\tt bstvec}
 holds HS-mode's version of the {\tt stvec} register.  When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps the
 contents of {\tt bstvec} and {\tt stvec}.
@@ -468,8 +473,8 @@ HSXLEN-2 & 2 \\
 \subsection{Background Supervisor Scratch Register ({\tt bsscratch})}
 
 The {\tt bsscratch} register is an HSXLEN-bit read/write register formatted as shown
-in Figure~\ref{bsscratchreg}.  When V=0, the {\tt bsscratch} register holds the
-S-mode guest's version of the {\tt sscratch} register.  When V=1, {\tt bsscratch}
+in Figure~\ref{bsscratchreg}.  When V=0, the {\tt bsscratch} register holds
+VS-mode's version of the {\tt sscratch} register.  When V=1, {\tt bsscratch}
 holds HS-mode's version of the {\tt sscratch} register.  When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps the
 contents of {\tt bsscratch} and {\tt sscratch}.
@@ -499,8 +504,8 @@ HSXLEN \\
 \subsection{Background Supervisor Exception Program Counter ({\tt bsepc})}
 
 The {\tt bsepc} register is an HSXLEN-bit read/write register formatted as shown
-in Figure~\ref{bsepcreg}.  When V=0, the {\tt bsepc} register holds the
-S-mode guest's version of the {\tt sepc} register.  When V=1, {\tt bsepc}
+in Figure~\ref{bsepcreg}.  When V=0, the {\tt bsepc} register holds
+VS-mode's version of the {\tt sepc} register.  When V=1, {\tt bsepc}
 holds HS-mode's version of the {\tt sepc} register.  When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps the
 contents of {\tt bsepc} and {\tt sepc}.
@@ -531,8 +536,8 @@ HSXLEN \\
 \subsection{Background Supervisor Cause Register ({\tt bscause})}
 
 The {\tt bscause} register is an HSXLEN-bit read/write register formatted as shown
-in Figure~\ref{bscausereg}.  When V=0, the {\tt bscause} register holds the
-S-mode guest's version of the {\tt scause} register.  When V=1, {\tt bscause}
+in Figure~\ref{bscausereg}.  When V=0, the {\tt bscause} register holds
+VS-mode's version of the {\tt scause} register.  When V=1, {\tt bscause}
 holds HS-mode's version of the {\tt scause} register.  When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps the
 contents of {\tt bscause} and {\tt scause}.
@@ -565,8 +570,8 @@ values that {\tt scause} can hold.
 \subsection{Background Supervisor Trap Value Register ({\tt bstval})}
 
 The {\tt bstval} register is an HSXLEN-bit read/write register formatted as shown
-in Figure~\ref{bstvalreg}.  When V=0, the {\tt bstval} register holds the
-S-mode guest's version of the {\tt stval} register.  When V=1, {\tt bstval}
+in Figure~\ref{bstvalreg}.  When V=0, the {\tt bstval} register holds
+VS-mode's version of the {\tt stval} register.  When V=1, {\tt bstval}
 holds HS-mode's version of the {\tt stval} register.  When transitioning between
 virtualization modes (V=0 to V=1, or vice-versa), the implementation swaps the
 contents of {\tt bstval} and {\tt stval}.
@@ -598,7 +603,7 @@ HSXLEN \\
 
 The {\tt bsatp} register is an HSXLEN-bit read/write register formatted as shown
 in Figure~\ref{rv32bsatpreg} for RV32 and Figure~\ref{rv64bsatpreg}  for RV64.
-When V=0, the {\tt bsatp} register holds the S-mode guest's version of the
+When V=0, the {\tt bsatp} register holds VS-mode's version of the
 {\tt satp} register.  When V=1, {\tt bsatp} holds HS-mode's version of the
 {\tt satp} register.  When transitioning between virtualization modes (V=0 to
 V=1, or vice-versa), the implementation swaps the contents of {\tt bsatp} and
@@ -795,11 +800,11 @@ translation, MTL is set to 0.  For any other trap into M-mode, MTL is set to the
 of V at the time of the trap.
 
 The SXL field controls the value of XLEN for HS-mode.
-The UXL field controls the value of XLEN for S-mode when V=1, or for U-mode when V=0.
+The UXL field controls the value of XLEN for VS-mode when V=1, or for U-mode when V=0.
 
 The TSR and TVM fields only affect execution in HS-mode.
 
-The TW field affects execution in both HS-mode and S-mode.
+The TW field affects execution in both HS-mode and VS-mode.
 
 The hypervisor extension changes the behavior of the the Modify Privilege
 field, MPRV.  When MPRV=0, translation and protection behave as normal.  When
@@ -816,8 +821,8 @@ MPV.  Table~\ref{h-mprv} enumerates the cases.
    1    & 0   & 0   & U-level access with HS-level translation and protection only. \\ \hline
    1    & 0   & 1   & HS-level access with HS-level translation and protection only.  \\ \hline
    1    & --  & 3   & M-level access with no translation. \\ \hline
-   1    & 1   & 0   & U-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the S translation level only if readable at the HS translation level. \\ \hline
-   1    & 1   & 1   & S-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the S translation level only if readable at the HS translation level. {\tt bsstatus}.SUM applies instead of {\tt sstatus}.SUM. \\ \hline
+   1    & 1   & 0   & VU-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. \\ \hline
+   1    & 1   & 1   & VS-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. {\tt bsstatus}.SUM applies instead of {\tt sstatus}.SUM. \\ \hline
  \end{tabular}
 \end{center}
 \caption{Effect on load and store translation and protection under MPRV.  When MPRV=1, MPP$\neq$3, and {\tt hstatus}.SPRV=1, the effective privilege is further modified: {\tt hstatus}.SPV applies instead of MPV, and {\tt sstatus}.SPP applies instead of MPP.}
@@ -833,7 +838,7 @@ mstatus}, and vice-versa.
 Whenever the current virtualization mode V is 1, two-level address translation
 and protection is in effect.  For any virtual memory access, the original
 virtual address is first converted
-by S-level address translation, as controlled by the {\tt satp} register, into
+by VS-level address translation, as controlled by the {\tt satp} register, into
 a {\em guest physical address}.  The guest physical address is then
 converted by HS-level address translation, as controlled by the {\tt bsatp}
 register, into a {\em machine physical address}.
@@ -842,11 +847,11 @@ either level of translation can be effectively disabled by zeroing the
 corresponding {\tt satp} or {\tt bsatp} register.
 
 For the purposes of HS-level address translation and protection, all memory
-accesses made with V=1---including those made by the S-level
+accesses made with V=1---including those made by the VS-level
 address-translation hardware---are considered user-level accesses.  In
-addition to satisfying S-level translation and protection, the access type
+addition to satisfying VS-level translation and protection, the access type
 must be permitted at user level by HS-level translation and protection.
-The user page protections at HS level are perceived by S-mode as physical
+The user page protections at HS level are perceived by VS-mode as physical
 memory protection.  Figure~\ref{hs-pte-perm} summarizes the effective
 permissions at each translation level.
 
@@ -854,13 +859,13 @@ permissions at each translation level.
 \begin{center}
 \begin{tabular}{|c|c||l|l|l|}
   \hline
-   Virtualization & Privilege & Permissions at S    & Permissions at HS \\
+   Virtualization & Privilege & Permissions at VS   & Permissions at HS \\
    Mode (V)       & Mode      & translation level   & translation level \\ \hline
    0              & U         & ---                 & User \\
    0              & HS        & ---                 & Supervisor \\
   \hline
-   1              & U         & User                & User \\
-   1              & S         & Supervisor          & User \\
+   1              & VU        & User                & User \\
+   1              & VS        & Supervisor          & User \\
   \hline
  \end{tabular}
 \end{center}
@@ -869,18 +874,18 @@ permissions at each translation level.
 \end{table*}
 
 An HS-level memory protection fault caused by an access made by the
-S-level address translation hardware raises a load or store page
+VS-level address translation hardware raises a load or store page
 fault exception.  HS-level memory protection faults caused by other
 accesses with V = 1 raise the page-fault exception corresponding to
 the original access type (instruction, load, or store/AMO).  HS-level
 memory protection faults are treated as HS-level exceptions for the purpose of
-exception delegation, and so are not delegated to S-mode, regardless of the
+exception delegation, and so are not delegated to VS-mode, regardless of the
 setting of the {\tt hedeleg} register.
 
-Note that the S-level MXR setting, which makes execute-only pages readable,
-only overrides S-level page protection.  Setting MXR at S-level does not override
+Note that the VS-level MXR setting, which makes execute-only pages readable,
+only overrides VS-level page protection.  Setting MXR at VS-level does not override
 HS-level page protections.  Setting MXR at HS-level, however, overrides
-both HS-level and S-level execute-only permissions.
+both HS-level and VS-level execute-only permissions.
 
 For the purposes of HS-level address translation protection, memory accesses
 made in HS mode are considered supervisor-level accesses.  For example, for an
@@ -897,17 +902,17 @@ virtualization mode V.  When V=0, the virtual-address argument is an HS-level
 virtual address, and the ASID argument is an HS-level ASID.  If either argument
 is provided, the instruction orders stores only to HS-level address-translation
 structures with subsequent address translations.  If neither argument is
-provided, the instruction orders stores to all HS-level and S-level address-translation structures
+provided, the instruction orders stores to all HS-level and VS-level address-translation structures
 with subsequent address translations.
 
 When V=1, the virtual-address argument to SFENCE.VMA is a guest virtual
-address, and the ASID argument is an S-level ASID.  The instruction
-orders stores only to the S-level address-translation structures within the
+address, and the ASID argument is a VS-level ASID.  The instruction
+orders stores only to the VS-level address-translation structures within the
 HS-level address-space specified by the {\tt bsatp} register.
 
 When V=0, attempts to execute SFENCE.VMA in U-mode or when {\tt mstatus}.TVM=1
 raise an illegal instruction exception.  When V=1, attempts to execute
-SFENCE.VMA in U-mode or when {\tt hstatus}.VTVM=1 raise an illegal instruction
+SFENCE.VMA in VU-mode or when {\tt hstatus}.VTVM=1 raise an illegal instruction
 exception.
 
 \subsection{Trap Value Register Discipline}
@@ -915,49 +920,48 @@ exception.
 For an access fault, or for a page fault due to HS-level address translation,
 if V=1 at the time of the trap, then {\tt mtval} or {\tt stval} is written
 with the host virtual address (i.e., the guest physical address) obtained from
-translation of the original virtual address by S-level address translation.
+translation of the original virtual address by VS-level address translation.
 For any other access fault, page fault, or misaligned address exception, {\tt
 mtval} or {\tt stval} is written with the original virtual address, as usual.
 
 When a trap is taken into M-mode that sets {\tt mstatus}.MPV=1 and {\tt
 mstatus}.MTL=0, register {\tt mvtval} contains the access's original virtual
 address (guest virtual address) and {\tt mtval} contains the host virtual
-address (guest physical address) after S-level address translation.  Likewise,
+address (guest physical address) after VS-level address translation.  Likewise,
 when a trap is taken into HS-mode that sets {\tt hstatus}.SPV=1 and {\tt
 hstatus}.STL=0, {\tt hvtval} contains the original virtual address (guest
 virtual address) and {\tt stval} contains the host virtual address (guest
-physical address) after S-level address translation.
+physical address) after VS-level address translation.
 
 \section{Base ISA Control}
 
 The {\tt mstatus} field SXL determines XLEN for HS-mode.
 
-When executing in S-mode, XLEN is determined by the the UXL field of the
+When executing in VS-mode, XLEN is determined by the the UXL field of the
 background register {\tt bsstatus}.  Because {\tt bsstatus} is swapped with
-{\tt sstatus} when transitioning from S-mode into HS-mode or M-mode, HS-mode and
-M-mode can modify S-mode's XLEN via the UXL field of the foreground register {\tt
-sstatus}.
+{\tt sstatus} when transitioning from VS-mode into HS-mode or M-mode, HS-mode
+and M-mode can modify VS-mode's XLEN via the UXL field of the foreground
+register {\tt sstatus}.
 
-When executing in U-mode, XLEN is determined by the UXL field of the foreground register {\tt sstatus}.
+When executing in U-mode or VU-mode, XLEN is determined by the UXL field of the
+foreground register {\tt sstatus}.
 
 \begin{commentary}
-HS-mode controls unvirtualized U-mode's XLEN the same way it controls virtualized S-mode's XLEN, via
+HS-mode controls U-mode's XLEN the same way it controls VS-mode's XLEN, via
 {\tt sstatus}.UXL.
 \end{commentary}
 
 \section{Traps}
 
-The hypervisor extension modifies the environment-call exception cause
+The hypervisor extension augments the environment-call exception cause
 encoding.  Environment calls from HS-mode use cause 9, whereas environment
-calls from an S-mode guest now use cause 10.  Table~\ref{hcauses} lists the
+calls from VS-mode use cause 10.  Table~\ref{hcauses} lists the
 possible M-mode and HS-mode exception codes when the hypervisor extension is
 present.
 
 \begin{commentary}
-HS-mode and S-mode ECALLs use different cause values so they can be delegated
-separately.  Without the hypervisor extension, cause 9 is used for S-mode
-environment calls.  Using cause 9 for HS-mode environment calls when the
-hypervisor extension is enabled simplifies M-mode software.
+HS-mode and VS-mode ECALLs use different cause values so they can be delegated
+separately.
 \end{commentary}
 
 \begin{table*}[h!]
@@ -988,9 +992,9 @@ hypervisor extension is enabled simplifies M-mode software.
   0         & 5               & Load access fault \\
   0         & 6               & Store/AMO address misaligned \\
   0         & 7               & Store/AMO access fault \\
-  0         & 8               & Environment call from U-mode \\
+  0         & 8               & Environment call from U-mode or VU-mode \\
   0         & 9               & Environment call from HS-mode \\
-  0         & 10              & Environment call from S-mode \\
+  0         & 10              & Environment call from VS-mode \\
   0         & 11              & Environment call from M-mode \\
   0         & 12              & Instruction page fault \\
   0         & 13              & Load page fault \\
@@ -1004,17 +1008,17 @@ hypervisor extension is enabled simplifies M-mode software.
 \label{hcauses}
 \end{table*}
 
-When a trap occurs in HS-mode, or in U-mode with V=0, it goes to M-mode, unless
+When a trap occurs in HS-mode or U-mode, it goes to M-mode, unless
 delegated by {\tt medeleg} or {\tt mideleg}, in which case it goes to HS-mode.
-If the N extension for user-mode interrupts is implemented, then U-mode (V=0)
+If the N extension for user-mode interrupts is implemented, then U-mode
 traps destined for HS-mode may be further delegated to U-mode using the {\tt
 sedeleg} and {\tt sideleg} CSRs.
 
-When a trap occurs in S-mode, or in U-mode with V=1, it goes to M-mode, unless
+When a trap occurs in VS-mode or VU-mode, it goes to M-mode, unless
 delegated by {\tt medeleg} or {\tt mideleg}, in which case it goes to HS-mode,
 unless further delegated by {\tt hedeleg} or {\tt hideleg}, in which case it
-goes to S-mode.  If the N extension for user-mode interrupts is implemented,
-then U-mode traps destined for S-mode may be further delegated to U-mode
+goes to VS-mode.  If the N extension for user-mode interrupts is implemented,
+then VU-mode traps destined for VS-mode may be further delegated to VU-mode
 using the {\tt sedeleg} and {\tt sideleg} CSRs.
 
 When a trap is taken into M-mode, the following occurs: first, if the
@@ -1027,11 +1031,11 @@ mstatus}.MPV and {\tt mstatus}.MPP are set according to Table~\ref{h-mpp}.
 \begin{tabular}{|l|c|c|}
   \hline
   Previous Mode & MPV & MPP \\ \hline
-  U-mode, V=0   & 0   & 0   \\
+  U-mode        & 0   & 0   \\
   HS-mode       & 0   & 1   \\
   M-mode        & 0   & 3   \\ \hline
-  U-mode, V=1   & 1   & 0   \\
-  S-mode        & 1   & 1   \\ \hline
+  VU-mode       & 1   & 0   \\
+  VS-mode       & 1   & 1   \\ \hline
 \end{tabular}
 \end{center}
 \caption{Value of {\tt mstatus} fields MPV and MPP after a trap into M-mode.
@@ -1049,17 +1053,17 @@ hstatus}.SPV and {\tt sstatus}.SPP are set according to Table~\ref{h-spp}.
 \begin{tabular}{|l|c|c|}
   \hline
   Previous Mode & SPV & SPP \\ \hline
-  U-mode, V=0   & 0   & 0   \\
+  U-mode        & 0   & 0   \\
   HS-mode       & 0   & 1   \\ \hline
-  U-mode, V=1   & 1   & 0   \\
-  S-mode        & 1   & 1   \\ \hline
+  VU-mode       & 1   & 0   \\
+  VS-mode       & 1   & 1   \\ \hline
 \end{tabular}
 \end{center}
 \caption{Value of {\tt hstatus} field SPV and {\tt sstatus} field SPP after a trap into HS-mode.}
 \label{h-spp}
 \end{table*}
 
-When a trap is taken into S-mode, {\tt sstatus}.SPP is set according to
+When a trap is taken into VS-mode, {\tt sstatus}.SPP is set according to
 Table~\ref{h-vspp}.  The {\tt hstatus}.SPV
 bit is not modified, and the current virtualization state V remains 1.
 
@@ -1068,11 +1072,11 @@ bit is not modified, and the current virtualization state V remains 1.
 \begin{tabular}{|l|c|c|}
   \hline
   Previous Mode & SPP \\ \hline
-  U-mode, V=1   & 0   \\
-  S-mode        & 1   \\ \hline
+  VU-mode       & 0   \\
+  VS-mode       & 1   \\ \hline
 \end{tabular}
 \end{center}
-\caption{Value of {\tt sstatus} field SPP after a trap into S-mode.}
+\caption{Value of {\tt sstatus} field SPP after a trap into VS-mode.}
 \label{h-vspp}
 \end{table*}
 
@@ -1087,10 +1091,10 @@ background supervisor registers are swapped with their foreground
 counterparts.
 
 The SRET instruction is usually used to return from a trap taken into HS-mode or
-S-mode.  Its behavior depends on the current virtualization mode.  When
+VS-mode.  Its behavior depends on the current virtualization mode.  When
 executed in M-mode or HS-mode (i.e., V=0), SRET sets the privilege mode
 according to the values in {\tt sstatus}.SPP and {\tt hstatus}.SPV, as encoded
-in Table~\ref{h-spp}.  When executed in S-mode (i.e., V=1), SRET sets the
+in Table~\ref{h-spp}.  When executed in VS-mode (i.e., V=1), SRET sets the
 privilege mode according to Table~\ref{h-vspp}.  In either case, SRET then
 sets {\tt pc}={\tt sepc}, then in {\tt sstatus} sets SPP=0, SIE=SPIE, then
 SPIE=1.  Finally, if SRET changed the current virtualization state V, the
