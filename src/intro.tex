@@ -167,28 +167,30 @@ software on a guest hart to "yield" control of the guest hart.
 
 \section{RISC-V ISA Overview}
 
-The RISC-V ISA is defined as a base integer ISA, which must be present
+A RISC-V ISA is defined as a base integer ISA, which must be present
 in any implementation, plus optional extensions to the base ISA.  The
-base integer ISA is very similar to that of the early RISC processors
+base integer ISAs are very similar to that of the early RISC processors
 except with no branch delay slots and with support for optional
-variable-length instruction encodings.  The base is carefully
+variable-length instruction encodings.  A base is carefully
 restricted to a minimal set of instructions sufficient to provide a
 reasonable target for compilers, assemblers, linkers, and operating
 systems (with additional privileged operations), and so provides
 a convenient ISA and software toolchain ``skeleton'' around which more
 customized processor ISAs can be built.
 
-Each base integer instruction set is characterized by the width of the
-integer registers and the corresponding size of the address
-space.  There are two primary base integer variants, RV32I and RV64I,
-described in Chapters~\ref{rv32} and \ref{rv64}, which provide 32-bit
-or 64-bit address spaces respectively.  Chapter~\ref{rv32e}
-describes the RV32E subset variant of the RV32I base instruction set,
-which has been added to support small microcontrollers.
-Chapter~\ref{rv128} sketches a future RV128I variant of the base
-integer instruction set supporting a flat 128-bit address space.
-The base integer instruction sets use a two's-complement
-representation for signed integer values.
+Although it is convenient to speak of {\em the} RISC-V ISA, RISC-V is
+actually a family of related ISAs, of which there are currently four
+base ISAs.  Each base integer instruction set is characterized by the
+width of the integer registers and the corresponding size of the
+address space and by the number of integer registers.  There are two
+primary base integer variants, RV32I and RV64I, described in
+Chapters~\ref{rv32} and \ref{rv64}, which provide 32-bit or 64-bit
+address spaces respectively.  Chapter~\ref{rv32e} describes the RV32E
+subset variant of the RV32I base instruction set, which has been added
+to support small microcontrollers.  Chapter~\ref{rv128} sketches a
+future RV128I variant of the base integer instruction set supporting a
+flat 128-bit address space.  The base integer instruction sets use a
+two's-complement representation for signed integer values.
 
 \begin{commentary}
 Although 64-bit address spaces are a requirement for larger systems,
@@ -198,6 +200,66 @@ to lower memory traffic and energy consumption.  In addition, 32-bit
 address spaces are sufficient for educational purposes.  A larger flat
 128-bit address space might eventually be required, so we ensured this
 could be accommodated within the RISC-V ISA framework.
+\end{commentary}
+
+\begin{commentary}
+The four base ISAs in RISC-V are treated as distinct base ISAs.  A
+common question is why is there not a single ISA, and in particular,
+why is RV32I not a strict subset of RV64I?  Some earlier ISA designs
+(SPARC, MIPS) adopted a strict superset policy when increasing address
+space size to support running existing 32-bit binaries on new 64-bit
+hardware.
+
+The main advantage of explicitly separating base ISAs is that each
+base ISA can be optimized for its needs without requiring to support
+all the operations needed for other base ISAs.  For example, RV64I can
+omit instructions and CSRs that are only needed to cope with the
+narrower registers in RV32I.  The RV32I variants can use encoding
+space otherwise reserved for instructions only required by wider
+address-space variants.
+
+The main disadvantage of not treating the design as a single ISA is
+that it complicates the hardware needed to emulate one base ISA on
+another (e.g., RV32I on RV64I).  However, differences in addressing
+and illegal instruction traps generally mean some mode switch would be
+required in hardware in any case even with full superset instruction
+encodings, and the different RISC-V base ISAs are similar enough that
+supporting multiple versions is relatively low cost.  Although some
+have proposed that the strict superset design would allow legacy
+32-bit libraries to be linked with 64-bit code, this is impractical in
+practice even with compatible encodings due to the differences in
+software calling conventions and system-call interfaces.
+
+The current RISC-V privileged architecture provides fields in {\tt
+  misa} to control the user ISA at each level to support emulating
+different base ISAs on the same hardware.  We note that newer SPARC
+and MIPS ISA revisions have deprecated support for running 32-bit code
+unchanged on 64-bit systems.
+
+A related question is why there is a different encoding for 32-bit
+adds in RV32I (ADD) and RV64I (ADDW)? The ADDW opcode could be used
+for 32-bit adds in RV32I and ADDD for 64-bit adds in RV64I, instead of
+the existing design which uses the same opcode ADD for 32-bit adds in
+RV32I and 64-bit adds in RV64I with a different opcode ADDW for 32-bit
+adds in RV64I.  This would also be more consistent with the use of the
+same LW opcode for 32-bit load in both RV32I and RV64I.  The very
+first versions of RISC-V ISA did have a variant of this alternate
+design, but the RISC-V design was changed to the current choice in
+January 2011.  Our focus was on supporting 32-bit integers in the
+64-bit ISA not on providing compatibility with the 32-bit ISA, and the
+motivation was to remove the asymmetry that arose from having not all
+opcodes in RV32I have a *W suffix (e.g., ADDW, but AND not ANDW).  In
+hindsight, this was perhaps not well-justified and a consequence of
+designing both ISAs at the same time as opposed to adding one later to
+sit on top of another, and also from a belief we had to fold platform
+requirements into the ISA spec which would imply that all the RV32I
+instructions would have been required in RV64I.  It is too late to
+change the encoding now, but this is also of little practical
+consequence for the reasons stated above.
+
+It has been noted we could enable the *W variants as an extension to
+RV32I systems to provide a common encoding across RV64I and a future
+RV32 variant.
 \end{commentary}
 
 RISC-V has been designed to support extensive customization and
