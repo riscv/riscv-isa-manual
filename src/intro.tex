@@ -110,7 +110,8 @@ isolation between subsystems.
 
 The behavior of a RISC-V program depends on the execution environment
 in which it runs.  The execution environment defines the initial state
-of the program, the number and type of harts in the environment, the
+of the program, the number and type of harts in the environment including
+the privilege modes supported by the harts, the
 accessibility and attributes of memory and I/O regions, the behavior
 of all legal instructions executed on each hart, and the handling of
 any interrupts or exceptions raised during execution including
@@ -524,30 +525,64 @@ We use the term {\em exception} to refer to an unusual condition
 occurring at run time associated with an instruction in the current
 RISC-V hart.  We use the term {\em trap} to refer to the synchronous
 transfer of control to a trap handler caused by an exceptional
-condition occurring within a RISC-V hart.  Trap handlers usually
-execute in a more privileged environment.
-
-The instruction descriptions in following chapters describe conditions
-that raise an exception during execution.  Whether and how these are
-converted into traps is dependent on the execution environment, though
-the expectation is that most environments will take a {\em precise}
-trap when an exception is signaled (except for floating-point
-exceptions, which, in the standard floating-point extensions, do not
-cause traps).
-
-We use the term {\em interrupt} to refer to an external asynchronous
-event that causes a RISC-V hart to stop execution {\em precisely} on
-some instruction and then to enter an interrupt handler.  Some
-execution environments might not make interrupts visible to the
-software running inside an execution environment (e.g., if more
-privileged software implementing the environment respond to external
-interrupts).  When interrupts are made visible within an execution
-environment, some software interface must be defined within the
-execution environment to determine and service the cause of the
-interrupt, and to restore regular execution of the interrupted hart.
+condition occurring within a RISC-V hart.
 
 \begin{commentary}
 Our use of ``exception'' and ``trap'' matches that in the IEEE-754
 floating-point standard.
 \end{commentary}
 
+The instruction descriptions in following chapters describe conditions
+that can raise an exception during execution.  The general assumption
+for most RISC-V implementations is that a {\em precise} trap to some
+handler occurs when an exception is signaled on an instruction (except
+for floating-point exceptions, which, in the standard floating-point
+extensions, do not cause traps).  How traps are handled and made
+visible to software running on the hart depends on the enclosing
+execution environment.  From the perspective of software running
+inside an execution environment, traps encountered by a hart at
+runtime can have four different effects:
+\begin{description}
+  \item[Invisible Trap:] The trap is handled transparently by the execution environment
+    and execution resumes normally after the trap is handled.
+    Examples including emulating missing instructions or handling page
+    faults in a demand-paged virtual-memory system.  In these cases, the
+    software running inside the execution environment is not aware of
+    the trap.
+  \item[Environment Trap:] The trap is an explicit call to the execution environment
+    requesting an action of behalf of software inside the execution
+    environment.  An example is a system call.  In this case,
+    execution may or may not resume on the hart after the requested action is taken
+    by the execution environment.
+  \item[Visible Trap:]  The trap is visible to, and handled by, software running
+    inside the execution environment.  For example, in an execution
+    environment providing both supervisor and user mode on harts, an
+    ecall by a user-mode hart will generally result in a transfer of
+    control to a supervisor-mode handler running on the same hart.
+  \item[Fatal Trap:] The trap represents a fatal failure and causes the execution
+    environment to terminate execution.  Each execution environment
+    should define how execution is terminated and reported to an
+    external environment.  An example is software running inside an
+    execution environment failing a physical-memory protection check
+    and being terminated by the outer execution environment.
+\end{description}
+
+We use the term {\em interrupt} to refer to an external asynchronous
+event that causes a RISC-V hart to stop execution on some instruction
+(generally {\em precisely}) and then to enter an interrupt handler.
+As with traps, from the perspective of software running inside an
+execution environment, interrupts can have different effects.
+\begin{description}
+ \item[Invisible Interrupt:] The interrupt is handled entirely by the execution environment
+   and so is not visible to software running inside the execution
+   environment.  For example, a device interrupt for a different job
+   running on the same multiprogrammed machine.
+ \item[Visible Interrupt:] The interrupt is handled by software running inside the
+   execution environment.  For example, the execution environment supports
+   a supervisor-mode operating system, and a hart is interrupted from
+   user-mode to run an interrupt handler in supervisor mode.
+ \item[Fatal Interrupt:] The interrupt represent a hardware failure
+   condition that causes the execution environment to terminate
+   execution. For example, an unrecoverable memory error or a watchdog
+   timer expiring.
+\end{description}
