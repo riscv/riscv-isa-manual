@@ -2,8 +2,7 @@
 \label{rv32}
 
 This chapter describes version 2.0 of the RV32I base integer
-instruction set.  Much of the commentary also applies to the RV64I
-variant.
+instruction set.
 
 \begin{commentary}
 RV32I was designed to be sufficient to form a compiler target and to
@@ -24,17 +23,21 @@ omitting support for misaligned memory accesses and treating all SYSTEM
 instructions as a single trap.
 \end{commentary}
 
-\section{Programmers' Model for Base Integer Subset}
+\begin{commentary}
+Most of the commentary for RV32I also applies to the RV64I base.
+\end{commentary}
 
-Figure~\ref{gprs} shows the user-visible state for the base integer
-subset.  There are 31 general-purpose registers {\tt x1}--{\tt x31},
+\section{Programmers' Model for Base Integer ISA}
+
+Figure~\ref{gprs} shows the unprivileged state for the base integer
+ISA.  There are 31 general-purpose registers {\tt x1}--{\tt x31},
 which hold integer values.  Register {\tt x0} is hardwired to the
 constant 0.  There is no hardwired subroutine return address link
 register, but the standard software calling convention uses register
-{\tt x1} to hold the return address on a call.  For RV32, the {\tt x}
-registers are 32 bits wide, and for RV64, they are 64 bits wide.
+{\tt x1} to hold the return address on a call.  For RV32I, the {\tt x}
+registers are 32 bits wide, i.e., XLEN=32.
 
-There is one additional user-visible register: the program counter {\tt pc}
+There is one additional unprivileged register: the program counter {\tt pc}
 holds the address of the current instruction.
 
 \begin{commentary}
@@ -111,7 +114,7 @@ RV32E subset, which only has 16 registers (Chapter~\ref{rv32e}).
 \end{tabular}
 \end{center}
 }
-\caption{RISC-V user-level base integer register state.}
+\caption{RISC-V base unprivileged integer register state.}
 \label{gprs}
 \end{figure}
 
@@ -119,18 +122,25 @@ RV32E subset, which only has 16 registers (Chapter~\ref{rv32e}).
 
 \section{Base Instruction Formats}
 
-In the base ISA, there are four core instruction formats (R/I/S/U), as
-shown in Figure~\ref{fig:baseinstformats}.  All are a fixed 32 bits in
-length and must be aligned on a four-byte boundary in memory.  An
-instruction-address-misaligned exception is generated on a taken
-branch or unconditional jump if the target address is not four-byte
-aligned.  No instruction-address-misaligned exception is generated for
-a conditional branch that is not taken.
+In the base RV32I ISA, there are four core instruction formats
+(R/I/S/U), as shown in Figure~\ref{fig:baseinstformats}.  All are a
+fixed 32 bits in length and must be aligned on a four-byte boundary in
+memory.  An instruction-address-misaligned exception is generated on a
+taken branch or unconditional jump if the target address is not
+four-byte aligned.  This exception is report on the branch or jump
+instruction, not on the target instruction.  No
+instruction-address-misaligned exception is generated for a
+conditional branch that is not taken.
 
 \begin{commentary}
 The alignment constraint for base ISA instructions is relaxed to a
 two-byte boundary when instruction extensions with 16-bit lengths or
 other odd multiples of 16-bit lengths are added (i.e., IALIGN=16).
+
+Instruction-address-misaligned exceptions are reported on the branch
+or jump that would cause instruction misalignment to help debugging,
+and to simplify hardware design for systems with IALIGN=32, where these
+are the only places where misalignment can occur.
 \end{commentary}
 
 \vspace{-0.2in}
@@ -207,7 +217,7 @@ with RISC-IV aka. SPUR~\cite{spur-jsscc1989}).
 
 In practice, most immediates are either small or require all XLEN
 bits.  We chose an asymmetric immediate split (12 bits in regular
-instructions plus a special load upper immediate instruction with 20
+instructions plus a special load-upper-immediate instruction with 20
 bits) to increase the opcode space available for regular instructions.
 
 Immediates are sign-extended because we did not observe a benefit to
@@ -220,20 +230,6 @@ to keep the ISA as simple as possible.
 There are a further two variants of the instruction formats (B/J)
 based on the handling of immediates, as shown in
 Figure~\ref{fig:baseinstformatsimm}.
-
-The only difference between the S and B formats is that the 12-bit
-immediate field is used to encode branch offsets in multiples of 2 in
-the B format.  Instead of shifting all bits in the
-instruction-encoded immediate left by one in hardware as is
-conventionally done, the middle bits (imm[10:1]) and sign bit stay in
-fixed positions, while the lowest bit in S format (inst[7]) encodes a
-high-order bit in B format.
-
-Similarly, the only difference between the U and J formats is
-that the 20-bit immediate is shifted left by 12 bits to form U
-immediates and by 1 bit to form J immediates.  The location of
-instruction bits in the U and J format immediates is chosen to
-maximize overlap with the other formats and with each other.
 
 \begin{figure}[h]
 \begin{small}
@@ -314,6 +310,20 @@ J-type \\
 \label{fig:baseinstformatsimm}
 \end{figure}
 
+The only difference between the S and B formats is that the 12-bit
+immediate field is used to encode branch offsets in multiples of 2 in
+the B format.  Instead of shifting all bits in the
+instruction-encoded immediate left by one in hardware as is
+conventionally done, the middle bits (imm[10:1]) and sign bit stay in
+fixed positions, while the lowest bit in S format (inst[7]) encodes a
+high-order bit in B format.
+
+Similarly, the only difference between the U and J formats is
+that the 20-bit immediate is shifted left by 12 bits to form U
+immediates and by 1 bit to form J immediates.  The location of
+instruction bits in the U and J format immediates is chosen to
+maximize overlap with the other formats and with each other.
+
 Figure~\ref{fig:immtypes} shows the immediates produced by each of the
 base instruction formats, and is labeled to show which instruction
 bit (inst[{\em y}\,]) produces each bit of the immediate value.
@@ -383,7 +393,7 @@ J-immediate \\
 
 \begin{commentary}
 Sign-extension is one of the most critical operations on immediates
-(particularly in RV64I), and in RISC-V the sign bit for all immediates
+(particularly for XLEN>32), and in RISC-V the sign bit for all immediates
 is always held in bit 31 of the instruction to allow sign-extension to
 proceed in parallel with instruction decoding.
 
@@ -434,7 +444,7 @@ negative.
          slt t4, t0, t1
          bne t3, t4, overflow
 \end{verbatim}
-In RV64, checks of 32-bit signed additions can be optimized further by
+In RV64I, checks of 32-bit signed additions can be optimized further by
 comparing the results of ADD and ADDW on the operands.
 \end{commentary}
 
@@ -938,7 +948,7 @@ speculatively and out-of-order with respect to other code~\cite{ibmpower7}.
 
 RV32I is a load-store architecture, where only load and store
 instructions access memory and arithmetic instructions only operate on
-CPU registers.  RV32I provides a 32-bit user address space that is
+CPU registers.  RV32I provides a 32-bit address space that is
 byte-addressed and little-endian.  The execution environment will
 define what portions of the address space are legal to access with
 which instructions (e.g., some addresses might be read only, or
