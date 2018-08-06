@@ -949,7 +949,7 @@ speculatively and out-of-order with respect to other code~\cite{ibmpower7}.
 RV32I is a load-store architecture, where only load and store
 instructions access memory and arithmetic instructions only operate on
 CPU registers.  RV32I provides a 32-bit address space that is
-byte-addressed and little-endian.  The execution environment will
+byte-addressed and little-endian.  The EEI will
 define what portions of the address space are legal to access with
 which instructions (e.g., some addresses might be read only, or
 support word access only).  Loads with a destination of {\tt x0} must
@@ -1015,25 +1015,41 @@ defined analogously for 8-bit values.  The SW, SH, and SB instructions
 store 32-bit, 16-bit, and 8-bit values from the low bits of register
 {\em rs2} to memory.
 
-For best performance, the effective address for all loads and stores
-should be naturally aligned for each data type (i.e., on a four-byte
-boundary for 32-bit accesses, and a two-byte boundary for 16-bit
-accesses).  The base ISA supports misaligned accesses, but these might
-run extremely slowly depending on the implementation.  Furthermore,
-naturally aligned loads and stores are guaranteed to execute
-atomically, whereas misaligned loads and stores might not, and hence
-require additional synchronization to ensure atomicity.
+Regardless of EEI, loads and stores whose effective addresses are
+naturally aligned shall not raise an address-misaligned exception.
+Loads and stores where the effective address is not naturally aligned
+to the referenced datatype (i.e., on a four-byte boundary for 32-bit
+accesses, and a two-byte boundary for 16-bit accesses) have behavior
+dependent on the EEI.
+
+An EEI may guarantee that misaligned loads and stores are fully
+supported, and so the software running inside the execution
+environment will never experience a contained or fatal
+address-misaligned trap.  In this case, the misaligned loads and
+stores can be handled in hardware, or via an invisible trap into the
+execution environment implementation, or possibly a combination of
+hardware or software depending on address.
+
+An EEI may not guarantee misaligned loads and stores are handled
+invisibly.  In this case, loads and stores that are not naturally
+aligned may either complete execution successfully or raise an
+address-misaligned exception, but must not fail to execute due to
+misalignment and not raise an address-misaligned exception.  The EEI
+will define if address-misaligned exceptions cause a contained trap
+(allowing software running inside the execution environment to handle
+the trap) or a fatal trap (terminating execution).
 
 \begin{commentary}
 Misaligned accesses are occasionally required when porting legacy
-code, and are essential for good performance on many applications when
-using any form of packed-SIMD extension.  Our rationale for supporting
-misaligned accesses via the regular load and store instructions is to
-simplify the addition of misaligned hardware support.  One option
-would have been to disallow misaligned accesses in the base ISA and
-then provide some separate ISA support for misaligned accesses, either
-special instructions to help software handle misaligned accesses or a
-new hardware addressing mode for misaligned accesses.  Special
+code, and help performance on applications when using any form of
+packed-SIMD extension or handling externally packed data structures.
+Our rationale for allowing EEIs to choose to support misaligned
+accesses via the regular load and store instructions is to simplify
+the addition of misaligned hardware support.  One option would have
+been to disallow misaligned accesses in the base ISA and then provide
+some separate ISA support for misaligned accesses, either special
+instructions to help software handle misaligned accesses or a new
+hardware addressing mode for misaligned accesses.  Special
 instructions are difficult to use, complicate the ISA, and often add
 new processor state (e.g., SPARC VIS align address offset register) or
 complicate access to existing processor state (e.g., MIPS LWL/LWR
@@ -1044,13 +1060,23 @@ alignment, which complicates code generation and adds to loop startup
 overhead.  New misaligned hardware addressing modes take considerable
 space in the instruction encoding or require very simplified
 addressing modes (e.g., register indirect only).
+\end{commentary}
 
-We do not mandate atomicity for misaligned accesses so simple
-implementations can just use a machine trap and software handler to
-handle some or all misaligned accesses.  If hardware misaligned support is
-provided, software can exploit this by simply using regular load and
-store instructions.  Hardware can then automatically optimize accesses
-depending on whether runtime addresses are aligned.
+Even when misaligned loads and stores complete successfully, these
+accesses might run extremely slowly depending on the implementation
+(e.g., when implemented via an invisible trap).  Furthermore, whereas
+naturally aligned loads and stores are guaranteed to execute
+atomically, misaligned loads and stores might not, and hence
+require additional synchronization to ensure atomicity.
+
+\begin{commentary}
+We do not mandate atomicity for misaligned accesses so execution
+environment implementations can use an invisible machine trap and
+a software handler to handle some or all misaligned accesses.  If
+hardware misaligned support is provided, software can exploit this by
+simply using regular load and store instructions.  Hardware can then
+automatically optimize accesses depending on whether runtime addresses
+are aligned.
 \end{commentary}
 
 \section{Control and Status Register Instructions}
