@@ -19,4 +19,5 @@ ID.
 Project Name | Maintainers                   | Point of Contact                                        | Architecture ID | Project URL
 -------------|-------------------------------|---------------------------------------------------------|-----------------|---------------------------------------------------
 Rocket       | SiFive, UC Berkeley           | [Andrew Waterman](mailto:andrew@sifive.com), SiFive     |               1 | https://github.com/freechipsproject/rocket-chip
+BOOM         | UC Berkeley           | [Christopher Celio](mailto:celio@berkeley.edu)     |               2 | https://github.com/ucb-bar/riscv-boom
 Spike        | SiFive, UC Berkeley           | [Andrew Waterman](mailto:andrew@sifive.com), SiFive     |               5 | https://github.com/riscv/riscv-isa-sim
