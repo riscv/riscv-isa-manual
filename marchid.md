@@ -21,4 +21,5 @@ Project Name  | Maintainers                     | Point of Contact              
 Rocket        | SiFive, UC Berkeley             | [Andrew Waterman](mailto:andrew@sifive.com), SiFive         | 1                 | https://github.com/freechipsproject/rocket-chip     
 BOOM          | UC Berkeley                     | [Christopher Celio](mailto:celio@berkeley.edu)              | 2                 | https://github.com/ucb-bar/riscv-boom               
 Ariane        | PULP Platform                   | [Florian Zaruba](mailto:zarubaf@iis.ee.ethz.ch), ETH Zurich | 3                 | https://github.com/pulp-platform/ariane             
+RI5CY         | PULP Platform                   | [Frank K. Gürkaynak](mailto:kgf@iis.ee.ethz.ch), ETH Zurich | 4                 | https://github.com/pulp-platform/riscv
 Spike         | SiFive, UC Berkeley             | [Andrew Waterman](mailto:andrew@sifive.com), SiFive         | 5                 | https://github.com/riscv/riscv-isa-sim              
