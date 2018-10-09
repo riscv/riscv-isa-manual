@@ -186,7 +186,7 @@ as follows:
   \item (c) executes since all previous loads (i.e., (b)) have completed
   \item (d) executes and reads the value 0 from memory
   \item (e) executes and enters the second hart's private store buffer
-  \item (f) executes and forwards its return value 1 from (d) in the store buffer
+  \item (f) executes and forwards its return value 1 from (e) in the store buffer
   \item (g) executes since all previous loads (i.e., (f)) have completed
   \item (h) executes and reads the value 0 from memory
   \item (a) drains from the first hart's store buffer to memory
@@ -304,11 +304,11 @@ AMOs are therefore inherently atomic, while LR/SC pairs are atomic in the slight
   \label{fig:litmus:lrsdsc}
 \end{figure}
 
-The atomicity axiom forbids from other harts from being interleaved in global memory order between an LR and the SC paired with that LR.
+The atomicity axiom forbids stores from other harts from being interleaved in global memory order between an LR and the SC paired with that LR.
 The atomicity axiom does not forbid loads from being interleaved between the paired operations in program order or in the global memory order, nor does it forbid stores from the same hart or stores to non-overlapping locations from appearing between the paired operations in either program order or in the global memory order.
 For example, the SC instructions in Figure~\ref{fig:litmus:lrsdsc} may (but are not guaranteed to) succeed.
 None of those successes would violate the atomicity axiom, because the intervening non-conditional stores are from the same hart as the paired load-reserved and store-conditional instructions.
-This way, a memory system that tracks memory accesses at cache line granularity (and which therefore will see the four snippets of Figure~\ref{fig:litmus:lrsdsc} as identical) will not be forced to fail a store conditional instruction that happens to (falsely) share another portion of the same cache line as the memory location being held by the reservation.
+This way, a memory system that tracks memory accesses at cache line granularity (and which therefore will see the four snippets of Figure~\ref{fig:litmus:lrsdsc} as identical) will not be forced to fail a store-conditional instruction that happens to (falsely) share another portion of the same cache line as the memory location being held by the reservation.
 
 The atomicity axiom also technically supports cases in which the LR and SC touch different addresses and/or use different access sizes; however, use cases for such behaviors are expected to be rare in practice.
 Likewise, scenarios in which stores from the same hart between an LR/SC pair actually overlap the memory location(s) referenced by the LR or SC are expected to be rare compared to scenarios where the intervening store may simply fall onto the same cache line.
@@ -535,15 +535,15 @@ Because this example uses {\em aq}, the loads and stores in the critical section
 
 Now, consider the alternative in Figure~\ref{fig:litmus:spinlock_fences}.
 In this case, even though the AMOSWAP does not enforce ordering with an {\em aq} bit, the fence nevertheless enforces that the acquire AMOSWAP appears earlier in the global memory order than all loads and stores in the critical section.
-Note, however, that in this case, the fence also enforces additional orderings: it also requires that the ``Arbitrary unrelated load'' at the start of the program also appears earlier in the global memory order than the loads and stores of the critical section.  (This particular fence does not, however, enforce any ordering with respect to the ``Arbitrary unrelated store'' at the start of the snippet.)
+Note, however, that in this case, the fence also enforces additional orderings: it also requires that the ``Arbitrary unrelated load'' at the start of the program appears earlier in the global memory order than the loads and stores of the critical section.  (This particular fence does not, however, enforce any ordering with respect to the ``Arbitrary unrelated store'' at the start of the snippet.)
 In this way, fence-enforced orderings are slightly coarser than orderings enforced by {\em .aq}.
 
 Release orderings work exactly the same as acquire orderings, just in the opposite direction.  Release semantics require all loads and stores preceding the release operation in program order to also precede the release operation in the global memory order.
-This ensures, for example, that memory accesses in a critical section appear before the lock-releasing store in the global memory order.  Just as for acquire semantics, release semantics can be enforced using release annotations or with a FENCE~R,RW operations.  Using the same examples, the ordering between the loads and stores in the critical section and the ``Arbitrary unrelated store'' at the end of the code snippet is enforced only by the FENCE~R,RW in Figure~\ref{fig:litmus:spinlock_fences}, not by the {\em rl} in Figure~\ref{fig:litmus:spinlock_atomics}.
+This ensures, for example, that memory accesses in a critical section appear before the lock-releasing store in the global memory order.  Just as for acquire semantics, release semantics can be enforced using release annotations or with a FENCE~RW,W operation.  Using the same examples, the ordering between the loads and stores in the critical section and the ``Arbitrary unrelated store'' at the end of the code snippet is enforced only by the FENCE~RW,W in Figure~\ref{fig:litmus:spinlock_fences}, not by the {\em rl} in Figure~\ref{fig:litmus:spinlock_atomics}.
 
 With RCpc annotations alone, store-release-to-load-acquire ordering is not enforced.  This facilitates the porting of code written under the TSO and/or RCpc memory models.  
 To enforce store-release-to-load-acquire ordering, the code must use store-release-RCsc and load-acquire-RCsc operations so that PPO rule \ref{ppo:rcsc} applies.
-RCpc alone is sufficient for many uses cases in C/C++ but is insufficient for many other use cases in C/C++, Java, and Linux, to name just a few examples; see Section~\ref{sec:memory:porting} for details.
+RCpc alone is sufficient for many use cases in C/C++ but is insufficient for many other use cases in C/C++, Java, and Linux, to name just a few examples; see Section~\ref{sec:memory:porting} for details.
 
 PPO rule~\ref{ppo:pair} indicates that an SC must appear after its paired LR in the global memory order.
 This will follow naturally from the common use of LR/SC to perform an atomic read-modify-write operation due to the inherent data dependency.
@@ -619,7 +619,7 @@ Another would be to use a FENCE~R,R, but this would include all previous and all
 
 \begin{verbbox}
       lw  x1,0(x2)
-      bne x1,x0,NEXT
+      bne x1,x0,next
       sw  x3,0(x4)
 next: sw  x5,0(x6)
 \end{verbbox}
@@ -631,11 +631,11 @@ next: sw  x5,0(x6)
 \end{figure}
 
 Control dependencies behave differently from address and data dependencies in the sense that a control dependency always extends to all instructions following the original target in program order.
-Consider Figure~\ref{fig:litmus:control1}: the instruction at {\tt next} will always execute, but memory operation generated by that last instruction nevertheless still has control dependency from the memory operation generated by the first instruction.
+Consider Figure~\ref{fig:litmus:control1}: the instruction at {\tt next} will always execute, but the memory operation generated by that last instruction nevertheless still has a control dependency from the memory operation generated by the first instruction.
 
 \begin{verbbox}
         lw  x1,0(x2)
-        bne x1,x0,NEXT
+        bne x1,x0,next
   next: sw  x3,0(x4)
 \end{verbbox}
 \begin{figure}[h!]
@@ -649,7 +649,7 @@ Likewise, consider Figure~\ref{fig:litmus:control2}.
 Even though both branch outcomes have the same target, there is still a control dependency from the memory operation generated by the first instruction in this snippet to the memory operation generated by the last instruction.
 This definition of control dependency is subtly stronger than what might be seen in other contexts (e.g., C++), but it conforms with standard definitions of control dependencies in the literature.
 
-Notably, PPO rules \ref{ppo:addr}--\ref{ppo:ctrl} are also intentionally designed to respect dependencies that originate from the output of a successful store conditional instruction.
+Notably, PPO rules \ref{ppo:addr}--\ref{ppo:ctrl} are also intentionally designed to respect dependencies that originate from the output of a successful store-conditional instruction.
 Typically, an SC instruction will be followed by a conditional branch checking whether the outcome was successful; this implies that there will be a control dependency from the store operation generated by the SC instruction to any memory operations following the branch.
 PPO rule~\ref{ppo:ctrl} in turn implies that any subsequent store operations will appear later in the global memory order than the store operation generated by the SC.
 However, since control, address, and data dependencies are defined over memory operations, and since an unsuccessful SC does not generate a memory operation, no order is enforced between unsuccessful SC and its dependent instructions.
