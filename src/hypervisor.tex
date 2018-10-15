@@ -1,14 +1,15 @@
-\chapter{Hypervisor Extension, Version 0.1-draft}
+\chapter{Hypervisor Extension, Version 0.2-draft}
 \label{hypervisor}
 
 This chapter describes the RISC-V hypervisor extension, which virtualizes the
 supervisor-level architecture to support the efficient hosting of guest
 operating systems atop a type-1 or type-2 hypervisor.
-The hypervisor extension adds a new privilege
-mode, {\em hypervisor-extended supervisor mode} (HS-mode, or {\em hypervisor
+The hypervisor extension changes supervisor mode into
+{\em hypervisor-extended supervisor mode} (HS-mode, or {\em hypervisor
 mode} for short), where a hypervisor or a hosting-capable operating system
 runs.  The hypervisor extension also adds another level of address translation,
-from guest virtual addresses to host virtual addresses, to virtualize the
+from {\em guest physical addresses} to supervisor physical addresses,
+to virtualize the
 memory and memory-mapped I/O subsystems for a guest operating system.  HS-mode
 acts the same as S-mode, but with additional instructions and CSRs that control
 the new level of address translation and support hosting a guest OS in virtual
@@ -81,10 +82,9 @@ possible operating modes of a RISC-V hart with the hypervisor extension.
 
 An OS or hypervisor running in HS-mode uses the supervisor CSRs to interact with the exception,
 interrupt, and address-translation subsystems.
-Additional CSRs are provided to HS-mode, but not to VS-mode, to control
-the behavior of a VS-mode guest:
-{\tt hvtval}, {\tt hstatus}, {\tt hedeleg}, and
-{\tt hideleg}.
+Additional CSRs are provided to HS-mode, but not to VS-mode, to manage
+two-level address translation and to control the behavior of a VS-mode guest:
+{\tt hstatus}, {\tt hedeleg}, {\tt hideleg}, and {\tt hgatp}.
 
 Additionally, several {\em background} supervisor CSRs are copies of one of
 the existing {\em foreground} supervisor CSRs.  For example, the {\tt
@@ -98,35 +98,19 @@ version, and the foreground supervisor CSRs contain VS-mode's
 version.  The background registers are accessible to HS-mode, but not to
 VS-mode.
 
+\begin{commentary}
+The swapping of foreground and background supervisor registers can be
+implemented either by physically copying bits or by dynamically changing the
+CSR addresses of hardware registers.
+The CSR addresses of the background supervisor registers have been aligned with
+their foreground counterparts to minimize the cost of swapping registers simply
+by changing their addresses.
+\end{commentary}
+
 In this section, we use the term {\em HSXLEN} to refer to the effective XLEN
 when executing in HS-mode.
 
-\subsection{Hypervisor Virtual Trap Value ({\tt hvtval}) Register}
-
-The {\tt hvtval} register is an HSXLEN-bit read-write register formatted as shown
-in Figure~\ref{hvtvalreg}.  When an access fault, page fault, or misaligned
-address exception is taken into HS-mode, {\tt hvtval} is
-written with the original virtual address that caused the exception.
-For other traps into HS-mode, {\tt hvtval} is written with zero.
-
-\begin{figure}[h!]
-{\footnotesize
-\begin{center}
-\begin{tabular}{@{}J}
-\instbitrange{HSXLEN-1}{0} \\
-\hline
-\multicolumn{1}{|c|}{\tt hvtval} \\
-\hline
-HSXLEN \\
-\end{tabular}
-\end{center}
-}
-\vspace{-0.1in}
-\caption{Hypervisor virtual trap value register ({\tt hvtval}).}
-\label{hvtvalreg}
-\end{figure}
-
-\subsection{Hypervisor Status ({\tt hstatus}) Register}
+\subsection{Hypervisor Status Register ({\tt hstatus})}
 
 The {\tt hstatus} register is an HSXLEN-bit read/write register
 formatted as shown in Figure~\ref{hstatusreg}.  The {\tt hstatus}
@@ -137,31 +121,33 @@ that track and control the exception behavior of a VS-mode guest.
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{EcccWcYccR}
+\begin{tabular}{ScccRccccFc}
 \\
 \instbitrange{HSXLEN-1}{23} &
 \instbit{22} &
 \instbit{21} &
 \instbit{20} &
-\instbitrange{19}{18} &
-\instbit{17} &
-\instbitrange{16}{11} &
+\instbitrange{19}{11} &
 \instbit{10} &
 \instbit{9} &
-\instbitrange{8}{0} \\
+\instbit{8} &
+\instbit{7} &
+\instbitrange{6}{1} &
+\instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{\wpri} &
 \multicolumn{1}{c|}{VTSR} &
 \multicolumn{1}{c|}{VTW} &
 \multicolumn{1}{c|}{VTVM} &
 \multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{SPRV} &
-\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPV} &
 \multicolumn{1}{c|}{STL} &
-\multicolumn{1}{c|}{\wpri} \\
+\multicolumn{1}{c|}{SP2P} &
+\multicolumn{1}{c|}{SP2V} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{SPRV} \\
 \hline
-HSXLEN-23 & 1 & 1 & 1 & 2 & 1 & 6 & 1 & 1 & 9 \\
+HSXLEN-23 & 1 & 1 & 1 & 9 & 1 & 1 & 1 & 1 & 6 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -172,8 +158,7 @@ HSXLEN-23 & 1 & 1 & 1 & 2 & 1 & 6 & 1 & 1 & 9 \\
 
 The {\tt hstatus} fields VTSR, VTW, and VTVM are defined analogously to the
 {\tt mstatus} fields TSR, TW, and TVM, but affect the trapping behavior of the
-SRET, WFI, and virtual-memory management instructions in the VS-mode guest
-only.
+SRET, WFI, and virtual-memory management instructions only when V=1.
 
 The SPV bit (Supervisor Previous Virtualization Mode) is written by the implementation
 whenever a trap is taken into HS-mode.  Just as the SPP bit in {\tt sstatus} is set to the privilege
@@ -181,30 +166,40 @@ mode at the time of the trap, the SPV bit in {\tt hstatus} is set to the value o
 mode V at the time of the trap.  When an SRET instruction is executed when V=0,
 V is set to SPV.
 
+When a trap is taken into HS-mode, bits SP2V and SP2P are set to the values
+that SPV and the HS-level SPP had before the trap.
+(Before the trap, the HS-level SPP is {\tt sstatus}.SPP if V=0, or
+{\tt bsstatus}.SPP if V=1.)
+When an SRET instruction is executed when V=0, the reverse assignments occur:
+after SPV and {\tt sstatus}.SPP have supplied the new virtualization and
+privilege modes, they are written with SP2V and SP2P, respectively.
+
 The STL bit (Supervisor Translation Level), which indicates which address-translation level
-caused a page-fault exception, is also written by the implementation whenever a trap
-is taken into HS-mode.  On an access fault, or on a page fault due to HS-level address
-translation, STL is set to 0.  For any other trap into HS-mode, STL is set to the value
-of V at the time of the trap.
+caused an access-fault or page-fault exception, is also written by the implementation whenever a trap
+is taken into HS-mode.
+On an access or page fault due to guest physical address translation, STL is
+set to 1.
+For any other trap into HS-mode, STL is set to 0.
 
 The SPRV bit modifies the privilege with which loads and stores execute when
 not in M-mode.
 When SPRV=0, translation and protection behave as normal.  When SPRV=1,
 load and store memory addresses are translated and protected as though
-the current privilege mode were set to {\tt sstatus}.SPP and the current
-virtualization mode were set to {\tt hstatus}.SPV.
+the current virtualization mode were set to {\tt hstatus}.SPV and the current
+privilege mode were set to the HS-level SPP ({\tt sstatus}.SPP when V=0, or
+{\tt bsstatus}.SPP when V=1).
 Table~\ref{h-sprv} enumerates the cases.
 
 \begin{table*}[h!]
 \begin{center}
-\begin{tabular}{|c|c|c||p{5in}|}
+\begin{tabular}{|c|c|c||p{4.7in}|}
   \hline
    SPRV & SPV & SPP & Effect \\ \hline \hline
    0    & --  & --  & Normal access; current privilege and virtualization modes apply. \\ \hline
    1    & 0   & 0   & U-level access with HS-level translation and protection only. \\ \hline
    1    & 0   & 1   & HS-level access with HS-level translation and protection only. \\ \hline
-   1    & 1   & 0   & VU-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. \\ \hline
-   1    & 1   & 1   & VS-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. {\tt bsstatus}.SUM applies instead of {\tt sstatus}.SUM. \\ \hline
+   1    & 1   & 0   & VU-level access with two-level translation and protection. The HS-level MXR bit makes any executable page readable.  The VS-level MXR makes readable those pages marked executable at the VS translation level only if readable at the guest-physical translation level. \\ \hline
+   1    & 1   & 1   & VS-level access with two-level translation and protection. The HS-level MXR bit makes any executable page readable.  The VS-level MXR makes readable those pages marked executable at the VS translation level only if readable at the guest-physical translation level.  The VS-level SUM bit applies instead of HS-level SUM. \\ \hline
  \end{tabular}
 \end{center}
 \caption{Effect on load and store translation and protection under SPRV.}
@@ -259,17 +254,163 @@ HSXLEN \\
 \end{figure}
 
 The {\tt hedeleg} and {\tt hideleg} registers are only active when V=1.  When
-V=1, any trap that has been delegated to HS-mode (using {\tt medeleg} or {\tt
+V=1, a trap that has been delegated to HS-mode (using {\tt medeleg} or {\tt
 mideleg}) is further delegated to VS-mode if the corresponding {\tt hedeleg} or
 {\tt hideleg} bit is set.  If the N extension for user-mode interrupts
 is implemented, the VS-mode guest may further delegate the interrupt
 to VU-mode by setting the corresponding bit in {\tt sedeleg} or {\tt sideleg}.
 
-When V=0 and the N extension for user-mode interrupts is implemented, any trap
+When V=0 and the N extension for user-mode interrupts is implemented, a trap
 that has been delegated to HS-mode can be further delegated to U-mode by
 setting the corresponding bit in {\tt sedeleg} or {\tt sideleg}.
 
-\subsection{Background Supervisor Status ({\tt bsstatus}) Register}
+When an access-fault or page-fault exception is caused by guest physical
+address translation, the trap is not delegated beyond HS-mode, regardless of
+the setting of {\tt hedeleg}.
+
+\subsection{Hypervisor Guest Address Translation and Protection Register ({\tt hgatp})}
+\label{sec:hgatp}
+
+The {\tt hgatp} register is an HSXLEN-bit read/write register, formatted as
+shown in Figure~\ref{rv32hgatp} for HSXLEN=32 and Figure~\ref{rv64hgatp} for
+HSXLEN=64, which controls guest physical address translation and protection.
+Similar to CSR {\tt satp}, this register holds the physical page number (PPN)
+of the guest-physical root page table; a virtual machine identifier (VMID),
+which facilitates address-translation fences on a per-virtual-machine basis;
+and the MODE field, which selects the address-translation scheme for guest
+physical addresses.
+When {\tt mstatus}.TVM=1, attempts to read or write {\tt hgatp} while executing
+in HS-mode will raise an illegal instruction exception.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{cY@{}E@{}K}
+\instbit{31} &
+\instbitrange{30}{29} &
+\instbitrange{28}{22} &
+\instbitrange{21}{0} \\
+\hline
+\multicolumn{1}{|c|}{MODE} &
+\multicolumn{1}{|c|}{0 (\warl)} &
+\multicolumn{1}{|c|}{VMID (\warl)} &
+\multicolumn{1}{|c|}{PPN  (\warl)} \\
+\hline
+1 & 2 & 7 & 22 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{RV32 Hypervisor guest address translation and protection register
+{\tt hgatp}.}
+\label{rv32hgatp}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}S@{}Y@{}E@{}K}
+\instbitrange{63}{60} &
+\instbitrange{59}{58} &
+\instbitrange{57}{44} &
+\instbitrange{43}{0} \\
+\hline
+\multicolumn{1}{|c|}{MODE (\warl)} &
+\multicolumn{1}{|c|}{0 (\warl)} &
+\multicolumn{1}{|c|}{VMID (\warl)} &
+\multicolumn{1}{|c|}{PPN  (\warl)} \\
+\hline
+4 & 2 & 14 & 44 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{RV64 Hypervisor guest address translation and protection register
+{\tt hgatp}, for MODE values Bare, Sv39x4, and Sv48x4.}
+\label{rv64hgatp}
+\end{figure}
+
+Table~\ref{tab:hgatp-mode} shows the encodings of the MODE field for RV32 and
+RV64.
+When MODE=Bare, guest physical addresses are equal to supervisor physical
+addresses, and there is no further memory protection for a guest virtual
+machine beyond the physical memory protection scheme described in
+Section~\ref{sec:pmp}.
+In this case, the remaining fields in {\tt hgatp} have no effect.
+
+For RV32, the only other valid setting for MODE is Sv32x4, which is a
+modification of the usual Sv32 paged virtual-memory scheme, extended to support
+34-bit guest physical addresses.
+For RV64, modes Sv39x4 and Sv48x4 are defined as modifications of the Sv39 and
+Sv48 paged virtual-memory schemes.
+All these paged virtual-memory schemes are described in
+Section~\ref{sec:guest-addr-translation}.
+An additional RV64 scheme, Sv57x4, may be defined in a later version of this
+specification.
+
+The remaining MODE settings for RV64 are reserved for future use and may define
+different interpretations of the other fields in {\tt hgatp}.
+
+RV64 implementations are not required to support all defined RV64 MODE
+settings.
+(However, a write to {\tt hgatp} with an unsupported MODE value is not ignored
+as it is for {\tt satp}.)
+
+\begin{table}[h]
+\begin{center}
+\begin{tabular}{|c|c|l|}
+\hline
+\multicolumn{3}{|c|}{RV32} \\
+\hline
+Value  & Name & Description \\
+\hline
+0      & Bare   & No translation or protection. \\
+1      & Sv32x4 & Page-based 34-bit virtual addressing (2-bit extension of Sv32). \\
+\hline \hline
+\multicolumn{3}{|c|}{RV64} \\
+\hline
+Value  & Name & Description \\
+\hline
+0      & Bare   & No translation or protection. \\
+1--7   & ---    & {\em Reserved} \\
+8      & Sv39x4 & Page-based 41-bit virtual addressing (2-bit extension of Sv39). \\
+9      & Sv48x4 & Page-based 50-bit virtual addressing (2-bit extension of Sv48). \\
+10     & {\em Sv57x4} & {\em Reserved for page-based 59-bit virtual addressing.} \\
+11--15 & ---    & {\em Reserved} \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encoding of {\tt hgatp} MODE field.}
+\label{tab:hgatp-mode}
+\end{table}
+
+As explained in Section~\ref{sec:guest-addr-translation}, for the paged
+virtual-memory schemes (Sv32x4, Sv39x4, and Sv48x4), the root page table is
+16~KiB and must be aligned to a 16-KiB boundary.
+In these modes, the lowest two bits of the physical page number (PPN) in
+{\tt hgatp} are ignored.
+An implementation that supports only the defined paged virtual-memory schemes
+and/or Bare may hardwire PPN[1:0] to zero.
+
+The number of supervisor physical address bits is implementation-defined; any
+unimplemented address bits are hardwired to zero in {\tt hgatp}.PPN.
+The number of VMID bits is also implementation-defined and may be zero.
+The number of implemented VMID bits, termed {\mbox {\em VMIDLEN}}, may be
+determined by writing one to every bit position in the VMID field, then reading
+back the value in {\tt hgatp} to see which bit positions in the VMID field hold
+a one.
+The least-significant bits of VMID are implemented first:
+that is, if VMIDLEN~$>$~0, VMID[VMIDLEN-1:0] is writable.
+The maximal value of VMIDLEN, termed VMIDMAX, is 7 for Sv32x4 or 14 for Sv39x4
+and Sv48x4.
+
+Note that writing {\tt hgatp} does not imply any ordering constraints between
+page-table updates and subsequent guest physical address translations.
+If the new virtual machine's guest physical page tables have been modified, it
+may be necessary to execute an HFENCE.GVMA instruction
+(see Section~\ref{sec:hfence.vma}) before or after writing {\tt hgatp}.
+
+\subsection{Background Supervisor Status Register ({\tt bsstatus})}
 
 The {\tt bsstatus} register is an HSXLEN-bit read/write register formatted as
 shown in Figure~\ref{bsstatusreg}.  When V=0, the {\tt bsstatus} register
@@ -458,7 +599,7 @@ HS-mode.
 \instbitrange{HSXLEN-1}{2} &
 \instbitrange{1}{0} \\
 \hline
-\multicolumn{1}{|c|}{BASE[HSXLEN-1:2] (\warl)} & 
+\multicolumn{1}{|c|}{BASE[HSXLEN-1:2] (\warl)} &
 \multicolumn{1}{c|}{MODE (\warl)} \\
 \hline
 HSXLEN-2 & 2 \\
@@ -609,9 +750,11 @@ When V=0, the {\tt bsatp} register holds VS-mode's version of the
 V=1, or vice-versa), the implementation swaps the contents of {\tt bsatp} and
 {\tt satp}.
 
-When V=0, {\tt bsatp} does not directly affect the behavior of the machine.  When V=1,
-it controls the translation of guest physical addresses to
-machine physical addresses.  The interpretation of the MODE, ASID, and PPN
+{\tt bsatp} does not directly affect the behavior of the machine, unless the
+MPRV feature in the {\tt mstatus} register or the SPRV feature in the
+{\tt hstatus} register is used to execute a load or store {\em as though} V is
+the opposite of its actual setting.
+The interpretation of the MODE, ASID, and PPN
 fields is the same as for {\tt satp}.
 
 \begin{figure}[h!]
@@ -622,9 +765,9 @@ fields is the same as for {\tt satp}.
 \instbitrange{30}{22} &
 \instbitrange{21}{0} \\
 \hline
-\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
-\multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
-\multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
+\multicolumn{1}{|c|}{MODE (\warl)} &
+\multicolumn{1}{|c|}{ASID (\warl)} &
+\multicolumn{1}{|c|}{PPN  (\warl)} \\
 \hline
 1 & 9 & 22 \\
 \end{tabular}
@@ -643,9 +786,9 @@ fields is the same as for {\tt satp}.
 \instbitrange{59}{44} &
 \instbitrange{43}{0} \\
 \hline
-\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
-\multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
-\multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
+\multicolumn{1}{|c|}{MODE (\warl)} &
+\multicolumn{1}{|c|}{ASID (\warl)} &
+\multicolumn{1}{|c|}{PPN  (\warl)} \\
 \hline
 4 & 16 & 44 \\
 \end{tabular}
@@ -659,48 +802,119 @@ values Bare, Sv39, and Sv48.}
 
 \section{Hypervisor Instructions}
 
-The hypervisor extension adds one new instruction, HRET, which is valid only
-in HS-mode when {\tt mstatus}.TSR=0, or in M-mode (irrespective of {\tt
-mstatus}.TSR).  HRET sets {\tt hstatus}.SPV=1, then performs an SRET.
+The hypervisor extension adds two new privileged fence instructions.
+
+\subsection{Hypervisor Memory-Management Fence Instructions}
+\label{sec:hfence.vma}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+HFENCE.GVMA & vmid & gaddr & PRIV & 0 & SYSTEM \\
+HFENCE.BVMA & asid & vaddr & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+The hypervisor memory-management fence instructions, HFENCE.GVMA and
+HFENCE.BVMA, are valid only in HS-mode when {\tt mstatus}.TVM=0, or in M-mode
+(irrespective of {\tt mstatus}.TVM).
+These instructions perform a function similar to SFENCE.VMA
+(Section~\ref{sec:sfence.vma}), except applying to the guest-physical
+memory-management data structures controlled by CSR {\tt hgatp} (HFENCE.GVMA)
+or the VS-level memory-management data structures controlled by CSR {\tt bsatp}
+(HFENCE.BVMA).
+Instruction SFENCE.VMA applies only to the memory-management data structures
+controlled by the foreground {\tt satp}.
+
+If an HFENCE.BVMA instruction executes without trapping, its effect is much the
+same as temporarily entering VS-mode (with the usual swapping of foreground and
+background supervisor registers) and executing SFENCE.VMA.
+Executing an HFENCE.BVMA guarantees that any stores in the instruction stream
+prior to the HFENCE.BVMA are ordered before implicit references to VS-level
+memory-management data structures when those implicit references
+\begin{compactitem}
+\item
+are subsequent to the HFENCE.BVMA, and
+\item
+occur when {\tt hgatp}.VMID has the same setting as it did when HFENCE.BVMA
+executed.
+\end{compactitem}
+Implicit references need not be ordered when {\tt hgatp}.VMID is different than
+at the time HFENCE.BVMA executed.
+If operand {\em rs1}$\neq${\tt x0}, it specifies a single guest virtual
+address, and if operand {\em rs2}$\neq${\tt x0}, it specifies a single guest
+address-space identifier
+(ASID).
 
 \begin{commentary}
-As compared to setting {\tt hstatus}.SPV then executing SRET, HRET halves the
-number of emulation traps when executing an HS-mode hypervisor on an
-implementation without the hypervisor extension, or when recursively
-virtualizing.  The need to set {\tt hstatus}.SPV before executing SRET arises
-when the hypervisor takes an interrupt while servicing a trap from a guest,
-because the nested interrupt clears {\tt hstatus}.SPV.
+An HFENCE.BVMA instruction applies only to a single virtual machine, identified
+by the setting of {\tt hgatp}.VMID when HFENCE.BVMA executes.
+\end{commentary}
+
+When {\em rs2}$\neq${\tt x0}, bits XLEN-1:ASIDMAX of the value held in {\em
+rs2} are reserved for future use and should be zeroed by software and ignored
+by current implementations.
+Furthermore, if ASIDLEN~$<$~ASIDMAX, the implementation shall ignore bits
+ASIDMAX-1:ASIDLEN of the value held in {\em rs2}.
+
+\begin{commentary}
+Simpler implementations of HFENCE.BVMA can ignore the guest virtual address in
+{\em rs1} and the guest ASID value in {\em rs2}, as well as {\tt hgatp}.VMID,
+and always perform a global fence for the VS-level memory management of all
+virtual machines, or even a global fence for all memory-management data
+structures.
+\end{commentary}
+
+Executing an HFENCE.GVMA instruction guarantees that any stores in the
+instruction stream prior to the HFENCE.GVMA are ordered before all implicit
+references to guest-physical memory-management data structures subsequent to
+the HFENCE.GVMA.
+If operand {\em rs1}$\neq${\tt x0}, it specifies a single guest physical
+address, shifted right by 2~bits, and if operand {\em rs2}$\neq${\tt x0}, it
+specifies a single virtual machine identifier (VMID).
+
+\begin{commentary}
+For HFENCE.GVMA, a guest physical address specified in {\em rs1} is shifted
+right by 2~bits to accomodate addresses wider than the current XLEN.
+For RV32, the hypervisor extension permits guest physical addresses as wide as
+34 bits, and {\em rs1} specifies bits 33:2 of such an address.
+This shift-by-2 encoding of guest physical addresses matches the encoding of
+physical addresses in PMP address registers (Section~\ref{sec:pmp}) and in page
+table entries (Sections \ref{sec:sv32}, \ref{sec:sv39}, and~\ref{sec:sv48}).
+\end{commentary}
+
+When {\em rs2}$\neq${\tt x0}, bits XLEN-1:VMIDMAX of the value held in {\em
+rs2} are reserved for future use and should be zeroed by software and ignored
+by current implementations.
+Furthermore, if VMIDLEN~$<$~VMIDMAX, the implementation shall ignore bits
+VMIDMAX-1:VMIDLEN of the value held in {\em rs2}.
+
+\begin{commentary}
+Simpler implementations of HFENCE.GVMA can ignore the guest physical address in
+{\em rs1} and the VMID value in {\em rs2} and always perform a global fence for
+the guest-physical memory management of all virtual machines, or even a global
+fence for all memory-management data structures.
 \end{commentary}
 
 \section{Machine-Level CSRs}
 
-The hypervisor extension adds one new machine-level CSR, {\tt mvtval}, and
-augments the {\tt mstatus} CSR.
-
-\subsection{Machine Virtual Trap Value ({\tt mvtval}) Register}
-
-The {\tt mvtval} register is an MXLEN-bit read-write register formatted as shown
-in Figure~\ref{mvtvalreg}.  When an access fault, page fault, or misaligned
-address exception is taken into M-mode, {\tt mvtval} is
-written with the original virtual address that caused the exception.
-For other traps into M-mode, {\tt mvtval} is written with zero.
-
-\begin{figure}[h!]
-{\footnotesize
-\begin{center}
-\begin{tabular}{@{}J}
-\instbitrange{MXLEN-1}{0} \\
-\hline
-\multicolumn{1}{|c|}{\tt mvtval} \\
-\hline
-MXLEN \\
-\end{tabular}
-\end{center}
-}
-\vspace{-0.1in}
-\caption{Machine Virtual Trap Value register ({\tt mvtval}).}
-\label{mvtvalreg}
-\end{figure}
+The hypervisor extension augments the {\tt mstatus} CSR.
 
 \subsection{Machine Status Register ({\tt mstatus})}
 
@@ -794,17 +1008,19 @@ mode V at the time of the trap.  When an MRET instruction is executed, the
 virtualization mode V is set to MPV, unless MPP=3, in which case V remains 0.
 
 The MTL bit (Machine Translation Level), which indicates which address-translation level
-caused a page-fault exception, is also written by the implementation whenever a trap
-is taken into M-mode.  On an access fault, or on a page fault due to HS-level address
-translation, MTL is set to 0.  For any other trap into M-mode, MTL is set to the value
-of V at the time of the trap.
+caused an access-fault or page-fault exception, is also written by the implementation whenever a trap
+is taken into M-mode.
+On an access or page fault due to guest physical address translation, MTL is
+set to 1.
+For any other trap into M-mode, MTL is set to 0.
 
 The SXL field controls the value of XLEN for HS-mode.
-The UXL field controls the value of XLEN for VS-mode when V=1, or for U-mode when V=0.
+The UXL field controls the value of XLEN for VS-mode or U-mode when V=0, or for
+VU-mode when V=1.
 
 The TSR and TVM fields only affect execution in HS-mode.
 
-The TW field affects execution in both HS-mode and VS-mode.
+The TW field affects execution in all modes except M-mode.
 
 The hypervisor extension changes the behavior of the the Modify Privilege
 field, MPRV.  When MPRV=0, translation and protection behave as normal.  When
@@ -814,124 +1030,271 @@ MPV.  Table~\ref{h-mprv} enumerates the cases.
 
 \begin{table*}[h!]
 \begin{center}
-\begin{tabular}{|c|c|c||p{5in}|}
+\begin{tabular}{|c|c|c||p{4.5in}|}
   \hline
    MPRV & MPV & MPP & Effect \\ \hline \hline
    0    & --  & --  & Normal access; current privilege and virtualization modes apply. \\ \hline
    1    & 0   & 0   & U-level access with HS-level translation and protection only. \\ \hline
    1    & 0   & 1   & HS-level access with HS-level translation and protection only.  \\ \hline
    1    & --  & 3   & M-level access with no translation. \\ \hline
-   1    & 1   & 0   & VU-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. \\ \hline
-   1    & 1   & 1   & VS-level access with two-level translation and protection. {\tt sstatus}.MXR makes any executable page readable.  {\tt bsstatus}.MXR makes readable those pages marked executable at the VS translation level only if readable at the HS translation level. {\tt bsstatus}.SUM applies instead of {\tt sstatus}.SUM. \\ \hline
+   1    & 1   & 0   & VU-level access with two-level translation and protection. The HS-level MXR bit makes any executable page readable.  The VS-level MXR makes readable those pages marked executable at the VS translation level only if readable at the guest-physical translation level. \\ \hline
+   1    & 1   & 1   & VS-level access with two-level translation and protection. The HS-level MXR bit makes any executable page readable.  The VS-level MXR makes readable those pages marked executable at the VS translation level only if readable at the guest-physical translation level.  The VS-level SUM bit applies instead of HS-level SUM. \\ \hline
  \end{tabular}
 \end{center}
-\caption{Effect on load and store translation and protection under MPRV.  When MPRV=1, MPP$\neq$3, and {\tt hstatus}.SPRV=1, the effective privilege is further modified: {\tt hstatus}.SPV applies instead of MPV, and {\tt sstatus}.SPP applies instead of MPP.}
+\caption{Effect on load and store translation and protection under MPRV.  When MPRV=1, MPP$\neq$3, and {\tt hstatus}.SPRV=1, the effective privilege is further modified: {\tt hstatus}.SPV applies instead of MPV, and the HS-level SPP applies instead of MPP.}
 \label{h-mprv}
 \end{table*}
 
-The {\tt mstatus} register is a superset of the {\tt sstatus} register;
+The {\tt mstatus} register is a superset of the foreground {\tt sstatus}
+register;
 modifying a field in {\tt sstatus} modifies the homonymous field in {\tt
 mstatus}, and vice-versa.
 
 \section{Two-Level Address Translation}
+\label{sec:two-level-translation}
 
-Whenever the current virtualization mode V is 1, two-level address translation
-and protection is in effect.  For any virtual memory access, the original
-virtual address is first converted
-by VS-level address translation, as controlled by the {\tt satp} register, into
-a {\em guest physical address}.  The guest physical address is then
-converted by HS-level address translation, as controlled by the {\tt bsatp}
-register, into a {\em machine physical address}.
+Whenever the current virtualization mode V is 1 (and assuming both
+{\tt mstatus}.MPRV=0 and {\tt hstatus}.SPRV=0), two-level address translation
+and protection is in effect.
+For any virtual memory access, the original virtual address is first converted
+by VS-level address translation, as controlled by the VS-level {\tt satp}
+register, into a {\em guest physical address}.
+The guest physical address is then converted by guest physical address
+translation, as controlled by the {\tt hgatp} register, into a supervisor
+physical address.
 Although there is no option to disable two-level address translation when V=1,
 either level of translation can be effectively disabled by zeroing the
-corresponding {\tt satp} or {\tt bsatp} register.
+corresponding {\tt satp} or {\tt hgatp} register.
 
-For the purposes of HS-level address translation and protection, all memory
-accesses made with V=1---including those made by the VS-level
-address-translation hardware---are considered user-level accesses.  In
-addition to satisfying VS-level translation and protection, the access type
-must be permitted at user level by HS-level translation and protection.
-The user page protections at HS level are perceived by VS-mode as physical
-memory protection.  Figure~\ref{hs-pte-perm} summarizes the effective
-permissions at each translation level.
+The VS-level MXR setting, which makes execute-only pages readable, only
+overrides VS-level page protection.
+Setting MXR at VS-level does not override guest-physical page protections.
+Setting MXR at HS-level, however, overrides both VS-level and guest-physical
+execute-only permissions.
 
-\begin{table*}[h!]
-\begin{center}
-\begin{tabular}{|c|c||l|l|l|}
-  \hline
-   Virtualization & Privilege & Permissions at VS   & Permissions at HS \\
-   Mode (V)       & Mode      & translation level   & translation level \\ \hline
-   0              & U         & ---                 & User \\
-   0              & HS        & ---                 & Supervisor \\
-  \hline
-   1              & VU        & User                & User \\
-   1              & VS        & Supervisor          & User \\
-  \hline
- \end{tabular}
-\end{center}
-\caption{Effective virtual-memory permissions at each address-translation level.}
-\label{hs-pte-perm}
-\end{table*}
+When V=1, memory accesses that would normally bypass address translation are
+subject to guest physical address translation alone.
+This includes memory accesses made in support of VS-level address translation,
+such as reads and writes of VS-level page tables.
 
-An HS-level memory protection fault caused by an access made by the
-VS-level address translation hardware raises a load or store page
-fault exception.  HS-level memory protection faults caused by other
-accesses with V = 1 raise the page-fault exception corresponding to
-the original access type (instruction, load, or store/AMO).  HS-level
-memory protection faults are treated as HS-level exceptions for the purpose of
-exception delegation, and so are not delegated to VS-mode, regardless of the
-setting of the {\tt hedeleg} register.
-
-Note that the VS-level MXR setting, which makes execute-only pages readable,
-only overrides VS-level page protection.  Setting MXR at VS-level does not override
-HS-level page protections.  Setting MXR at HS-level, however, overrides
-both HS-level and VS-level execute-only permissions.
-
-For the purposes of HS-level address translation protection, memory accesses
-made in HS mode are considered supervisor-level accesses.  For example, for an
-HS-mode virtual memory access to succeed, the corresponding HS-level page-table
-entry must not have its U bit set, unless overridden by {\tt sstatus}.SUM.
-
-Machine-level physical memory protection applies to machine physical
+Machine-level physical memory protection applies to supervisor physical
 addresses and is in effect regardless of virtualization mode.
+
+\subsection{Guest Physical Address Translation}
+\label{sec:guest-addr-translation}
+
+The mapping of guest physical addresses to supervisor physical addresses is
+controlled by CSR {\tt hgatp} (Section~\ref{sec:hgatp}).
+
+When the address translation scheme selected by the MODE field of {\tt hgatp}
+is Bare, guest physical addresses are equal to supervisor physical addresses
+without modification, and no memory protection applies in the trivial
+translation of guest physical addresses to supervisor physical addresses.
+
+When {\tt hgatp}.MODE specifies a translation scheme of Sv32x4, Sv39x4, or
+Sv48x4, guest physical address translation is a variation on the usual
+page-based virtual address translation scheme of Sv32, Sv39, or Sv48,
+respectively.
+In each case, the size of the incoming address is widened by 2~bits (to 34, 41,
+or 50 bits).
+To accomodate the 2~extra bits, the root page table (only) is expanded by a
+factor of four to be 16~KiB instead of the usual 4~KiB.
+Matching its larger size, the root page table also must be aligned to a 16~KiB
+boundary instead of the usual 4~KiB page boundary.
+Except as noted, all other aspects of Sv32, Sv39, or Sv48 are adopted unchanged
+for guest physical address translation.
+Non-root page tables and all page table entries (PTEs) have the same formats as
+documented in Sections \ref{sec:sv32}, \ref{sec:sv39}, and~\ref{sec:sv48}.
+
+For Sv32x4, an incoming guest physical address is partitioned into a virtual
+page number (VPN) and page offset as shown in Figure~\ref{sv32x4va}.
+This partitioning is identical to that for an Sv32 virtual address as depicted
+in Figure~\ref{sv32va} (page~\pageref{sv32va}), except with 2 more bits at the
+high end in VPN[1].
+(Note that the fields of a partitioned guest physical address also correspond
+one-for-one with the structure that Sv32 assigns to a physical address,
+depicted in Figure~\ref{rv32va}.)
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}E@{}O@{}E}
+\instbitrange{33}{22} &
+\instbitrange{21}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+12 & 10 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv32x4 virtual address (guest physical address).}
+\label{sv32x4va}
+\end{figure*}
+
+For Sv39x4, an incoming guest physical address is partitioned as shown in
+Figure~\ref{sv39x4va}.
+This partitioning is identical to that for an Sv39 virtual address as depicted
+in Figure~\ref{sv39va} (page~\pageref{sv39va}), except with 2 more bits at the
+high end in VPN[2].
+Address bits 63:41 must all be zeros, or else a page-fault exception occurs,
+attributed to guest physical address translation.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}E@{}O@{}O@{}O}
+\instbitrange{40}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+11 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv39x4 virtual address (guest physical address).}
+\label{sv39x4va}
+\end{figure*}
+
+For Sv48x4, an incoming guest physical address is partitioned as shown in
+Figure~\ref{sv48x4va}.
+This partitioning is identical to that for an Sv48 virtual address as depicted
+in Figure~\ref{sv48va} (page~\pageref{sv48va}), except with 2 more bits at the
+high end in VPN[3].
+Address bits 63:50 must all be zeros, or else a page-fault exception occurs,
+attributed to guest physical address translation.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}E@{}O@{}O@{}O@{}O}
+\instbitrange{49}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[3]} &
+\multicolumn{1}{c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+11 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv48x4 virtual address (guest physical address).}
+\label{sv48x4va}
+\end{figure*}
+
+\begin{commentary}
+The page-based guest physical address translation scheme for RV32, Sv32x4, is
+defined to support a 34-bit guest physical address so that an RV32 hypervisor
+need not be limited in its ability to virtualize real 32-bit RISC-V machines,
+even those with 33-bit or 34-bit physical addresses.
+This may include the possibility of a machine virtualizing itself, if it
+happens to use 33-bit or 34-bit physical addresses.
+Multiplying the size and alignment of the root page table by a factor of four
+is the cheapest way to extend Sv32 to cover a 34-bit address.
+The possible wastage of 12~KiB for an unnecessarily large root page table is
+expected to be of negligible consequence for most (maybe all) real uses.
+
+A consistent ability to virtualize machines having as much as four times the
+physical address space as virtual address space is believed to be of some
+utility also for RV64.
+For a machine supporting 39-bit virtual addresses (Sv39), for example, this
+allows the hypervisor extension to support up to a 41-bit physical address
+space without either necessitating hardware support for 48-bit virtual
+addresses (Sv48) or falling back to emulating the larger address space with
+shadow page tables.
+\end{commentary}
+
+The conversion of an Sv32x4, Sv39x4, or Sv48x4 guest physical address is
+accomplished with the same algorithm used for Sv32, Sv39, or Sv48, as presented
+in Section~\ref{sv32algorithm}, except that:
+\begin{compactitem}
+\item
+in step~1, $a = \mbox{{\tt hgatp}.PPN}\times\mbox{PAGESIZE}$;
+\item
+the current privilege mode is always taken to be U-mode; and
+\item
+instead of {\tt mstatus}.MXR, the HS-level MXR applies (usually in
+{\tt bsstatus}).
+\end{compactitem}
+
+For guest physical address translation, all memory accesses (including those
+made to access data structures for VS-level address translation) are considered
+to be user-level accesses, as though executed in U-mode.
+Access type permissions---readable, writable, or executable---are checked
+during guest physical address translation the same as for VS-level address
+translation.
+For a memory access made to support VS-level address translation (such as to
+read/write a VS-level page table), permissions are checked as though for a load
+or store, not for the original access type.
+However, any exception is always reported for the original access type
+(instruction, load, or store/AMO).
+
+Access faults and page faults raised by guest physical address translation are
+treated as HS-level exceptions for the purpose of exception delegation, so are
+not delegated to VS-mode, regardless of the setting of the {\tt hedeleg}
+register.
 
 \subsection{Memory-Management Fences}
 
 The behavior of the SFENCE.VMA instruction is affected by the current
 virtualization mode V.  When V=0, the virtual-address argument is an HS-level
-virtual address, and the ASID argument is an HS-level ASID.  If either argument
-is provided, the instruction orders stores only to HS-level address-translation
-structures with subsequent address translations.  If neither argument is
-provided, the instruction orders stores to all HS-level and VS-level address-translation structures
-with subsequent address translations.
+virtual address, and the ASID argument is an HS-level ASID.
+The instruction orders stores only to HS-level address-translation structures
+with subsequent HS-level address translations.
 
 When V=1, the virtual-address argument to SFENCE.VMA is a guest virtual
-address, and the ASID argument is a VS-level ASID.  The instruction
-orders stores only to the VS-level address-translation structures within the
-HS-level address-space specified by the {\tt bsatp} register.
+address within the current virtual machine, and the ASID argument is a VS-level
+ASID within the current virtual machine.
+The current virtual machine is identified by the VMID field of CSR {\tt hgatp},
+and the effective ASID can be considered to be the combination of this VMID
+with the VS-level ASID.
+The SFENCE.VMA instruction orders stores only to the VS-level
+address-translation structures with subsequent VS-level address translations
+for the same virtual machine, i.e., only when {\tt hgatp}.VMID is the same as
+when the SFENCE.VMA executed.
 
-When V=0, attempts to execute SFENCE.VMA in U-mode or when {\tt mstatus}.TVM=1
-raise an illegal instruction exception.  When V=1, attempts to execute
-SFENCE.VMA in VU-mode or when {\tt hstatus}.VTVM=1 raise an illegal instruction
-exception.
+Hypervisor instructions HFENCE.GVMA and HFENCE.BVMA provide additional
+memory-management fences to complement SFENCE.VMA.
+These instructions are described in Section~\ref{sec:hfence.vma}.
 
-\subsection{Trap Value Register Discipline}
+Section~\ref{pmp-vmem} discusses the intersection between physical memory
+protection (PMP) and page-based address translation.
+It is noted there that, when PMP settings are modified in a manner that affects
+either the physical memory that holds page tables or the physical memory to
+which page tables point, M-mode software must synchronize the PMP settings with
+the virtual memory system.
+For HS-level address translation, this is accomplished by executing in M-mode
+an SFENCE.VMA instruction with {\em rs1}={\tt x0} and {\em rs2}={\tt x0}, after
+the PMP CSRs are written.
+If guest physical address translation is in use, synchronization with its data
+structures is also needed.
+When PMP settings are modified in a manner that affects either the physical
+memory that holds guest-physical page tables or the physical memory to which
+guest-physical page tables point, an HFENCE.GVMA instruction with
+{\em rs1}={\tt x0} and {\em rs2}={\tt x0} must be executed in M-mode after the
+PMP CSRs are written.
+An HFENCE.BVMA instruction is not required.
 
-For an access fault, or for a page fault due to HS-level address translation,
-if V=1 at the time of the trap, then {\tt mtval} or {\tt stval} is written
-with the host virtual address (i.e., the guest physical address) obtained from
-translation of the original virtual address by VS-level address translation.
-For any other access fault, page fault, or misaligned address exception, {\tt
-mtval} or {\tt stval} is written with the original virtual address, as usual.
 
-When a trap is taken into M-mode that sets {\tt mstatus}.MPV=1 and {\tt
-mstatus}.MTL=0, register {\tt mvtval} contains the access's original virtual
-address (guest virtual address) and {\tt mtval} contains the host virtual
-address (guest physical address) after VS-level address translation.  Likewise,
-when a trap is taken into HS-mode that sets {\tt hstatus}.SPV=1 and {\tt
-hstatus}.STL=0, {\tt hvtval} contains the original virtual address (guest
-virtual address) and {\tt stval} contains the host virtual address (guest
-physical address) after VS-level address translation.
+\clearpage
 
 \section{Base ISA Control}
 
@@ -970,7 +1333,7 @@ separately.
 
   \hline
   Interrupt & Exception Code  & Description \\
-  \hline	 
+  \hline
   1         & 0               & User software interrupt \\
   1         & 1               & Supervisor software interrupt \\
   1         & 2               & {\em Reserved} \\
@@ -986,7 +1349,7 @@ separately.
   1         & $\ge$12         & {\em Reserved} \\ \hline
   0         & 0               & Instruction address misaligned \\
   0         & 1               & Instruction access fault \\
-  0         & 2               & Illegal instruction \\   
+  0         & 2               & Illegal instruction \\
   0         & 3               & Breakpoint \\
   0         & 4               & Load address misaligned \\
   0         & 5               & Load access fault \\
@@ -1045,8 +1408,10 @@ Upon trap return, MPV is ignored when MPP=3.}
 
 When a trap is taken into HS-mode, the following occurs: first, if the
 virtualization mode V was 1, the contents of the background supervisor
-registers are swapped with their foreground counterparts.  Then, {\tt
-hstatus}.SPV and {\tt sstatus}.SPP are set according to Table~\ref{h-spp}.
+registers are swapped with their foreground counterparts.
+Then, {\tt hstatus}.SP2V is set to {\tt hstatus}.SPV, {\tt hstatus}.SP2P is set
+to {\tt sstatus}.SPP, and lastly {\tt hstatus}.SPV and {\tt sstatus}.SPP are
+set according to Table~\ref{h-spp}.
 
 \begin{table*}[h!]
 \begin{center}
@@ -1064,8 +1429,9 @@ hstatus}.SPV and {\tt sstatus}.SPP are set according to Table~\ref{h-spp}.
 \end{table*}
 
 When a trap is taken into VS-mode, {\tt sstatus}.SPP is set according to
-Table~\ref{h-vspp}.  The {\tt hstatus}.SPV
-bit is not modified, and the current virtualization state V remains 1.
+Table~\ref{h-vspp}.
+Bits SP2V, SP2P, and SPV of {\tt hstatus} are not modified, and the current
+virtualization state V remains 1.
 
 \begin{table*}[h!]
 \begin{center}
@@ -1082,25 +1448,27 @@ bit is not modified, and the current virtualization state V remains 1.
 
 \section{Trap Return}
 
-The MRET instruction is used to return from a trap taken into M-mode.  MRET sets the
-privilege mode according to the values in {\tt mstatus}.MPP and {\tt
-mstatus}.MPV, as encoded in Table~\ref{h-mpp}.  MRET then sets {\tt pc}={\tt
-mepc}, then in {\tt mstatus} sets MPP=0, MIE=MPIE, then MPIE=1.  Finally, if
-MRET changed the current virtualization state V, the contents of the
-background supervisor registers are swapped with their foreground
-counterparts.
+The MRET instruction is used to return from a trap taken into M-mode.
+MRET sets the privilege mode according to the values of MPP and MPV in
+{\tt mstatus}, as encoded in Table~\ref{h-mpp}.
+MRET then in {\tt mstatus} sets MPV=0, MPP=0, MIE=MPIE, and MPIE=1, and also
+sets {\tt pc}={\tt mepc}.
+Finally, if the new virtualization mode V=1, the contents of the background
+supervisor registers are swapped with their foreground counterparts.
 
-The SRET instruction is usually used to return from a trap taken into HS-mode or
-VS-mode.  Its behavior depends on the current virtualization mode.  When
-executed in M-mode or HS-mode (i.e., V=0), SRET sets the privilege mode
-according to the values in {\tt sstatus}.SPP and {\tt hstatus}.SPV, as encoded
-in Table~\ref{h-spp}.  When executed in VS-mode (i.e., V=1), SRET sets the
-privilege mode according to Table~\ref{h-vspp}.  In either case, SRET then
-sets {\tt pc}={\tt sepc}, then in {\tt sstatus} sets SPP=0, SIE=SPIE, then
-SPIE=1.  Finally, if SRET changed the current virtualization state V, the
-contents of the background supervisor registers are swapped with their
-foreground counterparts.
+The SRET instruction is used to return from a trap taken into HS-mode or
+VS-mode.  Its behavior depends on the current virtualization mode.
 
-The HRET instruction can be used to return from HS-mode into a virtualized
-guest.  It first sets {\tt hstatus.SPV}=1, then performs the same actions as
-SRET.
+When executed in M-mode or HS-mode (i.e., V=0), SRET sets the virtualization
+and privilege modes according to the values in {\tt hstatus}.SPV and
+{\tt sstatus}.SPP, as encoded in Table~\ref{h-spp}.
+SRET then sets {\tt hstatus}.SPV={\tt hstatus}.SP2V,
+{\tt sstatus}.SPP={\tt hstatus}.SP2P, {\tt hstatus}.SP2V=0,
+{\tt hstatus}.SP2P=0, {\tt sstatus}.SIE={\tt sstatus}.SPIE,
+{\tt sstatus}.SPIE=1, and {\tt pc}={\tt sepc}.
+Finally, if the new virtualization mode V=1, the contents of the background
+supervisor registers are swapped with their foreground counterparts.
+
+When executed in VS-mode (i.e., V=1), SRET sets the privilege mode according to
+Table~\ref{h-vspp}, then in {\tt sstatus} sets SPP=0, SIE=SPIE, and SPIE=1, and
+lastly sets {\tt pc}={\tt sepc}.
