@@ -1681,6 +1681,91 @@ the memory-mapped {\tt mtime} register, or hard-wire the TM bit in
 and emulate this functionality in M-mode software.
 \end{commentary}
 
+\subsection{Counter Interrupts ({\tt mtip})}
+\label{sec:mcip}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{cccMcccccc}
+\instbit{31} &
+\instbit{30} &
+\instbit{29} &
+\instbitrange{28}{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{HPM31} &
+\multicolumn{1}{c|}{HPM30} &
+\multicolumn{1}{c|}{HPM29} &
+\multicolumn{1}{c|}{...} &
+\multicolumn{1}{c|}{HPM5} &
+\multicolumn{1}{c|}{HPM4} &
+\multicolumn{1}{c|}{HPM3} &
+\multicolumn{1}{c|}{IR} &
+\multicolumn{1}{c|}{1} &
+\multicolumn{1}{c|}{CY} \\
+\hline
+1 & 1 & 1 & 23 & 1 & 1 & 1 & 1 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Counter-Interrupt-Pending registers ({\tt mccip} and {\tt scip} and {\tt ucip}).}
+\label{mcip}
+\end{figure*}
+
+All counters, with the exception of {\tt mtime} can cause a timer interrupt 
+upon rolling over from all ones to all zeroes (except that {\tt mtime} overflow
+is instead when its value is greater than or equal to {\tt mtimecmp}).
+ 
+When a counter overflows, a pending bit (whose position corresponds to 
+the counter number) is set in a 32 bit {\tt mcip}, {\tt scip}, or 
+{\tt ucip} CSR, depending on the mode to which the interrupt is delegated. 
+As with the timer interrupt, counter interrupts will only be taken if 
+the pending bit is set and its corresponding interrupt is enabled via  
+MTIE, STIE, or UTIE bit being set in the {\tt mtie}, {\tt stie}, or 
+{\tt utie} CSR, depending on the mode to which the interrupt is delegated. 
+
+If the interrupt is taken, the exception code is set to be the timer 
+interrupt code that corresponds to the lowest privilege level which can 
+access the counter. If multiple overflows occur simultaneously, the interrupt 
+is taken by most privileged mode which any of the interrupts are delegated, 
+as with any other simultaneous interrupt.
+
+{\tt scip} and {\tt ucip} are restricted views of {\tt mcip}; bits in 
+{\tt scip} will be read as zero if the corresponding bits in {\tt mcounteren} 
+are clear, while bits in  {\tt ucip} will be read as zero if the N-extension 
+is not implemented, or if the corresponding bits in {\tt mcounteren} 
+are clear and S-mode is not implemented, or if the corresponding bits in 
+{\tt scounteren} are clear. 
+
+{\tt <x>cip} CSRs are WARL; any bit can be implemented as read only zero 
+except bit 1, which corresponds to the timer interrupt; that bit can be 
+read only one but not read only zero. If {\tt <x>tip} is not implemented 
+it is read as all zero after being written with all one, and the capability 
+of {\tt mtime} interrupts are implied.
+
+\begin{commentary}
+  If {\tt mtip} is not implemented, then this is backwards compatible with 
+  existing implementations. Note that there are no separate enable bits for 
+  individual counters. If a system wants to count, but not interrupt, it 
+  should initialize the counter to a small positive number (e.g. zero). 
+  A counter initialized to zero will not overflow for ~500 years if counting 
+  continuously at 1 GHz.
+\end{commentary}
+
+Interrupts are delegated according to the normal delegation rules in the 
+{\tt <x>ideleg} CSRs. Not that the restricted view of {\tt stip} and {\tt utip}
+which forces reads to be zero if the corresponding {\tt mcounteren} and 
+{\tt scounteren} CSR bit is zero means that timer interrupts cannot be 
+delegated to modes that cannot access the timer/counter.
+
 \subsection{Machine Scratch Register ({\tt mscratch})}
 
 The {\tt mscratch} register is an MXLEN-bit read/write register
