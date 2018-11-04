@@ -1,0 +1,111 @@
+\chapter{``Zifencei'' Instruction-Fetch Fence, Version 2.0}
+\label{chap:zifencei}
+
+This chapter defines the ``Zifencei'' extension, which includes the
+FENCE.I instruction that provides explicit synchronization between
+writes to instruction memory and instruction fetches on the same hart.
+Currently, this instruction is the only standard mechanism to ensure
+an instruction modified by a store on a hart will be visible to a
+subsequent instruction fetch on the same hart.
+
+\begin{commentary}
+We considered but did not include a ``store instruction word''
+instruction (as in MAJC~\cite{majc}).  JIT compilers may generate a
+large trace of instructions before a single FENCE.I, and amortize any
+instruction cache snooping/invalidation overhead by writing translated
+instructions to memory regions that are known not to reside in the
+I-cache.
+\end{commentary}
+
+\begin{commentary}
+The FENCE.I instruction was designed to support a wide variety of
+implementations.  A simple implementation can flush the local
+instruction cache and the instruction pipeline when the FENCE.I is
+executed.  A more complex implementation might snoop the instruction
+(data) cache on every data (instruction) cache miss, or use an
+inclusive unified private L2 cache to invalidate lines from the
+primary instruction cache when they are being written by a local store
+instruction.  If instruction and data caches are kept coherent in this
+way, or if the memory system consists of only uncached RAMs, then just
+the fetch pipeline needs to be flushed at a FENCE.I.
+
+The FENCE.I instruction was previously part of the base I instruction
+set.  Two main issues are driving moving this out of the mandatory
+base, although at time of writing it is still the only standard method
+for maintaining instruction-fetch coherence.
+
+First, it has been recognized that on some systems, FENCE.I will be
+expensive to implement and alternate mechanisms are being discussed in
+the memory model task group.  In particular, for designs that have an
+incoherent instruction cache and an incoherent data cache, or where
+the instruction cache refill does not snoop a coherent data cache,
+both caches must be completely flushed when a FENCE.I instruction is
+encountered.  This problem is exacerbated when there are multiple
+levels of I and D cache in front of a unified cache or outer memory
+system.
+
+Second, the instruction is not powerful enough to make available at
+user level in a Unix-like operating system environment.  The FENCE.I
+only synchronizes the local hart, and the OS can reschedule the user
+hart to a different physical hart after the FENCE.I.  This would
+require the OS to execute an additional FENCE.I as part of every
+context migration.  For this reason, the standard Linux ABI has
+removed FENCE.I from user-level and now requires a system call to
+maintain instruction-fetch coherence, which allows the OS to minimize
+the number of FENCE.I executions required on current systems and
+provides forward-compatibility with future improved instruction-fetch
+coherence mechanisms.
+
+Future approaches to instruction-fetch coherence under discussion
+include providing more restricted versions of FENCE.I that only target
+a given address specified in {\em rs1}, and/or allowing software to use an
+ABI that relies on machine-mode cache-maintenance operations.
+\end{commentary}
+
+\vspace{-0.4in}
+\begin{center}
+\begin{tabular}{M@{}R@{}S@{}R@{}O}
+\\
+\instbitrange{31}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{imm[11:0]} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+12 & 5 & 3 & 5 & 7 \\
+0 & 0 & FENCE.I & 0 & MISC-MEM \\
+\end{tabular}
+\end{center}
+
+The FENCE.I instruction is used to synchronize the instruction and
+data streams.  RISC-V does not guarantee that stores to instruction
+memory will be made visible to instruction fetches on the same RISC-V
+hart until a FENCE.I instruction is executed.  A FENCE.I instruction
+only ensures that a subsequent instruction fetch on a RISC-V hart
+will see any previous data stores already visible to the same RISC-V
+hart.  FENCE.I does {\em not} ensure that other RISC-V harts'
+instruction fetches will observe the local hart's stores in a
+multiprocessor system. To make a store to instruction memory visible
+to all RISC-V harts, the writing hart has to execute a data FENCE
+before requesting that all remote RISC-V harts execute a FENCE.I.
+
+The unused fields in the FENCE.I instruction, {\em imm[11:0]}, {\em rs1}, and
+{\em rd}, are reserved for finer-grain fences in future extensions.  For
+forward compatibility, base implementations shall ignore these fields, and
+standard software shall zero these fields.
+
+\begin{commentary}
+Because FENCE.I only orders stores with a hart's own instruction
+fetches, application code should only rely upon FENCE.I if the
+application thread will not be migrated to a different hart.  The EEI
+can provide mechanisms for efficient multiprocessor instruction-stream
+synchronization.
+\end{commentary}
+
+
