@@ -23,3 +23,4 @@ BOOM          | UC Berkeley                     | [Christopher Celio](mailto:cel
 Ariane        | PULP Platform                   | [Florian Zaruba](mailto:zarubaf@iis.ee.ethz.ch), ETH Zurich | 3                 | https://github.com/pulp-platform/ariane             
 RI5CY         | PULP Platform                   | [Frank K. Gürkaynak](mailto:kgf@iis.ee.ethz.ch), ETH Zurich | 4                 | https://github.com/pulp-platform/riscv
 Spike         | SiFive, UC Berkeley             | [Andrew Waterman](mailto:andrew@sifive.com), SiFive         | 5                 | https://github.com/riscv/riscv-isa-sim              
+E-Class       | IIT Madras                      | [Neel Gala](mailto:neelgala@gmail.com)                      | 6                 | https://gitlab.com/shaktiproject/cores/e-class
