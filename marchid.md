@@ -25,3 +25,4 @@ RI5CY         | PULP Platform                   | [Frank K. Gürkaynak](mailto:k
 Spike         | SiFive, UC Berkeley             | [Andrew Waterman](mailto:andrew@sifive.com), SiFive         | 5                 | https://github.com/riscv/riscv-isa-sim              
 E-Class       | IIT Madras                      | [Neel Gala](mailto:neelgala@gmail.com)                      | 6                 | https://gitlab.com/shaktiproject/cores/e-class
 ORCA          | VectorBlox                      | [Joel Vandergriendt](mailto:joel@vectorblox.com)            | 7                 | https://github.com/vectorblox/orca
+SCR1          | Syntacore                       | [Dmitri Pavlov](mailto:dmitri.pavlov@syntacore.com), Syntacore| 8               | https://github.com/syntacore/scr1
