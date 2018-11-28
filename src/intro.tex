@@ -346,15 +346,38 @@ regardless of any subsequent extensions.
 
 \section{Memory}
 
-Executing each RISC-V machine instruction entails one or more {\em memory
-accesses}.  A RISC-V platform has a single byte-addressable address space for
-all memory accesses.  A {\em word} is defined as \wunits{32}{bits}
+A RISC-V hart has a single byte-addressable address space for all memory
+accesses.  A {\em word} of memory is defined as \wunits{32}{bits}
 (\wunits{4}{bytes}).  Correspondingly, a {\em halfword} is \wunits{16}{bits}
 (\wunits{2}{bytes}), a {\em doubleword} is \wunits{64}{bits}
 (\wunits{8}{bytes}), and a {\em quadword} is \wunits{128}{bits}
 (\wunits{16}{bytes}).
 
-The memory accesses made by RISC-V instructions are subdivided into {\em
+The execution environment determines the mapping of hardware resources into
+a hart's address space.
+Different address ranges of a hart's address space may (1)~be vacant, or
+(2)~contain {\em main memory}, or (3)~contain one or more {\em I/O devices}.
+Reads and writes of I/O devices may have visible side effects, but accesses
+to main memory cannot.
+Although it is possible for the execution environment to call everything in
+a hart's address space an I/O device, it is usually expected that some
+portion will be specified as main memory.
+
+When a RISC-V platform has multiple harts, the address spaces of any two
+harts may be entirely the same, or entirely different, or may be partly
+different but sharing some subset of resources, mapped into the same or
+different address ranges.
+
+\begin{commentary}
+For a purely ``bare metal'' environment, all harts may see an identical
+address space, accessed entirely by physical addresses.
+However, when the execution environment includes an operating system
+employing address translation, it is common for each hart to be given a
+virtual address space that is largely or entirely its own.
+\end{commentary}
+
+Executing each RISC-V machine instruction entails one or more memory
+accesses, subdivided into {\em
 implicit} and {\em explicit} accesses.  For each instruction executed, an {\em
 implicit} memory read (instruction fetch) is done to obtain the encoded
 instruction to execute.  Many RISC-V instructions perform no further memory
@@ -364,7 +387,8 @@ the instruction.  The execution environment may dictate that instruction
 execution performs other {\em implicit} memory accesses (such as to implement
 address translation) beyond those documented for the unprivileged ISA.
 
-The execution environment determines what portions of the address space are
+The execution environment determines what portions of the
+non-vacant address space are
 accessible for each kind of memory access.  For example, the set of locations
 that can be implicitly read for instruction fetch may or may not have any
 overlap with the set of locations that can be explicitly read by a load
@@ -372,16 +396,18 @@ instruction; and the set of locations that can be explicitly written by
 a store instruction may be only a subset of locations that can be read.
 Ordinarily, if an instruction attempts to access memory at an inaccessible
 address, an exception is raised for the instruction.
+Vacant locations in the address space are never accessible.
 
-Except when specified otherwise, implicit reads that do not raise an exception
+Except when specified otherwise, implicit reads that do not raise an
+exception and that have no side effects
 may occur arbitrarily early and speculatively, even before the machine could
 possibly prove that the read will be needed.  For instance, a valid
-implementation could attempt to read all of memory at the earliest
+implementation could attempt to read all of main memory at the earliest
 opportunity, cache as many fetchable (executable) bytes as possible for later
-instruction fetches, and avoid reading memory for instruction fetches ever
+instruction fetches, and avoid reading main memory for instruction fetches ever
 again.  To ensure that certain implicit reads are ordered only after writes to
-the same memory locations, software must execute specific fence or cache
-control instructions defined for this purpose (such as the FENCE.I instruction
+the same memory locations, software must execute specific fence
+instructions defined for this purpose (such as the FENCE.I instruction
 defined in Chapter~\ref{chap:zifencei}).
 
 The memory accesses (implicit or explicit) made by a hart may appear to occur
@@ -393,9 +419,11 @@ default memory consistency model for RISC-V is the RISC-V Weak Memory Ordering
 Optionally, an implementation may adopt the stronger model of Total Store
 Ordering, as defined in Chapter~\ref{sec:ztso}.  The execution environment may
 also add constraints that further limit the perceived reordering of memory
-accesses.  Software that assumes only the RVWMO model is compatible with the
+accesses.
+Since the RVWMO model is the weakest model allowed for any RISC-V
+implementation, software written for this model is compatible with the
 actual memory consistency rules of all RISC-V implementations.  As with
-implicit reads, software must execute fence or cache control instructions to
+implicit reads, software must execute fence instructions to
 ensure specific ordering of memory accesses beyond the requirements of the
 assumed memory consistency model and execution environment.
 
