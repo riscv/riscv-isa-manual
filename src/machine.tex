@@ -1929,19 +1929,19 @@ codes.
 \end{table*}
 
 \begin{commentary}
+Interrupts can be separated from other traps with a single branch on the sign of
+the {\tt mcause} register value.  A shift left can remove the
+interrupt bit and scale the exception codes to index into a trap
+vector table.
+\end{commentary}
+
+\begin{commentary}
 We do not distinguish privileged instruction exceptions from illegal
 opcode exceptions.  This simplifies the architecture and also hides
 details of which higher-privilege instructions are supported by an
 implementation.  The privilege level servicing the trap can implement
 a policy on whether these need to be distinguished, and if so, whether
 a given opcode should be treated as illegal or privileged.
-\end{commentary}
-
-\begin{commentary}
-Interrupts can be separated from other traps with a single branch on the sign of
-the {\tt mcause} register value.  A shift left can remove the
-interrupt bit and scale the exception codes to index into a trap
-vector table.
 \end{commentary}
 
 \subsection{Machine Trap Value ({\tt mtval}) Register}
@@ -2050,7 +2050,7 @@ possible invalid addresses.  Implementations may convert some invalid address
 patterns into other invalid addresses prior to writing them to {\tt mtval}.
 If the feature to return the faulting instruction bits is implemented, {\tt
 mtval} must also be able to hold all values less than $2^N$, where $N$ is the
-smaller of XLEN and the width of the longest supported instruction.
+smaller of XLEN and ILEN.
 
 \section{Machine-Mode Privileged Instructions}
 
@@ -2217,12 +2217,6 @@ the idle loop containing the WFI, and on a simple return from the
 handler, the idle loop will resume execution.
 \end{commentary}
 
-\begin{commentary}
-We have removed the earlier requirement that implementations ignore
-the {\em rs1} and {\em rd} fields, so non-zero values in these fields
-should now raise illegal instruction exceptions.
-\end{commentary}
-
 The WFI instruction can also be executed when interrupts are disabled.  The
 operation of WFI must be unaffected by the global interrupt bits in {\tt
 mstatus} (MIE/SIE/UIE) and the delegation registers {\tt [m|s]ideleg}
@@ -2271,10 +2265,10 @@ arrival.
 \label{sec:reset}
 
 Upon reset, a hart's privilege mode is set to M.  The {\tt mstatus} fields MIE
-and MPRV are reset to 0.  The {\tt pc} is
-set to an implementation-defined reset vector.  The {\tt mcause} register is
-set to a value indicating the cause of the reset.  All other hart state is
-undefined.
+and MPRV are reset to 0.  The {\tt pc} is set to an implementation-defined
+reset vector.  The {\tt mcause} register is set to a value indicating the
+cause of the reset.  Writable PMP registers' A and L fields are set to 0.  All
+other hart state is unspecified.
 
 The {\tt mcause} values after reset have implementation-specific
 interpretation, but the value 0 should be returned on implementations
@@ -2507,10 +2501,10 @@ same word size will be mutually atomic.
 
 Implementations may raise access exceptions instead of address-misaligned
 exceptions for some misaligned accesses, indicating the instruction should not
-be emulated by a trap handler.  If, for a given address and access width,
-a misaligned LR/SC or AMO generates an access exception, then regular loads
-and stores using the same address and access width are not required to execute
-atomically.
+be emulated by a trap handler.  If, for a given address and access width, all
+misaligned LRs/SCs and AMOs generate access exceptions, then regular
+misaligned loads and stores using the same address and access width are not
+required to execute atomically.
 
 \subsection{Memory-Ordering PMAs}
 
@@ -2521,7 +2515,7 @@ instruction and atomic-instruction ordering bits.
 Accesses by one hart to main memory regions are observable not only by
 other harts but also by other devices with the capability to initiate
 requests in the main memory system (e.g., DMA engines).  Main memory
-regions always have the standard RISC-V relaxed memory model.
+regions always have either the RVWMO or RVTSO memory model.
 
 Accesses by one hart to the I/O space are observable not only by other
 harts and bus mastering devices, but also by targeted slave I/O
@@ -2665,10 +2659,11 @@ generate spurious accesses to non-idempotent memory regions.
 \end{commentary}
 
 \begin{commentary}
-Non-idempotent regions might not support misaligned accesses, in which case
-software might emulate misaligned accesses as a sequence of aligned accesses,
-each possibly causing side effects.  Therefore, portable software should not
-issue misaligned accesses to non-idempotent regions.
+Non-idempotent regions might not support misaligned accesses.  Misaligned
+accesses to such regions should raise access exceptions rather than
+address-misaligned exceptions, indicating that software should not emulate the
+misaligned access using multiple smaller accesses, which could cause
+unexpected side effects.
 \end{commentary}
 
 \section{Physical Memory Protection}
