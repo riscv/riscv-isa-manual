@@ -28,4 +28,4 @@ ORCA          | VectorBlox                      | [Joel Vandergriendt](mailto:jo
 SCR1          | Syntacore                       | [Dmitri Pavlov](mailto:dmitri.pavlov@syntacore.com), Syntacore| 8               | https://github.com/syntacore/scr1
 YARVI         | Tommy Thorn's Priceless Services| [Tommy Thorn](mailto:tommy-github2@thorn.ws)                | 9                 | https://github.com/tommythorn/yarvi
 RVBS          | Alexandre Joannou, University of Cambridge| [Alexandre Joannou](mailto:aj443@cl.cam.ac.uk)    | 10                | https://github.com/CTSRD-CHERI/RVBS
-SweRV EH1     | Western Digital Corporation     | [Robert Golla](mailto:Robert.Golla@wdc.com)                 | 11                | https://github.com/westerndigitalcorporation/swerv/swerv-eh1
+SweRV EH1     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.Wicki@wdc.com)                 | 11                | https://github.com/westerndigitalcorporation/swerv/swerv-eh1
