@@ -987,6 +987,53 @@ Simpler implementations can ignore the virtual address in {\em rs1} and
 the ASID value in {\em rs2} and always perform a global fence.
 \end{commentary}
 
+Implementations may perform implicit reads of the translation data structures
+arbitrarily early and speculatively.  The results of these implicit speculative reads
+may be incoherently cached.  However, implementations must only perform implicit
+reads of the translation data structures pointed to by the current {\tt satp}
+register, and for the ASID currently loaded into the {\tt satp} register.
+
+Because implicit reads of the page tables may occur arbitrarily early and
+speculatively, the following common situations typically require executing an
+SFENCE.VMA instruction:
+
+\vspace{-0.1in}
+\begin{itemize}
+
+\item When software recycles an ASID (i.e., reassociates it with a different
+page table), it should {\em first} change {\tt satp} to point to the new page
+table using the recycled ASID, {\em then} execute SFENCE.VMA with {\em
+rs1}={\tt x0} and {\em rs2} set to the recycled ASID.  Alternatively, software
+can execute the same SFENCE.VMA instruction while a different ASID is loaded
+into {\tt satp}, provided the next time {\tt satp} is loaded with the recycled
+ASID, it is simultaneously loaded with the new page table.
+
+\item If the implementation does not provide ASIDs, or software chooses to
+always use ASID 0, then after every {\tt satp} write, software should execute
+SFENCE.VMA with {\em rs1}={\tt x0}.  In the common case that no global
+translations have been modified, {\em rs2} should be set to a register other than
+{\tt x0} but which contains the value zero, so that global translations are
+not flushed.
+
+\item If software modifies a non-leaf PTE, it should execute SFENCE.VMA with
+{\em rs1}={\tt x0}.  If any PTE along the traversal path had its G bit set,
+{\em rs2} must be {\tt x0}; otherwise, {\em rs2} should be set to the ASID for
+which the translation is being modified.
+
+\item If software modifies a leaf PTE, it should execute SFENCE.VMA with {\em
+rs1} set to a virtual address within the page.  If any PTE along the traversal
+path had its G bit set, {\em rs2} must be {\tt x0}; otherwise, {\em rs2}
+should be set to the ASID for which the translation is being modified.
+
+\item For the special cases of increasing the permissions on a leaf PTE and
+changing an invalid PTE to a valid leaf, software may choose to execute
+the SFENCE.VMA lazily.  After modifying the PTE but before executing
+SFENCE.VMA, either the new or old permissions will be used.  In the latter
+case, a page fault exception might occur, at which point software should
+execute SFENCE.VMA in accordance with the previous bullet point.
+
+\end{itemize}
+
 \section{Sv32: Page-Based 32-bit Virtual-Memory Systems}
 \label{sec:sv32}
 
