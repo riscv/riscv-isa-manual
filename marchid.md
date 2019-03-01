@@ -29,3 +29,4 @@ SCR1          | Syntacore                       | [Dmitri Pavlov](mailto:dmitri.
 YARVI         | Tommy Thorn's Priceless Services| [Tommy Thorn](mailto:tommy-github2@thorn.ws)                | 9                 | https://github.com/tommythorn/yarvi
 RVBS          | Alexandre Joannou, University of Cambridge| [Alexandre Joannou](mailto:aj443@cl.cam.ac.uk)    | 10                | https://github.com/CTSRD-CHERI/RVBS
 SweRV EH1     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.Wicki@wdc.com)                 | 11                | https://github.com/westerndigitalcorporation/swerv_eh1
+MSCC          | Rongcui Dong                    | [Rongcui Dong](mailto:rongcuid@outlook.com)                | 12 | https://github.com/rongcuid/MSCC
