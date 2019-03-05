@@ -1,4 +1,4 @@
-\chapter{Hypervisor Extension, Version 0.2}
+\chapter{Hypervisor Extension, Version 0.3}
 \label{hypervisor}
 
 {\bf Warning! This draft specification is likely to change before being
@@ -130,27 +130,27 @@ that track and control the exception behavior of a VS-mode guest.
 \instbit{22} &
 \instbit{21} &
 \instbit{20} &
-\instbitrange{19}{11} &
-\instbit{10} &
+\instbitrange{19}{10} &
 \instbit{9} &
 \instbit{8} &
 \instbit{7} &
-\instbitrange{6}{1} &
+\instbit{6} &
+\instbitrange{5}{1} &
 \instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{\wpri} &
 \multicolumn{1}{c|}{VTSR} &
-\multicolumn{1}{c|}{VTW} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{VTVM} &
 \multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{SP2V} &
+\multicolumn{1}{c|}{SP2P} &
 \multicolumn{1}{c|}{SPV} &
 \multicolumn{1}{c|}{STL} &
-\multicolumn{1}{c|}{SP2P} &
-\multicolumn{1}{c|}{SP2V} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPRV} \\
 \hline
-HSXLEN-23 & 1 & 1 & 1 & 9 & 1 & 1 & 1 & 1 & 6 & 1 \\
+HSXLEN-23 & 1 & 1 & 1 & 10 & 1 & 1 & 1 & 1 & 5 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -159,9 +159,9 @@ HSXLEN-23 & 1 & 1 & 1 & 9 & 1 & 1 & 1 & 1 & 6 & 1 \\
 \label{hstatusreg}
 \end{figure*}
 
-The {\tt hstatus} fields VTSR, VTW, and VTVM are defined analogously to the
-{\tt mstatus} fields TSR, TW, and TVM, but affect the trapping behavior of the
-SRET, WFI, and virtual-memory management instructions only when V=1.
+The {\tt hstatus} fields VTSR and VTVM are defined analogously to the
+{\tt mstatus} fields TSR and TVM, but affect the trapping behavior of the SRET
+and virtual-memory management instructions only when V=1.
 
 The SPV bit (Supervisor Previous Virtualization Mode) is written by the implementation
 whenever a trap is taken into HS-mode.  Just as the SPP bit in {\tt sstatus} is set to the privilege
@@ -346,18 +346,13 @@ modification of the usual Sv32 paged virtual-memory scheme, extended to support
 34-bit guest physical addresses.
 For RV64, modes Sv39x4 and Sv48x4 are defined as modifications of the Sv39 and
 Sv48 paged virtual-memory schemes.
-All these paged virtual-memory schemes are described in
+All of these paged virtual-memory schemes are described in
 Section~\ref{sec:guest-addr-translation}.
 An additional RV64 scheme, Sv57x4, may be defined in a later version of this
 specification.
 
 The remaining MODE settings for RV64 are reserved for future use and may define
 different interpretations of the other fields in {\tt hgatp}.
-
-RV64 implementations are not required to support all defined RV64 MODE
-settings.
-(However, a write to {\tt hgatp} with an unsupported MODE value is not ignored
-as it is for {\tt satp}.)
 
 \begin{table}[h]
 \begin{center}
@@ -387,11 +382,19 @@ Value  & Name & Description \\
 \label{tab:hgatp-mode}
 \end{table}
 
+RV64 implementations are not required to support all defined RV64 MODE
+settings.
+
+A write to {\tt hgatp} with an unsupported MODE value is not ignored as it is
+for {\tt satp}.
+Instead, the fields of {\tt hgatp} are {\warl} in the normal way, when so
+indicated.
+
 As explained in Section~\ref{sec:guest-addr-translation}, for the paged
 virtual-memory schemes (Sv32x4, Sv39x4, and Sv48x4), the root page table is
 16~KiB and must be aligned to a 16-KiB boundary.
 In these modes, the lowest two bits of the physical page number (PPN) in
-{\tt hgatp} are ignored.
+{\tt hgatp} always read as zeros.
 An implementation that supports only the defined paged virtual-memory schemes
 and/or Bare may hardwire PPN[1:0] to zero.
 
@@ -763,6 +766,10 @@ the opposite of its actual setting.
 The interpretation of the MODE, ASID, and PPN
 fields is the same as for {\tt satp}.
 
+A write to {\tt bsatp} with an unsupported MODE value is not ignored as it is
+for {\tt satp}.
+Instead, the fields of {\tt bsatp} are {\warl} in the normal way.
+
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
@@ -851,18 +858,19 @@ controlled by the foreground {\tt satp}.
 If an HFENCE.BVMA instruction executes without trapping, its effect is much the
 same as temporarily entering VS-mode (with the usual swapping of foreground and
 background supervisor registers) and executing SFENCE.VMA.
-Executing an HFENCE.BVMA guarantees that any stores in the instruction stream
-prior to the HFENCE.BVMA are ordered before implicit references to VS-level
-memory-management data structures when those implicit references
+Executing an HFENCE.BVMA guarantees that any explicit stores in the instruction
+stream prior to the HFENCE.BVMA are ordered before implicit reads of VS-level
+memory-management data structures when those implicit reads are for
+instructions that
 \begin{compactitem}
 \item
 are subsequent to the HFENCE.BVMA, and
 \item
-occur when {\tt hgatp}.VMID has the same setting as it did when HFENCE.BVMA
+execute when {\tt hgatp}.VMID has the same setting as it did when HFENCE.BVMA
 executed.
 \end{compactitem}
-Implicit references need not be ordered when {\tt hgatp}.VMID is different than
-at the time HFENCE.BVMA executed.
+Implicit reads need not be ordered when {\tt hgatp}.VMID is different than at
+the time HFENCE.BVMA executed.
 If operand {\em rs1}$\neq${\tt x0}, it specifies a single guest virtual
 address, and if operand {\em rs2}$\neq${\tt x0}, it specifies a single guest
 address-space identifier
@@ -887,10 +895,10 @@ virtual machines, or even a global fence for all memory-management data
 structures.
 \end{commentary}
 
-Executing an HFENCE.GVMA instruction guarantees that any stores in the
+Executing an HFENCE.GVMA instruction guarantees that any explicit stores in the
 instruction stream prior to the HFENCE.GVMA are ordered before all implicit
-references to guest-physical memory-management data structures subsequent to
-the HFENCE.GVMA.
+reads of guest-physical memory-management data structures done for instructions
+that follow the HFENCE.GVMA.
 If operand {\em rs1}$\neq${\tt x0}, it specifies a single guest physical
 address, shifted right by 2~bits, and if operand {\em rs2}$\neq${\tt x0}, it
 specifies a single virtual machine identifier (VMID).
@@ -934,10 +942,14 @@ hypervisor extension is provided.
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{cRccYccccccc}
+\scalebox{0.95}{
+\begin{tabular}{cRcccccFcccccc}
 \\
 \instbit{MXLEN-1} &
-\instbitrange{MXLEN-2}{36} &
+\instbitrange{MXLEN-2}{40} &
+\instbit{39} &
+\instbit{38} &
+\instbitrange{37}{36} &
 \instbitrange{35}{34} &
 \instbitrange{33}{32} &
 \instbitrange{31}{23} &
@@ -946,10 +958,12 @@ hypervisor extension is provided.
 \instbit{20} &
 \instbit{19} &
 \instbit{18} &
-\instbit{17} &
  \\
 \hline
 \multicolumn{1}{|c|}{SD} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{MPV} &
+\multicolumn{1}{c|}{MTL} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SXL[1:0]} &
 \multicolumn{1}{c|}{UXL[1:0]} &
@@ -959,19 +973,19 @@ hypervisor extension is provided.
 \multicolumn{1}{c|}{TVM} &
 \multicolumn{1}{c|}{MXR} &
 \multicolumn{1}{c|}{SUM} &
-\multicolumn{1}{c|}{MPRV} &
  \\
 \hline
-1 & MXLEN-37 & 2 & 2 & 9 & 1 & 1 & 1 & 1 & 1 & 1 & \\
-\end{tabular}
-\begin{tabular}{ccccccccccccccc}
+1 & MXLEN-41 & 1 & 1 & 2 & 2 & 2 & 9 & 1 & 1 & 1 & 1 & 1 & \\
+\end{tabular}}
+\scalebox{0.95}{
+\begin{tabular}{cccccccccccccccc}
 \\
 &
+\instbit{17} &
 \instbitrange{16}{15} &
 \instbitrange{14}{13} &
 \instbitrange{12}{11} &
-\instbit{10} &
-\instbit{9} &
+\instbitrange{10}{9} &
 \instbit{8} &
 \instbit{7} &
 \instbit{6} &
@@ -983,11 +997,11 @@ hypervisor extension is provided.
 \instbit{0} \\
 \hline
  &
-\multicolumn{1}{|c|}{XS[1:0]} &
+\multicolumn{1}{|c|}{MPRV} &
+\multicolumn{1}{c|}{XS[1:0]} &
 \multicolumn{1}{c|}{FS[1:0]} &
 \multicolumn{1}{c|}{MPP[1:0]} &
-\multicolumn{1}{c|}{MPV} &
-\multicolumn{1}{c|}{MTL} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPP} &
 \multicolumn{1}{c|}{MPIE} &
 \multicolumn{1}{c|}{\wpri} &
@@ -998,8 +1012,8 @@ hypervisor extension is provided.
 \multicolumn{1}{c|}{SIE} &
 \multicolumn{1}{c|}{UIE} \\
 \hline
- & 2 & 2 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
-\end{tabular}
+ & 1 & 2 & 2 & 2 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
+\end{tabular}}
 \end{center}
 }
 \vspace{-0.1in}
@@ -1020,11 +1034,17 @@ On an access or page fault due to guest physical address translation, MTL is
 set to 1.
 For any other trap into M-mode, MTL is set to 0.
 
-The SXL field controls the value of XLEN for HS-mode.
-The UXL field controls the value of XLEN for VS-mode or U-mode when V=0, or for
-VU-mode when V=1.
+\begin{commentary}
+For RV32, MPV and MTL are not in {\tt mstatus}.
+Instead, the plan is for these fields to be in a different CSR, {\tt mstatush},
+that is expected to be defined in a future version of this specification.
+\end{commentary}
 
-The TSR and TVM fields only affect execution in HS-mode.
+The SXL field controls the value of XLEN for HS-mode.
+When V=0, the UXL field controls the value of XLEN for VS-mode or U-mode.
+When V=1, the UXL field controls the value of XLEN for VU-mode.
+
+The TSR and TVM fields only affect execution in HS-mode, not in VS-mode.
 
 The TW field affects execution in all modes except M-mode.
 
@@ -1055,6 +1075,24 @@ The {\tt mstatus} register is a superset of the foreground {\tt sstatus}
 register;
 modifying a field in {\tt sstatus} modifies the homonymous field in {\tt
 mstatus}, and vice-versa.
+
+\section{Base ISA Control}
+
+The {\tt mstatus} field SXL determines XLEN for HS-mode.
+
+When executing in VS-mode, XLEN is determined by the the UXL field of the
+background register {\tt bsstatus}.  Because {\tt bsstatus} is swapped with
+{\tt sstatus} when transitioning from VS-mode into HS-mode or M-mode, HS-mode
+and M-mode can modify VS-mode's XLEN via the UXL field of the foreground
+register {\tt sstatus}.
+
+When executing in U-mode or VU-mode, XLEN is determined by the UXL field of the
+foreground register {\tt sstatus}.
+
+\begin{commentary}
+HS-mode controls U-mode's XLEN the same way it controls VS-mode's XLEN, via
+{\tt sstatus}.UXL.
+\end{commentary}
 
 \section{Two-Level Address Translation}
 \label{sec:two-level-translation}
@@ -1222,8 +1260,8 @@ A consistent ability to virtualize machines having as much as four times the
 physical address space as virtual address space is believed to be of some
 utility also for RV64.
 For a machine supporting 39-bit virtual addresses (Sv39), for example, this
-allows the hypervisor extension to support up to a 41-bit physical address
-space without either necessitating hardware support for 48-bit virtual
+allows the hypervisor extension to support up to a 41-bit guest physical
+address space without either necessitating hardware support for 48-bit virtual
 addresses (Sv48) or falling back to emulating the larger address space with
 shadow page tables.
 \end{commentary}
@@ -1299,25 +1337,15 @@ guest-physical page tables point, an HFENCE.GVMA instruction with
 PMP CSRs are written.
 An HFENCE.BVMA instruction is not required.
 
+\section{WFI in Virtual Operating Modes}
 
-\clearpage
-
-\section{Base ISA Control}
-
-The {\tt mstatus} field SXL determines XLEN for HS-mode.
-
-When executing in VS-mode, XLEN is determined by the the UXL field of the
-background register {\tt bsstatus}.  Because {\tt bsstatus} is swapped with
-{\tt sstatus} when transitioning from VS-mode into HS-mode or M-mode, HS-mode
-and M-mode can modify VS-mode's XLEN via the UXL field of the foreground
-register {\tt sstatus}.
-
-When executing in U-mode or VU-mode, XLEN is determined by the UXL field of the
-foreground register {\tt sstatus}.
+Executing instruction WFI in VS-mode or VU-mode causes an illegal instruction
+exception, unless it completes within an implementation-specific, bounded time
+limit.
 
 \begin{commentary}
-HS-mode controls U-mode's XLEN the same way it controls VS-mode's XLEN, via
-{\tt sstatus}.UXL.
+The behavior required of WFI in VS-mode and VU-mode is the same as required of
+it in U-mode when S-mode exists.
 \end{commentary}
 
 \section{Traps}
