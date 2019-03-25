@@ -157,36 +157,51 @@ bits in the CSR when the old value is not required: CSRS/CSRC {\em
 
 \subsection*{CSR Access Ordering}
 
-Each RISC-V hart observes its own CSR accesses, including its implicit CSR
-accesses, as if they were performed in program order.  Between harts, RISC-V
-has a relaxed CSR ordering model, in that other harts may perceive some CSR
-accesses in a different order.  CSR accesses are ordered with each other and
-with memory accesses by the syntactic dependency rules of the memory model
-(see Section~\ref{sec:rvwmo}) and by FENCE instructions.  For the purposes of
-the FENCE instruction (see Section~\ref{sec:fence}), CSR reads are considered
-device input (I), and CSR writes are considered device output (O).
+On a given hart, CSR accesses, including implicit CSR accesses, are performed
+in program order with respect to those instructions whose execution behavior is
+modified by the CSR accesses. In particular, a CSR read access returns the CSR
+state after the execution of any prior instructions in program order that may
+update the CSR state or whose execution behavior is modified by the CSR state,
+and a CSR write updates the CSR state prior to the execution any subsequent
+instructions in program order that consume the CSR state or whose execution
+behavior is modified by the CSR state.
 
-For CSR accesses that cause side effects, these ordering constraints dictate
-the ordering of side-effect initiation, not necessarily the ordering of
-side-effect completion.
-
-The hardware platform may define some CSRs as belonging to a strongly ordered
-I/O space, as defined in the Memory-Ordering PMAs section in Volume II of this
-manual, thereby implying stronger ordering constraints with other CSR
-accesses, memory-mapped I/O accesses, or both.
+Where the above program order does not hold, CSR accesses are weakly ordered,
+and the local hart or other harts may observe the CSR accesses in an order
+different from program order. In addition, CSR accesses are not ordered with
+respect to explicit memory accesses, unless a CSR access modifies the execution
+behavior of the instruction that performs the explicit memory access or unless
+a CSR access and an explicit memory access are ordered by either the syntactic
+dependencies defined by the memory model or the ordering requirements defined
+by the Memory-Ordering PMAs section in Volume II of this manual. To enforce
+ordering in all other cases, software should execute a FENCE instruction
+between the relevant accesses. For the purposes of the FENCE instruction, CSR
+read accesses are classified as device input (I), and CSR write accesses are
+classified as device output (O).
 
 \begin{commentary}
-A future revision of the memory model will formalize this CSR I/O ordering
-scheme.
+Informally, the CSR space acts as a weakly ordered memory-mapped I/O region, as
+defined by the Memory-Ordering PMAs section in Volume II of this manual. As a
+result, the order of CSR accesses with respect to all other accesses is
+constrained by the same mechanisms that constrain the order of memory-mapped
+I/O accesses to such a region.
+
+These CSR-ordering constraints are imposed primarily to support ordering main
+memory and memory-mapped I/O accesses with respect to reads of the {\tt time}
+CSR.  With the exception of the {\tt time}, {\tt cycle}, and {\tt mcycle} CSRs,
+the CSRs defined thus far in Volumes I and II of this specification are not
+directly accessible to other harts or devices and cause no side effects visible
+to other harts or devices.  Thus, accesses to CSRs other than the
+aforementioned three can be freely reordered with respect to FENCE instructions
+without violating this specification.
 \end{commentary}
 
-\begin{commentary}
-These CSR-ordering constraints are imposed primarily to support ordering
-main memory and memory-mapped I/O accesses with respect to reads of the {\tt time}
-CSR.  With the exception of the {\tt time}, {\tt cycle}, and {\tt mcycle}
-CSRs, the CSRs defined thus far in Volumes I and II of this specification are
-not directly accessible to other harts or devices and cause no side effects
-visible to other harts or devices.  Thus, accesses to CSRs other than the
-aforementioned three can be freely reordered with respect to FENCE
-instructions without violating this specification.
-\end{commentary}
+For CSR accesses that cause side effects, the above ordering constraints apply
+to the order of the initiation of those side effects but does not necessarily
+apply to the order of the completion of those side effects.
+
+The hardware platform may define that accesses to certain CSRs are
+strongly ordered, as defined by the Memory-Ordering PMAs section in Volume II
+of this manual. Accesses to strongly ordered CSRs have stronger ordering
+constraints with respect to accesses to both weakly ordered CSRs and accesses
+to memory-mapped I/O regions.
