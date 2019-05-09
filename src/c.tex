@@ -32,8 +32,6 @@ on any 16-bit boundary, i.e., IALIGN=16.  With the addition of the C
 extension, no instructions can raise instruction-address-misaligned
 exceptions.
 
-\pagebreak
-
 \begin{commentary}
 Removing the 32-bit alignment constraint on the original 32-bit
 instructions allows significantly greater code density.
@@ -401,19 +399,23 @@ These instructions use the CI format.
 C.LWSP loads a 32-bit value from memory into register {\em rd}.  It computes
 an effective address by adding the {\em zero}-extended offset, scaled by 4, to
 the stack pointer, {\tt x2}.  It expands to {\tt lw rd, offset[7:2](x2)}.
-C.LWSP is only valid when $\textit{rd}{\neq}\texttt{x0}$.
+C.LWSP is only valid when $\textit{rd}{\neq}\texttt{x0}$;
+the code points with $\textit{rd}{=}\texttt{x0}$ are reserved.
+
 
 C.LDSP is an RV64C/RV128C-only instruction that loads a 64-bit value from memory into
 register {\em rd}.  It computes its effective address by adding the
 zero-extended offset, scaled by 8, to the stack pointer, {\tt x2}.
 It expands to {\tt ld rd, offset[8:3](x2)}.
-C.LDSP is only valid when $\textit{rd}{\neq}\texttt{x0}$.
+C.LDSP is only valid when $\textit{rd}{\neq}\texttt{x0}$;
+the code points with $\textit{rd}{=}\texttt{x0}$ are reserved.
 
 C.LQSP is an RV128C-only instruction that loads a 128-bit value from memory
 into register {\em rd}.  It computes its effective address by adding the
 zero-extended offset, scaled by 16, to the stack pointer, {\tt x2}.
 It expands to {\tt lq rd, offset[9:4](x2)}.
-C.LQSP is only valid when $\textit{rd}{\neq}\texttt{x0}$.
+C.LQSP is only valid when $\textit{rd}{\neq}\texttt{x0}$;
+the code points with $\textit{rd}{=}\texttt{x0}$ are reserved.
 
 C.FLWSP is an RV32FC-only instruction that loads a single-precision
 floating-point value from memory into floating-point register {\em rd}. It
@@ -686,11 +688,15 @@ These instructions use the CR format.
 
 C.JR (jump register) performs an unconditional control transfer to
 the address in register {\em rs1}.  C.JR expands to {\tt jalr x0, 0(rs1)}.
+C.JR is only valid when $\textit{rs1}{\neq}\texttt{x0}$; the code point
+with $\textit{rs1}{=}\texttt{x0}$ is reserved.
 
 C.JALR (jump and link register) performs the same operation as C.JR,
 but additionally writes the address of the instruction following the
 jump ({\tt pc}+2) to the link register, {\tt x1}.  C.JALR expands to
 {\tt jalr x1, 0(rs1)}.
+C.JALR is only valid when $\textit{rs1}{\neq}\texttt{x0}$; the code point
+with $\textit{rs1}{=}\texttt{x0}$ corresponds to the C.EBREAK instruction.
 
 \begin{commentary}
 Strictly speaking, C.JALR does not expand exactly to a base RVI
@@ -761,15 +767,21 @@ C.LUI    & nzimm[17] & $\textrm{dest}{\neq}{\left\{0,2\right\}}$ & nzimm[16:12] 
 \end{tabular}
 \end{center}
 C.LI loads the sign-extended 6-bit immediate, {\em imm}, into
-register {\em rd}.  C.LI is only valid when {\em rd}$\neq${\tt x0}.
+register {\em rd}.
 C.LI expands into {\tt addi rd, x0, imm[5:0]}.
+C.LI is only valid when {\em rd}$\neq${\tt x0};
+the code points with {\em rd}={\tt x0} encode HINTs.
 
 C.LUI loads the non-zero 6-bit immediate field into bits 17--12 of the
 destination register, clears the bottom 12 bits, and sign-extends bit
-17 into all higher bits of the destination.  C.LUI is only valid when
+17 into all higher bits of the destination.
+C.LUI expands into {\tt lui rd, nzimm[17:12]}.
+C.LUI is only valid when
 $\textit{rd}{\neq}{\left\{\texttt{x0},\texttt{x2}\right\}}$,
 and when the immediate is not equal to zero.
-C.LUI expands into {\tt lui rd, nzimm[17:12]}.
+The code points with {\em nzimm}=0 are reserved; the remaining code points
+with {\em rd}={\tt x0} are HINTs; and the remaining code points with
+{\em rd}={\tt x2} correspond to the C.ADDI16SP instruction.
 
 \subsection*{Integer Register-Immediate Operations}
 
@@ -804,12 +816,15 @@ C.ADDI adds the non-zero sign-extended 6-bit immediate to the value in
 register {\em rd} then writes the result to {\em rd}.  C.ADDI expands
 into {\tt addi rd, rd, nzimm[5:0]}.
 C.ADDI is only valid when {\em rd}$\neq${\tt x0}.
+The code point with both {\em rd}={\tt x0} and {\em nzimm}=0 encodes the C.NOP instruction;
+the remaining code points with either {\em rd}={\tt x0} or {\em nzimm}=0 encode HINTs.
 
 C.ADDIW is an RV64C/RV128C-only instruction that performs the same
 computation but produces a 32-bit result, then sign-extends result to
 64 bits.  C.ADDIW expands into {\tt addiw rd, rd, imm[5:0]}.  The
 immediate can be zero for C.ADDIW, where this corresponds to {\tt
-sext.w rd}.  C.ADDIW is only valid when {\em rd}$\neq${\tt x0}.
+sext.w rd}.  C.ADDIW is only valid when {\em rd}$\neq${\tt x0};
+the code points with {\em rd}={\tt x0} are reserved.
 
 C.ADDI16SP shares the opcode with C.LUI, but has a destination field
 of {\tt x2}. C.ADDI16SP adds the non-zero sign-extended 6-bit immediate to
@@ -817,6 +832,8 @@ the value in the stack pointer ({\tt sp}={\tt x2}), where the
 immediate is scaled to represent multiples of 16 in the range
 (-512,496). C.ADDI16SP is used to adjust the stack pointer in procedure
 prologues and epilogues.  It expands into {\tt addi x2, x2, nzimm[9:4]}.
+C.ADDI16SP is only valid when {\em nzimm}$\neq$0;
+the code point with {\em nzimm}=0 is reserved.
 
 \begin{commentary}
 In the standard RISC-V calling convention, the stack pointer {\tt sp}
@@ -846,7 +863,8 @@ non-zero immediate, scaled by 4, to the stack pointer, {\tt x2}, and
 writes the result to {\tt \rdprime}.  This instruction is used
 to generate pointers to stack-allocated variables, and expands to
 {\tt addi \rdprime, x2, nzuimm[9:2]}.
-
+C.ADDI4SPN is only valid when {\em nzuimm}$\neq$0;
+the code points with {\em nzuimm}=0 are reserved.
 
 \vspace{-0.4in}
 \begin{center}
@@ -871,12 +889,16 @@ C.SLLI  & shamt[5] & dest$\neq$0 & shamt[4:0] & C2 \\
 
 C.SLLI is a CI-format instruction that performs a logical left shift
 of the value in register {\em rd} then writes the result to {\em rd}.
-The shift amount is encoded in the {\em shamt} field, where {\em
-  shamt[5]} must be zero for RV32C.  For RV32C and RV64C, the shift
-amount must be non-zero.  For RV128C, a shift amount of zero is used
-to encode a shift of 64.  C.SLLI expands into {\tt slli rd, rd,
-  shamt[5:0]}, except for RV128C with {\tt shamt=0}, which expands to
-{\tt slli rd, rd, 64}.
+The shift amount is encoded in the {\em shamt} field.
+For RV128C, a shift amount of zero is used to encode a shift of 64.
+C.SLLI expands into {\tt slli rd, rd, shamt[5:0]}, except for
+RV128C with {\tt shamt=0}, which expands to {\tt slli rd, rd, 64}.
+
+For RV32C, {\em shamt[5]} must be zero; the code points with {\em shamt[5]}=1
+are reserved for custom extensions.  For RV32C and RV64C, the shift
+amount must be non-zero; the code points with {\em shamt}=0 are HINTs.  For
+all base ISAs, the code points with {\em rd}={\tt x0} are HINTs, except those
+with {\em shamt[5]}=1 in RV32C.
 
 \vspace{-0.4in}
 \begin{center}
@@ -904,14 +926,17 @@ C.SRAI  & shamt[5] & C.SRAI & dest & shamt[4:0] & C1 \\
 
 C.SRLI is a CB-format instruction that performs a logical right shift
 of the value in register {\em \rdprime} then writes the result to {\em \rdprime}.
-The shift amount is encoded in the {\em shamt} field, where {\em
-  shamt[5]} must be zero for RV32C.  For RV32C and RV64C, the shift
-amount must be non-zero.  For RV128C, a shift amount of zero is used
-to encode a shift of 64.  Furthermore, the shift amount is sign-extended
+The shift amount is encoded in the {\em shamt} field.
+For RV128C, a shift amount of zero is used to encode a shift of 64.
+Furthermore, the shift amount is sign-extended
 for RV128C, and so the legal shift amounts are 1--31, 64, and 96--127.
 C.SRLI expands into {\tt srli \rdprime, \rdprime, shamt[5:0]},
 except for RV128C with {\tt shamt=0}, which expands to
 {\tt srli \rdprime, \rdprime, 64}.
+
+For RV32C, {\em shamt[5]} must be zero; the code points with {\em shamt[5]}=1
+are reserved for custom extensions.  For RV32C and RV64C, the shift
+amount must be non-zero; the code points with {\em shamt}=0 are HINTs.
 
 C.SRAI is defined analogously to C.SRLI, but instead performs an arithmetic
 right shift.
@@ -982,6 +1007,10 @@ These instructions use the CR format.
 
 C.MV copies the value in register {\em rs2} into register {\em rd}.  C.MV
 expands into {\tt add rd, x0, rs2}.
+C.MV is only valid when $\textit{rs2}{\neq}\texttt{x0}$; the code points
+with $\textit{rs2}{=}\texttt{x0}$ correspond to the C.JR instruction.
+The code points with $\textit{rs2}{\neq}\texttt{x0}$ and
+$\textit{rd}{=}\texttt{x0}$ are HINTs.
 
 \begin{commentary}
 C.MV expands to a different instruction than the canonical MV
@@ -992,6 +1021,10 @@ to expand C.MV to MV instead of ADD, at slight additional hardware cost.
 
 C.ADD adds the values in registers {\em rd} and {\em rs2} and writes the
 result to register {\em rd}.  C.ADD expands into {\tt add rd, rd, rs2}.
+C.ADD is only valid when $\textit{rs2}{\neq}\texttt{x0}$; the code points
+with $\textit{rs2}{=}\texttt{x0}$ correspond to the C.JALR and C.EBREAK instructions.
+The code points with $\textit{rs2}{\neq}\texttt{x0}$ and
+$\textit{rd}{=}\texttt{x0}$ are HINTs.
 
 \vspace{-0.4in}
 \begin{center}
@@ -1222,7 +1255,7 @@ than 16 bits, including those in the base ISAs.  Several instructions
 are only valid for certain operands; when invalid, they are marked
 either {\em RES} to indicate that the opcode is reserved for future
 standard extensions; {\em NSE} to indicate that the opcode is reserved
-for non-standard extensions; or {\em HINT} to indicate that the opcode
+for custom extensions; or {\em HINT} to indicate that the opcode
 is reserved for microarchitectural hints (see Section~\ref{sec:rvc-hints}).
 
 \input{rvc-opcode-map}
