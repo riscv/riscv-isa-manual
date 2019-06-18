@@ -143,54 +143,6 @@ exception can be generated for a memory access that would otherwise be
 able to complete except for the misalignment, if the misaligned access
 should not be emulated.
 
-\label{lrscseq}
-
-In the standard A extension, certain constrained LR/SC sequences are
-guaranteed to succeed eventually.  The static code for the LR/SC
-sequence plus the code to retry the sequence in case of failure must
-comprise at most 16 integer instructions placed sequentially in
-memory.  For the sequence to be guaranteed to eventually succeed, the
-dynamic code executed between the LR and SC instructions can only
-contain other instructions from the base ``I'' instruction set, excluding
-loads, stores, backward jumps or taken backward branches, JALR, FENCE,
-FENCE.I, and SYSTEM instructions.  The code to retry a failing LR/SC
-sequence can contain backward jumps and/or branches to repeat the
-LR/SC sequence, but otherwise has the same constraints.  The SC must
-be to the same address and of the same data size as the latest LR
-executed.  The execution environment can limit the instruction and
-data memory regions within which forward progress is guaranteed.
-LR/SC sequences that do not meet all these constraints might complete on
-some attempts on some implementations, but there is no guarantee of
-eventual success.
-
-\begin{commentary}
-One advantage of CAS is that it guarantees that some hart eventually
-makes progress, whereas an LR/SC atomic sequence could livelock
-indefinitely on some systems.  To avoid this concern, we added an
-architectural guarantee of forward progress to LR/SC atomic sequences.
-The restrictions on LR/SC sequence contents allows an implementation
-to capture a cache line on the LR and complete the LR/SC sequence by
-holding off remote cache interventions for a bounded short
-time. Interrupts and TLB misses might cause the reservation to be
-lost, but eventually the atomic sequence can complete.  We restricted
-the length of LR/SC sequences to fit within 64 contiguous instruction
-bytes in the base ISA to avoid undue restrictions on instruction cache
-and TLB size and associativity.  Similarly, we disallowed other loads
-and stores within the sequences to avoid restrictions on data-cache
-associativity.  The restrictions on branches and jumps limits the time
-that can be spent in the sequence.  Floating-point operations and
-integer multiply/divide were disallowed to simplify the operating
-system's emulation of these instructions on implementations lacking
-appropriate hardware support.
-
-Although software is not forbidden from using LR/SC sequences that do not meet
-the forward-progress constraints, portable software must detect the case that
-the sequence repeatedly fails, then fall back to an alternate code sequence
-that does not run afoul of the forward-progress constraints.
-Implementations are permitted to simply always fail any LR/SC sequence that does
-not meet the forward-progress guarantee.
-\end{commentary}
-
 An implementation can reserve an arbitrarily large subset of the
 address space on each LR, provided the memory range includes all bytes
 of the addressed data word or doubleword.
@@ -199,7 +151,7 @@ may succeed if no store from another hart to the address range
 reserved by the LR can be observed to have occurred between the LR and
 the SC, and if there is no other SC between the LR and itself in
 program order.  Note this LR might have had a different address
-argument, but reserved the SC's address as part of the memory subset.
+argument and data size, but reserved the SC's address as part of the memory subset.
 Following this model, in systems with memory translation, an SC is
 allowed to succeed if the earlier LR reserved the same location using
 an alias with a different virtual address, but is also allowed to fail
@@ -210,6 +162,15 @@ another SC (to any address) between the LR and the SC in program
 order.  The precise statement of the atomicity requirements for
 successful LR/SC sequences is defined by the Atomicity Axiom in
 Section~\ref{sec:rvwmo}.
+
+\begin{commentary}
+The platform should provide a means to determine the size and shape of the
+memory range reserved on an LR.
+
+A platform specification may constrain the size and shape of the memory range
+reserved on an LR.  For example, the Unix platform is expected to require the
+range be contiguous and no greater than the virtual memory page size.
+\end{commentary}
 
 \begin{commentary}
 A store-conditional instruction to a scratch word of memory should be used
@@ -277,6 +238,102 @@ memory buffer along the lines of the original transactional memory
 proposals as an optional standard extension ``T''.
 \end{commentary}
 
+\newpage
+\section{Eventual Success of Store-Conditional Instructions}
+\label{sec:lrscseq}
+
+The standard A extension defines {\em constrained LR/SC sequences}, which have
+the following properties:
+\vspace{-0.2in}
+\begin{itemize}
+\parskip 0pt
+\itemsep 1pt
+\item The static code for the LR/SC sequence, plus the code to retry the
+  sequence in the case of failure, must comprise at most 16 instructions
+  placed sequentially in memory.
+\item The dynamic code executed between the LR and SC instructions can only
+  contain instructions from the base ``I'' instruction set, excluding loads,
+  stores, backward jumps or taken backward branches, JALR, FENCE, and SYSTEM
+  instructions.  If the ``C'' extension is supported, then compressed forms
+  of the aforementioned ``I'' instructions are also permitted.
+\item The code to retry a failing LR/SC sequence can contain backwards jumps
+  and/or branches to repeat the LR/SC sequence, but otherwise has the same
+  constraint as the code between the LR and SC.
+\item The LR address must lie either within a main memory region or within some
+  other memory region specified by the execution environment.
+\item The SC must be to the same address and of the same data size as the
+  latest LR executed.
+\end{itemize}
+
+LR/SC sequences that do not meet these constraints are {\em unconstrained}.
+Unconstrained LR/SC sequences might succeed on some attempts on some
+implementations, but might never succeed on other implementations.
+
+\begin{commentary}
+The restrictions on LR/SC sequence contents allow a simple implementation
+to capture a cache line on the LR and complete the LR/SC sequence by
+holding off remote cache interventions for a bounded short
+time.  Interrupts and TLB misses might cause the reservation to be
+lost, but eventually the atomic sequence can complete.  More scalable
+implementations that do not obtain exclusive access to the cache line
+on the LR are also possible, and also benefit from these restrictions.
+
+We restricted the length of LR/SC sequences to fit within 64 contiguous
+instruction bytes in the base ISA to avoid undue restrictions on instruction
+cache and TLB size and associativity.  Similarly, we disallowed other loads
+and stores within the sequences to avoid restrictions on data-cache
+associativity.  The restrictions on branches and jumps limit the time that
+can be spent in the sequence.  Floating-point operations and integer
+multiply/divide were disallowed to simplify the operating system's emulation
+of these instructions on implementations lacking appropriate hardware support.
+
+Software is not forbidden from using unconstrained LR/SC sequences, but
+portable software must detect the case that the sequence repeatedly fails,
+then fall back to an alternate code sequence that does not rely on an
+unconstrained LR/SC sequence.  Implementations are permitted to
+unconditionally fail any unconstrained LR/SC sequence.
+\end{commentary}
+
+If a hart {\em H} enters a constrained LR/SC sequence, the execution environment
+must guarantee that one of the following events eventually occurs:
+\vspace{-0.2in}
+\begin{itemize}
+\parskip 0pt
+\itemsep 1pt
+\item {\em H} or some other hart executes a successful SC to the subset of
+  memory reserved by the LR instruction in {\em H}'s constrained LR/SC sequence.
+\item Some other hart executes an unconditional store or AMO instruction to
+  the subset of memory reserved by the LR instruction in {\em H}'s constrained
+  LR/SC sequence.
+\item {\em H} executes a branch or jump that exits the constrained LR/SC
+  sequence.
+\item {\em H} executes an instruction that raises a synchronous exception.
+\item {\em H} takes an interrupt.
+\end{itemize}
+
+\begin{commentary}
+As a consequence of this requirement, if some harts in an execution
+environment are executing constrained LR/SC sequences, and no other harts in
+the execution environment execute an unconditional store or AMO, then at least
+one hart will eventually exit its constrained LR/SC sequence.
+
+Loads and load-reserved instructions do not by themselves impede the progress
+of other harts' LR/SC sequences.
+\end{commentary}
+
+\begin{commentary}
+One advantage of CAS is that it guarantees that some hart eventually
+makes progress, whereas an LR/SC atomic sequence could livelock
+indefinitely on some systems.  To avoid this concern, we added an
+architectural guarantee of livelock freedom for LR/SC sequences.
+
+Earlier versions of this specification imposed a stronger starvation-freedom
+guarantee.  However, the weaker livelock-freedom guarantee is sufficient to
+implement the C11 and C++11 languages, and is substantially easier to provide
+in some microarchitectural styles.
+\end{commentary}
+
+\newpage
 \section{Atomic Memory Operations}
 \label{sec:amo}
 
