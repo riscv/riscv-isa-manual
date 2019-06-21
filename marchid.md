@@ -30,3 +30,5 @@ YARVI         | Tommy Thorn's Priceless Services| [Tommy Thorn](mailto:tommy-git
 RVBS          | Alexandre Joannou, University of Cambridge| [Alexandre Joannou](mailto:aj443@cl.cam.ac.uk)    | 10                | https://github.com/CTSRD-CHERI/RVBS
 SweRV EH1     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.Wicki@wdc.com)                 | 11                | https://github.com/westerndigitalcorporation/swerv_eh1
 MSCC          | Rongcui Dong                    | [Rongcui Dong](mailto:rongcuid@outlook.com)                | 12 | https://github.com/rongcuid/MSCC
+BlackParrot   | The World                       | [Michael B. Taylor](mailto:prof.taylor@gmail.com), U. Washington | 13 |  https://github.com/black-parrot 
+BaseJump Manycore   | U. Washington             | [Michael B. Taylor](mailto:prof.taylor@gmail.com), U. Washington | 14 |  https://github.com/bespoke-silicon-group/bsg_manycore 
