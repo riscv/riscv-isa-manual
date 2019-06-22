@@ -590,33 +590,49 @@ fault when such an instruction borders a protection boundary,
 complicating variable-instruction-length fetch and decode.
 \end{commentary}
 
-RISC-V base ISAs have little-endian memory systems.  Instructions are
-stored in memory with each 16-bit parcel stored in a memory
-halfword.  Parcels forming one instruction are stored at increasing
+RISC-V base ISAs have either little-endian or big-endian memory systems,
+with the privileged architecture further defining bi-endian operation.
+Instructions are stored in memory as a sequence of 16-bit little-endian
+parcels, regardless of memory system endianness.
+Parcels forming one instruction are stored at increasing
 halfword addresses, with the lowest-addressed parcel holding the
 lowest-numbered bits in the instruction specification.
 
 \begin{commentary}
-We chose little-endian byte ordering for the RISC-V memory system
+We originally chose little-endian byte ordering for the RISC-V memory system
 because little-endian systems are currently dominant commercially (all
 x86 systems; iOS, Android, and Windows for ARM).  A minor point is
 that we have also found little-endian memory systems to be more
 natural for hardware designers.  However, certain application areas,
 such as IP networking, operate on big-endian data structures, and
 certain legacy code bases have been built assuming big-endian
-processors, so we expect that future specifications will describe
-big-endian or bi-endian variants of RISC-V.
+processors, so we have defined big-endian and bi-endian variants of RISC-V.
 
 We have to fix the order in which instruction parcels are stored in
 memory, independent of memory system endianness, to ensure that the
 length-encoding bits always appear first in halfword address
 order. This allows the length of a variable-length instruction to be
 quickly determined by an instruction-fetch unit by examining only the
-first few bits of the first 16-bit instruction parcel.  Once we had
-decided to fix on a native little-endian memory system and instruction
-parcel ordering, this naturally led to placing the length-encoding
-bits in the LSB positions of the instruction format to avoid breaking
-up opcode fields.
+first few bits of the first 16-bit instruction parcel.
+
+We further make the instruction parcels themselves little-endian to decouple
+the instruction encoding from the memory system endianness altogether.
+This design benefits both software tooling and bi-endian hardware.
+Otherwise, for instance, a RISC-V assembler or disassembler would always need
+to know the intended active endianness, despite that in bi-endian systems, the
+endianness mode might change dynamically during execution.
+In contrast, by giving instructions a fixed endianness, it is sometimes
+possible for carefully written software to be endianness-agnostic even in
+binary form, much like position-independent code.
+
+The choice to have instructions be only little-endian does have consequences,
+however, for RISC-V software that encodes or decodes machine instructions.
+Big-endian JIT compilers, for example, must swap the byte order when storing
+to instruction memory.
+
+Once we had decided to fix on a little-endian instruction encoding, this
+naturally led to placing the length-encoding bits in the LSB positions of the
+instruction format to avoid breaking up opcode fields.
 \end{commentary}
 
 \section{Exceptions, Traps, and Interrupts}
