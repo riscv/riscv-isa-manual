@@ -113,7 +113,8 @@ the CAS instruction to obtain a value for speculative computation,
 then a second load as part of the CAS instruction to check if value is
 unchanged before updating).
 
-The main disadvantage of LR/SC over CAS is livelock, which we avoid
+The main disadvantage of LR/SC over CAS is livelock, which we avoid,
+under certain circumstances,
 with an architected guarantee of eventual forward progress as
 described below.  Another concern is whether the influence of the
 current x86 architecture, with its DW-CAS, will complicate porting of
@@ -146,18 +147,23 @@ should not be emulated.
 An implementation can reserve an arbitrarily large subset of the
 address space on each LR, provided the memory range includes all bytes
 of the addressed data word or doubleword.
-An SC can only pair with the most recent LR in program order.  An SC
-may succeed if no store from another hart to the address range
-reserved by the LR can be observed to have occurred between the LR and
-the SC, and if there is no other SC between the LR and itself in
-program order.  Note this LR might have had a different address
+An SC can only pair with the most recent LR in program order.  An SC may
+succeed if no store from another hart, nor a write from some other device, to
+the address range reserved by the LR can be observed to have occurred between
+the LR and the SC, and if there is no other SC between the LR and itself in
+program order.
+Note this LR might have had a different address
 argument and data size, but reserved the SC's address as part of the memory subset.
 Following this model, in systems with memory translation, an SC is
 allowed to succeed if the earlier LR reserved the same location using
 an alias with a different virtual address, but is also allowed to fail
-if the virtual address is different.  The SC must fail if a store from
-another hart to the address range reserved by the LR can be observed
-to occur between the LR and the SC.  An SC must fail if there is
+if the virtual address is different.
+The SC must fail if the address is not within the memory subset reserved
+by the most recent LR in program order.
+The SC must fail if a store from another hart, or a write from some other
+device, to the address range reserved by the LR can be observed to occur
+between the LR and the SC.
+An SC must fail if there is
 another SC (to any address) between the LR and the SC in program
 order.  The precise statement of the atomicity requirements for
 successful LR/SC sequences is defined by the Atomicity Axiom in
@@ -270,19 +276,13 @@ unconstrained}.  Unconstrained LR/SC sequences might succeed on some attempts
 on some implementations, but might never succeed on other implementations.
 
 \begin{commentary}
-The restrictions on LR/SC loop contents allow a simple implementation
-to capture a cache line on the LR and complete the LR/SC sequence by
-holding off remote cache interventions for a bounded short
-time.  Interrupts and TLB misses might cause the reservation to be
-lost, but eventually the atomic sequence can complete.  More scalable
-implementations that do not obtain exclusive access to the cache line
-on the LR are also possible, and also benefit from these restrictions.
-
 We restricted the length of LR/SC loops to fit within 64 contiguous
 instruction bytes in the base ISA to avoid undue restrictions on instruction
-cache and TLB size and associativity.  Similarly, we disallowed other loads
-and stores within the loops to avoid restrictions on data-cache
-associativity.  The restrictions on branches and jumps limit the time that
+cache and TLB size and associativity.
+Similarly, we disallowed other loads and stores within the loops to avoid
+restrictions on data-cache associativity in simple implementations that track
+the reservation within the cache.
+The restrictions on branches and jumps limit the time that
 can be spent in the sequence.  Floating-point operations and integer
 multiply/divide were disallowed to simplify the operating system's emulation
 of these instructions on implementations lacking appropriate hardware support.
@@ -317,9 +317,13 @@ environment are executing constrained LR/SC loops, and no other harts or
 devices in the execution environment execute an unconditional store or AMO to
 that granule, then at least one hart will eventually exit its constrained
 LR/SC loop.
+By contrast, if other harts or devices continue to write to that granule,
+it is not guaranteed that any hart will exit its LR/SC loop.
 
 Loads and load-reserved instructions do not by themselves impede the progress
 of other harts' LR/SC sequences.
+We note this constraint implies that multithreaded cores require a mechanism
+to prevent other threads' cache contention from precluding LR/SC progress.
 
 These definitions admit the possibility that SC instructions may spuriously
 fail for for implementation reasons, provided progress is eventually made.
@@ -435,7 +439,7 @@ compared to AMOs with the corresponding {\em aq} or {\em rl} bit set.
 \end{commentary}
 
 An example code sequence for a critical section guarded by a
-test-and-set spinlock is shown in Figure~\ref{critical}.  Note the
+test-and-test-and-set spinlock is shown in Figure~\ref{critical}.  Note the
 first AMO is marked {\em aq} to order the lock acquisition before the
 critical section, and the second AMO is marked {\em rl} to order
 the critical section before the lock relinquishment.
@@ -445,8 +449,10 @@ the critical section before the lock relinquishment.
 \begin{verbatim}
         li           t0, 1        # Initialize swap value.
     again:
-        amoswap.w.aq t0, t0, (a0) # Attempt to acquire lock.
-        bnez         t0, again    # Retry if held.
+        lw           t1, (a0)     # Check if lock is held.
+        bnez         t1, again    # Retry if held.
+        amoswap.w.aq t1, t0, (a0) # Attempt to acquire lock.
+        bnez         t1, again    # Retry if held.
         # ...
         # Critical section.
         # ...
