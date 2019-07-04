@@ -124,6 +124,13 @@ synchronization libraries and other software that assumes DW-CAS is
 the basic machine primitive.  A possible mitigating factor is the
 recent addition of transactional memory instructions to x86, which
 might cause a move away from DW-CAS.
+
+More generally, a multi-word atomic primitive is desirable, but there is
+still considerable debate about what form this should take, and
+guaranteeing forward progress adds complexity to a system.  Our
+current thoughts are to include a small limited-capacity transactional
+memory buffer along the lines of the original transactional memory
+proposals as an optional standard extension ``T''.
 \end{commentary}
 
 The failure code with value 1 is reserved to encode an unspecified
@@ -189,10 +196,27 @@ during a preemptive context switch to forcibly yield any existing load
 reservation.
 \end{commentary}
 
-LR/SC can be used to construct lock-free data structures.  An example
-using LR/SC to implement a compare-and-swap function is shown in
-Figure~\ref{cas}.  If inlined, compare-and-swap functionality need
-only take four instructions.
+An SC instruction can never be observed by another RISC-V hart
+before the immediately preceding LR.
+The LR/SC
+sequence can be given acquire semantics by setting the {\em aq} bit on
+the LR instruction.  The LR/SC sequence can be given release semantics
+by setting the {\em rl} bit on the SC instruction.  Setting the {\em
+  aq} bit on the LR instruction, and setting both the {\em aq} and the {\em
+  rl} bit on the SC instruction makes the LR/SC sequence sequentially
+consistent, meaning that it cannot be reordered with earlier or
+later memory operations from the same hart.
+
+If neither bit is set on both LR and SC, the LR/SC sequence can be
+observed to occur before or after surrounding memory operations from
+the same RISC-V hart.  This can be appropriate when the LR/SC
+sequence is used to implement a parallel reduction operation.
+
+Software should not set the {\em rl} bit on an LR instruction unless the {\em
+aq} bit is also set, nor should software set the {\em aq} bit on an SC
+instruction unless the {\em rl} bit is also set.  LR.{\em rl} and SC.{\em aq}
+instructions are not guaranteed to provide any stronger ordering than those
+with both bits clear, but may result in lower performance.
 
 \begin{figure}[h!]
 \begin{center}
@@ -217,36 +241,10 @@ only take four instructions.
 \label{cas}
 \end{figure}
 
-An SC instruction can never be observed by another RISC-V hart
-before the immediately preceding LR.
-The LR/SC
-sequence can be given acquire semantics by setting the {\em aq} bit on
-the LR instruction.  The LR/SC sequence can be given release semantics
-by setting the {\em rl} bit on the SC instruction.  Setting the {\em
-  aq} bit on the LR instruction, and setting both the {\em aq} and the {\em
-  rl} bit on the SC instruction makes the LR/SC sequence sequentially
-consistent, meaning that it cannot be reordered with earlier or
-later memory operations from the same hart.
-
-If neither bit is set on both LR and SC, the LR/SC sequence can be
-observed to occur before or after surrounding memory operations from
-the same RISC-V hart.  This can be appropriate when the LR/SC
-sequence is used to implement a parallel reduction operation.
-
-Software should not set the {\em rl} bit on an LR instruction unless the {\em
-aq} bit is also set, nor should software set the {\em aq} bit on an SC
-instruction unless the {\em rl} bit is also set.  LR.{\em rl} and SC.{\em aq}
-instructions are not guaranteed to provide any stronger ordering than those
-with both bits clear, but may result in lower performance.
-
-\begin{commentary}
-In general, a multi-word atomic primitive is desirable but there is
-still considerable debate about what form this should take, and
-guaranteeing forward progress adds complexity to a system.  Our
-current thoughts are to include a small limited-capacity transactional
-memory buffer along the lines of the original transactional memory
-proposals as an optional standard extension ``T''.
-\end{commentary}
+LR/SC can be used to construct lock-free data structures.  An example
+using LR/SC to implement a compare-and-swap function is shown in
+Figure~\ref{cas}.  If inlined, compare-and-swap functionality need
+only take four instructions.
 
 \section{Eventual Success of Store-Conditional Instructions}
 \label{sec:lrscseq}
