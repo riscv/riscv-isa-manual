@@ -81,7 +81,7 @@ possible operating modes of a RISC-V hart with the hypervisor extension.
 \label{h-operating-modes}
 \end{table*}
 
-\section{Hypervisor CSRs}
+\section{Hypervisor and Virtual Supervisor CSRs}
 
 An OS or hypervisor running in HS-mode uses the supervisor CSRs to interact with the exception,
 interrupt, and address-translation subsystems.
@@ -92,7 +92,7 @@ two-level address translation and to control the behavior of a VS-mode guest:
 
 Furthermore, several {\em virtual supervisor} CSRs (VS CSRs) are replicas
 of the normal supervisor CSRs.
-For example, {\tt vsstatus} is the VS CSR that mirrors the usual
+For example, {\tt vsstatus} is the VS CSR that duplicates the usual
 {\tt sstatus} CSR.
 
 When V=1, the VS CSRs substitute for the corresponding supervisor CSRs,
@@ -125,7 +125,9 @@ XLEN when executing in VS-mode.
 \subsection{Hypervisor Status Register ({\tt hstatus})}
 
 The {\tt hstatus} register is an HSXLEN-bit read/write register
-formatted as shown in Figure~\ref{hstatusreg}.  The {\tt hstatus}
+formatted as shown in Figure~\ref{hstatusreg-rv32} when HSXLEN=32 and
+Figure~\ref{hstatusreg} when HSXLEN=64.
+The {\tt hstatus}
 register provides facilities analogous to the {\tt mstatus} register
 that track and control the exception behavior of a VS-mode guest.
 
@@ -133,9 +135,9 @@ that track and control the exception behavior of a VS-mode guest.
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{ScccRccccFc}
+\begin{tabular}{YcccRcccccWc}
 \\
-\instbitrange{HSXLEN-1}{23} &
+\instbitrange{31}{23} &
 \instbit{22} &
 \instbit{21} &
 \instbit{20} &
@@ -144,7 +146,8 @@ that track and control the exception behavior of a VS-mode guest.
 \instbit{8} &
 \instbit{7} &
 \instbit{6} &
-\instbitrange{5}{1} &
+\instbit{5} &
+\instbitrange{4}{1} &
 \instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{\wpri} &
@@ -156,17 +159,85 @@ that track and control the exception behavior of a VS-mode guest.
 \multicolumn{1}{c|}{SP2P} &
 \multicolumn{1}{c|}{SPV} &
 \multicolumn{1}{c|}{STL} &
+\multicolumn{1}{c|}{VSBE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPRV} \\
 \hline
-HSXLEN-23 & 1 & 1 & 1 & 10 & 1 & 1 & 1 & 1 & 5 & 1 \\
+9 & 1 & 1 & 1 & 10 & 1 & 1 & 1 & 1 & 1 & 4 & 1 \\
 \end{tabular}
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Hypervisor-mode status register ({\tt hstatus}).}
+\caption{Hypervisor-mode status register ({\tt hstatus}) for RV32.}
+\label{hstatusreg-rv32}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{MFScccc}
+\\
+\instbitrange{HSXLEN-1}{34} &
+\instbitrange{33}{32} &
+\instbitrange{31}{23} &
+\instbit{22} &
+\instbit{21} &
+\instbit{20} &
+ \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{VSXL[1:0]} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{VTSR} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{VTVM} &
+ \\
+\hline
+HSXLEN-34 & 2 & 9 & 1 & 1 & 1 & \\
+\end{tabular}
+\begin{tabular}{cOcccccFc}
+\\
+&
+\instbitrange{19}{10} &
+\instbit{9} &
+\instbit{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbitrange{4}{1} &
+\instbit{0} \\
+\hline
+ &
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{SP2V} &
+\multicolumn{1}{c|}{SP2P} &
+\multicolumn{1}{c|}{SPV} &
+\multicolumn{1}{c|}{STL} &
+\multicolumn{1}{c|}{VSBE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{SPRV} \\
+\hline
+ & 10 & 1 & 1 & 1 & 1 & 1 & 4 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Hypervisor-mode status register ({\tt hstatus}) for RV64.}
 \label{hstatusreg}
 \end{figure*}
+
+The VSXL field controls the effective XLEN for VS-mode (known as VSXLEN),
+which may differ from the XLEN for HS-mode (HSXLEN).
+When HSXLEN=32, the VSXL field does not exist, and VSXLEN=32.
+When HSXLEN=64, VSXL is a \warl\ field that is encoded the same as the
+MXL field of {\tt misa}, shown in Table~\ref{misabase} on
+page~\pageref{misabase}.
+In particular, the implementation may hardwire VSXL so that VSXLEN=HSXLEN.
+
+If HSXLEN is changed from 32 to a wider width, and if field VSXL is not
+hardwired to a forced value, it gets the value corresponding to the
+widest supported width not wider than the new HSXLEN.
 
 The {\tt hstatus} fields VTSR and VTVM are defined analogously to the
 {\tt mstatus} fields TSR and TVM, but affect the trapping behavior of the SRET
@@ -191,8 +262,15 @@ On an access or page fault due to guest physical address translation, STL is
 set to 1.
 For any other trap into HS-mode, STL is set to 0.
 
-The SPRV bit modifies the privilege with which loads and stores execute when
-not in M-mode.
+The VSBE bit is a \warl\ field that controls the endianness of explicit
+memory accesses made from VS-mode.
+If VSBE=0, explicit load and store memory accesses made from VS-mode are
+little-endian, and if VSBE=1, they are big-endian.
+An implementation may hardwire VSBE to specify always the same endianness
+as for HS-mode.
+
+The SPRV bit modifies the privilege with which loads and stores execute
+in HS-mode.
 When SPRV=0, translation and protection behave as normal.
 When SPRV=1, load and store memory addresses are translated and protected, and
 endianness is applied, as though the current virtualization mode were set to
@@ -215,10 +293,8 @@ Table~\ref{h-sprv} enumerates the cases.
 \label{h-sprv}
 \end{table*}
 
-\begin{commentary}
-For simplicity, SPRV is in effect even when in U-mode, VS-mode, or VU-mode, but
-in normal use will only be enabled for short sequences in HS-mode.
-\end{commentary}
+An MRET or SRET instruction that changes the operating mode to U-mode,
+VS-mode, or VU-mode also sets SPRV=0.
 
 \subsection{Hypervisor Trap Delegation Registers ({\tt hedeleg} and {\tt hideleg})}
 
@@ -321,18 +397,18 @@ to the guest virtual machine.
 
 When the CY, TM, IR, or HPM{\em n} bit in the {\tt hcounteren} register
 is clear, attempts to read the {\tt cycle}, {\tt time}, {\tt instret}, or
-{\tt hpmcounter{\em n}} register while V=1 will cause an illegal
+{\tt hpmcounter}{\em n} register while V=1 will cause an illegal
 instruction exception.
 When one of these bits is set, access to the corresponding register is
-permitted when V=1.
+permitted when V=1, unless prevented for some other reason.
+In VU-mode, a counter is not readable unless the applicable bits are set
+in both {\tt hcounteren} and {\tt scounteren}.
 
 {\tt hcounteren} must be implemented.
 However, any of the bits may contain a hardwired value of zero,
 indicating reads to the corresponding counter will cause an exception
 when V=1.
 Hence, they are effectively \warl\ fields.
-A bit in {\tt hcounteren} reads as zero (hardwired to zero) if the
-corresponding bit in {\tt mcounteren} is clear.
 
 \subsection{Hypervisor Guest Address Translation and Protection Register ({\tt hgatp})}
 \label{sec:hgatp}
@@ -483,7 +559,8 @@ may be necessary to execute an HFENCE.GVMA instruction
 
 The {\tt vsstatus} register is a VSXLEN-bit read/write register that is
 VS-mode's version of supervisor register {\tt sstatus}, formatted as
-shown in Figure~\ref{vsstatusreg}.
+shown in Figure~\ref{vsstatusreg} when VSXLEN=32 and
+Figure~\ref{vsstatusreg} when VSXLEN=64.
 When V=1, {\tt vsstatus} substitutes for the usual {\tt sstatus}, so
 instructions that normally read or modify {\tt sstatus} actually access
 {\tt vsstatus} instead.
@@ -492,7 +569,58 @@ instructions that normally read or modify {\tt sstatus} actually access
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{cScScccc}
+\scalebox{0.95}{
+\begin{tabular}{cWcccccWcccccWcc}
+\\
+\instbit{31} &
+\instbitrange{30}{20} &
+\instbit{19} &
+\instbit{18} &
+\instbit{17} &
+\instbitrange{16}{15} &
+\instbitrange{14}{13} &
+\instbitrange{12}{9} &
+\instbit{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbitrange{3}{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{SD} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{MXR} &
+\multicolumn{1}{c|}{SUM} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{XS[1:0]} &
+\multicolumn{1}{c|}{FS[1:0]} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{SPP} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UBE} &
+\multicolumn{1}{c|}{SPIE} &
+\multicolumn{1}{c|}{UPIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{SIE}  &
+\multicolumn{1}{c|}{UIE}
+\\
+\hline
+1 & 11 & 1 & 1 & 1 & 2 & 2 & 4 & 1 & 1 & 1 & 1 & 1 & 2 & 1 & 1 \\
+\end{tabular}}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Virtual supervisor status register ({\tt vsstatus}) for RV32.}
+\label{vsstatusreg-rv32}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{cSFScccc}
 \\
 \instbit{VSXLEN-1} &
 \instbitrange{VSXLEN-2}{34} &
@@ -505,7 +633,7 @@ instructions that normally read or modify {\tt sstatus} actually access
 \hline
 \multicolumn{1}{|c|}{SD} &
 \multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{UXL} &
+\multicolumn{1}{c|}{UXL[1:0]} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MXR} &
 \multicolumn{1}{c|}{SUM} &
@@ -514,14 +642,15 @@ instructions that normally read or modify {\tt sstatus} actually access
 \hline
 1 & VSXLEN-35 & 2 & 12 & 1 & 1 & 1 & \\
 \end{tabular}
-\begin{tabular}{ccccccccccc}
+\begin{tabular}{cccccccccccc}
 \\
 &
 \instbitrange{16}{15} &
 \instbitrange{14}{13} &
 \instbitrange{12}{9} &
 \instbit{8} &
-\instbitrange{7}{6} &
+\instbit{7} &
+\instbit{6} &
 \instbit{5} &
 \instbit{4} &
 \instbitrange{3}{2} &
@@ -529,18 +658,19 @@ instructions that normally read or modify {\tt sstatus} actually access
 \instbit{0} \\
 \hline
  &
-\multicolumn{1}{c|}{XS[1:0]} &
-\multicolumn{1}{|c|}{FS[1:0]} &
+\multicolumn{1}{|c|}{XS[1:0]} &
+\multicolumn{1}{c|}{FS[1:0]} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPP} &
 \multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UBE} &
 \multicolumn{1}{c|}{SPIE} &
 \multicolumn{1}{c|}{UPIE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SIE} &
 \multicolumn{1}{c|}{UIE} \\
 \hline
- & 2 & 2 & 4 & 1 & 2 & 1 & 1 & 2 & 1 & 1 \\
+ & 2 & 2 & 4 & 1 & 1 & 1 & 1 & 1 & 2 & 1 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -549,14 +679,43 @@ instructions that normally read or modify {\tt sstatus} actually access
 \label{vsstatusreg}
 \end{figure*}
 
-Fields UPIE and UIE are aliases of the same fields in the HS-level
+Fields UPIE and UIE of {\tt vsstatus} are aliases of the same fields in
+the HS-level {\tt sstatus}.
+The other fields of {\tt vsstatus} exist independently of HS-level
 {\tt sstatus}.
+
+The UXL field controls the effective XLEN for VU-mode, which may differ
+from the XLEN for VS-mode (VSXLEN).
+When VSXLEN=32, the UXL field does not exist, and VU-mode XLEN=32.
+When VSXLEN=64, UXL is a \warl\ field that is encoded the same as the MXL
+field of {\tt misa}, shown in Table~\ref{misabase} on
+page~\pageref{misabase}.
+In particular, the implementation may hardwire field UXL so that VU-mode
+XLEN=VSXLEN.
+
+If VSXLEN is changed from 32 to a wider width, and if field UXL is not
+hardwired to a forced value, it gets the value corresponding to the
+widest supported width not wider than the new VSXLEN.
 
 When V=1, both {\tt vsstatus}.FS and the HS-level {\tt sstatus}.FS are in
 effect.  Attempts
 to execute a floating-point instruction when either field is 0 (Off) raise an
 illegal-instruction exception.  Modifying the floating-point state when V=1
 causes both fields to be set to 3 (Dirty).
+
+\begin{commentary}
+For a hypervisor to benefit from the extension context status, it must
+have its own copy in the HS-level {\tt sstatus}, maintained independently
+of a guest OS running in VS-mode.
+While a version of the extension context status obviously must exist in
+{\tt vsstatus} for VS-mode, a hypervisor cannot rely on this version
+being maintained correctly, given that VS-level software can change
+{\tt vsstatus}.FS arbitrarily.
+If the HS-level {\tt sstatus}.FS were not independently active and
+maintained by the hardware in parallel with {\tt vsstatus}.FS while V=1,
+hypervisors would always be forced to conservatively swap all
+floating-point state when context-switching between virtual machines.
+\end{commentary}
 
 Read-only fields SD and XS summarize the extension context status as it
 is visible to VS-mode only.
@@ -1006,62 +1165,80 @@ fence for all memory-management data structures.
 
 \section{Machine-Level CSRs}
 
-The hypervisor extension augments the {\tt mstatus} CSR.
+The hypervisor extension augments machine status registers {\tt mstatus}
+and (for RV32 only) {\tt mstatush}.
 
-\subsection{Machine Status Register ({\tt mstatus})}
+\subsection{Machine Status Registers ({\tt mstatus} and {\tt mstatush})}
 
-The hypervisor extension adds two fields to the machine-mode {\tt mstatus} CSR,
-MPV and MTL,
-and modifies the behavior of several existing fields.
-Figure~\ref{hypervisor-mstatus} shows the {\tt mstatus} register when the
-hypervisor extension is provided.
+The hypervisor extension adds two fields, MPV and MTL, to the
+machine-level {\tt mstatus} or {\tt mstatush} CSR, and modifies the
+behavior of several existing {\tt mstatus} fields.
+Figure~\ref{hypervisor-mstatus} shows the modified {\tt mstatus} register
+when the hypervisor extension is provided and MXLEN=64.
+When MXLEN=32, the hypervisor extension adds fields not to {\tt mstatus}
+but to {\tt mstatush}, which must exist.
+Figure~\ref{hypervisor-mstatush} shows the {\tt mstatush} register when
+the hypervisor extension is provided and MXLEN=32.
 
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\scalebox{0.95}{
-\begin{tabular}{cRcccccFcccccc}
+\begin{tabular}{cMccccFFc}
 \\
 \instbit{MXLEN-1} &
 \instbitrange{MXLEN-2}{40} &
 \instbit{39} &
 \instbit{38} &
-\instbitrange{37}{36} &
+\instbit{37} &
+\instbit{36} &
 \instbitrange{35}{34} &
 \instbitrange{33}{32} &
-\instbitrange{31}{23} &
-\instbit{22} &
-\instbit{21} &
-\instbit{20} &
-\instbit{19} &
-\instbit{18} &
  \\
 \hline
 \multicolumn{1}{|c|}{SD} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MPV} &
 \multicolumn{1}{c|}{MTL} &
-\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{MBE} &
+\multicolumn{1}{c|}{SBE} &
 \multicolumn{1}{c|}{SXL[1:0]} &
 \multicolumn{1}{c|}{UXL[1:0]} &
-\multicolumn{1}{c|}{\wpri} &
+ \\
+\hline
+1 & MXLEN-41 & 1 & 1 & 1 & 1 & 2 & 2 & \\
+\end{tabular}
+\begin{tabular}{cEccccccWWc}
+\\
+&
+\instbitrange{31}{23} &
+\instbit{22} &
+\instbit{21} &
+\instbit{20} &
+\instbit{19} &
+\instbit{18} &
+\instbit{17} &
+\instbitrange{16}{15} &
+\instbitrange{14}{13} &
+ \\
+\hline
+ &
+\multicolumn{1}{|c|}{\wpri} &
 \multicolumn{1}{c|}{TSR} &
 \multicolumn{1}{c|}{TW} &
 \multicolumn{1}{c|}{TVM} &
 \multicolumn{1}{c|}{MXR} &
 \multicolumn{1}{c|}{SUM} &
+\multicolumn{1}{c|}{MPRV} &
+\multicolumn{1}{c|}{XS[1:0]} &
+\multicolumn{1}{c|}{FS[1:0]} &
  \\
 \hline
-1 & MXLEN-41 & 1 & 1 & 2 & 2 & 2 & 9 & 1 & 1 & 1 & 1 & 1 & \\
-\end{tabular}}
-\scalebox{0.95}{
-\begin{tabular}{cccccccccccccccc}
+ & 9 & 1 & 1 & 1 & 1 & 1 & 1 & 2 & 2 & \\
+\end{tabular}
+\begin{tabular}{cFWcccccccccc}
 \\
 &
-\instbit{17} &
-\instbitrange{16}{15} &
-\instbitrange{14}{13} &
 \instbitrange{12}{11} &
 \instbitrange{10}{9} &
 \instbit{8} &
@@ -1075,14 +1252,11 @@ hypervisor extension is provided.
 \instbit{0} \\
 \hline
  &
-\multicolumn{1}{|c|}{MPRV} &
-\multicolumn{1}{c|}{XS[1:0]} &
-\multicolumn{1}{c|}{FS[1:0]} &
-\multicolumn{1}{c|}{MPP[1:0]} &
+\multicolumn{1}{|c|}{MPP[1:0]} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPP} &
 \multicolumn{1}{c|}{MPIE} &
-\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UBE} &
 \multicolumn{1}{c|}{SPIE} &
 \multicolumn{1}{c|}{UPIE} &
 \multicolumn{1}{c|}{MIE} &
@@ -1090,13 +1264,43 @@ hypervisor extension is provided.
 \multicolumn{1}{c|}{SIE} &
 \multicolumn{1}{c|}{UIE} \\
 \hline
- & 1 & 2 & 2 & 2 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
-\end{tabular}}
+ & 2 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
+\end{tabular}
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Machine-mode status register ({\tt mstatus}) for RV64.}
+\caption{Machine-mode status register ({\tt mstatus}) for RV64 when the hypervisor extension is provided.}
 \label{hypervisor-mstatus}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{LccccF}
+\\
+\instbitrange{31}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbitrange{3}{0} \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{MPV} &
+\multicolumn{1}{c|}{MTL} &
+\multicolumn{1}{c|}{MBE} &
+\multicolumn{1}{c|}{SBE} &
+\multicolumn{1}{c|}{\wpri} \\
+\hline
+24 & 1 & 1 & 1 & 1 & 4 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Additional machine-mode status register ({\tt mstatush}) for RV32 when the hypervisor extension is provided.
+The format of {\tt mstatus} is unchanged for RV32.}
+\label{hypervisor-mstatush}
 \end{figure*}
 
 The MPV bit (Machine Previous Virtualization Mode) is written by the implementation
@@ -1112,22 +1316,13 @@ On an access or page fault due to guest physical address translation, MTL is
 set to 1.
 For any other trap into M-mode, MTL is set to 0.
 
-\begin{commentary}
-For RV32, MPV and MTL are not in {\tt mstatus}.
-Instead, the plan is for these fields to be in a different CSR, {\tt mstatush},
-that is expected to be defined in a future version of the privileged
-architecture.
-\end{commentary}
-
-The SXL field controls the value of XLEN for HS-mode, while
-the UXL field controls the value of XLEN for VS-mode and U-mode.
-
-The TSR and TVM fields only affect execution in HS-mode, not in VS-mode.
-
+The TSR and TVM fields of {\tt mstatus} affect execution only in HS-mode,
+not in VS-mode.
 The TW field affects execution in all modes except M-mode.
 
 The hypervisor extension changes the behavior of the the Modify Privilege
-field, MPRV.  When MPRV=0, translation and protection behave as normal.  When
+field, MPRV, of {\tt mstatus}.
+When MPRV=0, translation and protection behave as normal.  When
 MPRV=1, loads and stores are translated and protected as though the current
 privilege mode were set to MPP and the current virtualization mode were set to
 MPV.  Table~\ref{h-mprv} enumerates the cases.
@@ -1154,20 +1349,12 @@ register but is not a superset of {\tt vsstatus}.
 Because {\tt vsstatus} fields UPIE and UIE are aliased in the HS-level
 {\tt sstatus}, they are also aliased in {\tt mstatus}.
 
-\section{Base ISA Control}
-
-The SXL field of {\tt mstatus} determines XLEN for HS-mode.
-
-The UXL field of the HS-level {\tt sstatus} determines XLEN for both
-VS-mode and U-mode, while {\tt vsstatus}.UXL determines XLEN for
-VU-mode.
-
 \section{Two-Level Address Translation}
 \label{sec:two-level-translation}
 
-Whenever the current virtualization mode V is 1 (and assuming both
-{\tt mstatus}.MPRV=0 and {\tt hstatus}.SPRV=0), two-level address translation
-and protection is in effect.
+Whenever the current virtualization mode V is 1 (and assuming
+{\tt mstatus}.MPRV=0), two-level address translation and protection is in
+effect.
 For any virtual memory access, the original virtual address is first converted
 by VS-level address translation, as controlled by the {\tt vsatp}
 register, into a {\em guest physical address}.
@@ -1421,11 +1608,6 @@ calls from VS-mode use cause 10.  Table~\ref{hcauses} lists the
 possible M-mode and HS-mode exception codes when the hypervisor extension is
 present.
 
-\begin{commentary}
-HS-mode and VS-mode ECALLs use different cause values so they can be delegated
-separately.
-\end{commentary}
-
 \begin{table*}[h!]
 \begin{center}
 \begin{tabular}{|r|r|l|l|}
@@ -1474,6 +1656,11 @@ separately.
 \caption{Supervisor and machine cause register ({\tt scause} and {\tt mcause}) values when the hypervisor extension is enabled.}
 \label{hcauses}
 \end{table*}
+
+\begin{commentary}
+HS-mode and VS-mode ECALLs use different cause values so they can be delegated
+separately.
+\end{commentary}
 
 When a trap occurs in HS-mode or U-mode, it goes to M-mode, unless
 delegated by {\tt medeleg} or {\tt mideleg}, in which case it goes to HS-mode.
@@ -1555,8 +1742,10 @@ MRET first determines what the new operating mode will be according to
 the values of MPP and MPV in {\tt mstatus}, as encoded in
 Table~\ref{h-mpp}.
 MRET then in {\tt mstatus} sets MPV=0, MPP=0, MIE=MPIE, and MPIE=1.
+If the new operating mode will be U, VS, or VU, MRET also sets
+{\tt hstatus}.SPRV=0.
 Lastly, MRET sets the virtualization and privilege modes as previously
-determined, and also sets {\tt pc}={\tt mepc}.
+determined, and sets {\tt pc}={\tt mepc}.
 
 The SRET instruction is used to return from a trap taken into HS-mode or
 VS-mode.  Its behavior depends on the current virtualization mode.
@@ -1568,8 +1757,10 @@ SRET then sets {\tt hstatus}.SPV={\tt hstatus}.SP2V,
 {\tt sstatus}.SPP={\tt hstatus}.SP2P, {\tt hstatus}.SP2V=0,
 {\tt hstatus}.SP2P=0, {\tt sstatus}.SIE={\tt sstatus}.SPIE, and
 {\tt sstatus}.SPIE=1.
+If the new operating mode will be U, VS, or VU, SRET also sets
+{\tt hstatus}.SPRV=0.
 Lastly, SRET sets the virtualization and privilege modes as previously
-determined, and also sets {\tt pc}={\tt sepc}.
+determined, and sets {\tt pc}={\tt sepc}.
 
 When executed in VS-mode (i.e., V=1), SRET sets the privilege mode according to
 Table~\ref{h-vspp}, then in {\tt vsstatus} sets SPP=0, SIE=SPIE, and SPIE=1, and
