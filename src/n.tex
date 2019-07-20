@@ -4,6 +4,12 @@
 \begin{commentary}
   This is a placeholder for a more complete writeup of the N
   extension, and to form a basis for discussion.
+
+  An ongoing topic of discussion is whether, for systems with only M and
+  U privilege modes, the N extension should be supplanted by S-mode without
+  virtual memory (i.e., with {\tt satp} hardwired to zero).
+  This approach would have similar hardware cost and would simplify the
+  architecture.
 \end{commentary}
 
 This chapter presents a proposal for adding RISC-V user-level
@@ -28,32 +34,13 @@ floating-point traps.
 
 \section{Additional CSRs}
 
-The user-visible CSRs added to support the N extension are listed in
-Table~\ref{tab:ncsrs}.
+New user-visible CSRs added to support the N extension.
+Their encodings are listed in Table~\ref{ucsrnames} in
+Chapter~\ref{chap:priv-csrs}.
 
-\begin{table}[hbt]
-  \centering
-  \begin{tabular}{|l|l|l|}
-    \hline
-    Number   & Name           & Description \\
-    \hline
-    \tt 0x000 & \tt ustatus    & User status register. \\
-    \tt 0x004 & \tt uie        & User interrupt-enable register. \\
-    \tt 0x005 & \tt utvec      & User trap handler base address. \\
-    \tt 0x040 & \tt uscratch   & Scratch register for user trap handlers. \\
-    \tt 0x041 & \tt uepc       & User exception program counter. \\
-    \tt 0x042 & \tt ucause     & User trap cause. \\
-    \tt 0x043 & \tt utval      & User bad address or instruction. \\
-    \tt 0x044 & \tt uip        & User interrupt pending. \\
-    \hline
-  \end{tabular}
-  \caption{CSRs for N extension.}
-  \label{tab:ncsrs}
-\end{table}
+\subsection{User Status Register ({\tt ustatus})}
 
-\section{User Status Register ({\tt ustatus})}
-
-The {\tt ustatus} register is an XLEN-bit read/write register
+The {\tt ustatus} register is a UXLEN-bit read/write register
 formatted as shown in Figure~\ref{ustatusreg}.  The {\tt ustatus}
 register keeps track of and controls the hart's current operating
 state.
@@ -63,7 +50,7 @@ state.
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{KccFc}
 \\
-\instbitrange{XLEN}{5} &
+\instbitrange{UXLEN}{5} &
 \instbit{4} &
 \instbitrange{3}{1} &
 \instbit{0} \\
@@ -73,7 +60,7 @@ state.
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{UIE} \\
 \hline
-XLEN-5 & 1 & 3 & 1 \\
+UXLEN-5 & 1 & 3 & 1 \\
 \end{tabular}
 \end{center}
 \vspace{-0.1in}
@@ -85,6 +72,9 @@ The user interrupt-enable bit UIE disables user-level interrupts when
 clear. The value of UIE is copied into UPIE when a user-level trap is
 taken, and the value of UIE is set to zero to provide atomicity for
 the user-level trap handler.
+
+The UIE and UPIE bits are mirrored in the {\tt mstatus} and {\tt sstatus}
+registers in the same bit positions.
 
 \begin{commentary}
   There is no UPP bit to hold the previous privilege mode as it can
@@ -98,12 +88,132 @@ copies UPIE into UIE, then sets UPIE.
   and help catch coding errors.
 \end{commentary}
 
-\section{Other CSRs}
-The remaining CSRs function in an analogous way to the trap handling
-registers defined for M-mode and S-mode.
+\subsection{User Interrupt Registers ({\tt uip} and {\tt uie})}
+
+The {\tt uip} register is a UXLEN-bit read/write register containing
+information on pending interrupts, while {\tt uie} is the corresponding
+UXLEN-bit read/write register containing interrupt enable bits.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{KcFcFc}
+\instbitrange{UXLEN-1}{9} &
+\instbit{8} &
+\instbitrange{7}{5} &
+\instbit{4} &
+\instbitrange{3}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{UEIP} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UTIP} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{USIP} \\
+\hline
+UXLEN-9 & 1 & 3 & 1 & 3 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{User interrupt-pending register ({\tt uip}).}
+\label{uipreg}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{KcFcFc}
+\instbitrange{UXLEN-1}{9} &
+\instbit{8} &
+\instbitrange{7}{5} &
+\instbit{4} &
+\instbitrange{3}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{UEIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UTIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{USIE} \\
+\hline
+UXLEN-9 & 1 & 3 & 1 & 3 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{User interrupt-enable register ({\tt uie}).}
+\label{uiereg}
+\end{figure*}
+
+Three types of interrupts are defined: software interrupts, timer interrupts,
+and external interrupts.  A user-level software interrupt is triggered
+on the current hart by writing 1 to its user software interrupt-pending
+(USIP) bit in the {\tt uip} register.  A pending user-level software
+interrupt can be cleared by writing 0 to the USIP bit in {\tt uip}.
+User-level software interrupts are disabled when the USIE bit in the
+{\tt uie} register is clear.
+
+The ABI should provide a mechanism to send interprocessor interrupts to other
+harts, which will ultimately cause the USIP bit to be set in the recipient
+hart's {\tt uip} register.
+
+All bits besides USIP in the {\tt uip} register are read-only.
+
+A user-level timer interrupt is pending if the UTIP bit in the {\tt uip}
+register is set.  User-level timer interrupts are disabled when the UTIE
+bit in the {\tt uie} register is clear.  The ABI should provide a
+mechanism to clear a pending timer interrupt.
+
+A user-level external interrupt is pending if the UEIP bit in the
+{\tt uip} register is set.  User-level external interrupts are disabled
+when the UEIE bit in the {\tt uie} register is clear.  The ABI
+should provide facilities to mask, unmask, and query the cause of external
+interrupts.
+
+The {\tt uip} and {\tt uie} registers are subsets of the {\tt mip} and {\tt
+mie} registers.
+Reading any field, or writing any writable field, of {\tt uip}/{\tt uie}
+effects a read or write of the homonymous field of {\tt mip}/{\tt mie}.
+If S-mode is implemented, the {\tt uip} and {\tt uie} registers are also
+subsets of the {\tt sip} and {\tt sie} registers.
+
+\subsection{Machine Trap Delegation Registers ({\tt medeleg} and {\tt mideleg})}
+
+In systems with the N extension, the {\tt medeleg} and {\tt mideleg}
+registers, described in Chapter~\ref{machine},  must be implemented.
+
+In systems that implement S-mode, {\tt medeleg} and {\tt mideleg}
+behave as described in Chapter~\ref{machine}.
+In systems with only M and U privilege modes, setting a bit in {\tt medeleg}
+or {\tt mideleg} delegates the corresponding trap in U-mode to the U-mode trap
+handler.
+
+\subsection{Supervisor Trap Delegation Registers ({\tt sedeleg} and {\tt sideleg})}
+
+For systems with both S-mode and the N extension, new CSRs {\tt
+sedeleg} and {\tt sideleg} are added.
+These registers have the same layout as the machine trap delegation registers,
+{\tt medeleg} and {\tt mideleg}.
+
+{\tt sedeleg} and {\tt sideleg} allow S-mode to delegate traps to U-mode.
+Only bits corresponding to traps that have been delegated to S-mode are
+writable; the others are hardwired to zero.
+Setting a bit in {\tt sedeleg} or {\tt sideleg} delegates the corresponding
+trap in U-mode to the U-mode trap handler.
+
+\subsection{Other CSRs}
+
+The {\tt uscratch}, {\tt uepc}, {\tt ucause}, {\tt utvec}, and {\tt utval}
+CSRs are defined analogously to the {\tt mscratch}, {\tt mepc}, {\tt mcause},
+{\tt mtvec}, and {\tt mtval} CSRs.
 
 \begin{commentary}
-  A more complete writeup to follow.
+  A more complete writeup is to follow.
 \end{commentary}
 
 \section{N Extension Instructions}

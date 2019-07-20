@@ -361,14 +361,14 @@ The {\tt mstatus} register is an MXLEN-bit read/write register
 formatted as shown in Figure~\ref{mstatusreg} for RV64 and
 Figure~\ref{mstatusreg-rv32} for RV32.  The {\tt mstatus}
 register keeps track of and controls the hart's current operating
-state.  Restricted views of the {\tt mstatus} register appear as the
-{\tt sstatus} and {\tt ustatus} registers in the S-level and U-level
-ISAs respectively.
+state.  A restricted view of {\tt mstatus} appears as the
+{\tt sstatus} register in the S-level ISA.
 
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
+\scalebox{0.95}{
 \begin{tabular}{cRccccYcccccc}
 \\
 \instbit{MXLEN-1} &
@@ -400,8 +400,9 @@ ISAs respectively.
  \\
 \hline
 1 & MXLEN-39 & 1 & 1 & 2 & 2 & 9 & 1 & 1 & 1 & 1 & 1 & \\
-\end{tabular}
-\begin{tabular}{ccccccccccccccc}
+\end{tabular}}
+\scalebox{0.95}{
+\begin{tabular}{ccWWcWccccccccc}
 \\
 &
 \instbit{17} &
@@ -429,14 +430,14 @@ ISAs respectively.
 \multicolumn{1}{c|}{MPIE} &
 \multicolumn{1}{c|}{UBE} &
 \multicolumn{1}{c|}{SPIE} &
-\multicolumn{1}{c|}{UPIE} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MIE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SIE} &
-\multicolumn{1}{c|}{UIE} \\
+\multicolumn{1}{c|}{\wpri} \\
 \hline
  & 1 & 2 & 2 & 2 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
-\end{tabular}
+\end{tabular}}
 \end{center}
 }
 \vspace{-0.1in}
@@ -472,7 +473,7 @@ ISAs respectively.
 \hline
 1 & 8 & 1 & 1 & 1 & 1 & 1 & 1 & \\
 \end{tabular}
-\begin{tabular}{cccccccccccccc}
+\begin{tabular}{cWWcWccccccccc}
 \\
 &
 \instbitrange{16}{15} &
@@ -498,11 +499,11 @@ ISAs respectively.
 \multicolumn{1}{c|}{MPIE} &
 \multicolumn{1}{c|}{UBE} &
 \multicolumn{1}{c|}{SPIE} &
-\multicolumn{1}{c|}{UPIE} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MIE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SIE} &
-\multicolumn{1}{c|}{UIE} \\
+\multicolumn{1}{c|}{\wpri} \\
 \hline
  & 2 & 2 & 2 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
 \end{tabular}
@@ -551,8 +552,9 @@ would be hardwired to zero.
 \subsubsection{Privilege and Global Interrupt-Enable Stack in {\tt mstatus} register}
 \label{privstack}
 
-Global interrupt-enable bits, MIE, SIE, and UIE, are provided for each
-privilege mode.  These bits are primarily used to guarantee atomicity
+Global interrupt-enable bits, MIE and SIE, are provided for M-mode and
+S-mode respectively.
+These bits are primarily used to guarantee atomicity
 with respect to interrupt handlers in the current privilege mode.
 
 \begin{commentary}
@@ -564,11 +566,13 @@ instruction.
 When a hart is executing in privilege mode {\em x}, interrupts are
 globally enabled when {\em x}\,IE=1 and globally disabled when {\em
   x}\,IE=0.  Interrupts for lower-privilege modes, {\em w}$<${\em x},
-are always globally disabled regardless of the setting of the
-lower-privilege mode's global {\em w}\,IE bit.  Interrupts for
+are always globally disabled regardless of the setting of any global
+{\em w}\,IE bit for the lower-privilege mode.
+Interrupts for
 higher-privilege modes, {\em y}$>${\em x}, are always globally enabled
-regardless of the setting of the higher-privilege mode's global {\em
-  y}\,IE bit.  Higher-privilege-level code can use separate
+regardless of the setting of the global {\em y}\,IE bit for the
+higher-privilege mode.
+Higher-privilege-level code can use separate
 per-interrupt enable bits to disable selected higher-privilege-mode
 interrupts before ceding control to a lower-privilege mode.
 
@@ -579,12 +583,13 @@ interrupts before ceding control to a lower-privilege mode.
   interrupt, or reset as means to regain control of the hart.
 \end{commentary}
 
-To support nested traps, each privilege mode {\em x} has a two-level
+To support nested traps, each privilege mode {\em x} that can respond to
+interrupts has a two-level
 stack of interrupt-enable bits and privilege modes.  {\em x}\,PIE
 holds the value of the interrupt-enable bit active prior to the trap,
 and {\em x}\,PP holds the previous privilege mode.  The {\em x}\,PP
 fields can only hold privilege modes up to {\em x}, so MPP is
-two bits wide, SPP is one bit wide, and UPP is implicitly zero.  When
+two bits wide and SPP is one bit wide.  When
 a trap is taken from privilege mode {\em y} into privilege mode {\em
   x}, {\em x}\,PIE is set to the value of {\em x}\,IE; {\em x}\,IE is set to
 0; and {\em x}\,PP is set to {\em y}.
@@ -598,8 +603,8 @@ interrupted context, will save the privilege stack before re-enabling
 interrupts, so only one entry per stack is required.
 \end{commentary}
 
-The MRET, SRET, or URET instructions are used to return from
-traps in M-mode, S-mode, or U-mode respectively.  When
+An MRET or SRET instruction is used to return from
+a trap in M-mode or S-mode respectively.  When
 executing an {\em x}\,RET instruction, supposing {\em x}\,PP holds the
 value {\em y}, {\em x}\,IE is set to {\em x}\,PIE; the privilege mode
 is changed to {\em y}; {\em x}\,PIE is set to 1; and {\em x}\,PP is
@@ -615,20 +620,6 @@ by writing that mode to MPP then reading it back.
 
 If the machine provides only U and M modes, then only a single
 hardware storage bit is required to represent either 00 or 11 in MPP.
-\end{commentary}
-
-User-level interrupts are an optional extension and have been
-allocated the ISA extension letter N.
-If user-level interrupts are omitted, the
-UIE and UPIE bits are hardwired to zero.  For all other supported
-privilege modes {\em x}, the {\em x}\,IE and {\em x}\,PIE must not
-be hardwired.
-
-\begin{commentary}
-User-level interrupts are primarily intended to support secure
-embedded systems with only M-mode and U-mode present, but can also be
-supported in systems running Unix-like operating systems to support
-user-level trap handling.
 \end{commentary}
 
 \subsubsection{Base ISA Control in {\tt mstatus} Register}
@@ -1208,26 +1199,14 @@ a lower privilege level.  The machine exception delegation register
 ({\tt medeleg}) and machine interrupt delegation register ({\tt
   mideleg}) are MXLEN-bit read/write registers.
 
-In systems with all three privilege modes (M/S/U), setting a bit in
-{\tt medeleg} or {\tt mideleg} will delegate the corresponding trap in
-S-mode or U-mode to the S-mode trap handler. If U-mode traps are
-supported, S-mode may in turn set corresponding bits in the {\tt
-  sedeleg} and {\tt sideleg} registers to delegate traps that occur in
-U-mode to the U-mode trap handler.
-In systems with S-mode, the {\tt medeleg} and {\tt mideleg} registers must
-exist, whereas the {\tt sedeleg} and {\tt sideleg} registers should only exist
-if the N extension for user-mode interrupts is also implemented.
+In systems with S-mode, the {\tt medeleg} and {\tt mideleg} registers
+must exist, and setting a bit in
+{\tt medeleg} or {\tt mideleg} will delegate the corresponding trap, when
+occurring in S-mode or U-mode, to the S-mode trap handler.
+In systems without S-mode, the {\tt medeleg} and {\tt mideleg} registers
+should not exist (unless the N extension for user-mode interrupts is
+implemented).
 
-In systems with two privilege modes (M/U) and support for U-mode
-traps, setting a bit in {\tt medeleg} or {\tt mideleg} will
-delegate the corresponding trap in U-mode to the U-mode trap handler.
-In systems with only M-mode and U-mode, the {\tt medeleg} and {\tt mideleg}
-registers should only be implemented if the N extension for user-mode
-interrupts is implemented.
-
-In systems with only M-mode, or with both M-mode and U-mode but
-without U-mode trap support, the {\tt medeleg} and {\tt mideleg}
-registers should not exist.
 \begin{commentary}
   In versions 1.9.1 and earlier , these registers existed but were
   hardwired to zero in M-mode only, or M/U without N systems.  There
@@ -1236,18 +1215,18 @@ registers should not exist.
 \end{commentary}
 
 
-When a trap is delegated to a less-privileged mode {\em x}, the
-{\em x}\,{\tt cause} register is written with the trap cause; the
-{\em x}\,{\tt epc} register is written with the virtual address of
+When a trap is delegated to S-mode, the
+{\tt scause} register is written with the trap cause; the
+{\tt sepc} register is written with the virtual address of
 the instruction that took the trap; the
-{\em x}\,{\tt tval} register is written with an
-exception-specific datum; the {\em x}\,PP field
+{\tt stval} register is written with an
+exception-specific datum; the SPP field
 of {\tt mstatus} is written with the active privilege mode at the time of
-the trap; the {\em x}\,PIE field of {\tt mstatus} is written with the
-value of the {\em x}\,IE field at the time of the trap; and
-the {\em x}\,IE field of {\tt mstatus} is cleared.  The {\tt mcause} and
-{\tt mepc} registers and the MPP and MPIE fields of {\tt mstatus} are
-not written.
+the trap; the SPIE field of {\tt mstatus} is written with the
+value of the SIE field at the time of the trap; and
+the SIE field of {\tt mstatus} is cleared.
+The {\tt mcause}, {\tt mepc}, and {\tt mtval} registers and the MPP and
+MPIE fields of {\tt mstatus} are not written.
 
 An implementation shall not hardwire any delegation bits to one, i.e.,
 any trap that can be delegated must support not being delegated.  An
@@ -1315,9 +1294,9 @@ MXLEN \\
 layout of bits matching those in the {\tt mip} register (i.e., STIP interrupt
 delegation control is located in bit 5).
 
-Some exceptions cannot occur at less privileged modes, and corresponding
-{\em x}\,{\tt edeleg} bits should be hardwired to zero.  In particular,
-{\tt medeleg}[11] and {\tt sedeleg}[11:9] are all hardwired to zero.
+For exceptions that cannot occur in less privileged modes, the corresponding
+{\tt medeleg} bits should be hardwired to zero.  In particular,
+{\tt medeleg}[11] is hardwired to zero.
 
 \subsection{Machine Interrupt Registers ({\tt mip} and {\tt mie})}
 
@@ -1325,8 +1304,8 @@ The {\tt mip} register is an MXLEN-bit read/write register containing
 information on pending interrupts, while {\tt mie} is the
 corresponding MXLEN-bit read/write register containing interrupt enable
 bits.  Only the bits corresponding to lower-privilege software
-interrupts (USIP, SSIP), timer interrupts (UTIP, STIP),
-and external interrupts (UEIP, SEIP) in {\tt mip}
+interrupts (SSIP), timer interrupts (STIP),
+and external interrupts (SEIP) in {\tt mip}
 are writable through this CSR address; the remaining bits are
 read-only.
 
@@ -1339,18 +1318,19 @@ read-only.
 \end{commentary}
 
 Restricted views of the {\tt mip} and {\tt mie} registers appear as
-the {\tt sip}/{\tt sie}, and {\tt uip}/{\tt uie} registers in 
-S-mode and U-mode respectively.  If an interrupt is delegated to
-privilege mode {\em x} by setting a bit in the {\tt mideleg} register,
-it becomes visible in the {\em x}\,{\tt ip} register and is maskable
-using the {\em x}\,{\tt ie} register.  Otherwise, the corresponding
-bits in {\em x}\,{\tt ip} and {\em x}\,{\tt ie} appear to be hardwired
+the {\tt sip} and {\tt sie} registers for supervisor level.
+If an interrupt is delegated to
+S-mode by setting a bit in the {\tt mideleg} register,
+it becomes visible in the {\tt sip} register and is maskable
+using the {\tt sie} register.  Otherwise, the corresponding
+bits in {\tt sip} and {\tt sie} appear to be hardwired
 to zero.
 
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
+\scalebox{0.95}{
 \begin{tabular}{Rcccccccccccc}
 \instbitrange{MXLEN-1}{12} &
 \instbit{11} &
@@ -1370,18 +1350,18 @@ to zero.
 \multicolumn{1}{c|}{MEIP} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SEIP} &
-\multicolumn{1}{c|}{UEIP} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MTIP} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{STIP} &
-\multicolumn{1}{c|}{UTIP} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MSIP} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SSIP} &
-\multicolumn{1}{c|}{USIP} \\
+\multicolumn{1}{c|}{\wpri} \\
 \hline
 MXLEN-12 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
-\end{tabular}
+\end{tabular}}
 \end{center}
 }
 \vspace{-0.1in}
@@ -1393,6 +1373,7 @@ MXLEN-12 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
+\scalebox{0.95}{
 \begin{tabular}{Rcccccccccccc}
 \instbitrange{MXLEN-1}{12} &
 \instbit{11} &
@@ -1412,18 +1393,18 @@ MXLEN-12 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
 \multicolumn{1}{c|}{MEIE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SEIE} &
-\multicolumn{1}{c|}{UEIE} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MTIE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{STIE} &
-\multicolumn{1}{c|}{UTIE} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MSIE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SSIE} &
-\multicolumn{1}{c|}{USIE} \\
+\multicolumn{1}{c|}{\wpri} \\
 \hline
 MXLEN-12 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
-\end{tabular}
+\end{tabular}}
 \end{center}
 }
 \vspace{-0.1in}
@@ -1431,38 +1412,36 @@ MXLEN-12 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
 \label{miereg}
 \end{figure*}
 
-The MTIP, STIP, UTIP bits correspond to timer interrupt-pending bits
-for machine, supervisor, and user timer interrupts, respectively.  The
+The MTIP and STIP bits correspond to timer interrupt-pending bits
+for machine and supervisor timer interrupts, respectively.  The
 MTIP bit is read-only and is cleared by writing to the memory-mapped
-machine-mode timer compare register.  The UTIP and STIP bits may be
-written by M-mode software to deliver timer interrupts to lower
-privilege levels.  User and supervisor software may clear the UTIP and
-STIP bits with calls to the AEE and SEE respectively.
+machine-mode timer compare register.  The STIP bit may be
+written by M-mode software to deliver timer interrupts to S-mode.
+Supervisor software may clear the STIP bit with a call to the SEE.
 
-There is a separate timer interrupt-enable bit, named MTIE, STIE, and
-UTIE for M-mode, S-mode, and U-mode timer interrupts respectively.
+There is a separate timer interrupt-enable bit, named MTIE and STIE,
+for M-mode and S-mode timer interrupts respectively.
 
-Each lower privilege level has a separate software interrupt-pending
-bit (SSIP, USIP), which can be both read and written by CSR accesses
-from code running on the local hart at the associated or any higher
-privilege level. The machine-level MSIP bits are written by accesses
+Supervisor level has a software interrupt-pending
+bit (SSIP), which can be both read and written by CSR accesses
+from code running on the local hart in S-mode or M-mode.
+The machine-level MSIP bit is written by accesses
 to memory-mapped control registers, which are used by remote harts to
 provide machine-mode interprocessor interrupts.  Interprocessor
-interrupts for lower privilege levels are implemented through
-implementation-specific mechanisms, e.g., via calls to an AEE or SEE,
+interrupts at supervisor level are implemented through
+implementation-specific mechanisms, e.g., via calls to an SEE,
 which might ultimately result in
 a machine-mode write to the receiving hart's MSIP bit.  A hart can write its
 own MSIP bit using the same memory-mapped control register.
 
-The MSIE, SSIE, and USIE fields in the {\tt mie} CSR enable M-mode software
-interrupts, S-mode software interrupts, and U-mode software interrupts,
-respectively.
+The MSIE and SSIE fields in the {\tt mie} CSR enable M-mode software
+interrupts and S-mode software interrupts, respectively.
 
 \begin{commentary}
-We only allow a hart to directly write its own SSIP or USIP
-bits when running in the appropriate mode, as other harts might be
+We allow a hart to directly write only its own SSIP bit, not those of other
+harts, as other harts might be
 virtualized and possibly descheduled by higher privilege levels.  We
-rely on calls to the AEE and SEE to provide interprocessor interrupts
+rely on calls to the SEE to provide interprocessor interrupts
 for this reason.  Machine-mode harts are not virtualized and can
 directly interrupt other harts by setting their MSIP bits, typically
 using uncached I/O writes to memory-mapped control registers depending
@@ -1495,13 +1474,8 @@ from the external interrupt controller.
   slightly modified from regular CSR accesses as a result.
 \end{commentary}
 
-The UEIP field in {\tt mip} provides user-mode external interrupts when the
-N extension for user-mode interrupts is implemented.  It is defined
-analogously to SEIP.
-
-The MEIE, SEIE, and UEIE fields in the {\tt mie} CSR enable M-mode external
-interrupts, S-mode external interrupts, and U-mode external interrupts,
-respectively.
+The MEIE and SEIE fields in the {\tt mie} CSR enable M-mode external
+interrupts and S-mode external interrupts, respectively.
 
 \begin{commentary}
 The non-maskable interrupt is not made visible via the {\tt mip}
@@ -1510,16 +1484,16 @@ trap handler.
 \end{commentary}
 
 For all the various interrupt types (software, timer, and external),
-if a privilege level is not supported, or if U-mode is supported but
-the N extension is not supported, then the associated pending and
+if a privilege level is not supported, then the associated pending and
 interrupt-enable bits are hardwired to zero in the {\tt mip} and {\tt
   mie} registers respectively.  Hence, these are all effectively
 \warl\ fields.
 
 Implementations may add additional platform-specific interrupt sources to bits
 16 and above of the {\tt mip} and {\tt mie} registers.  Some platforms may
-avail these interrupts for custom use.  The other unallocated interrupt
-sources (15--12, 10, 6, and 2) are reserved for future standard use.
+make custom use of these interrupts.  The other unallocated interrupt
+sources (0, 2, 4, 6, 8, 10, and 12--15) are reserved for other possible
+standardized uses.
 
 An interrupt {\em i} will be taken if bit {\em i} is set in both {\tt
   mip} and {\tt mie}, and if interrupts are globally enabled.  By
@@ -1528,14 +1502,14 @@ privilege mode is less than M, or if the current privilege mode is M
 and the MIE bit in the {\tt mstatus} register is set.  If bit {\em i}
 in {\tt mideleg} is set, however, interrupts are considered to be
 globally enabled if the hart's current privilege mode equals the
-delegated privilege mode (S or U) and that mode's interrupt enable
-bit (SIE or UIE in {\tt mstatus}) is set, or if the current
+delegated privilege mode and that mode's interrupt enable
+bit ({\em x}\,IE in {\tt mstatus} for mode~{\em x}) is set, or if the current
 privilege mode is less than the delegated privilege mode.
 
 Multiple simultaneous interrupts destined for different privilege modes are
 handled in decreasing order of destined privilege mode.  Multiple simultaneous
 interrupts destined for the same privilege mode are handled in the following
-decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI, UEI, USI, UTI.
+decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI.
 Synchronous exceptions are of lower priority than all interrupts.
 
 \begin{commentary}
@@ -2042,20 +2016,20 @@ codes.
   \hline
   Interrupt & Exception Code  & Description \\
   \hline	 
-  1         & 0               & User software interrupt \\
+  1         & 0               & {\em Reserved} \\
   1         & 1               & Supervisor software interrupt \\
-  1         & 2               & {\em Reserved for future standard use} \\
+  1         & 2               & {\em Reserved} \\
   1         & 3               & Machine software interrupt \\ \hline
-  1         & 4               & User timer interrupt \\
+  1         & 4               & {\em Reserved} \\
   1         & 5               & Supervisor timer interrupt \\
-  1         & 6               & {\em Reserved for future standard use} \\
+  1         & 6               & {\em Reserved} \\
   1         & 7               & Machine timer interrupt \\ \hline
-  1         & 8               & User external interrupt \\
+  1         & 8               & {\em Reserved} \\
   1         & 9               & Supervisor external interrupt \\
-  1         & 10              & {\em Reserved for future standard use} \\
+  1         & 10              & {\em Reserved} \\
   1         & 11              & Machine external interrupt \\ \hline
-  1         & 12--15          & {\em Reserved for future standard use} \\
-  1         & $\ge$16         & {\em Reserved for platform use} \\ \hline
+  1         & 12--15          & {\em Reserved} \\
+  1         & $\ge$16         & {\em Available for platform use} \\ \hline
   0         & 0               & Instruction address misaligned \\
   0         & 1               & Instruction access fault \\
   0         & 2               & Illegal instruction \\   
@@ -2070,13 +2044,13 @@ codes.
   0         & 11              & Environment call from M-mode \\
   0         & 12              & Instruction page fault \\
   0         & 13              & Load page fault \\
-  0         & 14              & {\em Reserved for future standard use} \\
+  0         & 14              & {\em Reserved} \\
   0         & 15              & Store/AMO page fault \\
-  0         & 16--23          & {\em Reserved for future standard use} \\
-  0         & 24--31          & {\em Reserved for custom use} \\
-  0         & 32--47          & {\em Reserved for future standard use} \\
-  0         & 48--63          & {\em Reserved for custom use} \\
-  0         & $\ge$64         & {\em Reserved for future standard use} \\
+  0         & 16--23          & {\em Reserved} \\
+  0         & 24--31          & {\em Available for custom use} \\
+  0         & 32--47          & {\em Reserved} \\
+  0         & 48--63          & {\em Available for custom use} \\
+  0         & $\ge$64         & {\em Reserved} \\
   \hline
 
 \end{tabular}
@@ -2331,17 +2305,16 @@ minor opcode.
 \multicolumn{1}{c|}{opcode} \\
 \hline
 12 & 5 & 3 & 5 & 7 \\
-MRET/SRET/URET & 0 & PRIV & 0 & SYSTEM \\
+MRET/SRET & 0 & PRIV & 0 & SYSTEM \\
 \end{tabular}
 \end{center}
 
 To return after handling a trap, there are separate trap return
-instructions per privilege level: MRET, SRET, and URET.  MRET is
+instructions per privilege level, MRET and SRET.  MRET is
 always provided. SRET must be provided if supervisor mode is
 supported, and should raise an illegal instruction exception otherwise. SRET
 should also raise an illegal instruction exception when TSR=1 in {\tt mstatus},
-as described in Section~\ref{virt-control}. URET is only provided if user-mode
-traps are supported, and should raise an illegal instruction otherwise.
+as described in Section~\ref{virt-control}.
 An {\em x}\,RET instruction can be executed in privilege mode {\em x}
 or higher, where executing a lower-privilege {\em x}\,RET instruction
 will pop the relevant lower-privilege interrupt enable and privilege
@@ -2425,7 +2398,7 @@ handler, the idle loop will resume execution.
 
 The WFI instruction can also be executed when interrupts are disabled.  The
 operation of WFI must be unaffected by the global interrupt bits in {\tt
-mstatus} (MIE/SIE/UIE) and the delegation registers {\tt [m|s]ideleg}
+mstatus} (MIE and SIE) and the delegation register {\tt mideleg}
 (i.e., the hart must resume if a locally enabled interrupt becomes pending,
 even if it has been delegated to a less-privileged mode), but should honor the
 individual interrupt enables (e.g, MTIE) (i.e., implementations should
