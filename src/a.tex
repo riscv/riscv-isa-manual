@@ -87,11 +87,13 @@ with the load-reserved (LR) and store-conditional (SC) instructions.
 LR.W loads a word from the address in {\em rs1}, places the sign-extended
 value in {\em rd}, and registers a {\em reservation set}---a set of addresses
 that subsumes the bytes in the addressed word.
-SC.W writes a word in {\em rs2} to the address in {\em rs1}, provided the
-reservation is still valid and the reservation set contains the addresses of
-the bytes being stored to.
-SC.W writes zero to {\em rd} on success or a nonzero code on failure, then,
-regardless of success, yields any load reservation held by this hart.
+SC.W conditionally writes a word in {\em rs2} to the address in {\em rs1}, 
+and the SC.W succeeds if the reservation is still valid and the reservation set
+contains the bytes being written.  If the SC.W succeeds, the instruction writes
+the addressed bytes and returns zero to {\em rd}.  If the SC.W fails, the
+instruction does not write the addressed bytes and returns a non-zero value to
+{\em rd}.  Regardless of success or failure, the reservation held by this hart
+is invalidated on execution of an SC.W.
 LR.D and SC.D act analogously on doublewords and are only available on RV64.
 For RV64, LR.W and SC.W sign-extend the value placed in {\em rd}.
 
@@ -157,29 +159,49 @@ should not be emulated.
 Emulating misaligned LR/SC sequences is impractical in most systems.
 \end{commentary}
 
-An implementation can register an arbitrarily large reservation set on each
-LR, provided the reservation set includes all bytes of the addressed data word
-or doubleword.
-An SC can only pair with the most recent LR in program order.
-An SC may succeed if no store from another hart, nor a write from some other
-device, to the reservation set can be observed to have occurred between the LR
-and the SC, and if there is no other SC between the LR and itself in program
-order.
-Note this LR might have had a different address argument and data size, but
-reserved the SC's address as part of the reservation set.
-Following this model, in systems with memory translation, an SC is allowed to
-succeed if the earlier LR reserved the same location using an alias with
-a different virtual address, but is also allowed to fail if the virtual
-address is different.
-The SC must fail if the address is not within the reservation set of the most
-recent LR in program order.
-The SC must fail if a store from another hart, or a write from some other
-device, to the reservation set can be observed to occur between the LR and the
-SC.
-An SC must fail if there is another SC (to any address) between the LR and the
-SC in program order.
-The precise statement of the atomicity requirements for successful LR/SC
-sequences is defined by the Atomicity Axiom in Section~\ref{sec:rvwmo}.
+The reservation set accessed by the LR and SC instructions must be {\em
+reservable}, i.e., the addresses in the reservation set must support these
+operations; otherwise, executing an LR or SC instruction generates an access
+exception.
+
+An LR registers an arbitrarily large reservation set, and the reservation set
+must include all bytes of the addressed data word or doubleword.  An SC
+succeeds if all of the following conditions are true when the SC is executed:
+\vspace{-0.2in}
+\begin{itemize}
+\parskip 0pt
+\itemsep 1pt
+\item The reservation is valid.
+\item The reservation set includes all of the bytes of the word or doubleword
+addressed by the SC.
+\end{itemize}
+If any of the above conditions are false when the SC is executed, the SC fails.
+
+The following events are guaranteed to invalidate the reservation on hart
+{\em H}:
+\vspace{-0.2in}
+\begin{itemize}
+\parskip 0pt
+\itemsep 1pt
+\item {\em H} executes a successful SC.
+\item {\em H} executes an SC that addresses bytes that are not included in the
+reservation set.
+\item A memory write (e.g., an unconditional store, an AMO, a
+successful SC, or a device write) performed by another hart or device to a byte
+included in the reservation set is observed between the LR and the SC executed
+by {\em H}.
+\end{itemize}
+
+Architectural specifications that extend the base specification, e.g.
+extensions, privileged architecture, and platform specifications, may identify
+additional conditions that cause the reservation to be invalidated.
+
+In general, an SC in an LR/SC sequence may succeed only if certain atomicity
+requirements, as defined by the Atomicity Axiom in Section 14.1, are satisfied.
+If these requirements cannot be satisfied, the SC in an LR/SC sequence must
+fail. In particular, if two harts do not agree on the memory order of accesses
+to a reservation set, the atomicity of accesses from those two harts to that
+reservation set cannot be maintained, and so the SC must fail.
 
 \begin{commentary}
 The platform should provide a means to determine the size and shape of the
@@ -267,12 +289,11 @@ the following properties:
 \item The code to retry a failing LR/SC sequence can contain backwards jumps
   and/or branches to repeat the LR/SC sequence, but otherwise has the same
   constraint as the code between the LR and SC.
-\item The LR address must lie within a memory region with the {\em LR/SC
-  eventuality} property.  Main memory regions have this property.  The
-  execution environment may specify additional memory regions that have
-  this property.
-\item The SC must be to the same virtual address and of the same data size as
-  the latest LR executed by the same hart.
+\item The LR and SC addresses must lie within a memory region with the {\em LR/SC
+  eventuality} property.  The execution environment is responsible for
+  communicating which regions have this property.
+\item The SC must be to the same address and of the same data size as the
+  latest LR executed by the same hart.
 \end{itemize}
 
 LR/SC sequences that do not lie within constrained LR/SC loops are {\em
@@ -298,19 +319,27 @@ unconstrained LR/SC sequence.  Implementations are permitted to
 unconditionally fail any unconstrained LR/SC sequence.
 \end{commentary}
 
-If a hart {\em H} enters a constrained LR/SC loop, the execution environment
-must guarantee that one of the following events eventually occurs:
+If each hart in a set of harts is executing a constrained LR/SC loop on the
+same reservation set, at least one hart in that set of harts is guaranteed to
+eventually execute an SC successfully, except under the following conditions:
 \vspace{-0.2in}
 \begin{itemize}
 \parskip 0pt
 \itemsep 1pt
-\item {\em H} or some other hart executes a successful SC to the reservation
-  set of the LR instruction in {\em H}'s constrained LR/SC loops.
-\item Some other hart executes an unconditional store or AMO instruction to
-  the reservation set of the LR instruction in {\em H}'s constrained LR/SC
-  loop, or some other device in the system writes to that reservation set.
+\item A hart or a device performs a memory write to a byte included in the
+  reservation set.
+\item Any additional conditions specified by any architectural specifications
+  that extend the base specification.
+\end{itemize}
+
+An SC in a constrained LR/SC loop, executed by an individual hart {\em H}, may
+not succeed if any of the following events occurs:
+\vspace{-0.2in}
+\begin{itemize}
+\parskip 0pt
+\itemsep 1pt
 \item {\em H} executes a branch or jump that exits the constrained LR/SC loop.
-\item {\em H} takes a trap.
+\item {\em H} traps.
 \end{itemize}
 
 \begin{commentary}
