@@ -85,13 +85,17 @@ SC.W/D & \multicolumn{2}{c}{ordering} & src & addr & width & dest & AMO  \\
 Complex atomic memory operations on a single memory word or doubleword are performed
 with the load-reserved (LR) and store-conditional (SC) instructions.
 LR.W loads a word from the address in {\em rs1}, places the sign-extended
-value in {\em rd}, and registers a {\em reservation set}---a set of addresses
+value in {\em rd}, and registers a {\em reservation set}---a set of bytes
 that subsumes the bytes in the addressed word.
-SC.W writes a word in {\em rs2} to the address in {\em rs1}, provided the
-reservation is still valid and the reservation set contains the addresses of
-the bytes being stored to.
-SC.W writes zero to {\em rd} on success or a nonzero code on failure, then,
-regardless of success, yields any load reservation held by this hart.
+SC.W conditionally writes a word in {\em rs2} to the address in {\em rs1}: the
+SC.W succeeds only if the reservation is still valid and the reservation set
+contains the bytes being written.
+If the SC.W succeeds, the instruction writes the word in {\em rs2} to memory,
+and it writes zero to {\em rd}.
+If the SC.W fails, the instruction does not write to memory, and it writes
+a nonzero value to {\em rd}.
+Regardless of success or failure, executing an SC.W instruction invalidates
+any reservation held by this hart.
 LR.D and SC.D act analogously on doublewords and are only available on RV64.
 For RV64, LR.W and SC.W sign-extend the value placed in {\em rd}.
 
@@ -155,6 +159,9 @@ should not be emulated.
 
 \begin{commentary}
 Emulating misaligned LR/SC sequences is impractical in most systems.
+
+Misaligned LR/SC sequences also raise the possibility of accessing multiple
+reservation sets at once, which present definitions do not provide for.
 \end{commentary}
 
 An implementation can register an arbitrarily large reservation set on each
@@ -192,12 +199,38 @@ contiguous and no greater than the virtual memory page size.
 
 \begin{commentary}
 A store-conditional instruction to a scratch word of memory should be used
-during a preemptive context switch to forcibly yield any existing load
-reservation.
+to forcibly invalidate any existing load reservation:
+\begin{itemize}
+\item during a preemptive context switch, and
+\item if necessary when changing virtual to physical address mappings,
+  such as when migrating pages that might contain an active reservation.
+\end{itemize}
+\end{commentary}
+
+\begin{commentary}
+The invalidation of a hart's reservation when it executes an LR or SC
+imply that a hart can only hold one reservation at a time, and that
+an SC can only pair with the most recent LR, and LR with the next
+following SC, in program order.  This is a restriction to the
+Atomicity Axiom in Section~\ref{sec:rvwmo} that ensures software runs
+correctly on expected common implementations that operate in this manner.
+
+It is conceivable for a future extension to allow the same hart to hold
+multiple independent reservations at once, such as to help improve performance
+in some scenarios.  Such an extension would presumably introduce a mechanism
+to clear all of a hart's reservations, replacing the no longer effective SC
+to a scratch word.  The practicality of such an extension is not established.
+\end{commentary}
+
+\begin{commentary}
+Another example effective memory write that invalidate a reservation
+is the invalidation of a dirty cache line.  It is also possible for
+operations that prepare for a write without actually doing the write
+to also invalidate a reservation, such as prefetch-for-write requests.
 \end{commentary}
 
 An SC instruction can never be observed by another RISC-V hart
-before the immediately preceding LR.
+before the LR instruction that established the reservation.
 The LR/SC
 sequence can be given acquire semantics by setting the {\em aq} bit on
 the LR instruction.  The LR/SC sequence can be given release semantics
@@ -267,10 +300,9 @@ the following properties:
 \item The code to retry a failing LR/SC sequence can contain backwards jumps
   and/or branches to repeat the LR/SC sequence, but otherwise has the same
   constraint as the code between the LR and SC.
-\item The LR address must lie within a memory region with the {\em LR/SC
-  eventuality} property.  Main memory regions have this property.  The
-  execution environment may specify additional memory regions that have
-  this property.
+\item The LR and SC addresses must lie within a memory region with the
+  {\em LR/SC eventuality} property.  The execution environment is responsible
+  for communicating which regions have this property.
 \item The SC must be to the same virtual address and of the same data size as
   the latest LR executed by the same hart.
 \end{itemize}
@@ -285,7 +317,7 @@ instruction bytes in the base ISA to avoid undue restrictions on instruction
 cache and TLB size and associativity.
 Similarly, we disallowed other loads and stores within the loops to avoid
 restrictions on data-cache associativity in simple implementations that track
-the reservation within the cache.
+the reservation within a private cache.
 The restrictions on branches and jumps limit the time that
 can be spent in the sequence.  Floating-point operations and integer
 multiply/divide were disallowed to simplify the operating system's emulation
@@ -310,11 +342,17 @@ must guarantee that one of the following events eventually occurs:
   the reservation set of the LR instruction in {\em H}'s constrained LR/SC
   loop, or some other device in the system writes to that reservation set.
 \item {\em H} executes a branch or jump that exits the constrained LR/SC loop.
-\item {\em H} takes a trap.
+\item {\em H} traps.
 \end{itemize}
 
 \begin{commentary}
-As a consequence of this requirement, if some harts in an execution
+Note that these definitions permit an implementation to fail an SC instruction
+occasionally for any reason, provided the aforementioned guarantee is not
+violated.
+\end{commentary}
+
+\begin{commentary}
+As a consequence of the eventuality guarantee, if some harts in an execution
 environment are executing constrained LR/SC loops, and no other harts or
 devices in the execution environment execute an unconditional store or AMO to
 that reservation set, then at least one hart will eventually exit its
@@ -327,8 +365,10 @@ of other harts' LR/SC sequences.
 We note this constraint implies, among other things, that loads and
 load-reserved instructions executed by other harts (possibly within the same
 core) cannot impede LR/SC progress indefinitely.
-For example, conflict misses caused by another hart sharing the cache cannot
+For example, cache evictions caused by another hart sharing the cache cannot
 impede LR/SC progress indefinitely.
+Typically, this implies reservations are tracked independently of
+evictions from any shared cache.
 Similarly, cache misses caused by speculative execution within a hart cannot
 impede LR/SC progress indefinitely.
 
