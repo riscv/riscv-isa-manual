@@ -324,43 +324,76 @@ Setting MODE=Vectored may impose a stricter alignment constraint on BASE.
 The {\tt sip} register is an SXLEN-bit read/write register containing
 information on pending interrupts, while {\tt sie} is the corresponding
 SXLEN-bit read/write register containing interrupt enable bits.
+Interrupt cause number \textit{i} (as reported in CSR {\tt scause},
+Section~\ref{sec:scause}) corresponds with bit~\textit{i} in both
+{\tt sip} and {\tt sie}.
+Bits 15:0 are allocated to standard interrupt causes only, while bits 16
+and above are available for platform or custom use.
 
-\begin{figure*}[h!]
+\begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{KcFcFcc}
-\instbitrange{SXLEN-1}{10} &
-\instbit{9} &
-\instbitrange{8}{6} &
-\instbit{5} &
-\instbitrange{4}{2} &
-\instbit{1} &
-\instbit{0} \\
+\begin{tabular}{@{}J}
+\instbitrange{SXLEN-1}{0} \\
 \hline
-\multicolumn{1}{|c|}{\wpri} &
-\multicolumn{1}{c|}{SEIP} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{STIP} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{SSIP} &
-\multicolumn{1}{c|}{\wpri} \\
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
 \hline
-SXLEN-10 & 1 & 3 & 1 & 3 & 1 & 1 \\
+SXLEN \\
 \end{tabular}
 \end{center}
 }
 \vspace{-0.1in}
 \caption{Supervisor interrupt-pending register ({\tt sip}).}
 \label{sipreg}
-\end{figure*}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{SXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
+\hline
+SXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor interrupt-enable register ({\tt sie}).}
+\label{siereg}
+\end{figure}
+
+An interrupt \textit{i} will be taken if bit \textit{i} is set in both
+{\tt sip} and {\tt sie}, and if supervisor-level interrupts are globally
+enabled.
+Supervisor-level interrupts are globally enabled if the hart's current
+privilege mode is less than S, or if the current privilege mode is S
+and the SIE bit in the {\tt sstatus} register is set.
+
+Each individual bit in register {\tt sip} may be writable or may be
+read-only.
+When bit~\textit{i} in {\tt sip} is writable, a pending interrupt
+\textit{i} can be cleared by writing 0 to this bit.
+If interrupt \textit{i} can become pending but bit~\textit{i} in
+{\tt sip} is read-only, the implementation must provide some other
+mechanism for clearing the pending interrupt (which may involve a call to
+the execution environment).
+
+A bit in {\tt sie} must be writable if the corresponding interrupt can
+ever become pending.
+Bits of {\tt sie} that are not writable must be hardwired to zero.
+
+The standard portions (bits 15:0) of registers {\tt sip} and {\tt sie}
+are formatted as shown in Figures \ref{sipreg-standard} and
+\ref{siereg-standard} respectively.
 
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{KcFcFcc}
-\instbitrange{SXLEN-1}{10} &
+\begin{tabular}{ScFcFcc}
+\instbitrange{15}{10} &
 \instbit{9} &
 \instbitrange{8}{6} &
 \instbit{5} &
@@ -368,59 +401,103 @@ SXLEN-10 & 1 & 3 & 1 & 3 & 1 & 1 \\
 \instbit{1} &
 \instbit{0} \\
 \hline
-\multicolumn{1}{|c|}{\wpri} &
-\multicolumn{1}{c|}{SEIE} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{STIE} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{SSIE} &
-\multicolumn{1}{c|}{\wpri} \\
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SEIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{STIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{SSIP} &
+\multicolumn{1}{c|}{0} \\
 \hline
-SXLEN-10 & 1 & 3 & 1 & 3 & 1 & 1 \\
+6 & 1 & 3 & 1 & 3 & 1 & 1 \\
 \end{tabular}
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Supervisor interrupt-enable register ({\tt sie}).}
-\label{siereg}
+\caption{Standard portion (bits 15:0) of {\tt sip}.}
+\label{sipreg-standard}
 \end{figure*}
 
-Three types of interrupts are defined: software interrupts, timer interrupts,
-and external interrupts.  A supervisor-level software interrupt is triggered
-on the current hart by writing 1 to its supervisor software interrupt-pending
-(SSIP) bit in the {\tt sip} register.  A pending supervisor-level software
-interrupt can be cleared by writing 0 to the SSIP bit in {\tt sip}.
-Supervisor-level software interrupts are disabled when the SSIE bit in the
-{\tt sie} register is clear.
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ScFcFcc}
+\instbitrange{15}{10} &
+\instbit{9} &
+\instbitrange{8}{6} &
+\instbit{5} &
+\instbitrange{4}{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SEIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{STIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{SSIE} &
+\multicolumn{1}{c|}{0} \\
+\hline
+6 & 1 & 3 & 1 & 3 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt sie}.}
+\label{siereg-standard}
+\end{figure*}
 
+Bits {\tt sip}.SEIP and {\tt sie}.SEIE are the interrupt-pending and
+interrupt-enable bits for supervisor-level external interrupts.
+If implemented, SEIP is read-only in {\tt sip}, and is set and cleared by
+the execution environment, typically through a platform-specific
+interrupt controller.
+
+Bits {\tt sip}.STIP and {\tt sie}.STIE are the interrupt-pending and
+interrupt-enable bits for supervisor-level timer interrupts.
+If implemented, STIP is read-only in {\tt sip}, and is set and cleared by
+the execution environment.
+
+Bits {\tt sip}.SSIP and {\tt sie}.SSIE are the interrupt-pending and
+interrupt-enable bits for supervisor-level software interrupts.
+If implemented, SSIP is writable in {\tt sip}.
+A supervisor-level software interrupt is triggered
+on the current hart by writing 1 to SSIP,
+while a pending supervisor-level software
+interrupt can be cleared by writing 0 to SSIP.
+
+\begin{commentary}
 Interprocessor interrupts are sent to other harts by implementation-specific
 means, which will ultimately cause the SSIP bit to be set in the recipient
 hart's {\tt sip} register.
+\end{commentary}
 
-All bits besides SSIP in the {\tt sip} register are read-only.
-
-A supervisor-level timer interrupt is pending if the STIP bit in the {\tt sip}
-register is set.  Supervisor-level timer interrupts are disabled when the STIE
-bit in the {\tt sie} register is clear.  The implementation must provide a
-mechanism to clear a pending timer interrupt.
-
-A supervisor-level external interrupt is pending if the SEIP bit in the
-{\tt sip} register is set.  Supervisor-level external interrupts are disabled
-when the SEIE bit in the {\tt sie} register is clear.  The implementation
-should provide facilities to mask, unmask, and query the cause of external
-interrupts.
+Each standard interrupt type (SEI, STI, or SSI) may not be implemented,
+in which case the corresponding interrupt-pending and interrupt-enable
+bits are hardwired to zeros.
+All bits in {\tt sip} and {\tt sie} are \warl\ fields.
+The implemented interrupts may be found by writing one to every bit
+location in {\tt sie}, then reading back to see which bit positions hold
+a one.
 
 \begin{commentary}
 The {\tt sip} and {\tt sie} registers are subsets of the {\tt mip} and {\tt
-mie} registers.  Reading any field, or writing any writable field, of {\tt
-sip}/{\tt sie} effects a read or write of the homonymous field of {\tt
-mip}/{\tt mie}.
+mie} registers.  Reading any implemented field,
+or writing any writable field, of {\tt sip}/{\tt sie}
+effects a read or write of the homonymous field of {\tt mip}/{\tt mie}.
 
 Bits 3, 7, and 11 of {\tt sip} and {\tt sie} correspond to the machine-mode
 software, timer, and external interrupts, respectively.  Since most platforms
 will choose not to make these interrupts delegatable from M-mode to S-mode,
-they are marked \wpri\ in Figures~\ref{sipreg} and \ref{siereg}.
+they are shown as hardwired to 0 in Figures~\ref{sipreg-standard} and
+\ref{siereg-standard}.
 \end{commentary}
+
+Multiple simultaneous
+interrupts destined for supervisor mode are handled in the following
+decreasing priority order: SEI, SSI, STI.
+Synchronous exceptions are of lower priority than all interrupts.
 
 \subsection{Supervisor Timers and Performance Counters}
 
@@ -552,6 +629,7 @@ SXLEN \\
 \end{figure}
 
 \subsection{Supervisor Cause Register ({\tt scause})}
+\label{sec:scause}
 
 The {\tt scause} register is an SXLEN-bit read-write register formatted as
 shown in Figure~\ref{scausereg}.  When a trap is taken into S-mode, {\tt
