@@ -1,4 +1,4 @@
-\chapter{Hypervisor Extension, Version 0.4}
+\chapter{Hypervisor Extension, Version 0.5}
 \label{hypervisor}
 
 {\bf Warning! This draft specification is likely to change before being
@@ -55,8 +55,8 @@ Hypervisors can support nested virtualization analogously.
 The current {\em virtualization mode}, denoted V, indicates whether the hart
 is currently executing in a guest.
 When V=1, the hart is either in virtual S-mode (VS-mode), or in virtual U-mode
-(VU-mode) under a guest OS running in VS-mode.
-When V=0, the hart is either in M-mode, in HS-mode, or in U-mode under an OS
+(VU-mode) atop a guest OS running in VS-mode.
+When V=0, the hart is either in M-mode, in HS-mode, or in U-mode atop an OS
 running in HS-mode.
 The virtualization mode also indicates whether two-level address translation
 is active (V=1) or inactive (V=0).  Table~\ref{h-operating-modes} lists the
@@ -87,8 +87,9 @@ An OS or hypervisor running in HS-mode uses the supervisor CSRs to interact with
 interrupt, and address-translation subsystems.
 Additional CSRs are provided to HS-mode, but not to VS-mode, to manage
 two-level address translation and to control the behavior of a VS-mode guest:
-{\tt hstatus}, {\tt hedeleg}, {\tt hideleg}, {\tt hcounteren}, and
-{\tt hgatp}.
+{\tt hstatus}, {\tt hedeleg}, {\tt hideleg}, {\tt hip}, {\tt hie},
+{\tt hcounteren}, {\tt htimedelta}, {\tt htimedeltah}, {\tt htval},
+{\tt htinst}, and {\tt hgatp}.
 
 Furthermore, several {\em virtual supervisor} CSRs (VS CSRs) are replicas
 of the normal supervisor CSRs.
@@ -104,7 +105,8 @@ In VS-mode, an attempt to read or write a VS CSR directly by its own
 separate CSR address causes an illegal instruction exception.
 The VS CSRs can be directly accessed only from M-mode or HS-mode.
 
-While V=1, the normal HS-level supervisor CSRs retain their values but do
+While V=1, the normal HS-level supervisor CSRs that are replaced by
+VS CSRs retain their values but do
 not affect the behavior of the machine unless specifically documented to
 do so.
 Conversely, when V=0, the VS CSRs do not ordinarily affect the behavior of
@@ -113,12 +115,12 @@ the machine other than being readable and writable by CSR instructions.
 A few standard supervisor CSRs ({\tt scounteren} and, if the N extension
 is implemented, {\tt sedeleg} and {\tt sideleg}) have no matching VS CSR.
 These supervisor CSRs continue to have their usual function and
-accessibility even when V=1, except with VS-mode and VU-mode substituting
-for HS-mode and U-mode.
+accessibility even when V=1, except with VS-mode and VU-mode substituting for
+HS-mode and U-mode.
 Hypervisor software is expected to manually swap the contents of these
 registers as needed.
 
-In this section, we use the term {\em HSXLEN} to refer to the effective XLEN
+In this chapter, we use the term {\em HSXLEN} to refer to the effective XLEN
 when executing in HS-mode, and {\em VSXLEN} to refer to the effective
 XLEN when executing in VS-mode.
 
@@ -129,7 +131,7 @@ formatted as shown in Figure~\ref{hstatusreg-rv32} when HSXLEN=32 and
 Figure~\ref{hstatusreg} when HSXLEN=64.
 The {\tt hstatus}
 register provides facilities analogous to the {\tt mstatus} register
-that track and control the exception behavior of a VS-mode guest.
+for tracking and controlling the exception behavior of a VS-mode guest.
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -158,7 +160,7 @@ that track and control the exception behavior of a VS-mode guest.
 \multicolumn{1}{c|}{SP2V} &
 \multicolumn{1}{c|}{SP2P} &
 \multicolumn{1}{c|}{SPV} &
-\multicolumn{1}{c|}{STL} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{VSBE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPRV} \\
@@ -168,7 +170,7 @@ that track and control the exception behavior of a VS-mode guest.
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Hypervisor-mode status register ({\tt hstatus}) for RV32.}
+\caption{Hypervisor status register ({\tt hstatus}) for RV32.}
 \label{hstatusreg-rv32}
 \end{figure*}
 
@@ -213,7 +215,7 @@ HSXLEN-34 & 2 & 9 & 1 & 1 & 1 & \\
 \multicolumn{1}{c|}{SP2V} &
 \multicolumn{1}{c|}{SP2P} &
 \multicolumn{1}{c|}{SPV} &
-\multicolumn{1}{c|}{STL} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{VSBE} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPRV} \\
@@ -223,7 +225,7 @@ HSXLEN-34 & 2 & 9 & 1 & 1 & 1 & \\
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Hypervisor-mode status register ({\tt hstatus}) for RV64.}
+\caption{Hypervisor status register ({\tt hstatus}) for RV64.}
 \label{hstatusreg}
 \end{figure*}
 
@@ -255,26 +257,22 @@ When an SRET instruction is executed when V=0, the reverse assignments occur:
 after SPV and {\tt sstatus}.SPP have supplied the new virtualization and
 privilege modes, they are written with SP2V and SP2P, respectively.
 
-The STL bit (Supervisor Translation Level), which indicates which address-translation level
-caused an access-fault or page-fault exception, is also written by the implementation whenever a trap
-is taken into HS-mode.
-On an access or page fault due to guest physical address translation, STL is
-set to 1.
-For any other trap into HS-mode, STL is set to 0.
-
 The VSBE bit is a \warl\ field that controls the endianness of explicit
 memory accesses made from VS-mode.
 If VSBE=0, explicit load and store memory accesses made from VS-mode are
 little-endian, and if VSBE=1, they are big-endian.
+VSBE also controls the endianness of all implicit accesses to VS-level
+memory management data structures, such as page tables.
 An implementation may hardwire VSBE to specify always the same endianness
 as for HS-mode.
 
-The SPRV bit modifies the privilege with which loads and stores execute
-in HS-mode.
+The SPRV bit modifies the privilege of explicit memory accesses made in
+HS-mode.
 When SPRV=0, translation and protection behave as normal.
-When SPRV=1, load and store memory addresses are translated and protected, and
-endianness is applied, as though the current virtualization mode were set to
-{\tt hstatus}.SPV and the current privilege mode were set to the HS-level SPP.
+When SPRV=1, explicit memory accesses in HS-mode are translated and
+protected, and endianness is applied, as though the current
+virtualization mode were set to {\tt hstatus}.SPV and the current
+privilege mode were set to the HS-level SPP.
 Table~\ref{h-sprv} enumerates the cases.
 
 \begin{table*}[h!]
@@ -289,7 +287,8 @@ Table~\ref{h-sprv} enumerates the cases.
    1    & 1   & 1   & VS-level access with two-level translation and protection. The HS-level MXR bit makes any executable page readable.  {\tt vsstatus}.MXR makes readable those pages marked executable at the VS translation level, but only if readable at the guest-physical translation level.  {\tt vsstatus}.SUM applies instead of the HS-level SUM bit. \\ \hline
  \end{tabular}
 \end{center}
-\caption{Effect of SPRV on load and store translation and protection.}
+\caption{Effect of SPRV on the translation and protection of explicit
+memory accesses in HS-mode.}
 \label{h-sprv}
 \end{table*}
 
@@ -298,6 +297,8 @@ VS-mode, or VU-mode also sets SPRV=0.
 
 \subsection{Hypervisor Trap Delegation Registers ({\tt hedeleg} and {\tt hideleg})}
 
+Registers {\tt hedeleg} and {\tt hideleg} are HSXLEN-bit read/write
+registers.
 By default, all traps at any privilege level are handled in M-mode, though
 M-mode usually uses the {\tt medeleg} and {\tt mideleg} CSRs to delegate
 some traps to HS-mode.  The {\tt hedeleg} and {\tt hideleg} CSRs allow these
@@ -307,7 +308,7 @@ as {\tt medeleg} and {\tt mideleg}.
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}U}
+\begin{tabular}{@{}J}
 \instbitrange{HSXLEN-1}{0} \\
 \hline
 \multicolumn{1}{|c|}{Synchronous Exceptions (\warl)} \\
@@ -317,14 +318,14 @@ HSXLEN \\
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Hypervisor Exception Delegation Register {\tt hedeleg}.}
+\caption{Hypervisor exception delegation register ({\tt hedeleg}).}
 \label{hedelegreg}
 \end{figure}
 
 \begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{@{}U}
+\begin{tabular}{@{}J}
 \instbitrange{HSXLEN-1}{0} \\
 \hline
 \multicolumn{1}{|c|}{Interrupts (\warl)} \\
@@ -334,18 +335,243 @@ HSXLEN \\
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Hypervisor Interrupt Delegation Register {\tt hideleg}.}
+\caption{Hypervisor interrupt delegation register ({\tt hideleg}).}
 \label{hidelegreg}
 \end{figure}
 
-The {\tt hedeleg} and {\tt hideleg} registers are only active when V=1.  When
-V=1, a trap that has been delegated to HS-mode (using {\tt medeleg} or {\tt
-mideleg}) is further delegated to VS-mode if the corresponding {\tt hedeleg} or
-{\tt hideleg} bit is set.
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|r|l|l|}
+\hline
+Bit & Attribute   & Corresponding Exception \\
+\hline
+ 0  & (See text)  & Instruction address misaligned \\
+ 1  & Writable    & Instruction access fault \\
+ 2  & Writable    & Illegal instruction \\
+ 3  & Writable    & Breakpoint \\
+ 4  & Writable    & Load address misaligned \\
+ 5  & Writable    & Load access fault \\
+ 6  & Writable    & Store/AMO address misaligned \\
+ 7  & Writable    & Store/AMO access fault \\
+ 8  & Writable    & Environment call from U-mode or VU-mode \\
+ 9  & Read-only 0 & Environment call from HS-mode \\
+11  & Read-only 0 & Environment call from M-mode \\
+12  & Writable    & Instruction page fault \\
+13  & Writable    & Load page fault \\
+15  & Writable    & Store/AMO page fault \\
+20  & Read-only 0 & Instruction guest-page fault \\
+21  & Read-only 0 & Load guest-page fault \\
+23  & Read-only 0 & Store/AMO guest-page fault \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Bits of {\tt hedeleg} that must be writable or must be hardwired
+to zero.}
+\label{table:hedeleg-bits}
+\end{table*}
 
-When an access-fault or page-fault exception is caused by guest physical
-address translation, the trap is not delegated beyond HS-mode, regardless of
-the setting of {\tt hedeleg}.
+A synchronous trap that has been delegated to HS-mode (using
+{\tt medeleg}) is further delegated to VS-mode if V=1 before the trap and
+the corresponding {\tt hedeleg} bit is set.
+Each bit of {\tt hedeleg} shall be either writable or hardwired to zero.
+Many bits of {\tt hedeleg} are required specifically to be writable or
+zero, as enumerated in Table~\ref{table:hedeleg-bits}.
+Bit~0, corresponding to instruction address misaligned exceptions, must
+be writable if IALIGN=32.
+
+\begin{commentary}
+Requiring that certain bits of {\tt hedeleg} be writable reduces some of
+the burden on a hypervisor to handle variations of implementation.
+\end{commentary}
+
+An interrupt that has been delegated to HS-mode (using {\tt mideleg}) is
+further delegated to VS-mode if the corresponding {\tt hideleg} bit is
+set.
+Among bits 15:0 of {\tt hideleg}, only bits 10, 6, and 2 (corresponding
+to the standard VS-level interrupts) shall be writable, and the others
+shall be hardwired to zero.
+
+When a virtual supervisor external interrupt (code 10) is delegated to
+VS-mode, it is automatically translated by the machine into a supervisor
+external interrupt (code 9) for VS-mode, including the value written to
+{\tt vscause} on an interrupt trap.
+Likewise, a virtual supervisor timer interrupt (6) is translated into a
+supervisor timer interrupt (5) for VS-mode, and a virtual supervisor
+software interrupt (2) is translated into a supervisor software interrupt
+(1) for VS-mode.
+Similar translations may or may not be done for platform or custom
+interrupt causes (codes 16 and above).
+
+\subsection{Hypervisor Interrupt Registers ({\tt hip} and {\tt hie})}
+
+Registers {\tt hip} and {\tt hie} are HSXLEN-bit read/write registers
+that supplement HS-level's {\tt sip} and {\tt sie} respectively.
+The {\tt hip} register indicates pending VS-level interrupts, while
+{\tt hie} contains enable bits for VS-level interrupts.
+Like {\tt sip} and {\tt sie}, interrupt cause number \textit{i}
+corresponds with bit~\textit{i} in both {\tt hip} and {\tt hie}.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{HSXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{VS-Level Interrupts (\warl)} \\
+\hline
+HSXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Hypervisor interrupt-pending register ({\tt hip}).}
+\label{hipreg}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{HSXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{VS-Level Interrupts (\warl)} \\
+\hline
+HSXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Hypervisor interrupt-enable register ({\tt hie}).}
+\label{hiereg}
+\end{figure}
+
+For each writable bit in {\tt sie}, the corresponding bit shall be
+hardwired to zero in both {\tt hip} and {\tt hie}.
+Hence, the nonzero bits in {\tt sie} and {\tt hie} are always mutually
+exclusive, and likewise for {\tt sip} and {\tt hip}.
+
+\begin{commentary}
+The active bits of {\tt hip} and {\tt hie} cannot be placed in HS-level's
+{\tt sip} and {\tt sie} because doing so would make it impossible for
+software to emulate the hypervisor extension on platforms that do not
+implement it in hardware.
+\end{commentary}
+
+If bit~\textit{i} of {\tt sie} is hardwired to zero, the same bit in
+register {\tt hip} may be writable or may be read-only.
+When bit~\textit{i} in {\tt hip} is writable, a pending interrupt
+\textit{i} can be cleared by writing 0 to this bit.
+If interrupt \textit{i} can become pending in {\tt hip} but
+bit~\textit{i} in {\tt hip} is read-only, the implementation must provide
+some other mechanism for clearing the pending interrupt (which may
+involve a call to the execution environment).
+
+A bit in {\tt hie} shall be writable if the corresponding interrupt can
+ever become pending in {\tt hip}.
+Bits of {\tt hie} that are not writable shall be hardwired to zero.
+
+The standard portions (bits 15:0) of registers {\tt hip} and {\tt hie}
+are formatted as shown in Figures \ref{hipreg-standard} and
+\ref{hiereg-standard} respectively.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ScFcFcW}
+\instbitrange{15}{11} &
+\instbit{10} &
+\instbitrange{9}{7} &
+\instbit{6} &
+\instbitrange{5}{3} &
+\instbit{2} &
+\instbitrange{1}{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{VSEIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{VSTIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{VSSIP} &
+\multicolumn{1}{c|}{0} \\
+\hline
+5 & 1 & 3 & 1 & 3 & 1 & 2 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt hip}.}
+\label{hipreg-standard}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ScFcFcW}
+\instbitrange{15}{11} &
+\instbit{10} &
+\instbitrange{9}{7} &
+\instbit{6} &
+\instbitrange{5}{3} &
+\instbit{2} &
+\instbitrange{1}{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{VSEIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{VSTIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{VSSIE} &
+\multicolumn{1}{c|}{0} \\
+\hline
+5 & 1 & 3 & 1 & 3 & 1 & 2 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt hie}.}
+\label{hiereg-standard}
+\end{figure*}
+
+Bits {\tt hip}.VSEIP and {\tt hie}.VSEIE are the interrupt-pending and
+interrupt-enable bits for VS-level external interrupts.
+VSEIP is writable in {\tt hip}, and may be written by a hypervisor to
+indicate to VS-mode that an external interrupt is pending.
+Additionally, the platform-level interrupt controller may generate
+VS-level external interrupts.
+VS-level external interrupts are made pending based on the logical-OR of
+the software-writable VSEIP bit and the signal from the external
+interrupt controller.
+When {\tt hip} is read with a CSR instruction, the value of the VSEIP bit
+returned in the {\tt rd} destination register is the logical-OR of the
+software-writable bit and the interrupt signal from the interrupt
+controller.
+However, the value used in the read-modify-write sequence of a CSRRS or
+CSRRC instruction contains only the software-writable VSEIP bit, ignoring
+the interrupt value from the external interrupt controller.
+
+\begin{commentary}
+The VSEIP field behavior is designed to allow a hypervisor to mimic
+external interrupts cleanly for a guest virtual machine, without losing
+any real external interrupts that may be directed to VS-level.
+The behavior of the CSR instructions is slightly modified from regular
+CSR accesses as a result.
+This modified CSR behavior for VSEIP is the same as given to
+{\tt mip}.SEIP for like reason.
+\end{commentary}
+
+Bits {\tt hip}.VSTIP and {\tt hie}.VSTIE are the interrupt-pending and
+interrupt-enable bits for VS-level timer interrupts.
+VSTIP is writable in {\tt hip}, and may be written by a hypervisor to
+deliver timer interrupts to VS-mode.
+
+Bits {\tt hip}.VSSIP and {\tt hie}.VSSIE are the interrupt-pending and
+interrupt-enable bits for VS-level software interrupts.
+VSSIP is writable in {\tt hip}.
+
+Multiple simultaneous interrupts destined for HS-mode are handled in the
+following decreasing priority order:  SEI, SSI, STI, VSEI, VSSI, VSTI.
 
 \subsection{Hypervisor Counter-Enable Register ({\tt hcounteren})}
 
@@ -451,6 +677,95 @@ delta, and {\tt htimedeltah} holds the upper 32 bits of the delta.
 \label{hdeltahreg}
 \end{figure*}
 
+\subsection{Hypervisor Trap Value Register ({\tt htval})}
+
+The {\tt htval} register is an HSXLEN-bit read/write register formatted
+as shown in Figure~\ref{htvalreg}.
+When a trap is taken into HS-mode, {\tt htval} is written with additional
+exception-specific information, alongside {\tt stval}, to assist software
+in handling the trap.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{HSXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt htval} \\
+\hline
+HSXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Hypervisor trap value register ({\tt htval}).}
+\label{htvalreg}
+\end{figure*}
+
+When a guest-page-fault trap is taken into HS-mode, {\tt htval} is
+written with either zero or the guest physical address that faulted,
+shifted right by 2~bits.
+For other traps, {\tt htval} is set to zero, but a future standard may
+redefine {\tt htval}'s setting for other traps.
+
+For misaligned loads and stores that cause guest-page faults, {\tt htval}
+will contain zero or the guest physical address of the portion of the
+access that caused the fault.
+For instruction guest-page faults on systems with variable-length
+instructions, {\tt htval} will contain zero or the guest physical address
+of the portion of the instruction that caused the fault.
+
+\begin{commentary}
+The least-significant two bits of a faulting guest physical address are
+not available in {\tt htval}.
+If needed, these bits are ordinarily the same as the least-significant
+two bits of the faulting virtual address in {\tt stval}.
+For faults due to implicit memory accesses for VS-level address
+translation, the least-significant two bits are instead zeros.
+These cases can be distinguished using the value provided in register
+{\tt htinst}.
+\end{commentary}
+
+{\tt htval} is a \warl\ register that must be able to hold zero and may
+be capable of holding only an arbitrary subset of other 2-bit-shifted
+guest physical addresses, if any.
+
+\begin{commentary}
+Unless it has reason to assume otherwise (such as a platform standard),
+software that writes a value to {\tt htval} should read back from
+{\tt htval} to confirm the stored value.
+\end{commentary}
+
+\subsection{Hypervisor Trap Instruction Register ({\tt htinst})}
+
+The {\tt htinst} register is an HSXLEN-bit read/write register formatted
+as shown in Figure~\ref{htinstreg}.
+When a trap is taken into HS-mode, {\tt htinst} is written with a value
+that, if nonzero, provides information about the instruction that
+trapped, to assist software in handling the trap.
+The values that may be written to {\tt htinst} on a trap are documented
+in Section~\ref{sec:tinst-vals}.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{HSXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt htinst} \\
+\hline
+HSXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Hypervisor trap instruction register ({\tt htinst}).}
+\label{htinstreg}
+\end{figure*}
+
+{\tt htinst} is a \warl\ register that need only be able to hold the
+values that the implementation may automatically write to it on a trap.
+
 \subsection{Hypervisor Guest Address Translation and Protection Register ({\tt hgatp})}
 \label{sec:hgatp}
 
@@ -519,7 +834,7 @@ When MODE=Bare, guest physical addresses are equal to supervisor physical
 addresses, and there is no further memory protection for a guest virtual
 machine beyond the physical memory protection scheme described in
 Section~\ref{sec:pmp}.
-In this case, the remaining fields in {\tt hgatp} have no effect.
+In this case, the remaining fields in {\tt hgatp} must be set to zeros.
 
 For RV32, the only other valid setting for MODE is Sv32x4, which is a
 modification of the usual Sv32 paged virtual-memory scheme, extended to support
@@ -760,72 +1075,61 @@ in the {\tt hstatus} register is used to execute a load or store
 
 \subsection{Virtual Supervisor Interrupt Registers ({\tt vsip} and {\tt vsie})}
 
-The {\tt vsip} register is a VSXLEN-bit read/write register that is
-VS-mode's version of supervisor register {\tt sip}, formatted as shown
-in Figure~\ref{vsipreg}.
-The {\tt vsip} register indicates pending VS-level interrupts.
+The {\tt vsip} and {\tt vsie} registers are VSXLEN-bit read/write
+registers that are VS-mode's versions of supervisor CSRs {\tt sip} and
+{\tt sie}, formatted as shown in Figures \ref{vsipreg} and \ref{vsiereg}
+respectively.
+When V=1, {\tt vsip} and {\tt vsie} substitute for the usual {\tt sip}
+and {\tt sie}, so instructions that normally read or modify
+{\tt sip}/{\tt sie} actually access {\tt vsip}/{\tt vsie} instead.
+However, external interrupts directed to HS-level continue to be
+indicated in the HS-level {\tt sip} register, not in {\tt vsip}, when
+V=1.
 
-When V=1, {\tt vsip} substitutes for the usual {\tt sip}, so instructions
-that normally read or modify {\tt sip} actually access {\tt vsip}
-instead.
-However, pending HS-level interrupts continue to be indicated in the
-HS-level {\tt sip} register, not in {\tt vsip}.
-
-\note{Need to describe how {\tt vsip}.SEIP interacts with PLIC.
-Current thinking is that {\tt vsip}.SEIP should purely be a
-read-write storage bit to emulate the PLIC for VS-mode; the PLIC should not be
-wired into {\tt vsip}.SEIP.
-
-A future revision of the PLIC is expected to provide direct support
-for VS-level interrupts to reduce virtualization overhead.}
-
-\begin{figure*}[h!]
+\begin{figure}[h!]
 {\footnotesize
 \begin{center}
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{KcFcFcc}
-\instbitrange{VSXLEN-1}{10} &
-\instbit{9} &
-\instbitrange{8}{6} &
-\instbit{5} &
-\instbitrange{4}{2} &
-\instbit{1} &
-\instbit{0} \\
+\begin{tabular}{@{}J}
+\instbitrange{VSXLEN-1}{0} \\
 \hline
-\multicolumn{1}{|c|}{\wpri} &
-\multicolumn{1}{c|}{SEIP} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{STIP} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{SSIP} &
-\multicolumn{1}{c|}{\wpri} \\
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
 \hline
-VSXLEN-10 & 1 & 3 & 1 & 3 & 1 & 1 \\
+VSXLEN \\
 \end{tabular}
 \end{center}
 }
 \vspace{-0.1in}
 \caption{Virtual supervisor interrupt-pending register ({\tt vsip}).}
 \label{vsipreg}
-\end{figure*}
+\end{figure}
 
-The {\tt vsie} register is a VSXLEN-bit read/write register that is
-VS-mode's version of supervisor register {\tt sie}, formatted as shown in
-Figure~\ref{vsiereg}.
-The {\tt vsie} register contains interrupt enable bits for VS-level
-interrupts.
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{VSXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
+\hline
+VSXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Virtual supervisor interrupt-enable register ({\tt vsie}).}
+\label{vsiereg}
+\end{figure}
 
-When V=1, {\tt vsie} substitutes for the usual {\tt sie}, so instructions
-that normally read or modify {\tt sie} actually access {\tt vsie} instead.
-However, the enables for HS-level interrupts continue to be provided by
-the HS-level {\tt sie} register, not by {\tt vsie}.
+The standard portions (bits 15:0) of registers {\tt vsip} and {\tt vsie}
+are formatted as shown in Figures \ref{vsipreg-standard} and
+\ref{vsiereg-standard} respectively.
 
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{KcFcFcc}
-\instbitrange{VSXLEN-1}{10} &
+\begin{tabular}{ScFcFcc}
+\instbitrange{15}{10} &
 \instbit{9} &
 \instbitrange{8}{6} &
 \instbit{5} &
@@ -833,22 +1137,67 @@ the HS-level {\tt sie} register, not by {\tt vsie}.
 \instbit{1} &
 \instbit{0} \\
 \hline
-\multicolumn{1}{|c|}{\wpri} &
-\multicolumn{1}{c|}{SEIE} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{STIE} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{SSIE} &
-\multicolumn{1}{c|}{\wpri} \\
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SEIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{STIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{SSIP} &
+\multicolumn{1}{c|}{0} \\
 \hline
-VSXLEN-10 & 1 & 3 & 1 & 3 & 1 & 1 \\
+6 & 1 & 3 & 1 & 3 & 1 & 1 \\
 \end{tabular}
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Virtual supervisor interrupt-enable register ({\tt vsie}).}
-\label{vsiereg}
+\caption{Standard portion (bits 15:0) of {\tt vsip}.}
+\label{vsipreg-standard}
 \end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ScFcFcc}
+\instbitrange{15}{10} &
+\instbit{9} &
+\instbitrange{8}{6} &
+\instbit{5} &
+\instbitrange{4}{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SEIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{STIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{SSIE} &
+\multicolumn{1}{c|}{0} \\
+\hline
+6 & 1 & 3 & 1 & 3 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt vsie}.}
+\label{vsiereg-standard}
+\end{figure*}
+
+When bit 10 of {\tt hideleg} is zero, {\tt vsip}.SEIP and {\tt vsie}.SEIE
+are each hardwired to zero.
+Else, {\tt vsip}.SEIP is a read-only alias of {\tt hip}.VSEIP, and
+{\tt vsie}.SEIE is an alias of {\tt hie}.VSEIE.
+
+When bit 6 of {\tt hideleg} is zero, {\tt vsip}.STIP and {\tt vsie}.STIE
+are each hardwired to zero.
+Else, {\tt vsip}.STIP is a read-only alias of {\tt hip}.VSTIP, and
+{\tt vsie}.STIE is an alias of {\tt hie}.VSTIE.
+
+When bit 2 of {\tt hideleg} is zero, {\tt vsip}.SSIP and {\tt vsie}.SSIE
+are each hardwired to zero.
+Else, {\tt vsip}.SSIP and {\tt vsie}.SSIE are aliases (both writable) of
+{\tt hip}.VSSIP and {\tt hie}.VSSIE.
 
 \subsection{Virtual Supervisor Trap Vector Base Address Register ({\tt vstvec})}
 
@@ -1070,7 +1419,7 @@ values Bare, Sv39, and Sv48.}
 
 \section{Hypervisor Instructions}
 
-The hypervisor extension adds two new privileged fence instructions.
+The hypervisor extension adds two privileged fence instructions.
 
 \subsection{Hypervisor Memory-Management Fence Instructions}
 \label{sec:hfence.vma}
@@ -1183,20 +1532,21 @@ fence for all memory-management data structures.
 
 \section{Machine-Level CSRs}
 
-The hypervisor extension augments machine status registers {\tt mstatus}
-and (for RV32 only) {\tt mstatush}.
+The hypervisor extension augments or modifies machine CSRs {\tt mstatus},
+{\tt mstatush} (RV32 only), {\tt mideleg}, {\tt mip}, and {\tt mie}, and
+adds CSRs {\tt mtval2} and {\tt mtinst}.
 
 \subsection{Machine Status Registers ({\tt mstatus} and {\tt mstatush})}
 
-The hypervisor extension adds two fields, MPV and MTL, to the
+The hypervisor extension adds one field, MPV, to the
 machine-level {\tt mstatus} or {\tt mstatush} CSR, and modifies the
 behavior of several existing {\tt mstatus} fields.
 Figure~\ref{hypervisor-mstatus} shows the modified {\tt mstatus} register
-when the hypervisor extension is provided and MXLEN=64.
-When MXLEN=32, the hypervisor extension adds fields not to {\tt mstatus}
+when the hypervisor extension is implemented and MXLEN=64.
+When MXLEN=32, the hypervisor extension adds MPV not to {\tt mstatus}
 but to {\tt mstatush}, which must exist.
 Figure~\ref{hypervisor-mstatush} shows the {\tt mstatush} register when
-the hypervisor extension is provided and MXLEN=32.
+the hypervisor extension is implemented and MXLEN=32.
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -1217,7 +1567,7 @@ the hypervisor extension is provided and MXLEN=32.
 \multicolumn{1}{|c|}{SD} &
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MPV} &
-\multicolumn{1}{c|}{MTL} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MBE} &
 \multicolumn{1}{c|}{SBE} &
 \multicolumn{1}{c|}{SXL[1:0]} &
@@ -1287,7 +1637,7 @@ the hypervisor extension is provided and MXLEN=32.
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Machine-mode status register ({\tt mstatus}) for RV64 when the hypervisor extension is provided.}
+\caption{Machine status register ({\tt mstatus}) for RV64 when the hypervisor extension is implemented.}
 \label{hypervisor-mstatus}
 \end{figure*}
 
@@ -1306,7 +1656,7 @@ the hypervisor extension is provided and MXLEN=32.
 \hline
 \multicolumn{1}{|c|}{\wpri} &
 \multicolumn{1}{c|}{MPV} &
-\multicolumn{1}{c|}{MTL} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{MBE} &
 \multicolumn{1}{c|}{SBE} &
 \multicolumn{1}{c|}{\wpri} \\
@@ -1316,7 +1666,7 @@ the hypervisor extension is provided and MXLEN=32.
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Additional machine-mode status register ({\tt mstatush}) for RV32 when the hypervisor extension is provided.
+\caption{Additional machine status register ({\tt mstatush}) for RV32 when the hypervisor extension is implemented.
 The format of {\tt mstatus} is unchanged for RV32.}
 \label{hypervisor-mstatush}
 \end{figure*}
@@ -1327,23 +1677,9 @@ mode at the time of the trap, the MPV bit is set to the value of the virtualizat
 mode V at the time of the trap.  When an MRET instruction is executed, the
 virtualization mode V is set to MPV, unless MPP=3, in which case V remains 0.
 
-The MTL bit (Machine Translation Level), which indicates which address-translation level
-caused an access-fault or page-fault exception, is also written by the implementation whenever a trap
-is taken into M-mode.
-On an access or page fault due to guest physical address translation, MTL is
-set to 1.
-For any other trap into M-mode, MTL is set to 0.
-
 The TSR and TVM fields of {\tt mstatus} affect execution only in HS-mode,
 not in VS-mode.
 The TW field affects execution in all modes except M-mode.
-
-The hypervisor extension changes the behavior of the the Modify Privilege
-field, MPRV, of {\tt mstatus}.
-When MPRV=0, translation and protection behave as normal.  When
-MPRV=1, loads and stores are translated and protected as though the current
-privilege mode were set to MPP and the current virtualization mode were set to
-MPV.  Table~\ref{h-mprv} enumerates the cases.
 
 \begin{table*}[h!]
 \begin{center}
@@ -1358,12 +1694,200 @@ MPV.  Table~\ref{h-mprv} enumerates the cases.
    1    & 1   & 1   & VS-level access with two-level translation and protection. The HS-level MXR bit makes any executable page readable.  {\tt vsstatus}.MXR makes readable those pages marked executable at the VS translation level, but only if readable at the guest-physical translation level.  {\tt vsstatus}.SUM applies instead of the HS-level SUM bit. \\ \hline
  \end{tabular}
 \end{center}
-\caption{Effect of MPRV on load and store translation and protection.  When MPRV=1, MPP$\neq$3, and {\tt hstatus}.SPRV=1, the effective privilege is further modified: {\tt hstatus}.SPV applies instead of MPV, and the HS-level SPP applies instead of MPP.}
+\caption{Effect of MPRV on the translation and protection of explicit
+memory accesses.
+When MPRV=1, MPP$\neq$3, and {\tt hstatus}.SPRV=1, the effective
+privilege is further modified: {\tt hstatus}.SPV applies instead of MPV,
+and the HS-level SPP applies instead of MPP.}
 \label{h-mprv}
 \end{table*}
 
+The hypervisor extension changes the behavior of the the Modify Privilege
+field, MPRV, of {\tt mstatus}.
+When MPRV=0, translation and protection behave as normal.
+When MPRV=1, explicit memory accesses are translated and protected, and
+endianness is applied, as though the current virtualization mode were set
+to MPV and the current privilege mode were set to MPP.
+Table~\ref{h-mprv} enumerates the cases.
+
 The {\tt mstatus} register is a superset of the HS-level {\tt sstatus}
 register but is not a superset of {\tt vsstatus}.
+
+\subsection{Machine Interrupt Delegation Register ({\tt mideleg})}
+
+When the hypervisor extension is implemented, bits 10, 6, and 2 of
+{\tt mideleg} (corresponding to the standard VS-level interrupts) are
+each hardwired to one.
+VS-level interrupts are always delegated past M-mode to HS-mode.
+
+\subsection{Machine Interrupt Registers ({\tt mip} and {\tt mie})}
+
+The hypervisor extension gives registers {\tt mip} and {\tt mie}
+additional active bits for VS-level interrupts.
+Figures \ref{hypervisor-mipreg-standard} and
+\ref{hypervisor-miereg-standard} show the standard portions (bits 15:0)
+of registers {\tt mip} and {\tt mie} when the hypervisor extension is
+implemented.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{Rcccccccccccc}
+\instbitrange{15}{12} &
+\instbit{11} &
+\instbit{10} &
+\instbit{9} &
+\instbit{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{MEIP} &
+\multicolumn{1}{c|}{VSEIP} &
+\multicolumn{1}{c|}{SEIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{MTIP} &
+\multicolumn{1}{c|}{VSTIP} &
+\multicolumn{1}{c|}{STIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{MSIP} &
+\multicolumn{1}{c|}{VSSIP} &
+\multicolumn{1}{c|}{SSIP} &
+\multicolumn{1}{c|}{0} \\
+\hline
+4 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt mip}.}
+\label{hypervisor-mipreg-standard}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{Rcccccccccccc}
+\instbitrange{15}{12} &
+\instbit{11} &
+\instbit{10} &
+\instbit{9} &
+\instbit{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{MEIE} &
+\multicolumn{1}{c|}{VSEIE} &
+\multicolumn{1}{c|}{SEIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{MTIE} &
+\multicolumn{1}{c|}{VSTIE} &
+\multicolumn{1}{c|}{STIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{MSIE} &
+\multicolumn{1}{c|}{VSSIE} &
+\multicolumn{1}{c|}{SSIE} &
+\multicolumn{1}{c|}{0} \\
+\hline
+4 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt mie}.}
+\label{hypervisor-miereg-standard}
+\end{figure*}
+
+Bits VSEIP, VSTIP, and VSSIP in {\tt mip} are aliases for the same bits
+in hypervisor CSR {\tt hip}, while VSEIE, VSTIE, and VSSIE in {\tt mie}
+are aliases for the same bits in {\tt hie}.
+
+\subsection{Machine Second Trap Value Register ({\tt mtval2})}
+
+The {\tt mtval2} register is an MXLEN-bit read/write register formatted
+as shown in Figure~\ref{mtval2reg}.
+When a trap is taken into M-mode, {\tt mtval2} is written with additional
+exception-specific information, alongside {\tt mtval}, to assist software
+in handling the trap.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{MXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt mtval2} \\
+\hline
+MXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Machine second trap value register ({\tt mtval2}).}
+\label{mtval2reg}
+\end{figure*}
+
+When a guest-page-fault trap is taken into M-mode, {\tt mtval2} is
+written with either zero or the guest physical address that faulted,
+shifted right by 2~bits.
+For other traps, {\tt mtval2} is set to zero, but a future standard may
+redefine {\tt mtval2}'s setting for other traps.
+
+For misaligned loads and stores that cause guest-page faults,
+{\tt mtval2} will contain zero or the guest physical address of the
+portion of the access that caused the fault.
+For instruction guest-page faults on systems with variable-length
+instructions, {\tt mtval2} will contain zero or the guest physical
+address of the portion of the instruction that caused the fault.
+
+{\tt mtval2} is a \warl\ register that must be able to hold zero and may
+be capable of holding only an arbitrary subset of other 2-bit-shifted
+guest physical addresses, if any.
+
+\subsection{Machine Trap Instruction Register ({\tt mtinst})}
+
+The {\tt mtinst} register is an MXLEN-bit read/write register formatted
+as shown in Figure~\ref{mtinstreg}.
+When a trap is taken into M-mode, {\tt mtinst} is written with a value
+that, if nonzero, provides information about the instruction that
+trapped, to assist software in handling the trap.
+The values that may be written to {\tt mtinst} on a trap are documented
+in Section~\ref{sec:tinst-vals}.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{MXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt mtinst} \\
+\hline
+MXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Machine trap instruction register ({\tt mtinst}).}
+\label{mtinstreg}
+\end{figure*}
+
+{\tt mtinst} is a \warl\ register that need only be able to hold the
+values that the implementation may automatically write to it on a trap.
 
 \section{Two-Level Address Translation}
 \label{sec:two-level-translation}
@@ -1456,8 +1980,8 @@ Figure~\ref{sv39x4va}.
 This partitioning is identical to that for an Sv39 virtual address as depicted
 in Figure~\ref{sv39va} (page~\pageref{sv39va}), except with 2 more bits at the
 high end in VPN[2].
-Address bits 63:41 must all be zeros, or else a page-fault exception occurs,
-attributed to guest physical address translation.
+Address bits 63:41 must all be zeros, or else a guest-page-fault
+exception occurs.
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -1487,8 +2011,8 @@ Figure~\ref{sv48x4va}.
 This partitioning is identical to that for an Sv48 virtual address as depicted
 in Figure~\ref{sv48va} (page~\pageref{sv48va}), except with 2 more bits at the
 high end in VPN[3].
-Address bits 63:50 must all be zeros, or else a page-fault exception occurs,
-attributed to guest physical address translation.
+Address bits 63:50 must all be zeros, or else a guest-page-fault
+exception occurs.
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -1530,10 +2054,10 @@ expected to be of negligible consequence for most (maybe all) real uses.
 A consistent ability to virtualize machines having as much as four times the
 physical address space as virtual address space is believed to be of some
 utility also for RV64.
-For a machine supporting 39-bit virtual addresses (Sv39), for example, this
+For a machine implementing 39-bit virtual addresses (Sv39), for example, this
 allows the hypervisor extension to support up to a 41-bit guest physical
 address space without either necessitating hardware support for 48-bit virtual
-addresses (Sv48) or falling back to emulating the larger address space with
+addresses (Sv48) or falling back to emulating the larger address space using
 shadow page tables.
 \end{commentary}
 
@@ -1542,9 +2066,12 @@ accomplished with the same algorithm used for Sv32, Sv39, or Sv48, as presented
 in Section~\ref{sv32algorithm}, except that:
 \begin{compactitem}
 \item
-in step~1, $a = \mbox{{\tt hgatp}.PPN}\times\mbox{PAGESIZE}$; and
+in step~1, $a = \mbox{{\tt hgatp}.PPN}\times\mbox{PAGESIZE}$;
 \item
-the current privilege mode is always taken to be U-mode.
+the current privilege mode is always taken to be U-mode; and
+\item
+guest-page-fault exceptions are raised instead of regular page-fault
+exceptions.
 \end{compactitem}
 
 For guest physical address translation, all memory accesses (including those
@@ -1559,10 +2086,39 @@ or store, not for the original access type.
 However, any exception is always reported for the original access type
 (instruction, load, or store/AMO).
 
-Access faults and page faults raised by guest physical address translation are
-treated as HS-level exceptions for the purpose of exception delegation, so are
-not delegated to VS-mode, regardless of the setting of the {\tt hedeleg}
-register.
+\begin{commentary}
+Guest physical address translation uses the identical format for PTEs as
+regular address translation, even including the U~bit, due to the
+possibility of sharing some (or all) page tables between guest physical
+address translation and regular HS-level address translation.
+Regardless of whether this usage will ever become common, we chose not to
+preclude it.
+\end{commentary}
+
+\subsection{Guest-Page Faults}
+
+Guest-page-fault traps may be delegated from M-mode to HS-mode under the
+control of CSR {\tt medeleg}, but cannot be delegated to other operating
+modes.
+On a guest-page fault, CSR {\tt mtval} or {\tt stval} is written with the
+faulting virtual address as usual, and {\tt mtval2} or {\tt htval} is
+written either with zero or with the faulting guest physical address,
+shifted right by 2~bits.
+CSR {\tt mtinst} or {\tt htinst} may also be written with information
+about the faulting instruction or other reason for the access, as
+explained in Section~\ref{sec:tinst-vals}.
+
+When an instruction fetch or a misaligned memory access straddles a page
+boundary, two different address translations are involved.
+When a guest-page fault occurs in such a circumstance, the faulting
+virtual address written to {\tt mtval}/{\tt stval} is the same as would
+be required for a regular page fault.
+Thus, the faulting virtual address may be a page-boundary address that is
+higher than the instruction's original virtual address, if the byte at
+that page boundary is among the accessed bytes.
+A nonzero guest physical address written to {\tt mtval2}/{\tt htval}
+shall always correspond to the exact virtual address written to
+{\tt mtval}/{\tt stval}.
 
 \subsection{Memory-Management Fences}
 
@@ -1607,7 +2163,7 @@ An HFENCE.VVMA instruction is not required.
 
 \section{WFI in Virtual Operating Modes}
 
-Executing instruction WFI in VS-mode or VU-mode causes an illegal instruction
+Executing instruction WFI when V=1 causes an illegal instruction
 exception, unless it completes within an implementation-specific, bounded time
 limit.
 
@@ -1618,33 +2174,28 @@ it in U-mode when S-mode exists.
 
 \section{Traps}
 
-The hypervisor extension augments the environment-call exception cause
-encoding.  Environment calls from HS-mode use cause 9, whereas environment
-calls from VS-mode use cause 10.  Table~\ref{hcauses} lists the
-possible M-mode and HS-mode exception codes when the hypervisor extension is
-present.
+\subsection{Trap Cause Codes}
 
 \begin{table*}[p]
 \begin{center}
 \begin{tabular}{|r|r|l|l|}
-
   \hline
   Interrupt & Exception Code  & Description \\
   \hline
   1         & 0               & {\em Reserved} \\
   1         & 1               & Supervisor software interrupt \\
-  1         & 2               & {\em Reserved} \\
+  1         & 2               & Virtual supervisor software interrupt \\
   1         & 3               & Machine software interrupt \\ \hline
   1         & 4               & {\em Reserved} \\
   1         & 5               & Supervisor timer interrupt \\
-  1         & 6               & {\em Reserved} \\
+  1         & 6               & Virtual supervisor timer interrupt \\
   1         & 7               & Machine timer interrupt \\ \hline
   1         & 8               & {\em Reserved} \\
   1         & 9               & Supervisor external interrupt \\
-  1         & 10              & {\em Reserved} \\
+  1         & 10              & Virtual supervisor external interrupt \\
   1         & 11              & Machine external interrupt \\ \hline
   1         & 12--15          & {\em Reserved} \\
-  1         & $\ge$16         & {\em Available for platform use} \\ \hline
+  1         & $\ge$16         & {\em Available for platform or custom use} \\ \hline
   0         & 0               & Instruction address misaligned \\
   0         & 1               & Instruction access fault \\
   0         & 2               & Illegal instruction \\
@@ -1661,7 +2212,11 @@ present.
   0         & 13              & Load page fault \\
   0         & 14              & {\em Reserved} \\
   0         & 15              & Store/AMO page fault \\
-  0         & 16--23          & {\em Reserved} \\
+  0         & 16--19          & {\em Reserved} \\
+  0         & 20              & Instruction guest-page fault \\
+  0         & 21              & Load guest-page fault \\
+  0         & 22              & {\em Reserved} \\
+  0         & 23              & Store/AMO guest-page fault \\
   0         & 24--31          & {\em Available for custom use} \\
   0         & 32--47          & {\em Reserved} \\
   0         & 48--63          & {\em Available for custom use} \\
@@ -1669,14 +2224,24 @@ present.
   \hline
 \end{tabular}
 \end{center}
-\caption{Supervisor and machine cause register ({\tt scause} and {\tt mcause}) values when the hypervisor extension is enabled.}
+\caption{Supervisor and machine cause register ({\tt scause} and {\tt mcause}) values when the hypervisor extension is implemented.}
 \label{hcauses}
 \end{table*}
+
+The hypervisor extension augments the trap cause encoding.
+Table~\ref{hcauses} lists the possible M-mode and HS-mode trap cause
+codes when the hypervisor extension is implemented.
+Codes are added for VS-level interrupts (interrupts 2, 6, 10) and for
+guest-page faults (exceptions 20, 21, 23).
+Furthermore, environment calls from VS-mode are assigned cause 10,
+whereas those from HS-mode or S-mode use cause 9.
 
 \begin{commentary}
 HS-mode and VS-mode ECALLs use different cause values so they can be delegated
 separately.
 \end{commentary}
+
+\subsection{Trap Entry}
 
 When a trap occurs in HS-mode or U-mode, it goes to M-mode, unless
 delegated by {\tt medeleg} or {\tt mideleg}, in which case it goes to HS-mode.
@@ -1686,8 +2251,10 @@ unless further delegated by {\tt hedeleg} or {\tt hideleg}, in which case it
 goes to VS-mode.
 
 When a trap is taken into M-mode, virtualization mode V gets set to~0,
-and {\tt mstatus}.MPV and {\tt mstatus}.MPP are set according to
+and in {\tt mstatus} or {\tt mstatush} MPV and MPP are set according to
 Table~\ref{h-mpp}.
+A trap into M-mode also writes CSRs {\tt mepc}, {\tt mcause},
+{\tt mtval}, {\tt mtval2}, and {\tt mtinst}.
 
 \begin{table*}[h!]
 \begin{center}
@@ -1701,16 +2268,17 @@ Table~\ref{h-mpp}.
   VS-mode       & 1   & 1   \\ \hline
 \end{tabular}
 \end{center}
-\caption{Value of {\tt mstatus} fields MPV and MPP after a trap into M-mode.
+\caption{Value of {\tt mstatus}/{\tt mstatush} fields MPV and MPP after a trap into M-mode.
 Upon trap return, MPV is ignored when MPP=3.}
 \label{h-mpp}
 \end{table*}
 
-When a trap is taken into HS-mode, virtualization mode V is first set
-to~0,
-then {\tt hstatus}.SP2V is set to {\tt hstatus}.SPV, {\tt hstatus}.SP2P is set
+When a trap is taken into HS-mode, virtualization mode V is first set to~0,
+{\tt hstatus}.SP2V is set to {\tt hstatus}.SPV, {\tt hstatus}.SP2P is set
 to {\tt sstatus}.SPP, and lastly {\tt hstatus}.SPV and {\tt sstatus}.SPP are
 set according to Table~\ref{h-spp}.
+A trap into HS-mode also writes CSRs {\tt sepc}, {\tt scause},
+{\tt stval}, {\tt htval}, and {\tt htinst}.
 
 \begin{table*}[h!]
 \begin{center}
@@ -1731,10 +2299,12 @@ When a trap is taken into VS-mode, {\tt vsstatus}.SPP is set according to
 Table~\ref{h-vspp}.
 Register {\tt hstatus} and the HS-level {\tt sstatus} are not modified,
 and the virtualization mode V remains~1.
+A trap into VS-mode also writes CSRs {\tt vsepc}, {\tt vscause}, and
+{\tt vstval}.
 
 \begin{table*}[h!]
 \begin{center}
-\begin{tabular}{|l|c|c|}
+\begin{tabular}{|l|c|}
   \hline
   Previous Mode & SPP \\ \hline
   VU-mode       & 0   \\
@@ -1745,16 +2315,405 @@ and the virtualization mode V remains~1.
 \label{h-vspp}
 \end{table*}
 
-
 \FloatBarrier
 
-\section{Trap Return}
+\subsection{Transformed Instruction or Pseudoinstruction for {\tt mtinst} or {\tt htinst}}
+\label{sec:tinst-vals}
+
+On any trap into M-mode or HS-mode, one of these values is written
+automatically into the appropriate trap instruction CSR, {\tt mtinst} or
+{\tt htinst}:
+\begin{tightlist}
+\item
+zero;
+\item
+a transformation of the trapping instruction;
+\item
+a custom value (allowed only if the trapping instruction is nonstandard);
+or
+\item
+a special pseudoinstruction.
+\end{tightlist}
+Except when a pseudoinstruction value is required (described later), the
+value written to {\tt mtinst} or {\tt htinst} may always be zero,
+indicating that the hardware is providing no information in the register
+for this particular trap.
+
+\begin{commentary}
+The value written to the trap instruction CSR serves two purposes.
+The first is to improve the speed of instruction emulation in a trap
+handler, partly by allowing the handler to skip loading the trapping
+instruction from memory, and partly by obviating some of the work of
+decoding and executing the instruction.
+The second purpose is to supply, via pseudoinstructions, additional
+information about guest-page-fault exceptions caused by implicit memory
+accesses done for VS-level address translation.
+
+A \emph{transformation} of the trapping instruction is written instead of
+simply a copy of the original instruction in order to minimize the burden
+for hardware yet still provide to a trap handler the information needed
+to emulate the instruction.
+An implementation may at any time reduce its effort by substituting zero
+in place of the transformed instruction.
+\end{commentary}
+
+On an interrupt, the value written to the trap instruction register is
+always zero.
+On a synchronous exception, if a nonzero value is written, one of the
+following shall be true about the value:
+
+\begin{itemize}
+
+\item
+Bit~0 is {\tt 1}, and replacing bit~1 with {\tt 1} makes the value into a
+valid encoding of a standard instruction.
+
+In this case, the instruction that trapped is the same kind as indicated
+by the register value, and the register value is the transformation of
+the trapping instruction, as defined later.
+For example, if bits 1:0 are binary {\tt 11} and the register value is
+the encoding of a standard LW (load word) instruction, then the trapping
+instruction is LW, and the register value is the transformation of the
+trapping LW instruction.
+
+\item
+Bit~0 is {\tt 1}, and replacing bit~1 with {\tt 1} makes the value into
+an instruction encoding that is explicitly available for a custom
+instruction (\emph{not} an unused reserved encoding).
+
+This is a \textit{custom value}.
+The instruction that trapped is a nonstandard instruction.
+The interpretation of a custom value is not otherwise specified by this
+standard.
+
+\item
+The value is one of the special pseudoinstructions defined later, all of
+which have bits 1:0 equal to {\tt 00}.
+
+\end{itemize}
+
+These three cases exclude a large number of other possible values, such
+as all those having bits 1:0 equal to binary {\tt 10}.
+A future standard may define additional cases, thus allowing values that
+are currently excluded.
+Software may safely treat an unrecognized value in a trap instruction
+register the same as zero.
+
+\begin{commentary}
+To be forward-compatible with future revisions of this standard, software
+that interprets a nonzero value from {\tt mtinst} or {\tt htinst} must
+fully verify that the value conforms to one of the cases listed above.
+For instance, for RV64, discovering that bits 6:0 of {\tt mtinst} are
+{\tt 0000011} and bits 14:12 are {\tt 010} is not sufficient to establish
+that the first case applies and the trapping instruction is a standard LW
+instruction;
+rather, software must also confirm that bits 63:32 of {\tt mtinst} are
+all zeros.
+A future standard might define new values for 64-bit {\tt mtinst} that
+are nonzero in bits 63:32 yet may coincidentally have in bits 31:0 the
+same bit patterns as standard RV64 instructions.
+\end{commentary}
+
+\begin{commentary}
+Unlike for standard instructions, there is no requirement that the
+instruction encoding of a custom value be of the same ``kind'' as the
+instruction that trapped (or even have any correlation with the trapping
+instruction).
+\end{commentary}
+
+Table~\ref{table:tinst-values} shows the values that may be automatically
+written to the trap instruction register for each standard exception
+cause.
+For exceptions that prevent the fetching of an instruction, only zero may
+be written.
+A custom value may be automatically written only if the instruction that
+traps is nonstandard.
+A future standard may permit other values to be written, chosen from the
+set of allowed values established earlier.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+                               &      & Transformed &        & Pseudo- \\
+                               &      & Standard    & Custom & instruction \\
+Exception                      & Zero & Instruction & Value  & Value \\
+\hline
+Instruction address misaligned & Yes  & No          & Yes    & No  \\
+\hline
+Instruction access fault       & Yes  & No          & No     & No  \\
+Illegal instruction            & Yes  & No          & No     & No  \\
+Breakpoint                     & Yes  & No          & Yes    & No  \\
+\hline
+Load address misaligned        & Yes  & Yes         & Yes    & No  \\
+Load access fault              & Yes  & Yes         & Yes    & No  \\
+Store/AMO address misaligned   & Yes  & Yes         & Yes    & No  \\
+Store/AMO access fault         & Yes  & Yes         & Yes    & No  \\
+\hline
+Environment call               & Yes  & No          & Yes    & No  \\
+\hline
+Instruction page fault         & Yes  & No          & No     & No  \\
+Load page fault                & Yes  & Yes         & Yes    & No  \\
+Store/AMO page fault           & Yes  & Yes         & Yes    & No  \\
+\hline
+Instruction guest-page fault   & Yes  & No          & No     & Yes \\
+Load guest-page fault          & Yes  & Yes         & Yes    & Yes \\
+Store/AMO guest-page fault     & Yes  & Yes         & Yes    & Yes \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Values that may be automatically written to the trap instruction
+register ({\tt mtinst} or {\tt htinst}) on an exception trap.}
+\label{table:tinst-values}
+\end{table*}
+
+As enumerated in the table, a synchronous exception may write to the trap
+instruction register a standard transformation of the trapping
+instruction only for exceptions that arise from explicit memory accesses
+(from loads, stores, and AMO instructions).
+Accordingly, standard transformations are currently defined only for
+these memory-access instructions.
+If a synchronous trap occurs for a standard instruction for which no
+transformation has been defined, the trap instruction register shall be
+written with zero (or, under certain circumstances, with a special
+pseudoinstruction value).
+
+For a standard load instruction that is not a compressed instruction and
+is one of LB, LBU, LH, LHU, LW, LWU, LD, FLW, FLD, or FLQ, the
+transformed instruction has the format shown in
+Figure~\ref{transformedloadinst}.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{Addr.\ Offset} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Transformed noncompressed load instruction (LB, LBU, LH, LHU,
+LW, LWU, LD, FLW, FLD, or FLQ).
+Fields funct3, rd, and opcode are the same as the trapping load
+instruction.}
+\label{transformedloadinst}
+\end{figure*}
+
+For a standard store instruction that is not a compressed instruction and
+is one of SB, SH, SW, SD, FSW, FSD, or FSQ, the transformed instruction
+has the format shown in Figure~\ref{transformedstoreinst}.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{Addr.\ Offset} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Transformed noncompressed store instruction (SB, SH, SW, SD,
+FSW, FSD, or FSQ).
+Fields rs2, funct3, and opcode are the same as the trapping store
+instruction.}
+\label{transformedstoreinst}
+\end{figure*}
+
+For a standard atomic instruction (load-reserved, store-conditional, or
+AMO instruction), the transformed instruction has the format shown in
+Figure~\ref{transformedatomicinst}.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}R@{}c@{}c@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{27} &
+\instbit{26} &
+\instbit{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct5} &
+\multicolumn{1}{c|}{aq} &
+\multicolumn{1}{c|}{rl} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{Addr.\ Offset} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+5 & 1 & 1 & 5 & 5 & 3 & 5 & 7 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Transformed atomic instruction (load-reserved,
+store-conditional, or AMO instruction).
+All fields are the same as the trapping instruction except bits 19:15,
+Addr.\ Offset.}
+\label{transformedatomicinst}
+\end{figure*}
+
+In the transformed instructions above, the Addr.\ Offset field that
+replaces the instruction's rs1 field in bits 19:15 is the positive
+difference between the faulting virtual address (written to {\tt mtval}
+or {\tt stval}) and the original virtual address.
+This difference can be nonzero only for an access or page fault that
+occurs for a misaligned memory access.
+Note also that, for basic loads and stores, the transformations replace
+the instruction's immediate offset fields with zero.
+
+For a standard compressed instruction (16-bit size), the transformed
+instruction is found as follows:
+\begin{enumerate}
+\item
+Expand the compressed instruction to its 32-bit equivalent.
+\item
+Transform the 32-bit equivalent instruction.
+\item
+Replace bit~1 with a~{\tt 0}.
+\end{enumerate}
+Bits 1:0 of a transformed standard instruction will be binary {\tt 01} if
+the trapping instruction is compressed and {\tt 11} if not.
+
+\begin{commentary}
+In decoding the contents of {\tt mtinst} or {\tt htinst}, once software
+has determined that the register contains the encoding of a standard
+basic load (LB, LBU, LH, LHU, LW, LWU, LD, FLW, FLD, or FLQ) or basic
+store (SB, SH, SW, SD, FSW, FSD, or FSQ), it is not necessary to confirm
+also that the immediate offset fields (31:25, and 24:20 or 11:7) are
+zeros.
+The knowledge that the register's value is the encoding of a basic
+load/store is sufficient to prove that the trapping instruction is of the
+same kind.
+
+A future version of this standard may add information to the fields that
+are currently zeros;
+however, for backwards compatiblity, any such information will be for
+performance purposes only and can safely be ignored.
+\end{commentary}
+
+For guest-page faults, the trap instruction register is written with a
+special pseudoinstruction value if:
+(a)~the faulting memory access is an implicit access for VS-level address
+translation, and
+(b)~a nonzero value (the faulting guest physical address) is written to
+{\tt mtval2} or {\tt htval}.
+If both conditions are met, the value written to {\tt mtinst} or
+{\tt htinst} must be taken from Table~\ref{table:pseudoinsts};
+zero is not allowed.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|l|l|}
+\hline
+Value            & Meaning \\
+\hline
+{\tt 0x00002000} & 32-bit read for VS-level address translation (RV32) \\
+{\tt 0x00002020} & 32-bit write for VS-level address translation (RV32) \\
+\hline
+{\tt 0x00003000} & 64-bit read for VS-level address translation (RV64) \\
+{\tt 0x00003020} & 64-bit write for VS-level address translation (RV64) \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Special pseudoinstruction values for guest-page faults.
+The RV32 values are used when VSXLEN=32, and the RV64 values when VSXLEN=64.}
+\label{table:pseudoinsts}
+\end{table*}
+
+The defined pseudoinstruction values are designed to correspond closely
+with the encodings of basic loads and stores, as illustrated by
+Table~\ref{table:pseudoinsts-basis}.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|l|l|}
+\hline
+Encoding         & Instruction \\ \hline
+{\tt 0x00002003} & {\tt lw x0,0(x0)} \\
+{\tt 0x00002023} & {\tt sw x0,0(x0)} \\ \hline
+{\tt 0x00003003} & {\tt ld x0,0(x0)} \\
+{\tt 0x00003023} & {\tt sd x0,0(x0)} \\ \hline
+\end{tabular}
+\end{center}
+\caption{Standard instructions corresponding to the special
+psuedoinstructions of Table~\ref{table:pseudoinsts}.}
+\label{table:pseudoinsts-basis}
+\end{table*}
+
+A \textit{write} pseudoinstruction ({\tt 0x00002020} or {\tt 0x00003020})
+is used for the case that the machine is attempting automatically to
+update bits A and/or D in VS-level page tables.
+All other implicit memory accesses for VS-level address translation will
+be reads.
+If a machine never automatically updates bits A or D in VS-level page
+tables (leaving this to software), the \textit{write} case will never
+arise.
+The fact that such a page table update must actually be atomic, not just
+a simple write, is ignored for the pseudoinstruction.
+
+\begin{commentary}
+If the conditions that necessitate a pseudoinstruction value can ever
+occur for M-mode, then {\tt mtinst} cannot be hardwired entirely to zero;
+and likewise for HS-mode and {\tt htinst}.
+However, in that case, the trap instruction registers may minimally
+support only values 0 and {\tt 0x00002000} or {\tt 0x00003000}, and
+possibly {\tt 0x00002020} or {\tt 0x00003020}, requiring as few as one or
+two flip-flops in hardware, per register.
+\end{commentary}
+
+\begin{commentary}
+There is no harm here in ignoring the atomicity requirement for page
+table updates, because a hypervisor is not expected in these
+circumstances to emulate an implicit memory access that fails.
+Rather, the hypervisor is given enough information about the faulting
+access to be able to make the memory accessible (e.g., by restoring a
+missing page of virtual memory) before resuming execution by retrying the
+faulting instruction.
+\end{commentary}
+
+\subsection{Trap Return}
 
 The MRET instruction is used to return from a trap taken into M-mode.
 MRET first determines what the new operating mode will be according to
-the values of MPP and MPV in {\tt mstatus}, as encoded in
+the values of MPP and MPV in {\tt mstatus} or {\tt mstatush}, as encoded in
 Table~\ref{h-mpp}.
-MRET then in {\tt mstatus} sets MPV=0, MPP=0, MIE=MPIE, and MPIE=1.
+MRET then in {\tt mstatus}/{\tt mstatush} sets MPV=0, MPP=0, MIE=MPIE, and MPIE=1.
 If the new operating mode will be U, VS, or VU, MRET also sets
 {\tt hstatus}.SPRV=0.
 Lastly, MRET sets the virtualization and privilege modes as previously
