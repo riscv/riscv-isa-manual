@@ -88,6 +88,7 @@ interrupt, and address-translation subsystems.
 Additional CSRs are provided to HS-mode, but not to VS-mode, to manage
 two-stage address translation and to control the behavior of a VS-mode guest:
 {\tt hstatus}, {\tt hedeleg}, {\tt hideleg}, {\tt hip}, {\tt hie},
+{\tt hgeip}, {\tt hgeie},
 {\tt hcounteren}, {\tt htimedelta}, {\tt htimedeltah}, {\tt htval},
 {\tt htinst}, and {\tt hgatp}.
 
@@ -147,13 +148,30 @@ for tracking and controlling the exception behavior of a VS-mode guest.
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{YcccRcccccWc}
+\begin{tabular}{TcccWSc}
 \\
 \instbitrange{31}{23} &
 \instbit{22} &
 \instbit{21} &
 \instbit{20} &
-\instbitrange{19}{10} &
+\instbitrange{19}{18} &
+\instbitrange{17}{12} &
+ \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{VTSR} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{VTVM} &
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{VGEIN[5:0]} &
+ \\
+\hline
+9 & 1 & 1 & 1 & 2 & 6 & \\
+\end{tabular}
+\begin{tabular}{cWcccccYc}
+\\
+&
+\instbitrange{11}{10} &
 \instbit{9} &
 \instbit{8} &
 \instbit{7} &
@@ -162,11 +180,8 @@ for tracking and controlling the exception behavior of a VS-mode guest.
 \instbitrange{4}{1} &
 \instbit{0} \\
 \hline
+ &
 \multicolumn{1}{|c|}{\wpri} &
-\multicolumn{1}{c|}{VTSR} &
-\multicolumn{1}{c|}{\wpri} &
-\multicolumn{1}{c|}{VTVM} &
-\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SP2V} &
 \multicolumn{1}{c|}{SP2P} &
 \multicolumn{1}{c|}{SPV} &
@@ -175,7 +190,7 @@ for tracking and controlling the exception behavior of a VS-mode guest.
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPRV} \\
 \hline
-9 & 1 & 1 & 1 & 10 & 1 & 1 & 1 & 1 & 1 & 4 & 1 \\
+ & 2 & 1 & 1 & 1 & 1 & 1 & 4 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -188,7 +203,7 @@ for tracking and controlling the exception behavior of a VS-mode guest.
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{MFScccc}
+\begin{tabular}{KFScccc}
 \\
 \instbitrange{HSXLEN-1}{34} &
 \instbitrange{33}{32} &
@@ -208,10 +223,12 @@ for tracking and controlling the exception behavior of a VS-mode guest.
 \hline
 HSXLEN-34 & 2 & 9 & 1 & 1 & 1 & \\
 \end{tabular}
-\begin{tabular}{cOcccccFc}
+\begin{tabular}{cWRWcccccFc}
 \\
 &
-\instbitrange{19}{10} &
+\instbitrange{19}{18} &
+\instbitrange{17}{12} &
+\instbitrange{11}{10} &
 \instbit{9} &
 \instbit{8} &
 \instbit{7} &
@@ -222,6 +239,8 @@ HSXLEN-34 & 2 & 9 & 1 & 1 & 1 & \\
 \hline
  &
 \multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{VGEIN[5:0]} &
+\multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SP2V} &
 \multicolumn{1}{c|}{SP2P} &
 \multicolumn{1}{c|}{SPV} &
@@ -230,7 +249,7 @@ HSXLEN-34 & 2 & 9 & 1 & 1 & 1 & \\
 \multicolumn{1}{c|}{\wpri} &
 \multicolumn{1}{c|}{SPRV} \\
 \hline
- & 10 & 1 & 1 & 1 & 1 & 1 & 4 & 1 \\
+ & 2 & 6 & 2 & 1 & 1 & 1 & 1 & 1 & 4 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -254,6 +273,18 @@ widest supported width not wider than the new HSXLEN.
 The {\tt hstatus} fields VTSR and VTVM are defined analogously to the
 {\tt mstatus} fields TSR and TVM, but affect the trapping behavior of the SRET
 and virtual-memory management instructions only when V=1.
+
+The VGEIN (Virtual Guest External Interrupt Number) field selects a guest
+external interrupt source for VS-level external interrupts.
+VGEIN is a \wlrl\ field that must be able to hold values between zero
+and the maximum guest external interrupt number (known as GEILEN),
+inclusive.
+When VGEIN=0, no guest external interrupt source is selected for VS-level
+external interrupts.
+GEILEN may be zero, in which case VGEIN may be hardwired to zero.
+Guest external interrupts are explained in
+Section~\ref{sec:hgeinterruptregs}, and the use of VGEIN is covered
+further in Section~\ref{sec:hinterruptregs}.
 
 The SPV bit (Supervisor Previous Virtualization Mode) is written by the implementation
 whenever a trap is taken into HS-mode.  Just as the SPP bit in {\tt sstatus} is set to the privilege
@@ -418,8 +449,8 @@ interrupt causes (codes 16 and above).
 
 Registers {\tt hip} and {\tt hie} are HSXLEN-bit read/write registers
 that supplement HS-level's {\tt sip} and {\tt sie} respectively.
-The {\tt hip} register indicates pending VS-level interrupts, while
-{\tt hie} contains enable bits for VS-level interrupts.
+The {\tt hip} register indicates pending VS-level and hypervisor-specific
+interrupts, while {\tt hie} contains enable bits for the same interrupts.
 Like {\tt sip} and {\tt sie}, interrupt cause number \textit{i}
 corresponds with bit~\textit{i} in both {\tt hip} and {\tt hie}.
 
@@ -429,7 +460,7 @@ corresponds with bit~\textit{i} in both {\tt hip} and {\tt hie}.
 \begin{tabular}{@{}J}
 \instbitrange{HSXLEN-1}{0} \\
 \hline
-\multicolumn{1}{|c|}{VS-Level Interrupts (\warl)} \\
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
 \hline
 HSXLEN \\
 \end{tabular}
@@ -446,7 +477,7 @@ HSXLEN \\
 \begin{tabular}{@{}J}
 \instbitrange{HSXLEN-1}{0} \\
 \hline
-\multicolumn{1}{|c|}{VS-Level Interrupts (\warl)} \\
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
 \hline
 HSXLEN \\
 \end{tabular}
@@ -490,8 +521,10 @@ are formatted as shown in Figures \ref{hipreg-standard} and
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{ScFcFcW}
-\instbitrange{15}{11} &
+\begin{tabular}{FcccFcFcW}
+\instbitrange{15}{13} &
+\instbit{12} &
+\instbit{11} &
 \instbit{10} &
 \instbitrange{9}{7} &
 \instbit{6} &
@@ -500,6 +533,8 @@ are formatted as shown in Figures \ref{hipreg-standard} and
 \instbitrange{1}{0} \\
 \hline
 \multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SGEIP} &
+\multicolumn{1}{c|}{0} &
 \multicolumn{1}{c|}{VSEIP} &
 \multicolumn{1}{c|}{0} &
 \multicolumn{1}{c|}{VSTIP} &
@@ -507,7 +542,7 @@ are formatted as shown in Figures \ref{hipreg-standard} and
 \multicolumn{1}{c|}{VSSIP} &
 \multicolumn{1}{c|}{0} \\
 \hline
-5 & 1 & 3 & 1 & 3 & 1 & 2 \\
+3 & 1 & 1 & 1 & 3 & 1 & 3 & 1 & 2 \\
 \end{tabular}
 \end{center}
 }
@@ -520,8 +555,10 @@ are formatted as shown in Figures \ref{hipreg-standard} and
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{ScFcFcW}
-\instbitrange{15}{11} &
+\begin{tabular}{FcccFcFcW}
+\instbitrange{15}{13} &
+\instbit{12} &
+\instbit{11} &
 \instbit{10} &
 \instbitrange{9}{7} &
 \instbit{6} &
@@ -530,6 +567,8 @@ are formatted as shown in Figures \ref{hipreg-standard} and
 \instbitrange{1}{0} \\
 \hline
 \multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SGEIE} &
+\multicolumn{1}{c|}{0} &
 \multicolumn{1}{c|}{VSEIE} &
 \multicolumn{1}{c|}{0} &
 \multicolumn{1}{c|}{VSTIE} &
@@ -537,7 +576,7 @@ are formatted as shown in Figures \ref{hipreg-standard} and
 \multicolumn{1}{c|}{VSSIE} &
 \multicolumn{1}{c|}{0} \\
 \hline
-5 & 1 & 3 & 1 & 3 & 1 & 2 \\
+3 & 1 & 1 & 1 & 3 & 1 & 3 & 1 & 2 \\
 \end{tabular}
 \end{center}
 }
@@ -546,22 +585,35 @@ are formatted as shown in Figures \ref{hipreg-standard} and
 \label{hiereg-standard}
 \end{figure*}
 
+Bits {\tt hip}.SGEIP and {\tt hie}.SGEIE are the interrupt-pending and
+interrupt-enable bits for guest external interrupts at supervisor level
+(HS-level).
+SGEIP is read-only in {\tt hip}, and is 1 if and only if the bitwise
+logical-AND of CSRs {\tt hgeip} and {\tt hgeie} is nonzero in any bit.
+(See Section~\ref{sec:hgeinterruptregs}.)
+
 Bits {\tt hip}.VSEIP and {\tt hie}.VSEIE are the interrupt-pending and
 interrupt-enable bits for VS-level external interrupts.
 VSEIP is writable in {\tt hip}, and may be written by a hypervisor to
 indicate to VS-mode that an external interrupt is pending.
-Additionally, the platform-level interrupt controller may generate
-VS-level external interrupts.
-VS-level external interrupts are made pending based on the logical-OR of
-the software-writable VSEIP bit and the signal from the external
-interrupt controller.
+Additionally, VS-level external interrupts may come from other sources,
+such as a platform-level interrupt controller.
+VS-level external interrupts are made pending based on the logical-OR of:
+\begin{tightlist}
+\item
+the software-writable VSEIP bit;
+\item
+the bit of {\tt hgeip} selected by {\tt hstatus}.VGEIN; and
+\item
+any other platform-specific external interrupt signal directed to
+VS-level.
+\end{tightlist}
 When {\tt hip} is read with a CSR instruction, the value of the VSEIP bit
-returned in the {\tt rd} destination register is the logical-OR of the
-software-writable bit and the interrupt signal from the interrupt
-controller.
+returned in the {\tt rd} destination register is the logical-OR of all
+the sources listed above.
 However, the value used in the read-modify-write sequence of a CSRRS or
 CSRRC instruction contains only the software-writable VSEIP bit, ignoring
-the interrupt value from the external interrupt controller.
+other interrupt sources.
 
 \begin{commentary}
 The VSEIP field behavior is designed to allow a hypervisor to mimic
@@ -583,7 +635,110 @@ interrupt-enable bits for VS-level software interrupts.
 VSSIP is writable in {\tt hip}.
 
 Multiple simultaneous interrupts destined for HS-mode are handled in the
-following decreasing priority order:  SEI, SSI, STI, VSEI, VSSI, VSTI.
+following decreasing priority order:  SEI, SSI, STI, SGEI, VSEI, VSSI, VSTI.
+
+\subsection{Hypervisor Guest External Interrupt Registers ({\tt hgeip} and {\tt hgeie})}
+\label{sec:hgeinterruptregs}
+
+The {\tt hgeip} register is an HSXLEN-bit read-only register, formatted
+as shown in Figure~\ref{hgeipreg}, that indicates pending guest external
+interrupts for this hart.
+The {\tt hgeie} register is an HSXLEN-bit read/write register, formatted
+as shown in Figure~\ref{hgeiereg}, that contains enable bits for the
+guest external interrupts at this hart.
+Guest external interrupt number \textit{i} corresponds with
+bit~\textit{i} in both {\tt hgeip} and {\tt hgeie}.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}Jc}
+\instbitrange{HSXLEN-1}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{Guest External Interrupts} &
+\multicolumn{1}{c|}{0} \\
+\hline
+HSXLEN-1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Hypervisor guest external interrupt-pending register ({\tt hgeip}).}
+\label{hgeipreg}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}Jc}
+\instbitrange{HSXLEN-1}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{Guest External Interrupts (\warl)} &
+\multicolumn{1}{c|}{0} \\
+\hline
+HSXLEN-1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Hypervisor guest external interrupt-enable register ({\tt hgeie}).}
+\label{hgeiereg}
+\end{figure}
+
+Guest external interrupts represent interrupts directed to individual
+virtual machines at VS-level.
+If a RISC-V platform supports placing a physical device under the direct
+control of a guest OS with minimal hypervisor intervention (known as
+\emph{pass-through} or \emph{direct assignment} between a virtual machine
+and the physical device), then, in such circumstance, interrupts from the
+device are intended for a specific virtual machine.
+Each bit of {\tt hgeip} summarizes \emph{all} pending interrupts directed
+to one virtual hart, as collected and reported by an interrupt
+controller.
+To distinguish specific pending interrupts from multiple devices,
+software must query the interrupt controller.
+
+\begin{commentary}
+Support for guest external interrupts requires an interrupt controller
+that can collect virtual-machine-directed interrupts separately from
+other interrupts.
+\end{commentary}
+
+The number of bits implemented in {\tt hgeip} and {\tt hgeie} for guest
+external interrupts is \unspecified\ and may be zero.
+This number is known as \textit{GEILEN}.
+The least-significant bits are implemented first, apart from bit~0.
+Hence, if GEILEN is nonzero, bits GEILEN:1 shall be writable in
+{\tt hgeie}, and all other bit positions shall be hardwired to zeros in
+both {\tt hgeip} and {\tt hgeie}.
+
+\begin{commentary}
+The set of guest external interrupts received and handled at one physical
+hart may differ from those received at other harts.
+Guest external interrupt number~\textit{i} at one physical hart is
+typically expected not to be the same as guest external
+interrupt~\textit{i} at any other hart.
+For any one physical hart, the maximum number of virtual harts that may
+directly receive guest external interrupts is limited by GEILEN.
+The maximum this number can be for any implementation is 31 for RV32 and
+63 for RV64, per physical hart.
+
+A hypervisor is always free to \emph{emulate} devices for any number of
+virtual harts without being limited by GEILEN.
+Only direct pass-through (direct assignment) of interrupts is affected by
+the GEILEN limit, and the limit is on the number of virtual harts
+receiving such interrupts, not the number of distinct interrupts
+received.
+The number of distinct interrupts a single virtual hart may receive is
+determined by the interrupt controller.
+\end{commentary}
+
+Register {\tt hgeie} selects the subset of guest external interrupts that
+cause a supervisor-level (HS-level) guest external interrupt.
+The enable bits in {\tt hgeie} do not affect the VS-level external
+interrupt signal selected from {\tt hgeip} by {\tt hstatus}.VGEIN.
 
 \subsection{Hypervisor Counter-Enable Register ({\tt hcounteren})}
 
@@ -1737,12 +1892,16 @@ register but is not a superset of {\tt vsstatus}.
 When the hypervisor extension is implemented, bits 10, 6, and 2 of
 {\tt mideleg} (corresponding to the standard VS-level interrupts) are
 each hardwired to one.
-VS-level interrupts are always delegated past M-mode to HS-mode.
+Furthermore, if any guest external interrupts are implemented (GEILEN is
+nonzero), bit~12 of {\tt mideleg} (corresponding to supervisor-level
+guest external interrupts) is also hardwired to one.
+VS-level interrupts and guest external interrupts are always delegated
+past M-mode to HS-mode.
 
 \subsection{Machine Interrupt Registers ({\tt mip} and {\tt mie})}
 
 The hypervisor extension gives registers {\tt mip} and {\tt mie}
-additional active bits for VS-level interrupts.
+additional active bits for the hypervisor-added interrupts.
 Figures \ref{hypervisor-mipreg-standard} and
 \ref{hypervisor-miereg-standard} show the standard portions (bits 15:0)
 of registers {\tt mip} and {\tt mie} when the hypervisor extension is
@@ -1752,8 +1911,9 @@ implemented.
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{Rcccccccccccc}
-\instbitrange{15}{12} &
+\begin{tabular}{Yccccccccccccc}
+\instbitrange{15}{13} &
+\instbit{12} &
 \instbit{11} &
 \instbit{10} &
 \instbit{9} &
@@ -1768,6 +1928,7 @@ implemented.
 \instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SGEIP} &
 \multicolumn{1}{c|}{MEIP} &
 \multicolumn{1}{c|}{VSEIP} &
 \multicolumn{1}{c|}{SEIP} &
@@ -1781,7 +1942,7 @@ implemented.
 \multicolumn{1}{c|}{SSIP} &
 \multicolumn{1}{c|}{0} \\
 \hline
-4 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
+3 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -1794,8 +1955,9 @@ implemented.
 {\footnotesize
 \begin{center}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{Rcccccccccccc}
-\instbitrange{15}{12} &
+\begin{tabular}{Yccccccccccccc}
+\instbitrange{15}{13} &
+\instbit{12} &
 \instbit{11} &
 \instbit{10} &
 \instbit{9} &
@@ -1810,6 +1972,7 @@ implemented.
 \instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SGEIE} &
 \multicolumn{1}{c|}{MEIE} &
 \multicolumn{1}{c|}{VSEIE} &
 \multicolumn{1}{c|}{SEIE} &
@@ -1823,7 +1986,7 @@ implemented.
 \multicolumn{1}{c|}{SSIE} &
 \multicolumn{1}{c|}{0} \\
 \hline
-4 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
+3 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\
 \end{tabular}
 \end{center}
 }
@@ -1832,8 +1995,8 @@ implemented.
 \label{hypervisor-miereg-standard}
 \end{figure*}
 
-Bits VSEIP, VSTIP, and VSSIP in {\tt mip} are aliases for the same bits
-in hypervisor CSR {\tt hip}, while VSEIE, VSTIE, and VSSIE in {\tt mie}
+Bits SGEIP, VSEIP, VSTIP, and VSSIP in {\tt mip} are aliases for the same bits
+in hypervisor CSR {\tt hip}, while SGEIE, VSEIE, VSTIE, and VSSIE in {\tt mie}
 are aliases for the same bits in {\tt hie}.
 
 Instructions CSRRS and CSRRC have the same modified behavior for bit
@@ -2222,7 +2385,8 @@ it in U-mode when S-mode exists.
   1         & 9               & Supervisor external interrupt \\
   1         & 10              & Virtual supervisor external interrupt \\
   1         & 11              & Machine external interrupt \\ \hline
-  1         & 12--15          & {\em Reserved} \\
+  1         & 12              & Supervisor guest external interrupt \\
+  1         & 13--15          & {\em Reserved} \\
   1         & $\ge$16         & {\em Available for platform or custom use} \\ \hline
   0         & 0               & Instruction address misaligned \\
   0         & 1               & Instruction access fault \\
