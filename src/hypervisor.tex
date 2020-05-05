@@ -1,4 +1,4 @@
-\chapter{Hypervisor Extension, Version 0.6}
+\chapter{Hypervisor Extension, Version 0.6.1}
 \label{hypervisor}
 
 {\bf Warning! This draft specification may change before being
@@ -99,7 +99,9 @@ otherwise.
 Instructions that normally read or modify a supervisor CSR shall instead
 access the corresponding VS CSR.
 In VS-mode, an attempt to read or write a VS CSR directly by its own
-separate CSR address causes an illegal instruction exception.
+separate CSR address causes a virtual instruction exception.
+(Attempts from U-mode or VU-mode cause an illegal instruction exception
+as usual.)
 The VS CSRs can be accessed as themselves only from M-mode or HS-mode.
 
 While V=1, the normal HS-level supervisor CSRs that are replaced by
@@ -255,8 +257,13 @@ hardwired to a forced value, it gets the value corresponding to the
 widest supported width not wider than the new HSXLEN.
 
 The {\tt hstatus} fields VTSR and VTVM are defined analogously to the
-{\tt mstatus} fields TSR and TVM, but affect the trapping behavior of the SRET
-and virtual-memory management instructions only when V=1.
+{\tt mstatus} fields TSR and TVM, but affect execution only in VS-mode,
+and cause virtual instruction exceptions instead of illegal instruction
+exceptions.
+When VTSR=1, an attempt in VS-mode to execute SRET raises a virtual
+instruction exception.
+When VTVM=1, an attempt in VS-mode to execute SFENCE.VMA or to access CSR
+{\tt satp} raises a virtual instruction exception.
 
 The VGEIN (Virtual Guest External Interrupt Number) field selects a guest
 external interrupt source for VS-level external interrupts.
@@ -394,6 +401,7 @@ Bit & Attribute   & Corresponding Exception \\
 15  & Writable    & Store/AMO page fault \\
 20  & Read-only 0 & Instruction guest-page fault \\
 21  & Read-only 0 & Load guest-page fault \\
+22  & Read-only 0 & Virtual instruction \\
 23  & Read-only 0 & Store/AMO guest-page fault \\
 \hline
 \end{tabular}
@@ -818,8 +826,8 @@ to the guest virtual machine.
 
 When the CY, TM, IR, or HPM{\em n} bit in the {\tt hcounteren} register
 is clear, attempts to read the {\tt cycle}, {\tt time}, {\tt instret}, or
-{\tt hpmcounter}{\em n} register while V=1 will cause an illegal
-instruction exception.
+{\tt hpmcounter}{\em n} register while V=1 will cause a virtual
+instruction exception if the same bit in {\tt mcounteren} is~1.
 When one of these bits is set, access to the corresponding register is
 permitted when V=1, unless prevented for some other reason.
 In VU-mode, a counter is not readable unless the applicable bits are set
@@ -1715,6 +1723,11 @@ HLVX cannot override machine-level physical memory protection (PMP),
 so attempting to read memory that PMP designates as execute-only still
 results in an access fault.
 
+Attempts to execute a virtual-machine load/store instruction (HLV, HLVX,
+or HSV) when V=1 cause a virtual instruction trap.
+Attempts to execute one of these same instructions from U-mode when
+{\tt hstatus}.HU=0 cause an illegal instruction trap.
+
 \subsection{Hypervisor Memory-Management Fence Instructions}
 \label{sec:hfence.vma}
 
@@ -1823,6 +1836,12 @@ Simpler implementations of HFENCE.GVMA can ignore the guest physical address in
 the guest-physical memory management of all virtual machines, or even a global
 fence for all memory-management data structures.
 \end{commentary}
+
+Attempts to execute HFENCE.VVMA or HFENCE.GVMA in VS-mode cause a virtual
+instruction trap, while attempts to do the same in U-mode or VU-mode
+cause an illegal instruction trap.
+Attempting to execute HFENCE.GVMA in HS-mode when {\tt mstatus}.TVM=1
+also causes an illegal instruction trap.
 
 \section{Machine-Level CSRs}
 
@@ -2018,6 +2037,8 @@ V=1 and the privilege mode were {\tt hstatus}.SPVP, overriding MPRV.
 
 The {\tt mstatus} register is a superset of the HS-level {\tt sstatus}
 register but is not a superset of {\tt vsstatus}.
+
+\FloatBarrier
 
 \subsection{Machine Interrupt Delegation Register ({\tt mideleg})}
 
@@ -2493,13 +2514,14 @@ An HFENCE.VVMA instruction is not required.
 
 \section{WFI in Virtual Operating Modes}
 
-Executing instruction WFI when V=1 causes an illegal instruction
+Executing instruction WFI when V=1 causes a virtual instruction
 exception, unless it completes within an implementation-specific, bounded time
 limit.
 
 \begin{commentary}
 The behavior required of WFI in VS-mode and VU-mode is the same as required of
-it in U-mode when S-mode exists.
+it in U-mode when S-mode exists, except with a virtual instruction
+exception substituting for an illegal instruction exception.
 \end{commentary}
 
 \section{Traps}
@@ -2509,9 +2531,10 @@ it in U-mode when S-mode exists.
 The hypervisor extension augments the trap cause encoding.
 Table~\ref{hcauses} lists the possible M-mode and HS-mode trap cause
 codes when the hypervisor extension is implemented.
-Codes are added for VS-level interrupts (interrupts 2, 6, 10), for
-supervisor-level guest external interrupts (interrupt~12), and for
-guest-page faults (exceptions 20, 21, 23).
+Codes are added for VS-level interrupts (interrupts 2, 6,~10), for
+supervisor-level guest external interrupts (interrupt~12), for virtual
+instruction exceptions (exception~22), and for guest-page faults
+(exceptions 20, 21,~23).
 Furthermore, environment calls from VS-mode are assigned cause 10,
 whereas those from HS-mode or S-mode use cause~9 as usual.
 
@@ -2555,7 +2578,7 @@ whereas those from HS-mode or S-mode use cause~9 as usual.
   0         & 16--19          & {\em Reserved} \\
   0         & 20              & Instruction guest-page fault \\
   0         & 21              & Load guest-page fault \\
-  0         & 22              & {\em Reserved} \\
+  0         & 22              & Virtual instruction \\
   0         & 23              & Store/AMO guest-page fault \\
   0         & 24--31          & {\em Available for custom use} \\
   0         & 32--47          & {\em Reserved} \\
@@ -2572,6 +2595,57 @@ whereas those from HS-mode or S-mode use cause~9 as usual.
 \begin{commentary}
 HS-mode and VS-mode ECALLs use different cause values so they can be delegated
 separately.
+\end{commentary}
+
+When V=1, a virtual instruction trap (not an illegal instruction trap) is
+taken for:
+\begin{itemize}
+
+\item
+attempts to access a counter CSR when the corresponding bit in
+{\tt hcounteren} is~0 and the same bit in {\tt mcounteren} is~1;
+
+\item
+attempts to execute WFI, unless the instruction completes within an
+implementation-specific, bounded time;
+
+\item
+attempts to execute a virtual-machine load/store instruction, HLV, HLVX,
+or HSV;
+
+\item
+in VS-mode, attempts to execute an HFENCE instruction or to access an
+implemented hypervisor CSR or VS CSR;
+
+\item
+in VS-mode, attempts to execute SRET when {\tt hstatus}.VTSR=1; or
+
+\item
+in VS-mode, attempts to execute an SFENCE instruction or to access
+{\tt satp}, when {\tt hstatus}.VTVM=1.
+
+\end{itemize}
+
+On a virtual instruction trap, {\tt mtval} or {\tt stval} is written the
+same as for an illegal instruction trap.
+
+\begin{commentary}
+When V=1, circumstances that might otherwise cause an illegal instruction
+trap instead cause a virtual instruction trap if a hypervisor is normally
+expected to emulate the instruction.
+Notably, for VS-mode this includes the hypervisor instructions (HLV, HLVX,
+HSV, and HFENCE) and accesses to the hypervisor-level CSRs, all of which
+must be emulated for nested hypervisors.
+A hypervisor that does not support nested hypervisors should convert many
+virtual instruction traps into illegal instruction exceptions for the
+guest virtual machine.
+
+Machine level is expected ordinarily to delegate virtual instruction
+traps directly to HS-level, whereas illegal instruction traps are likely
+to be processed first in M-mode before being conditionally delegated (by
+software) to HS-level.
+Consequently, virtual instruction traps are expected typically to be
+handled faster than illegal instruction traps.
 \end{commentary}
 
 \subsection{Trap Entry}
@@ -2783,6 +2857,7 @@ Instruction address misaligned & Yes  & No          & Yes    & No  \\
 Instruction access fault       & Yes  & No          & No     & No  \\
 Illegal instruction            & Yes  & No          & No     & No  \\
 Breakpoint                     & Yes  & No          & Yes    & No  \\
+Virtual instruction            & Yes  & No          & Yes    & No  \\
 \hline
 Load address misaligned        & Yes  & Yes         & Yes    & No  \\
 Load access fault              & Yes  & Yes         & Yes    & No  \\
