@@ -98,10 +98,9 @@ taking over all functions of the usual supervisor CSRs except as specified
 otherwise.
 Instructions that normally read or modify a supervisor CSR shall instead
 access the corresponding VS CSR.
-In VS-mode, an attempt to read or write a VS CSR directly by its own
+When V=1, an attempt to read or write a VS CSR directly by its own
 separate CSR address causes a virtual instruction exception.
-(Attempts from U-mode or VU-mode cause an illegal instruction exception
-as usual.)
+(Attempts from U-mode cause an illegal instruction exception as usual.)
 The VS CSRs can be accessed as themselves only from M-mode or HS-mode.
 
 While V=1, the normal HS-level supervisor CSRs that are replaced by
@@ -1837,8 +1836,8 @@ the guest-physical memory management of all virtual machines, or even a global
 fence for all memory-management data structures.
 \end{commentary}
 
-Attempts to execute HFENCE.VVMA or HFENCE.GVMA in VS-mode cause a virtual
-instruction trap, while attempts to do the same in U-mode or VU-mode
+Attempts to execute HFENCE.VVMA or HFENCE.GVMA when V=1 cause a virtual
+instruction trap, while attempts to do the same in U-mode
 cause an illegal instruction trap.
 Attempting to execute HFENCE.GVMA in HS-mode when {\tt mstatus}.TVM=1
 also causes an illegal instruction trap.
@@ -2610,12 +2609,12 @@ attempts to execute WFI, unless the instruction completes within an
 implementation-specific, bounded time;
 
 \item
-attempts to execute a virtual-machine load/store instruction, HLV, HLVX,
-or HSV;
+attempts to execute a hypervisor instruction (HLV, HLVX, HSV, or HFENCE)
+or to access an implemented hypervisor CSR or VS CSR;
 
 \item
-in VS-mode, attempts to execute an HFENCE instruction or to access an
-implemented hypervisor CSR or VS CSR;
+in VU-mode, attempts to execute a supervisor instruction (SRET or SFENCE)
+or to access an implemented supervisor CSR;
 
 \item
 in VS-mode, attempts to execute SRET when {\tt hstatus}.VTSR=1; or
@@ -2630,15 +2629,18 @@ On a virtual instruction trap, {\tt mtval} or {\tt stval} is written the
 same as for an illegal instruction trap.
 
 \begin{commentary}
-When V=1, circumstances that might otherwise cause an illegal instruction
-trap instead cause a virtual instruction trap if a hypervisor is normally
-expected to emulate the instruction.
-Notably, for VS-mode this includes the hypervisor instructions (HLV, HLVX,
-HSV, and HFENCE) and accesses to the hypervisor-level CSRs, all of which
-must be emulated for nested hypervisors.
-A hypervisor that does not support nested hypervisors should convert many
-virtual instruction traps into illegal instruction exceptions for the
-guest virtual machine.
+When V=1, privileged instructions that are invalid in VS-mode or
+VU-mode generally cause a virtual instruction trap instead of an illegal
+instruction trap.
+The same goes for attempts to access hypervisor- or supervisor-level CSRs
+that fail due to insufficient privilege when V=1, or attempts to access
+CSRs to which access has been expressly disabled by a hypervisor CSR
+(e.g.\ {\tt hcounteren}).
+It is not unusual that hypervisors must emulate such instructions, to
+support nested hypervisors or for other reasons.
+When not emulating an instruction, a hypervisor should convert a virtual
+instruction trap into an illegal instruction exception for the guest
+virtual machine.
 
 Machine level is expected ordinarily to delegate virtual instruction
 traps directly to HS-level, whereas illegal instruction traps are likely
