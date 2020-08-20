@@ -35,3 +35,4 @@ BaseJump Manycore   | U. Washington             | [Michael B. Taylor](mailto:pro
 C-Class       | IIT Madras                      | [Neel Gala](mailto:neelgala@gmail.com)                      | 15                 | https://gitlab.com/shaktiproject/cores/c-class
 SweRV EL2     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.Wicki@wdc.com)                 | 16                | https://github.com/chipsalliance/Cores-SweRV-EL2
 SweRV EH2     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.Wicki@wdc.com)                 | 17                | https://github.com/chipsalliance/Cores-SweRV-EH2
+SERV          | Olof Kindgren Enterprises       | [Olof Kindgren](mailto:olof.kindgren@gmail.com)             | 18                | https://github.com/olofk/serv
