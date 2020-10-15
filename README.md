@@ -13,7 +13,7 @@ The Manual is split up into the following volumes:
 - Volume II: Privileged Architecture
 
 **Official versions** of the specifications are available at
-https://riscv.org/specifications/
+https://riscv.org/technical/specifications/
 
 **Compiled versions of the most recent drafts** of the specifications are available at
 https://github.com/riscv/riscv-isa-manual/releases/latest
