@@ -1604,120 +1604,6 @@ using the {\tt sie} register.  Otherwise, the corresponding
 bits in {\tt sip} and {\tt sie} appear to be hardwired
 to zero.
 
-\subsection{Machine Timer Registers ({\tt mtime} and {\tt mtimecmp})}
-
-Platforms provide a real-time counter, exposed as a memory-mapped
-machine-mode read-write register, {\tt mtime}.  {\tt mtime} must
-increment at constant frequency, and the platform must provide a
-mechanism for determining the timebase of {\tt mtime}.  The {\tt
-  mtime} register will wrap around if the count overflows.
-
-The {\tt mtime} register has a 64-bit precision on all RV32 and RV64
-systems.  Platforms provide a 64-bit memory-mapped machine-mode
-timer compare register ({\tt mtimecmp}).
-A timer interrupt becomes pending whenever {\tt mtime} contains
-a value greater than or equal to {\tt mtimecmp}, treating the values
-as unsigned integers.
-The interrupt remains posted until {\tt mtimecmp} becomes greater than
-{\tt mtime} (typically as a result of writing {\tt mtimecmp}).
-The interrupt will only be taken if interrupts
-are enabled and the MTIE bit is set in the {\tt mie} register.
-
-\begin{figure}[h!]
-{\footnotesize
-\begin{center}
-\begin{tabular}{@{}J}
-\instbitrange{63}{0} \\
-\hline
-\multicolumn{1}{|c|}{\tt mtime} \\
-\hline
-64 \\
-\end{tabular}
-\end{center}
-}
-\vspace{-0.1in}
-\caption{Machine time register (memory-mapped control register).}
-\end{figure}
-
-\begin{figure}[h!]
-{\footnotesize
-\begin{center}
-\begin{tabular}{@{}J}
-\instbitrange{63}{0} \\
-\hline
-\multicolumn{1}{|c|}{\tt mtimecmp} \\
-\hline
-64 \\
-\end{tabular}
-\end{center}
-}
-\vspace{-0.1in}
-\caption{Machine time compare register (memory-mapped control register).}
-\end{figure}
-
-\begin{commentary}
-The timer facility is defined to use wall-clock time rather than a
-cycle counter to support modern processors that run with a highly
-variable clock frequency to save energy through dynamic voltage and
-frequency scaling.
-
-Accurate real-time clocks (RTCs) are relatively expensive to provide
-(requiring a crystal or MEMS oscillator) and have to run even when the
-rest of system is powered down, and so there is usually only one in a
-system located in a different frequency/voltage domain from the
-processors.  Hence, the RTC must be shared by all the harts in a
-system and accesses to the RTC will potentially incur the penalty of a
-voltage-level-shifter and clock-domain crossing.  It is thus more
-natural to expose {\tt mtime} as a memory-mapped register than as a CSR.
-
-Lower privilege levels do not have their own {\tt timecmp} registers.
-Instead, machine-mode software can implement any number of virtual timers on
-a hart by multiplexing the next timer interrupt into the {\tt mtimecmp}
-register.
-
-Simple fixed-frequency systems can use a single clock for both cycle
-counting and wall-clock time.
-\end{commentary}
-
-Writes to {\tt mtime} and {\tt mtimecmp} are guaranteed to be reflected in
-MTIP eventually, but not necessarily immediately.
-
-\begin{commentary}
-A spurious timer interrupt might occur if an interrupt handler increments {\tt
-mtimecmp} then immediately returns, because MTIP might not yet have fallen in
-the interim.  All software should be written to assume this event is possible,
-but most software should assume this event is extremely unlikely.  It is
-almost always more performant to incur an occasional spurious timer interrupt
-than to poll MTIP until it falls.
-\end{commentary}
-
-In RV32, memory-mapped writes to {\tt mtimecmp} modify only one 32-bit
-part of the register.  The following code sequence sets a 64-bit {\tt
-  mtimecmp} value without spuriously generating a timer interrupt due
-to the intermediate value of the comparand:
-
-\begin{figure}[h!]
-\begin{center}
-\begin{verbatim}
-        # New comparand is in a1:a0.
-        li t0, -1
-        la t1, mtimecmp
-        sw t0, 0(t1)     # No smaller than old value.
-        sw a1, 4(t1)     # No smaller than new value.
-        sw a0, 0(t1)     # New value.
-\end{verbatim}
-\end{center}
-\caption{Sample code for setting the 64-bit time comparand in RV32, assuming
-  a little-endian memory system and that the registers live in a strongly
-  ordered I/O region.  Storing -1 to the low-order bits of {\tt mtimecmp}
-  prevents {\tt mtimecmp} from temporarily becoming smaller than the lesser
-  of the old and new values.}
-\label{mtimecmph}
-\end{figure}
-
-For RV64, naturally aligned 64-bit memory accesses to the {\tt mtime} and {\tt
-mtimecmp} registers are atomic.
-
 \subsection{Hardware Performance Monitor}
 
 M-mode includes a basic hardware performance-monitoring facility.  The
@@ -2328,6 +2214,122 @@ patterns into other invalid addresses prior to writing them to {\tt mtval}.
 If the feature to return the faulting instruction bits is implemented, {\tt
 mtval} must also be able to hold all values less than $2^N$, where $N$ is the
 smaller of XLEN and ILEN.
+
+\section{Machine-Level Memory-Mapped Registers}
+
+\subsection{Machine Timer Registers ({\tt mtime} and {\tt mtimecmp})}
+
+Platforms provide a real-time counter, exposed as a memory-mapped
+machine-mode read-write register, {\tt mtime}.  {\tt mtime} must
+increment at constant frequency, and the platform must provide a
+mechanism for determining the timebase of {\tt mtime}.  The {\tt
+	mtime} register will wrap around if the count overflows.
+
+The {\tt mtime} register has a 64-bit precision on all RV32 and RV64
+systems.  Platforms provide a 64-bit memory-mapped machine-mode
+timer compare register ({\tt mtimecmp}).
+A timer interrupt becomes pending whenever {\tt mtime} contains
+a value greater than or equal to {\tt mtimecmp}, treating the values
+as unsigned integers.
+The interrupt remains posted until {\tt mtimecmp} becomes greater than
+{\tt mtime} (typically as a result of writing {\tt mtimecmp}).
+The interrupt will only be taken if interrupts
+are enabled and the MTIE bit is set in the {\tt mie} register.
+
+\begin{figure}[h!]
+	{\footnotesize
+		\begin{center}
+			\begin{tabular}{@{}J}
+				\instbitrange{63}{0} \\
+				\hline
+				\multicolumn{1}{|c|}{\tt mtime} \\
+				\hline
+				64 \\
+			\end{tabular}
+		\end{center}
+	}
+	\vspace{-0.1in}
+	\caption{Machine time register (memory-mapped control register).}
+\end{figure}
+
+\begin{figure}[h!]
+	{\footnotesize
+		\begin{center}
+			\begin{tabular}{@{}J}
+				\instbitrange{63}{0} \\
+				\hline
+				\multicolumn{1}{|c|}{\tt mtimecmp} \\
+				\hline
+				64 \\
+			\end{tabular}
+		\end{center}
+	}
+	\vspace{-0.1in}
+	\caption{Machine time compare register (memory-mapped control register).}
+\end{figure}
+
+\begin{commentary}
+	The timer facility is defined to use wall-clock time rather than a
+	cycle counter to support modern processors that run with a highly
+	variable clock frequency to save energy through dynamic voltage and
+	frequency scaling.
+	
+	Accurate real-time clocks (RTCs) are relatively expensive to provide
+	(requiring a crystal or MEMS oscillator) and have to run even when the
+	rest of system is powered down, and so there is usually only one in a
+	system located in a different frequency/voltage domain from the
+	processors.  Hence, the RTC must be shared by all the harts in a
+	system and accesses to the RTC will potentially incur the penalty of a
+	voltage-level-shifter and clock-domain crossing.  It is thus more
+	natural to expose {\tt mtime} as a memory-mapped register than as a CSR.
+	
+	Lower privilege levels do not have their own {\tt timecmp} registers.
+	Instead, machine-mode software can implement any number of virtual timers on
+	a hart by multiplexing the next timer interrupt into the {\tt mtimecmp}
+	register.
+	
+	Simple fixed-frequency systems can use a single clock for both cycle
+	counting and wall-clock time.
+\end{commentary}
+
+Writes to {\tt mtime} and {\tt mtimecmp} are guaranteed to be reflected in
+MTIP eventually, but not necessarily immediately.
+
+\begin{commentary}
+	A spurious timer interrupt might occur if an interrupt handler increments {\tt
+		mtimecmp} then immediately returns, because MTIP might not yet have fallen in
+	the interim.  All software should be written to assume this event is possible,
+	but most software should assume this event is extremely unlikely.  It is
+	almost always more performant to incur an occasional spurious timer interrupt
+	than to poll MTIP until it falls.
+\end{commentary}
+
+In RV32, memory-mapped writes to {\tt mtimecmp} modify only one 32-bit
+part of the register.  The following code sequence sets a 64-bit {\tt
+	mtimecmp} value without spuriously generating a timer interrupt due
+to the intermediate value of the comparand:
+
+\begin{figure}[h!]
+	\begin{center}
+		\begin{verbatim}
+			# New comparand is in a1:a0.
+			li t0, -1
+			la t1, mtimecmp
+			sw t0, 0(t1)     # No smaller than old value.
+			sw a1, 4(t1)     # No smaller than new value.
+			sw a0, 0(t1)     # New value.
+		\end{verbatim}
+	\end{center}
+	\caption{Sample code for setting the 64-bit time comparand in RV32, assuming
+		a little-endian memory system and that the registers live in a strongly
+		ordered I/O region.  Storing -1 to the low-order bits of {\tt mtimecmp}
+		prevents {\tt mtimecmp} from temporarily becoming smaller than the lesser
+		of the old and new values.}
+	\label{mtimecmph}
+\end{figure}
+
+For RV64, naturally aligned 64-bit memory accesses to the {\tt mtime} and {\tt
+	mtimecmp} registers are atomic.
 
 \section{Machine-Mode Privileged Instructions}
 
