@@ -1472,8 +1472,9 @@ follows:
 
 \item Let $pte$ be the value of the PTE at address
   $a+va.vpn[i]\times \textrm{PTESIZE}$. (For Sv32, PTESIZE=4.)
-  If accessing $pte$ violates a PMA or PMP check, raise an
-  access-fault exception corresponding to the original access type.
+  If accessing $pte$ violates a PMA or PMP check, or if any reserved
+  bits in $pte$ are set, raise an access-fault exception corresponding to the
+  original access type.
 
 \item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, stop and raise a
   page-fault exception corresponding to the original access type.
@@ -1991,7 +1992,7 @@ only supported for 4KiB leaf PTEs.
   1 & {\tt y~yyyy~yy1z} & 2                 &  16KiB contiguous region \\
   1 & {\tt y~yyyy~1z0z} & 4                 &  64KiB contiguous region \\
   1 & {\tt y~yy1z~0z0z} & 6                 &  256KiB contiguous region \\
-  1 & {\em other}       & $-$               &  {\em Reserved for standard use} \\
+  1 & {\em other}       & $-$               &  {\em Reserved for future standard use} \\
   \hline
   \multicolumn{4}{l}{{\tt y}: subset of PPN used for address translation} \\
   \multicolumn{4}{l}{{\tt z}: reserved for future use; must be set to zero} \\
@@ -2012,9 +2013,12 @@ only supported for 4KiB leaf PTEs.
 NAPOT PTEs behave just like non-NAPOT PTEs do within the address-translation
 algorithm in Section~\ref{sv32algorithm}, except that:
 \begin{itemize}
-  \item Instead of returning the original value of $pte$, implicit reads of a
+  \item If the encoding in $pte$ is valid according to Table~\ref{ptenapot},
+    then instead of returning the original value of $pte$, implicit reads of a
     NAPOT PTE return a copy of $pte$ in which $pte.ppn[pte.napot\_bits-1:0]$ is
     replaced by $vpn[0][pte.napot\_bits-1:0]$
+  \item If the encoding in $pte$ is {\em reserved} according to
+    Table~\ref{ptenapot}, then a page-fault exception must be raised.
   \item Implicit reads of NAPOT page table may create address-translation cache
     entries mapping $a + va.vpn[j] \times \textrm{PTESIZE}$ to a copy of $pte$
     in which $pte.ppn[pte.napot\_bits-1:0]$ is replaced by
@@ -2057,4 +2061,8 @@ algorithm in Section~\ref{sv32algorithm}, except that:
 
   Just as with normal PTEs, TLBs are permitted to cache NAPOT PTEs whose V
   (Valid) bit is clear.
+
+  Invalid NAPOT encodings were chosen to raise page-fault exceptions rather
+  than access-fault exceptions in order to match the behavior of misaligned
+  superpages.
 \end{commentary}
