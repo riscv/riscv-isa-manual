@@ -955,6 +955,20 @@ multi-level TLB hierarchies are quite inexpensive relative to the
 multi-level cache hierarchies whose address space they map.
 \end{commentary}
 
+The {\tt satp} register is considered {\em active} when the effective
+privilege mode is S-mode or U-mode, i.e., when in S-mode or U-mode,
+or when MPRV=1 and either MPP=S or MPP=U.  Executions of the
+address-translation algorithm may only begin using a given value of {\tt satp}
+when {\tt satp} is active.
+
+\begin{commentary}
+Translations that began while {\tt satp} was active are not required to
+complete or terminate when {\tt satp} is no longer active.  The SFENCE.VMA
+instruction must be used to ensure that updates to the address-translation
+data structures are observed by subsequent implicit reads to those
+structures by a hart.
+\end{commentary}
+
 Note that writing {\tt satp} does not imply any ordering constraints
 between page-table updates and subsequent address translations, nor does
 it imply any invalidation of address-translation caches.
@@ -1465,10 +1479,9 @@ follows:
 
 \begin{enumerate}
 
-\setcounter{enumi}{-1}
-\item Let $satp$ be the value of the {\tt satp} register.
-
-\item Let $a$ be $\text{\em satp}.ppn \times \textrm{PAGESIZE}$, and let $i=\textrm{LEVELS} - 1$. (For Sv32, PAGESIZE=$2^{12}$ and LEVELS=2.)
+\item Let $a$ be ${\tt satp}.ppn \times \textrm{PAGESIZE}$, and let $i=\textrm{LEVELS} - 1$. (For Sv32, PAGESIZE=$2^{12}$ and LEVELS=2.)
+  The {\tt satp} register must be {\em active}, i.e., the effective privilege
+  mode must be S-mode or U-mode.
 
 \item Let $pte$ be the value of the PTE at address
   $a+va.vpn[i]\times \textrm{PTESIZE}$. (For Sv32, PTESIZE=4.)
@@ -1775,6 +1788,7 @@ Setting the C and N bits simultaneously is reserved for future standard use.
 
 Bits 61--54 are reserved
 for future standard use and must be zeroed by software for forward compatibility.
+If any of these bits are set, an access-fault exception is raised.
 
 \begin{commentary}
 We reserved several PTE bits for a possible extension that improves
@@ -1963,11 +1977,10 @@ size.
 N & $pte.ppn[i]$      & $pte.napot\_bits$ & Meaning if $i=0$         \\
 \hline
 0 & {\tt y~yyyy~yyyy} & 0                 &  Non-NAPOT 4KiB PTE      \\
-1 & {\tt y~yyyy~1zzz} & 4                 &  64KiB contiguous region \\
+1 & {\tt y~yyyy~1000} & 4                 &  64KiB contiguous region \\
 1 & {\em other}       & $-$               &  {\em Reserved for standard use} \\
 \hline
 \multicolumn{4}{l}{{\tt y}: subset of PPN used for address translation} \\
-\multicolumn{4}{l}{{\tt z}: reserved for future standard use; must be set to zero} \\
 \end{tabular}
 \end{center}
 \caption{NAPOT Contiguous Translation Encodings}
@@ -1991,13 +2004,12 @@ only supported for 4KiB leaf PTEs.
   N & $pte.ppn[i]$      & $pte.napot\_bits$ & Meaning if $i=0$         \\
   \hline
   0 & {\tt y~yyyy~yyyy} & 0                 &  Non-NAPOT 4KiB PTE      \\
-  1 & {\tt y~yyyy~yy1z} & 2                 &  16KiB contiguous region \\
-  1 & {\tt y~yyyy~1z0z} & 4                 &  64KiB contiguous region \\
-  1 & {\tt y~yy1z~0z0z} & 6                 &  256KiB contiguous region \\
+  1 & {\tt y~yyyy~yy10} & 2                 &  16KiB contiguous region \\
+  1 & {\tt y~yyyy~1000} & 4                 &  64KiB contiguous region \\
+  1 & {\tt y~yy10~0000} & 6                 &  256KiB contiguous region \\
   1 & {\em other}       & $-$               &  {\em Reserved for future standard use} \\
   \hline
   \multicolumn{4}{l}{{\tt y}: subset of PPN used for address translation} \\
-  \multicolumn{4}{l}{{\tt z}: reserved for future use; must be set to zero} \\
   \end{tabular}
   \end{center}
 
@@ -2006,10 +2018,12 @@ only supported for 4KiB leaf PTEs.
   would be extended to allow system software to determine which sizes are
   supported.
 
+  Other sizes may remain deliberately excluded, so that PPN bits not being
+  used to indicate a valid NAPOT region size (e.g., the least-significant bit
+  of $pte.ppn[i]$) may be repurposed for other uses in the future.
+
   However, in case finer-grained intermediate page size support prove not to
   be useful, we have chosen to standardize only 64KiB support as a first step.
-  This allows the $z$ bits to potentially be used for other purposes instead,
-  and it simplifies the design space in the meantime.
 \end{commentary}
 
 NAPOT PTEs behave just like non-NAPOT PTEs do within the address-translation
@@ -2044,12 +2058,14 @@ algorithm in Section~\ref{sv32algorithm}, except that:
   hypervisor to configure the page tables in such a way that there are no
   inconsistencies between NAPOT PTEs and other NAPOT or non-NAPOT PTEs that
   overlap the same address range.  If an update needs to be made, the OS
-  generally should first mark all of the PTEs invalid, then issue an
-  SFENCE.VMA, then update the PTE(s), as described in
-  Section~\ref{sec:sfence.vma}, unless any inconsistencies are known to be
-  benign.  If any inconsistencies do exist, then the effect is the same as when
-  SFENCE.VMA is used incorrectly: one of the translations will be chosen, but
-  the choice is unpredictable.
+  generally should first mark all of the PTEs invalid, then issue SFENCE.VMA
+  instruction(s) covering all 4KiB regions within the range (either via a
+  single SFENCE.VMA with {\em rs1}={\tt x0}, or with multiple SFENCE.VMA
+  instructions with {\em rs1}$\neq${\tt x0}), then update the PTE(s), as
+  described in Section~\ref{sec:sfence.vma}, unless any inconsistencies are
+  known to be benign.  If any inconsistencies do exist, then the effect is the
+  same as when SFENCE.VMA is used incorrectly: one of the translations will be
+  chosen, but the choice is unpredictable.
 
   If an implementation chooses to use a NAPOT PTE (or cached version thereof),
   it might not consult the PTE directly specified by the algorithm in
