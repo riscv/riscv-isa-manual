@@ -1098,7 +1098,34 @@ by current implementations.  Furthermore, if ASIDLEN~$<$~ASIDMAX, the
 implementation shall ignore bits ASIDMAX-1:ASIDLEN of the value held in {\em
 rs2}.
 
+\begin{figure}[h!]
+\begin{center}
+\begin{verbatim}
+  # a0 holds the address of the first VA to be invalidated
+  # a1 holds PAGESIZE
+  # a2 holds the upper bound
+loop:
+  sfence.vma a0
+  add        a0,a0,a1
+  bgtu       a2,a0,loop
+\end{verbatim}
+\end{center}
+\caption{Sample code to synchronize a range of page table entries.}
+\label{consecutive_sfences}
+\end{figure}
+
 \begin{commentary}
+When synchronizing the address-translation data structures for multiple
+individual pages page at once, e.g., when updating a range of page table
+entries, it is recommended to insert at most one compressed or uncompressed
+integer {\tt add} instruction and one compressed or uncompressed branch
+instruction between consecutive SFENCE.VMA instructions.  This idiom, one form
+of which is demonstrated in Figure~\ref{consecutive_sfences}, will make it
+easier for certain implementations to detect the pattern and amortize any
+synchronization overheads across the whole sequence.  This idiom is recommended
+strictly as a performance optimization; the functionality of the SFENCE.VMA
+instructions is unaffected regardless of whether the idiom is used.
+
 Simpler implementations can ignore the virtual address in {\em rs1} and
 the ASID value in {\em rs2} and always perform a global fence.
 \end{commentary}
@@ -2078,6 +2105,11 @@ algorithm in Section~\ref{sv32algorithm}, except that:
   known to be benign.  If any inconsistencies do exist, then the effect is the
   same as when SFENCE.VMA is used incorrectly: one of the translations will be
   chosen, but the choice is unpredictable.
+
+  When updating a region of NAPOT PTEs all at once, it is recommended that
+  software continue to follow the idiom in Figure~\ref{consecutive_sfences}
+  in which no more than one add and one branch instruction is inserted between
+  consecutive SFENCE.VMA instructions.
 
   If an implementation chooses to use a NAPOT PTE (or cached version thereof),
   it might not consult the PTE directly specified by the algorithm in
