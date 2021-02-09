@@ -850,7 +850,7 @@ main memory be representable.
 }
 \vspace{-0.1in}
 \caption{RV64 Supervisor address translation and protection register {\tt satp}, for MODE
-values Bare, Sv39, and Sv48.}
+values Bare, Sv39, Sv48, and Sv57.}
 \label{rv64satp}
 \end{figure}
 
@@ -890,9 +890,9 @@ all patterns of the existing MODE field have already been allocated.
 For RV32, the only other valid setting for MODE is Sv32, a paged
 virtual-memory scheme described in Section~\ref{sec:sv32}.
 
-For RV64, two paged virtual-memory schemes are defined: Sv39 and Sv48,
-described in Sections~\ref{sec:sv39} and \ref{sec:sv48}, respectively.
-Two additional schemes, Sv57 and Sv64, will be defined in a later version
+For RV64, three paged virtual-memory schemes are defined: Sv39, Sv48, and Sv57,
+described in Sections~\ref{sec:sv39}, \ref{sec:sv48}, and \ref{sec:sv57}, respectively.
+One additional scheme, Sv64, will be defined in a later version
 of this specification.  The remaining MODE settings are reserved
 for future use and may define different interpretations of the other fields in
 {\tt satp}.
@@ -920,7 +920,7 @@ Value  & Name & Description \\
 1--7    & ---   & {\em Reserved for standard use} \\
 8       & Sv39  & Page-based 39-bit virtual addressing (see Section~\ref{sec:sv39}). \\
 9       & Sv48  & Page-based 48-bit virtual addressing (see Section~\ref{sec:sv48}). \\
-10      & {\em Sv57} & {\em Reserved for page-based 57-bit virtual addressing.} \\
+10      & Sv57  & Page-based 57-bit virtual addressing (see Section~\ref{sec:sv57}). \\
 11      & {\em Sv64} & {\em Reserved for page-based 64-bit virtual addressing.} \\
 12--13  & ---   & {\em Reserved for standard use} \\
 14--15  & ---   & {\em Designated for custom use} \\
@@ -937,7 +937,7 @@ determined by writing one to every bit position in the ASID field, then
 reading back the value in {\tt satp} to see which bit positions in the ASID
 field hold a one.  The least-significant bits of ASID are implemented first:
 that is, if ASIDLEN~$>$~0, ASID[ASIDLEN-1:0] is writable.  The maximal value
-of ASIDLEN, termed ASIDMAX, is 9 for Sv32 or 16 for Sv39 and Sv48.
+of ASIDLEN, termed ASIDMAX, is 9 for Sv32 or 16 for Sv39, Sv48, and Sv57.
 
 \begin{commentary}
 For many applications, the choice of page size has a substantial
@@ -1673,7 +1673,9 @@ cost.  For many systems, \wunits{512}{GiB} of virtual-address space is ample,
 and so Sv39 suffices.  Sv48 increases the virtual address space to
 \wunits{256}{TiB}, but increases the physical memory
 capacity dedicated to page tables, the latency of page-table traversals, and
-the size of hardware structures that store virtual addresses.
+the size of hardware structures that store virtual addresses.  Sv57 increases
+the virtual address space, page table capacity requirement, and translation
+latency even further.
 \end{commentary}
 
 \subsection{Addressing and Memory Protection}
@@ -1973,4 +1975,143 @@ aligned.
 
 The algorithm for virtual-to-physical address translation is the same
 as in Section~\ref{sv32algorithm}, except LEVELS equals 4 and PTESIZE
+equals 8.
+
+\section{Sv57: Page-Based 57-bit Virtual-Memory System}
+\label{sec:sv57}
+
+This section describes a simple paged virtual-memory system designed
+for RV64 systems, which supports 57-bit virtual address spaces.  Sv57
+is intended for systems for which a 48-bit virtual address space is
+insufficient.  It closely follows the design of Sv48, simply adding an
+additional level of page table, and so this chapter only details the
+differences between the two schemes.
+
+Implementations that support Sv57 must also support Sv48.
+
+\begin{commentary}
+Systems that support Sv57 can also support Sv48 at essentially no cost, and so
+should do so to maintain compatibility with supervisor software that assumes
+Sv48.
+\end{commentary}
+
+\subsection{Addressing and Memory Protection}
+
+Sv57 implementations support a 57-bit virtual address space, divided
+into \wunits{4}{KiB} pages.  An Sv57 address is partitioned as
+shown in Figure~\ref{sv57va}.
+Instruction fetch addresses and load and store effective addresses,
+which are 64 bits, must have bits 63--57 all equal to bit 56, or else
+a page-fault exception will occur.  The 45-bit VPN is translated into a
+44-bit PPN via a five-level page table, while the 12-bit page offset
+is untranslated.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}S@{}S@{}S@{}S@{}S@{}S}
+\instbitrange{56}{48} &
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[4]} &
+\multicolumn{1}{c|}{VPN[3]} &
+\multicolumn{1}{c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+9 & 9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 virtual address.}
+\label{sv57va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}E@{}O@{}O@{}O@{}O}
+\instbitrange{55}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+17 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 physical address.}
+\label{sv57pa}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{c@{}Y@{}Y@{}Y@{}Y@{}Y@{}Fcccccccc}
+\instbit{63} &
+\instbitrange{62}{54} &
+\instbitrange{53}{37} &
+\instbitrange{36}{28} &
+\instbitrange{27}{19} &
+\instbitrange{18}{10} &
+\instbitrange{9}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{C} &
+\multicolumn{1}{c|}{\it Reserved} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{RSW} &
+\multicolumn{1}{c|}{D} &
+\multicolumn{1}{c|}{A} &
+\multicolumn{1}{c|}{G} &
+\multicolumn{1}{c|}{U} &
+\multicolumn{1}{c|}{X} &
+\multicolumn{1}{c|}{W} &
+\multicolumn{1}{c|}{R} &
+\multicolumn{1}{c|}{V} \\
+\hline
+1 & 8 & 17 & 9 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 page table entry.}
+\label{sv57pte}
+\end{figure*}
+
+The PTE format for Sv57 is shown in Figure~\ref{sv57pte}.  Bits 63--54 and 9--0
+have the same meaning as for Sv39.  Any level of PTE may be a leaf
+PTE, so in addition to \wunits{4}{KiB} pages, Sv57 supports
+\wunits{2}{MiB} {\em megapages}, \wunits{1}{GiB} {\em gigapages},
+\wunits{512}{GiB} {\em terapages}, and \wunits{256}{TiB} {\em petapages},
+each of which must be virtually and physically aligned to a boundary equal
+to its size.  A page-fault exception is raised if the physical address is
+insufficiently aligned.
+
+The algorithm for virtual-to-physical address translation is the same
+as in Section~\ref{sv32algorithm}, except LEVELS equals 5 and PTESIZE
 equals 8.
