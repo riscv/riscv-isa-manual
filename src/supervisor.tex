@@ -1597,19 +1597,6 @@ The address-translation cache cannot be used in step 7; accessed and
 dirty bits may only be updated in memory directly.
 
 \begin{commentary}
-  The address-translation cache abstraction was used less explicitly in earlier
-  revisions of this specification, but it was made more explicit in order to
-  faciliate defining the behavior of NAPOT PTEs in Chapter~\ref{svnapot}.
-  In particular, an implicit load that hits on an address-translation cache
-  entry previously fetched due to a separate NAPOT PTE aliasing the 4KiB region
-  originally targeted is not easily described in terms of access ordering
-  alone.  In such a case, the PTE value being loaded was originally written to
-  an address that differs from the address of the PTE targeted by the
-  address-translation algorithm, and this complicates the memory ordering
-  analysis.  NAPOT PTEs notwithstanding, the inclusion of more explicit
-  language regarding the address-translation cache is not intended to imply any
-  actual change in behavior from prior versions of this specification.
-
   It is permitted for multiple address-translation cache entries to co-exist
   for the same address.  This represents the fact that in a conventional TLB
   hierarchy, it is possible for multiple entries to match a single address if, for
@@ -1759,10 +1746,9 @@ quickly distinguish user and supervisor address regions.
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{ccY@{}Y@{}Y@{}Y@{}Fcccccccc}
+\begin{tabular}{cY@{}Y@{}Y@{}Y@{}Fcccccccc}
 \instbit{63} &
-\instbit{62} &
-\instbitrange{61}{54} &
+\instbitrange{62}{54} &
 \instbitrange{53}{28} &
 \instbitrange{27}{19} &
 \instbitrange{18}{10} &
@@ -1777,7 +1763,6 @@ quickly distinguish user and supervisor address regions.
 \instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{C} &
-\multicolumn{1}{c|}{N} &
 \multicolumn{1}{c|}{\it Reserved} &
 \multicolumn{1}{c|}{PPN[2]} &
 \multicolumn{1}{c|}{PPN[1]} &
@@ -1792,7 +1777,7 @@ quickly distinguish user and supervisor address regions.
 \multicolumn{1}{c|}{R} &
 \multicolumn{1}{c|}{V} \\
 \hline
-1 & 1 & 8 & 26 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+1 & 9 & 26 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
 \end{tabular}
 \end{center}
 }
@@ -1811,29 +1796,24 @@ have the same meaning as for Sv32.
 
 \begin{table}[h]
 \begin{center}
-\begin{tabular}{|c|c||l|}
+\begin{tabular}{|c||l|}
 \hline
-C & N & Description \\
+C & Description \\
 \hline
-0 & 0 & The PTE follows standard address-translation rules \\
-0 & 1 & The PTE follows the rules specified in the Svnapot extension \\
-1 & 0 & {\em Designated for custom use} \\
-1 & 1 & {\em Reserved for standard use} \\
+0 & The PTE follows standard address-translation rules \\
+1 & {\em Designated for custom use} \\
 \hline
 \end{tabular}
 \end{center}
-\caption{Meaning of PTE C and N bits in Sv39.}
+\caption{Meaning of PTE C bit in Sv39.}
 \label{tab:pte_cv_bits}
 \end{table}
 
-The C and N bits are defined as shown in Table~\ref{tab:pte_cv_bits}.  The C
-bit is used to indicate that a PTE uses a custom implementation-specific
-encoding in the remaining bits other than the V bit.  The N bit indicates that
-the page represents a naturally-aligned power-of-two range of contiguous
-translations, as defined in the Svnapot extension in Chapter~\ref{svnapot}.
-Setting the C and N bits simultaneously is reserved for future standard use.
+As shown in Table~\ref{tab:pte_cv_bits}, the C bit is used to indicate that a
+PTE uses a custom implementation-specific encoding in the remaining bits other
+than the V bit.
 
-Bits 61--54 are reserved
+Bits 62--54 are reserved
 for future standard use and must be zeroed by software for forward compatibility.
 If any of these bits are set, an access-fault exception is raised.
 
@@ -1940,10 +1920,9 @@ is untranslated.
 \begin{figure*}[h!]
 {\footnotesize
 \begin{center}
-\begin{tabular}{ccF@{}F@{}F@{}F@{}F@{}Fcccccccc}
+\begin{tabular}{cF@{}F@{}F@{}F@{}F@{}Fcccccccc}
 \instbit{63} &
-\instbit{62} &
-\instbitrange{61}{54} &
+\instbitrange{62}{54} &
 \instbitrange{53}{37} &
 \instbitrange{36}{28} &
 \instbitrange{27}{19} &
@@ -1959,7 +1938,6 @@ is untranslated.
 \instbit{0} \\
 \hline
 \multicolumn{1}{|c|}{C} &
-\multicolumn{1}{c|}{N} &
 \multicolumn{1}{c|}{\it Reserved} &
 \multicolumn{1}{c|}{PPN[3]} &
 \multicolumn{1}{c|}{PPN[2]} &
@@ -1975,7 +1953,7 @@ is untranslated.
 \multicolumn{1}{c|}{R} &
 \multicolumn{1}{c|}{V} \\
 \hline
-1 & 1 & 8 & 17 & 9 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+1 & 9 & 17 & 9 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
 \end{tabular}
 \end{center}
 }
@@ -1996,143 +1974,3 @@ aligned.
 The algorithm for virtual-to-physical address translation is the same
 as in Section~\ref{sv32algorithm}, except LEVELS equals 4 and PTESIZE
 equals 8.
-
-\chapter{``Svnapot'' Standard Extension for NAPOT Translation Contiguity, Version 0.1}
-\label{svnapot}
-
-In Sv39 and Sv48, when a PTE has C=0 and N=1, the PTE represents a
-translation that is part of a range of contiguous virtual-to-physical
-translations with the same values for PTE bits 5--0.  Such ranges must be of a
-naturally aligned power-of-2 (NAPOT) granularity larger than the base page
-size.
-
-\begin{commentary}
-  The motivation for a NAPOT PTE is that it can be cached in a TLB as one or
-  more entries representing the contiguous region as if it were a single
-  (large) page covered by a single translation.  This compaction can help
-  relieve TLB pressure in some scenarios.  The encoding is designed to fit
-  within the pre-existing Sv39 and Sv48 PTE formats so as not to disrupt
-  existing implementations or designs that choose not to implement the scheme.
-  It is also designed so as not to complicate the definition of the
-  address-translation algorithm.
-\end{commentary}
-
-\begin{table*}[h!]
-\begin{center}
-\begin{tabular}{|c|c||c|c|}
-\hline
-N & $pte.ppn[i]$      & $pte.napot\_bits$ & Meaning if $i=0$         \\
-\hline
-0 & {\tt y~yyyy~yyyy} & 0                 &  Non-NAPOT 4KiB PTE      \\
-1 & {\tt y~yyyy~1000} & 4                 &  64KiB contiguous region \\
-1 & {\em other}       & $-$               &  {\em Reserved for standard use} \\
-\hline
-\multicolumn{4}{l}{{\tt y}: subset of PPN used for address translation} \\
-\end{tabular}
-\end{center}
-\caption{NAPOT Contiguous Translation Encodings}
-\label{ptenapot}
-\end{table*}
-
-The list of currently supported NAPOT PTE encodings and the definition of {\em
-napot\_bits} are shown in Table~\ref{ptenapot}.  Currently, NAPOT encodings are
-only supported for 4KiB leaf PTEs.
-
-\begin{commentary}
-  Depending on need, the NAPOT scheme may be extended to other intermediate
-  page sizes and/or to other levels of the page table in the future.  The
-  encoding is designed to accommodate other NAPOT sizes should that need
-  arise.  For example, the addition of 16KiB and 256KiB support would look
-  as follows:
-
-  \begin{center}\em
-  \begin{tabular}{|c|c||c|c|}
-  \hline
-  N & $pte.ppn[i]$      & $pte.napot\_bits$ & Meaning if $i=0$         \\
-  \hline
-  0 & {\tt y~yyyy~yyyy} & 0                 &  Non-NAPOT 4KiB PTE      \\
-  1 & {\tt y~yyyy~yy10} & 2                 &  16KiB contiguous region \\
-  1 & {\tt y~yyyy~1000} & 4                 &  64KiB contiguous region \\
-  1 & {\tt y~yy10~0000} & 6                 &  256KiB contiguous region \\
-  1 & {\em other}       & $-$               &  {\em Reserved for future standard use} \\
-  \hline
-  \multicolumn{4}{l}{{\tt y}: subset of PPN used for address translation} \\
-  \end{tabular}
-  \end{center}
-
-  In such a case, an implementation may or may not support all options, subject
-  to profile requirements.  The discoverability mechanism for this extension
-  would be extended to allow system software to determine which sizes are
-  supported.
-
-  Other sizes may remain deliberately excluded, so that PPN bits not being
-  used to indicate a valid NAPOT region size (e.g., the least-significant bit
-  of $pte.ppn[i]$) may be repurposed for other uses in the future.
-
-  However, in case finer-grained intermediate page size support prove not to
-  be useful, we have chosen to standardize only 64KiB support as a first step.
-\end{commentary}
-
-NAPOT PTEs behave just like non-NAPOT PTEs do within the address-translation
-algorithm in Section~\ref{sv32algorithm}, except that:
-\begin{itemize}
-  \item If the encoding in $pte$ is valid according to Table~\ref{ptenapot},
-    then instead of returning the original value of $pte$, implicit reads of a
-    NAPOT PTE return a copy of $pte$ in which $pte.ppn[pte.napot\_bits-1:0]$ is
-    replaced by $vpn[0][pte.napot\_bits-1:0]$
-  \item If the encoding in $pte$ is {\em reserved} according to
-    Table~\ref{ptenapot}, then a page-fault exception must be raised.
-  \item Implicit reads of NAPOT page table may create address-translation cache
-    entries mapping $a + va.vpn[j] \times \textrm{PTESIZE}$ to a copy of $pte$
-    in which $pte.ppn[pte.napot\_bits-1:0]$ is replaced by
-    $vpn[0][pte.napot\_bits-1:0]$, for any or all $j$ such that
-    $j[9:napot\_bits]=i[9:napot\_bits]$, all for the address space identified
-    in {\em satp} as loaded by step 0.
-\end{itemize}
-
-\begin{commentary}
-  This added step captures the behavior that would result from the creation
-  of a single TLB entry covering the entire NAPOT region.  It is also designed
-  to be consistent with implementations that support NAPOT PTEs by splitting
-  the NAPOT region into TLB entries covering any smaller power-of-two region
-  sizes.  For example, a 64KiB NAPOT PTE might trigger the creation of 16
-  standard 4KiB TLB entries, all with contents generated from the NAPOT PTE
-  (even if the PTEs for the other 4KiB regions have different contents).
-
-  In typical usage scenarios, NAPOT PTEs in the same region will have the same
-  attributes, same PPNs, and same values for bits 5--0.  RSW remains reserved
-  for supervisor software control.  It is the responsibility of the OS and/or
-  hypervisor to configure the page tables in such a way that there are no
-  inconsistencies between NAPOT PTEs and other NAPOT or non-NAPOT PTEs that
-  overlap the same address range.  If an update needs to be made, the OS
-  generally should first mark all of the PTEs invalid, then issue SFENCE.VMA
-  instruction(s) covering all 4KiB regions within the range (either via a
-  single SFENCE.VMA with {\em rs1}={\tt x0}, or with multiple SFENCE.VMA
-  instructions with {\em rs1}$\neq${\tt x0}), then update the PTE(s), as
-  described in Section~\ref{sec:sfence.vma}, unless any inconsistencies are
-  known to be benign.  If any inconsistencies do exist, then the effect is the
-  same as when SFENCE.VMA is used incorrectly: one of the translations will be
-  chosen, but the choice is unpredictable.
-
-  When updating a region of NAPOT PTEs all at once, it is recommended that
-  software continue to follow the idiom in Figure~\ref{consecutive_sfences}
-  in which no more than one add and one branch instruction is inserted between
-  consecutive SFENCE.VMA instructions.
-
-  If an implementation chooses to use a NAPOT PTE (or cached version thereof),
-  it might not consult the PTE directly specified by the algorithm in
-  Section~\ref{sv32algorithm} at all.  Therefore, the D and A bits may not be
-  identical across all mappings of the same address range even in typical use
-  cases  The operating system must query all NAPOT aliases of a page to
-  determine whether that page has been accessed and/or is dirty.  If the OS
-  manually sets the A and/or D bits for a page, it is recommended that the OS
-  also set the A and/or D bits for other NAPOT aliases as appropriate in order
-  to avoid unnecessary traps.
-
-  Just as with normal PTEs, TLBs are permitted to cache NAPOT PTEs whose V
-  (Valid) bit is clear.
-
-  Invalid NAPOT encodings were chosen to raise page-fault exceptions rather
-  than access-fault exceptions in order to match the behavior of misaligned
-  superpages.
-\end{commentary}
