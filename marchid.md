@@ -37,3 +37,4 @@ SweRV EL2     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.W
 SweRV EH2     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.Wicki@wdc.com)                 | 17                | https://github.com/chipsalliance/Cores-SweRV-EH2
 SERV          | Olof Kindgren Enterprises       | [Olof Kindgren](mailto:olof.kindgren@gmail.com)             | 18                | https://github.com/olofk/serv
 NEORV32       | Stephan Nolting                 | [Stephan Nolting](mailto:stnolting@gmail.com)               | 19                | https://github.com/stnolting/neorv32
+Ibex          | lowRISC                         | [lowRISC Hardware Team](mailto:hardware@lowrisc.org)        | 22                | https://github.com/lowRISC/ibex
