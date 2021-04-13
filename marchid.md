@@ -39,3 +39,4 @@ SERV          | Olof Kindgren Enterprises       | [Olof Kindgren](mailto:olof.ki
 NEORV32       | Stephan Nolting                 | [Stephan Nolting](mailto:stnolting@gmail.com)               | 19                | https://github.com/stnolting/neorv32
 CV32E40X      | OpenHW Group                    | [Arjan Bink](mailto:arjan.bink@silabs.com), Silicon Laboratories | 20           | https://github.com/openhwgroup/cv32e40x
 CV32E40S      | OpenHW Group                    | [Arjan Bink](mailto:arjan.bink@silabs.com), Silicon Laboratories | 21           | https://github.com/openhwgroup/cv32e40s
+Ibex          | lowRISC                         | [lowRISC Hardware Team](mailto:hardware@lowrisc.org)        | 22                | https://github.com/lowRISC/ibex
