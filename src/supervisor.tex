@@ -1095,16 +1095,21 @@ SFENCE.VMA depends on {\em rs1} and {\em rs2} as follows:
 If the value held in {\em rs1} is not a valid virtual address, then the
 SFENCE.VMA instruction has no effect.  No exception is raised in this case.
 
-\begin{commentary}
-This ensures it remains legal for implementations to simply ignore the
-value in {\em rs1}.
-\end{commentary}
-
 When {\em rs2}$\neq${\tt x0}, bits SXLEN-1:ASIDMAX of the value held in {\em
 rs2} are reserved for future use and should be zeroed by software and ignored
 by current implementations.  Furthermore, if ASIDLEN~$<$~ASIDMAX, the
 implementation shall ignore bits ASIDMAX-1:ASIDLEN of the value held in {\em
 rs2}.
+
+\begin{commentary}
+It is always legal to over-fence, e.g., by fencing only based on a subset
+of the bits in {\em rs1} and/or {\em rs2}, and/or by simply treating all
+SFENCE.VMA instructions as having {\em rs1}={\tt x0} and/or
+{\em rs2}={\tt x0}.  For example, simpler implementations can ignore the
+virtual address in {\em rs1} and the ASID value in {\em rs2} and always perform
+a global fence.  The choice not to raise an exception when an invalid virtual
+address is held in {\em rs1} facilicates this type of simplification.
+\end{commentary}
 
 \begin{figure}[h!]
 \begin{center}
@@ -1133,9 +1138,6 @@ easier for certain implementations to detect the pattern and amortize any
 synchronization overheads across the whole sequence.  This idiom is recommended
 strictly as a performance optimization; the functionality of the SFENCE.VMA
 instructions is unaffected regardless of whether the idiom is used.
-
-Simpler implementations can ignore the virtual address in {\em rs1} and
-the ASID value in {\em rs2} and always perform a global fence.
 \end{commentary}
 
 An implicit read of the memory-management data structures may return any
@@ -1277,6 +1279,18 @@ number (PPN), while the 12-bit page offset is untranslated.  The
 resulting supervisor-level physical addresses are then checked using
 any physical memory protection structures (Sections~\ref{sec:pmp}),
 before being directly converted to machine-level physical addresses.
+If necessary, supervisor-level physical addresses are zero-extended
+to the number of physical address bits found in the implementation.
+
+\begin{commentary}
+For example, consider an RV32 system supporting 34 bits of physical
+address.  When the value of {\tt satp}.MODE us Sv32, a 34-bit physical
+address is produced directly, and therefore no zero-extension is needed.
+When the value of {\tt satp}.MODE is Bare, the 32-bit virtual address is
+translated (unmodified) into a 32-bit physical address, and then that
+physical address is zero-extended into a 34-bit machine-level physical
+address.
+\end{commentary}
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -1521,12 +1535,12 @@ follows:
 
 \item Let $pte$ be the value of the PTE at address
   $a+va.vpn[i]\times \textrm{PTESIZE}$. (For Sv32, PTESIZE=4.)
-  If accessing $pte$ violates a PMA or PMP check, or if any reserved
-  bits in $pte$ are set, raise an access-fault exception corresponding to the
-  original access type.
+  If accessing $pte$ violates a PMA or PMP check, raise an
+  access-fault exception corresponding to the original access type.
 
-\item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, stop and raise a
-  page-fault exception corresponding to the original access type.
+\item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, or if any bits or encodings
+  that are reserved for future standard use are set within $pte$, stop and
+  raise a page-fault exception corresponding to the original access type.
 
 \item Otherwise, the PTE is valid.
   If $pte.r=1$ or $pte.x=1$, go to step 5.
@@ -1690,8 +1704,8 @@ a page-fault exception will occur.  The 27-bit VPN is translated into a
 is untranslated.
 
 \begin{commentary}
-When mapping between narrower and wider addresses, RISC-V usually
-zero-extends a narrower address to a wider size.  The mapping
+When mapping between narrower and wider addresses, RISC-V
+zero-extends a narrower physical address to a wider size.  The mapping
 between 64-bit virtual addresses and the 39-bit usable address
 space of Sv39 is not based on zero-extension but instead follows an
 entrenched convention that allows an OS to use one or a few of the
