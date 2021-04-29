@@ -1,0 +1,90 @@
+\chapter{``Zfinx'' Standard Extension for Floating-Point in Integer Registers, Version 0.1}
+\label{sec:zfinx}
+
+This chapter defines the ``Zfinx'' extension (pronounced ``z-f-in-x''), which
+redefines the instructions in the standard floating-point extensions
+(including F, D, Q, and Zfh) to operate on the {\tt x} registers, rather than
+the {\tt f} registers.
+The Zfinx extension depends on the F extension.
+
+\begin{commentary}
+The baseline F extension uses separate {\tt f} registers for floating-point
+computation.
+This design reduces register pressure and simplifies the provision of
+register-file ports for wide superscalars.
+However, the additional \wunits{128}{B} of architectural state increases the
+minimal implementation cost.
+By eliminating the {\tt f} registers, the Zfinx extension substantially
+reduces the cost of simple RISC-V implementations.
+
+Unlike most RISC-V extensions, the addition of Zfinx is not backwards
+compatible: software that uses floating-point instructions but assumes the
+absence of the Zfinx extension will not, in general, execute correctly on
+implementations with the Zfinx extension.
+\end{commentary}
+
+The Zfinx extension {\em removes} the floating-point load, store, and
+integer-transfer instructions (FL[HWDQ], FS[HWDQ], FMV.[HWDQ].X and
+FMV.X.[HWDQ]) and corresponding C-extension instructions (C.FL[WD],
+C.FL[WD]SP, C.FS[WD], C.FS[WD]SP).
+The opcodes corresponding to the removed instructions are {\em reserved}.
+
+\begin{commentary}
+Zfinx software uses integer loads and stores to transfer floating-point values
+from and to memory.
+Transfers between registers use either integer arithmetic or floating-point
+sign-injection instructions.
+\end{commentary}
+
+The Zfinx extension {\em redefines} all instructions that access {\tt f}
+registers to instead access the {\tt x} register with the same number.
+
+In the standard privileged architecture defined in Volume II, the
+{\tt mstatus} field FS is hardwired to 0 if the Zfinx extension is
+implemented, and FS no longer affects the trapping behavior of
+floating-point instructions or {\tt fcsr} accesses.
+
+\section{NaN Boxing of Narrower Values}
+
+Floating-point operands of width \mbox{{\em w} $<$ XLEN bits} occupy bits
+\mbox{{\em w}-1:0} of an {\tt x} register.
+Floating-point operations on {\em w}-bit operands ignore operand bits
+\mbox{XLEN-1:{\em w}}.
+
+Floating-point operations that produce \mbox{{\em w} $<$ XLEN-bit} results
+fill bits \mbox{XLEN-1:{\em w}} of the result with ones.
+
+\begin{commentary}
+To avoid the need for dedicated floating-point load instructions that fill the
+MSBs of an {\tt x} register with ones, we abandon the usual NaN-boxing
+requirement for floating-point operands.
+We retain the NaN-boxing of results to keep Zfinx as similar as possible and
+to ease debugging.
+\end{commentary}
+
+\section{Processing of Wider Values}
+
+Double-precision operands in RV32DZfinx and quad-precision operands
+in RV64QZfinx are held in aligned {\tt x}-register pairs, i.e.,
+register numbers must be even.
+Use of misaligned (odd-numbered) registers for double-width floating-point
+operands is {\em reserved}.
+
+Regardless of endianness, the lower-numbered register holds the low-order
+bits, and the higher-numbered register holds the high-order bits: e.g., bits
+31:0 of a double-precision operand in RV32DZfinx might be held in register
+{\tt x14}, with bits 63:32 of that operand held in {\tt x15}.
+
+When a double-width floating-point result is written to {\tt x0}, the entire
+write takes no effect: e.g., for RV32DZfinx, writing a double-precision result
+to {\tt x0} preserves the contents of {\tt x1}.
+
+\begin{commentary}
+Load-pair and store-pair instructions are not provided, so transferring
+double-precision operands in RV32DZfinx from or to memory requires
+two loads or stores.
+Register moves need only a single FSGNJ.D instruction, however.
+\end{commentary}
+
+Quad-precision operands in RV32QZfinx are handled analogously, with
+a four-register alignment requirement.
