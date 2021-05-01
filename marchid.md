@@ -40,3 +40,4 @@ NEORV32       | Stephan Nolting                 | [Stephan Nolting](mailto:stnol
 CV32E40X      | OpenHW Group                    | [Arjan Bink](mailto:arjan.bink@silabs.com), Silicon Laboratories | 20           | https://github.com/openhwgroup/cv32e40x
 CV32E40S      | OpenHW Group                    | [Arjan Bink](mailto:arjan.bink@silabs.com), Silicon Laboratories | 21           | https://github.com/openhwgroup/cv32e40s
 Ibex          | lowRISC                         | [lowRISC Hardware Team](mailto:hardware@lowrisc.org)        | 22                | https://github.com/lowRISC/ibex
+RudolV        | Jörg Mische                     | [Jörg Mische](mailto:bobbl@gmx.de)                          | 23                | https://github.com/bobbl/rudolv
