@@ -1,0 +1,397 @@
+% Ce fichier contient le code de l'extension "listofitems"
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                    %
+\def\loiname                 {listofitems}                           %
+\def\loiver                     {1.53}                               %
+%                                                                    %
+\def\loidate                  {2018/03/13}                           %
+%                                                                    %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% Author     : Christian Tellechea, Steven B. Segletes
+% Status     : Maintained
+% Maintainer : Christian Tellechea
+% Email      : unbonpetit@netc.fr
+%              steven.b.segletes.civ@mail.mil
+% Package URL: https://www.ctan.org/pkg/listofitems
+% Bug tracker: https://framagit.org/unbonpetit/listofitems/issues
+% Repository : https://framagit.org/unbonpetit/listofitems/tree/master
+% Copyright  : Christian Tellechea 2017-2018
+% Licence    : Released under the LaTeX Project Public License v1.3c
+%              or later, see http://www.latex-project.org/lppl.txt
+% Files      : 1) listofitems.tex
+%              2) listofitems.sty
+%              3) listofitems-fr.tex
+%              4) listofitems-fr.pdf
+%              5) listofitems-en.tex
+%              6) listofitems-en.pdf
+%              7) README
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\ifdefined\ProvidesPackage\else
+	\immediate\write -1 {%
+	Package: \loidate\space v\loiver\space Grab items in lists using user-specified sep char (CT)}%
+\fi
+
+\expandafter\edef\csname loi_restorecatcode\endcsname{\catcode\number`\_=\number\catcode`\_\relax}
+\catcode`\_11
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%% gestion des erreurs %%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\ifdefined\PackageError
+	\def\loi_error#1{\PackageError\loiname{#1}{Read the manual}}% pour LaTeX
+\else
+	\def\loi_error#1{\errmessage{Package \loiname\space Error: #1^^J}}% pour TeX
+\fi
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%% v\'erification de la pr`'esence de etex %%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begingroup
+\edef\__tempa{\meaning\eTeXversion}\edef\__tempb{\string\eTeXversion}%
+\ifx\__tempa\__tempb
+	\endgroup
+\else
+	\endgroup
+	\loi_error{You are not using an eTeX engine, listofitems cannot work.}%
+	\expandafter\loi_restorecatcode\expandafter\endinput
+\fi
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%% macros auxiliaires %%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%---- macros de d\'eveloppement et de manipulation d'arguments
+\chardef\loi_stop=0
+\def\loi_quark{\loi_quark}
+\long\def\loi_identity#1{#1}
+\def\loi_gobarg#1{}
+\long\def\loi_first#1#2{#1}
+\long\def\loi_second#1#2{#2}
+\long\def\loi_firsttonil#1#2\_nil{#1}
+\long\def\loi_antefi#1#2\fi{#2\fi#1}
+\long\def\loi_exparg#1#2{\expandafter\loi_exparg_i\expandafter{#2}{#1}}% \loi_exparg{<a>}{<b>} devient <a>{<*b>}
+\long\def\loi_exparg_i#1#2{#2{#1}}
+\long\def\loi_expafter#1#2{\expandafter\loi_expafter_i\expandafter{#2}{#1}}% \loi_expafter{<a>}{<b>} devient <a><*b>
+\long\def\loi_expafter_i#1#2{#2#1}
+\def\loi_macroname{\loi_ifinrange\escapechar[[0:255]]{\expandafter\loi_gobarg}{}\string}
+\def\loi_argcsname#1#{\loi_argcsname_i{#1}}
+\def\loi_argcsname_i#1#2{\loi_expafter{#1}{\csname#2\endcsname}}
+
+%--- macros de test
+\long\def\loi_ifnum#1{\ifnum#1\expandafter\loi_first\else\expandafter\loi_second\fi}
+\long\def\loi_ifx#1{\ifx#1\expandafter\loi_first\else\expandafter\loi_second\fi}
+\long\def\loi_ifempty#1{\loi_exparg\loi_ifx{\expandafter\relax\detokenize{#1}\relax}}
+\def\loi_ifstar#1#2{\def\loi_ifstar_i{\loi_ifx{*\loi_nxttok}{\loi_first{#1}}{#2}}\futurelet\loi_nxttok\loi_ifstar_i}
+\long\def\loi_ifprimitive#1{\edef\loi_tempa{\meaning#1}\edef\loi_tempb{\string#1}\loi_ifx{\loi_tempa\loi_tempb}}
+\long\def\loi_ifcs#1{% #1 est-il une sc (n'\'etant pas une primitive) ?
+	\loi_ifempty{#1}
+		\loi_second% si #1 est vide, faux
+		{\loi_ifspacefirst{#1}
+			\loi_second% si espace en 1er, faux
+			{\loi_exparg\loi_ifempty{\loi_gobarg#1}% 1 seul token ?
+				{\begingroup \escapechar`\_
+					\if\expandafter\loi_firsttonil\detokenize{#1}\_nil\expandafter\loi_firsttonil\string\relax\_nil
+						\loi_ifprimitive{#1}
+							{\endgroup\expandafter\loi_second}
+							{\endgroup\expandafter\loi_first}%
+					\else
+						\endgroup\expandafter\loi_second
+					\fi
+				}
+				\loi_second% si plusieurs tokens, faux
+			}%
+		}%
+}
+\def\loi_ifinrange#1[[#2:#3]]{\loi_ifnum{\numexpr(#1-#2)*(#1-#3)>0 }\loi_second\loi_first}
+
+%--- macro de type for
+%      Voir codes 150 \`a 155 ici --> http://progtex.fr/wp-content/uploads/2014/09/code.txt
+%      et pages 175 \`a 184 du livre "Apprendre \`a programmer en TeX"
+\def\loi_fornum#1=#2to#3\do{%
+	\edef#1{\number\numexpr#2}\edef\loi_sgncmp{\ifnum#1<\numexpr#3\relax>+\else<-\fi}%
+	\expandafter\loi_fornum_i\csname loi_fornum_\string#1\expandafter\endcsname\expandafter{\number\numexpr#3\expandafter}\loi_sgncmp#1%
+}
+\long\def\loi_fornum_i#1#2#3#4#5#6{\def#1{\unless\ifnum#5#3#2\relax\loi_antefi{#6\edef#5{\number\numexpr#5#41\relax}#1}\fi}#1}
+
+%--- macros retirant les espaces extr\^emes
+%      Voir codes 320 \`a 324 ici --> http://progtex.fr/wp-content/uploads/2014/09/code.txt
+%      et pages 339 \`a 343 de "Apprendre \`a programmer en TeX"
+\long\def\loi_ifspacefirst#1{\expandafter\loi_ifspacefirst_i\detokenize{#10} \_nil}
+\long\def\loi_ifspacefirst_i#1 #2\_nil{\loi_ifempty{#1}}
+\expandafter\def\expandafter\loi_gobspace\space{}
+\def\loi_removefirstspaces{\romannumeral\loi_removefirstspaces_i}
+\long\def\loi_removefirstspaces_i#1{\loi_ifspacefirst{#1}{\expandafter\loi_removefirstspaces_i\expandafter{\loi_gobspace#1}}{\loi_stop#1}}
+\edef\loi_restorezerocatcode{\catcode0=\number\catcode0 \relax}
+\catcode0 12
+\long\def\loi_removelastspaces#1{\romannumeral\loi_removelastspaces_i#1^^00 ^^00\_nil}
+\long\def\loi_removelastspaces_i#1 ^^00{\loi_removelastspaces_ii#1^^00}
+\long\def\loi_removelastspaces_ii#1^^00#2\_nil{\loi_ifspacefirst{#2}{\loi_removelastspaces_i#1^^00 ^^00\_nil}{\loi_stop#1}}
+\loi_restorezerocatcode
+\long\def\loi_removeextremespaces#1{% #1=texte o\`u les espaces extr\^emes sont retir\'es
+	\romannumeral\expandafter\expandafter\expandafter\loi_removelastspaces\expandafter\expandafter\expandafter
+	{\expandafter\expandafter\expandafter\loi_stop\loi_removefirstspaces{#1}}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%% macro publique \setsepchar %%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\setsepchar{\futurelet\loi_nxttok\setsepchar_i}
+\def\setsepchar_i{\loi_ifx{[\loi_nxttok}\setsepchar_ii{\setsepchar_ii[/]}}
+\long\def\setsepchar_ii[#1]#2{% #1=sepcar de <liste des sepcar>  #2=<liste des sepcar>
+	\loi_ifempty{#1}
+		{\loi_error{Empty separator not allowed, separator "/" used}%
+		\setsepchar_ii[/]{#2}%
+		}
+		{\def\loi_currentsep{#1}%
+		\_removeextremespacesfalse
+		\loi_nestcnt1 % r\'einitaliser niveau initial \`a 1
+		\def\nestdepth{1}%
+		\loi_argcsname\let{loi_previndex[\number\loi_nestcnt]}\empty
+		\def\loi_listname{loi_listofsep}%
+		\let\loi_def\def \let\loi_edef\edef \let\loi_let\let
+		\loi_ifempty{#2}
+			{\loi_error{Empty list of separators not allowed, "," used}%
+			\readlist_iv1{,}%
+			}
+			{\readlist_iv1{#2}}%
+		\loi_argcsname\let\nestdepth{loi_listofseplen[0]}%
+		\loi_argcsname\let\loi_currentsep{loi_listofsep[1]}% 1er car de s\'eparation
+		}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%% macro normalisant l'index %%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\loi_normalizeindex#1#2#3{% #1=macroname  #2=liste d'index  #3=profondeur max --> renvoie {err}{indx norm}
+	\loi_ifempty{#2}
+		{\loi_stop{}{}}
+		{\loi_normalizeindex_i1{}{#3}{#1}#2,\loi_quark,}%
+}%
+\def\loi_normalizeindex_i#1#2#3#4#5,{% #1=compteur de profondeur #2=index pr\'ec\'edents  #3=profondeur max #4=macroname  #5=index courant
+	\loi_ifx{\loi_quark#5}
+		{\loi_normalizeindex_iii#2\loi_quark}% supprimer la derni\`ere virgule
+		{\loi_ifnum{#1>#3 }
+			{\loi_invalidindex{Too deeply nested index, index [.] retained}{#2}}% si profondeur trop grande
+			{\loi_ifinrange\ifnum\numexpr#5<0 -1*\fi(#5)[[1:\csname #4len[#20]\endcsname]]% si abs(#5) hors de [1,len]
+				{\loi_exparg\loi_normalizeindex_ii{\number\numexpr#5\ifnum\numexpr#5<0 +\csname #4len[#20]\endcsname+1\fi}{#1}{#2}{#3}{#4}}
+				{\loi_invalidindex{#5 is an invalid index, index [.] retained}{#2}}%
+			}%
+		}%
+}
+\def\loi_normalizeindex_ii#1#2#3{\loi_exparg\loi_normalizeindex_i{\number\numexpr#2+1}{#3#1,}}% #1=index \`a rajouter  #2=compteur de profondeur #3=index pr\'ec\'edents
+\def\loi_normalizeindex_iii#1,\loi_quark{\loi_stop{}{#1}}
+\def\loi_invalidindex#1#2{\loi_ifempty{#2}{\loi_invalidindex_i{#1},}\loi_invalidindex_i{#1}{#2}}
+\def\loi_invalidindex_i#1#2{\loi_invalidindex_ii#1\loi_quark#2\loi_quark}
+\def\loi_invalidindex_ii#1[.]#2\loi_quark#3,\loi_quark#4\loi_quark,{\loi_stop{#1[#3]#2}{#3}}% #4= index ignor\'es
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% macro publique \readlist %%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newcount\loi_nestcnt
+\def\greadlist{\let\loi_def\gdef\let\loi_edef\xdef\def\loi_let{\global\let}\readlist_o}%
+\def\readlist{\let\loi_def\def\let\loi_edef\edef\let\loi_let\let\readlist_o}
+\def\readlist_o{%
+	\loi_nestcnt1 % niveau initial = 1
+	\loi_argcsname\let{loi_previndex[\number\loi_nestcnt]}\empty
+	\loi_ifstar{\_removeextremespacestrue\readlist_i}{\_removeextremespacesfalse\readlist_i}%
+}
+\long\def\readlist_i#1#2{% #1=macro stockant les \'el\'ements  #2=liste des \'el\'ements
+	\loi_ifcs{#2}
+		{\loi_exparg{\readlist_i#1}{#2}}
+		{\loi_edef\loi_listname{\loi_macroname#1}%
+		\loi_argcsname\loi_let{\loi_listname nest}\nestdepth
+		\loi_argcsname\loi_def{\loi_listname[]}{#2}% la liste enti\`ere
+		\loi_argcsname\loi_def{\loi_listname sep[]}{}% s\'eparateur vide
+		\loi_ifempty{#2}
+			{\loi_def#1[##1]{}%
+			\loi_argcsname\loi_def{\loi_listname len}{0}\loi_argcsname\loi_def{\loi_listname len[0]}{0}%
+			\loi_error{Empty list ignored, nothing to do}%
+			}
+			{\loi_edef#1[##1]{\unexpanded{\romannumeral\expandafter\loi_auxmacrolistitem\romannumeral\loi_normalizeindex}{\loi_listname}{##1}{\csname\loi_listname nest\endcsname}{\loi_listname}}%
+			\loi_argcsname\loi_edef{\loi_listname sep}[##1]{\unexpanded{\romannumeral\expandafter\loi_auxmacrolistitem\romannumeral\loi_normalizeindex}{\loi_listname}{##1}{\csname\loi_listname nest\endcsname}{\loi_listname sep}}%
+			\readlist_ii{#2}%
+			\loi_argcsname\loi_argcsname\loi_let{\loi_listname len}{\loi_listname len[0]}% longueur du niveau 0
+			}%
+		}%
+}
+\def\loi_auxmacrolistitem#1#2#3{%
+	\expandafter\expandafter\expandafter\loi_stop\csname#3[#2]\expandafter\endcsname
+	\romannumeral\loi_ifempty{#1}{\loi_stop}{\loi_stop\loi_error{#1}}%
+}
+\def\readlist_ii{%
+	\loi_argcsname\loi_let\loi_currentsep{loi_listofsep[\number\loi_nestcnt]}%
+	\expandafter\readlist_iii\loi_currentsep||\_nil
+}
+\long\def\readlist_iii#1||#2\_nil#3{\readlist_iv1{#3#1}}% #1=<sep courant simple>  #3=liste -> rajoute un \'el\'ement vide pour le test ifempty ci dessous
+\long\def\readlist_iv#1#2{% #1=compteur d'index  #2=liste d'\'el\'ements \`a examiner
+	\loi_ifempty{#2}
+		{\loi_argcsname\loi_edef{\loi_listname len[\csname loi_previndex[\number\loi_nestcnt]\endcsname0]}{\number\numexpr#1-1\relax}%
+		\loi_argcsname\loi_let{\loi_listname sep[\csname loi_previndex[\number\loi_nestcnt]\endcsname\number\numexpr#1-1\relax]}\empty% le dernier <sep> est <vide> ##NEW v1.52
+		\advance\loi_nestcnt-1
+		\loi_argcsname\loi_let\loi_currentsep{loi_listofsep[\number\loi_nestcnt]}%
+		}
+		{\loi_expafter{\readlist_vi{#2}{}}\loi_currentsep||\loi_quark||#2\_nil{#1}}% aller isoler le 1er item
+}
+\long\def\readlist_v#1#2{\readlist_vi{#2}{}#1||\loi_quark||#2\_nil}% #1=liste s\'eparateurs (s\'ep=||)  #2=chaine de tokens
+\long\def\readlist_vi#1#2#3||{% #1=liste restante   #2=dernier <sep utile>  #3=<sep courant>
+	\loi_ifx{\loi_quark#3}
+		{\loi_ifempty{#2}% si #1 vide, aucun <sep utile> n'a \'et\'e trouv\'e, il reste \`a lire "<liste compl\`ete>\_nil"
+			{\long\def\readlist_vii##1\_nil##2{\loi_exparg{\readlist_ix{##2}{}}{\loi_gobarg##1}{#2}}}% ##2=compteur d'index
+			{\long\def\readlist_vii##1#2{\loi_exparg\readlist_viii{\loi_gobarg##1}\relax}%
+			\long\def\readlist_viii##1##2\_nil##3{\loi_exparg{\readlist_ix{##3}}{\loi_gobarg##2}{##1}{#2}}% ##3=compteur d'index
+			}%
+		\readlist_vii\relax% le \relax meuble l'argument d\'elimit\'e
+		}
+		{\long\def\readlist_vii##1#3##2\_nil{%
+			\loi_ifempty{##2}% si <liste restante> ne contient pas le <sep courant>
+				{\readlist_vi{#1}{#2}}% recommencer avec le m\^eme <sep utile>
+				{\loi_exparg\readlist_vi{\loi_gobarg##1#3}{#3}}% sinon raccourcir <liste restante> et <sep courant>:=<sep utile>% ##BUGFIX v1.53
+			}%
+		\readlist_vii\relax#1#3\_nil% ##BUGFIX v1.53
+		}%
+}
+\long\def\readlist_ix#1#2#3{% #1=compteur d'index  #2=liste restante  #3=\'el\'ement courant
+	\loi_ifnum{0\loi_exparg\loi_ifspacefirst{\loi_currentsep}{}1\if_removeextremespaces1\fi=11 }% s'il faur retirer les espaces extr\^emes
+		{\loi_exparg{\loi_exparg{\readlist_x{#1}{#2}}}{\loi_removeextremespaces{#3}}}% red\'efinir l'\'el\'ement courant
+		{\readlist_x{#1}{#2}{#3}}%
+}
+\long\def\readlist_x#1#2#3#4{% #1=compteur d'index  #2=liste restante  #3=\'el\'ement courant   #4=sep utilis\'e
+	\loi_ifnum{0\if_ignoreemptyitems1\fi\loi_ifempty{#3}1{}=11 }
+		{\readlist_iv{#1}{#2}}% si l'on n'ignore pas les \'el\'ements vides :
+		{\loi_argcsname\loi_def{\loi_listname[\csname loi_previndex[\number\loi_nestcnt]\endcsname#1]}{#3}% assignation de l'item ctuel \`a la macro
+		\loi_argcsname\loi_def{\loi_listname sep[\csname loi_previndex[\number\loi_nestcnt]\endcsname#1]}{#4}% assignation du <sep> actuel \`a la macro \<macrolist>sep
+		\loi_ifnum{\loi_nestcnt<\nestdepth\relax}% si imbrication max non atteinte
+			{\advance\loi_nestcnt1
+			\loi_argcsname\edef{loi_previndex[\number\loi_nestcnt]}{\csname loi_previndex[\number\numexpr\loi_nestcnt-1]\endcsname#1,}%
+			\readlist_ii{#3}% recommencer avec l'\'el\'ement courant
+			}
+			{}%
+		\loi_exparg\readlist_iv{\number\numexpr#1+1}{#2}% puis chercher l'\'el\'ement suivant dans la liste restante
+		}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%% macro \listlen %%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\listlen#1[#2]{%
+	\romannumeral\loi_ifempty{#2}
+		{\expandafter\expandafter\expandafter\loi_stop\csname\loi_macroname#1len[0]\endcsname}
+		{\loi_exparg\listlen_i{\romannumeral-`\.\loi_macroname#1}{#2}}%
+}
+\def\listlen_i#1#2{% #1=macro name   #2=index non normalis\'e    prendre <profondeur max-1>
+	\loi_exparg{\expandafter\listlen_ii\romannumeral\loi_normalizeindex{#1}{#2}}{\number\numexpr\csname#1nest\endcsname-1}{#1}%
+}
+\def\listlen_ii#1#2#3{% #1=err   #2=index normalis\'e  #3=macroname
+	\expandafter\expandafter\expandafter\loi_stop\csname#3len[#2,0]\expandafter\endcsname
+	\romannumeral\loi_ifempty{#1}{\loi_stop}{\loi_stop\loi_error{#1}}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%% macro \foreachitem %%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\foreachitem#1\in#2{%
+	\edef\foreachitem_i{\noexpand\foreachitem_iii\noexpand#1{\expandafter\noexpand\csname\loi_macroname#1cnt\endcsname}{\loi_macroname#2}}%
+	\futurelet\loi_nxttok\foreachitem_ii
+}
+\def\foreachitem_ii{\loi_ifx{\loi_nxttok[}\foreachitem_i{\foreachitem_i[]}}
+\def\foreachitem_iii#1#2#3[#4]{% prendre <profondeur max-1>
+	\loi_exparg{\expandafter\foreachitem_iv\romannumeral\loi_normalizeindex{#3}{#4}}{\number\numexpr\csname#3nest\endcsname-1}#1{#2}{#3}%
+}
+\def\foreachitem_iv#1#2{\loi_ifempty{#2}{\foreachitem_v{#1}{}}{\foreachitem_v{#1}{#2,}}}% #1=err  #2=index norm
+\long\def\foreachitem_v#1#2#3#4#5#6{% #1=err  #2=index norm  #3=macroiter  #4=compteur associ\'e  #5=nom de macrolist  #6=code
+	\loi_ifnum{\csname#5len[#20]\endcsname>0 }
+		{\loi_ifempty{#1}{}{\loi_error{#1}}%
+		\loi_fornum#4=1to\csname#5len[#20]\endcsname\do{\loi_argcsname\let#3{#5[#2#4]}#6}%
+		}
+		{}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%% macro \showitem %%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\showitems{\loi_ifstar{\let\showitems_cmd\detokenize\showitems_i}{\let\showitems_cmd\loi_identity\showitems_i}}
+\def\showitems_i#1{\def\showitems_ii{\showitems_iv#1}\futurelet\loi_nxttok\showitems_iii}
+\def\showitems_iii{\loi_ifx{\loi_nxttok[}\showitems_ii{\showitems_ii[]}}
+\def\showitems_iv#1[#2]{\foreachitem\showitems_iter\in#1[#2]{\showitemsmacro{\expandafter\showitems_cmd\expandafter{\showitems_iter}}}}
+\unless\ifdefined\fbox
+	\newdimen\fboxrule \newdimen\fboxsep \fboxrule=.4pt \fboxsep=3pt % r\'eglages identiques \`a LaTeX
+	\def\fbox#1{% imitation de la macro \fbox de LaTeX, voir codes 251 \`a 254 ici --> http://progtex.fr/wp-content/uploads/2014/09/code.txt
+		\hbox{% et pages 271 \`a 274 de "Apprendre \`a programmer en TeX"
+			\vrule width\fboxrule
+			\vtop{%
+				\vbox{\hrule height\fboxrule \kern\fboxsep \hbox{\kern\fboxsep#1\kern\fboxsep}}%
+				\kern\fboxsep \hrule height\fboxrule
+			}\vrule width\fboxrule
+		}%
+	}
+\fi
+\def\showitemsmacro#1{% encadrement par d\'efaut
+	\begingroup\fboxsep=0.25pt \fboxrule=0.5pt \fbox{\strut#1}\endgroup
+	\hskip0.25em\relax
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%% macro \itemtomacro %%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\itemtomacro#1[#2]{% #1[#2]=item  non encore lu: #3=macro
+	\edef\loi_listname{\loi_macroname#1}%
+	\loi_exparg{\expandafter\itemtomacro_i\romannumeral\expandafter\loi_normalizeindex\expandafter{\loi_listname}{#2}}{\csname\loi_listname nest\endcsname}\let
+}
+\def\gitemtomacro#1[#2]{% #1[#2]=item
+	\xdef\loi_listname{\loi_macroname#1}%
+	\loi_exparg{\expandafter\itemtomacro_i\romannumeral\expandafter\loi_normalizeindex\expandafter{\loi_listname}{#2}}{\csname\loi_listname nest\endcsname}{\global\let}%
+}
+\def\itemtomacro_i#1#2#3#4{%
+	\loi_ifempty{#1}{}{\loi_error{#1}}%
+	\loi_argcsname#3#4{\loi_listname[#2]}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%% r\'eglages par d\'efaut %%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newif\if_removeextremespaces
+\newif\if_ignoreemptyitems
+\let\ignoreemptyitems\_ignoreemptyitemstrue
+\let\reademptyitems\_ignoreemptyitemsfalse
+\setsepchar{,}
+\reademptyitems
+
+\loi_restorecatcode
+\endinput
+
+######################################################################
+#                             Historique                             #
+######################################################################
+
+v1.0  19/8/2016
+  - Premi\`ere version publique
+
+v1.1  01/09/2016
+  - Stockage des s\'eparateurs dans <macrolist>sep
+  - bug corrig\'e dans \loi_restorecatcode
+
+v1.2  22/10/2016
+  - macros \greadlist et \gitemtomacro pour la globalit\'e
+
+v1.3  18/11/2016
+  - bugs corrig\'es dans la gestion de la globalit\'e
+
+v1.4  05/10/2017
+  - test \loi_ifprimitive ajout\'e au test \loi_ifcs
+  - suppression de \loi_expafternil, cr\'eation de \loi_expafter,
+    modification de \loi_argcsname
+  - correction d'un bug : \setsepchar{\par} ne provoque plus
+    d'erreur. \loi_ifnum devient \long
+
+v1.5  06/10/2017
+  - correction d'un bug dans \loi_ifcs
+
+v1.51 24/10/2017
+  - correction d'un bug dans \loi_ifcs
+
+v1.52 13/01/2018
+  - le dernier s\'eparateur est <vide>
+
+v1.53 13/03/2018
+  - correction d'un bug dans \readlist_vii
