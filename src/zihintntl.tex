@@ -7,26 +7,20 @@ The NTL instructions do not change architectural state, nor do they alter the
 architecturally visible effects of the subsequent memory-access instruction.
 Three variants are provided:
 
-The NTL.L1 instruction indicates that the subsequent memory-access
-instruction does not exhibit temporal locality that can be exploited by the
-innermost level of the memory hierarchy (e.g., an L1 cache).
-NTL.L1 is encoded as ADD {\em x0, x0, x1}.
-If the C extension is provided, an equivalent variant, C.NTL.L1, is encoded
-as C.ADD {\em x0, x1}.
+The NTL.L1 instruction indicates that the subsequent memory-access instruction
+does not exhibit temporal locality within the capacity of the innermost level
+of cache in the memory hierarchy (e.g., an L1 cache).
+NTL.L1 is encoded as \mbox{ADD {\em x0, x0, x1}}.
 
-The NTL.L1L2 instruction indicates that the subsequent memory-access
-instruction does not exhibit temporal locality that can be exploited by either
-the innermost or next-innermost level of the memory hierarchy (e.g., L1 and L2
-caches).
-NTL.L1L2 is encoded as ADD {\em x0, x0, x2}.
-If the C extension is provided, an equivalent variant, C.NTL.L1L2, is encoded
-as C.ADD {\em x0, x2}.
+The NTL.L2 instruction indicates that the subsequent memory-access instruction
+does not exhibit temporal locality within the capacity of the next-innermost
+level of cache in the memory hierarchy (e.g., an L2 cache).
+NTL.L2 is encoded as \mbox{ADD {\em x0, x0, x2}}.
 
-The NTL.ALL instruction indicates that the instruction does not exhibit
-temporal locality that can be exploited by any level of the memory hierarchy.
-NTL.ALL is encoded as ADD {\em x0, x0, x3}.
-If the C extension is provided, an equivalent variant, C.NTL.ALL, is encoded
-as C.ADD {\em x0, x3}.
+The NTL.LLC instruction indicates that the subsequent memory-access
+instruction does not exhibit temporal locality within the capacity of the last
+level of cache in the memory hierarchy.
+NTL.LLC is encoded as \mbox{ADD {\em x0, x0, x3}}.
 
 \begin{commentary}
 The NTL instructions can be used to avoid cache pollution when streaming data
@@ -38,21 +32,37 @@ replacement policy, or to decide which cache to allocate into, or to avoid
 cache allocation altogether.
 For example, NTL.L1 might indicate that an implementation should not allocate
 a line in an L1 cache, but should allocate in L2.
-NTL.L2 might indicate that an implementation should allocate in neither L1
-nor L2, but should allocate in L3.
+In another implementation, NTL.L1 might allocate the line in L1, but in
+the least-recently used state.
 
-Like any HINT, these instructions may be freely ignored.
-They may have different memory-hierarchy effects on different implementations:
-e.g., a simple implementation might implement all three hints identically.
+Like any HINTs, these instructions may be freely ignored.
+Hence, although they are described in terms of cache-based memory hierarchies,
+they do not mandate the provision of caches.
+
+Some implementations might respect these HINTs for some memory accesses but
+not others: e.g., implementations that implement LR/SC by acquiring a
+cache line in the exclusive state in L1 might ignore NTL instructions
+on LR and SC, but might respect NTL instructions for
+AMOs and regular loads and stores.
 \end{commentary}
+
+If the C extension is provided, compressed variants of these HINTs are also
+provided:
+C.NTL.L1 is encoded as \mbox{C.ADD {\em x0, x1}};
+C.NTL.L2 is encoded as \mbox{C.ADD {\em x0, x2}};
+and C.NTL.LLC is encoded as \mbox{C.ADD {\em x0, x3}}.
 
 The NTL instructions affect all memory-access instructions defined in the
 base ISAs and the A, F, D, Q, C, and V standard extensions,
-as well as those defined in the hypervisor extension defined in Volume II.
+as well as those defined as part of the hypervisor extension in Volume II.
 
 \begin{commentary}
 The expectation is that the NTL instructions will also affect memory-access
-instructions defined in later standard or custom extensions.
+instructions and some cache-maintenance operations
+defined in later standard or custom extensions.
+For example, NTL.L2 followed by a cache-line-zero instruction might indicate
+that the line should be allocated in L3 and zeroed, but not allocated in
+L1 or L2.
 \end{commentary}
 
 Software is discouraged from following an NTL instruction with an
@@ -66,4 +76,15 @@ subsequent memory-access instruction, execution will normally resume at the
 memory-access instruction.
 That the NTL instruction is not reexecuted does not change the semantics of
 the program.
+
+Some implementations might prefer not to process the NTL instruction until the
+subsequent memory-access instruction is seen (e.g., so that the NTL can be
+fused with the memory access it modifies).
+Such implementations might preferentially take the interrupt before the NTL,
+rather than between the NTL and the memory access.
+\end{commentary}
+
+\begin{commentary}
+Since the NTL instructions are encoded as ADDs, they can be used within LR/SC
+loops without voiding the forward-progress guarantee.
 \end{commentary}
