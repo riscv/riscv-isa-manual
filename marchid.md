@@ -37,3 +37,8 @@ SweRV EL2     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.W
 SweRV EH2     | Western Digital Corporation     | [Thomas Wicki](mailto:Thomas.Wicki@wdc.com)                 | 17                | https://github.com/chipsalliance/Cores-SweRV-EH2
 SERV          | Olof Kindgren Enterprises       | [Olof Kindgren](mailto:olof.kindgren@gmail.com)             | 18                | https://github.com/olofk/serv
 NEORV32       | Stephan Nolting                 | [Stephan Nolting](mailto:stnolting@gmail.com)               | 19                | https://github.com/stnolting/neorv32
+CV32E40X      | OpenHW Group                    | [Arjan Bink](mailto:arjan.bink@silabs.com), Silicon Laboratories | 20           | https://github.com/openhwgroup/cv32e40x
+CV32E40S      | OpenHW Group                    | [Arjan Bink](mailto:arjan.bink@silabs.com), Silicon Laboratories | 21           | https://github.com/openhwgroup/cv32e40s
+Ibex          | lowRISC                         | [lowRISC Hardware Team](mailto:hardware@lowrisc.org)        | 22                | https://github.com/lowRISC/ibex
+RudolV        | Jörg Mische                     | [Jörg Mische](mailto:bobbl@gmx.de)                          | 23                | https://github.com/bobbl/rudolv
+Steel Core    | Rafael Calcada                  | [Rafael Calcada](mailto:rafaelcalcada@gmail.com)            | 24                | https://github.com/rafaelcalcada/steel-core
