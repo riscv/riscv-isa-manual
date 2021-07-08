@@ -2315,14 +2315,28 @@ Future extensions may provide more and/or finer-grained control over which PMAs
 can be overridden.
 \end{commentary}
 
+If the underlying physical memory attribute for a page is I/O, then accesses to
+that page with PBMT=1 will obey RVWMO or RVTSO rather than I/O strong ordering
+rules, and accesses to such pages are considered main memory rather than I/O
+for the purposes of FENCE, {\em.aq}, and {\em.rl}.
+
+If the underlying physical memory attribute for a page is main memory, then
+accesses to that page via a page table entry with PBMT=2 obey strong channel 0
+ordering with respect to other accesses to physical main memory and to other
+accesses to pages with PBMT=2.  Furthermore, accesses to such pages are
+considered I/O rather than main memory for the purposes of FENCE, {\em.aq}, and
+{\em.rl}.
+
 With Svpbmt enabled, it is possible for multiple virtual aliases of the same
-physical page to exist simultaneously with different memory attributes.
-It is also possible for a U-mode or S-mode mapping through a PTE with Svpbmt
-enabled to observe different memory attributes for a given region of
-physical memory than a concurrent access to the same page performed by M-mode
-or when {\tt satp}.MODE=Bare.  In such cases, each individual access observes
-the memory attributes associated with its own path; aliases are not considered
-when determining attributes.
+physical page to exist simultaneously with different memory attributes.  It is
+also possible for a U-mode or S-mode mapping through a PTE with Svpbmt enabled
+to observe different memory attributes for a given region of physical memory
+than a concurrent access to the same page performed by M-mode or when {\tt
+satp}.MODE=Bare.  If accesses are performed simultaneously to the same region
+of memory using different attributes, there may be a loss of coherence and/or
+of normal RVWMO, RVTSO, or I/O ordering semantics.  In such cases,
+platform-specific mechanisms must be used to restore corrent coherence and
+memory ordering.
 
 \begin{commentary}
 For example, a cacheable access may be issued at the same time as a
@@ -2340,45 +2354,20 @@ be respected.  This is not expected to be a common situation.
 Note that Svpbmt cannot be used to completely prevent speculative reads from
 being performed to a region of memory for which the PMAs indicate idempotence,
 as speculation can still be performed via M-mode or via Bare mappings, which do
-not use the PBMTs.
+not use the PBMTs.  Platform-specific mechanisms must be used to avoid this
+form of conflict.
 \end{commentary}
-
-Memory accesses are ordered according to the effective memory type for the
-address in question.  A region of memory which is considered main memory by the
-PMAs but I/O by a PTE will obey channel 0 strong ordering, where for memory
-ordering purposes the ``I/O region'' is considered to be main memory.  In other
-words, each access to such a virtual address will appear in the global memory
-order after all prior operations from the same hart to main memory or to the
-same ``I/O region'', and it will appear earlier in the global memory order than
-all subsequent accesses from the same hart to main memory or to the same ``I/O
-region''.  Such operations are not guaranteed to remain ordered with respect to
-I/O operations to other I/O regions unless FENCEs are inserted by software.
-
-Likewise, a region of memory which is considered I/O by the PMAs but main
-memory by a PTE will obey RVWMO (or RVTSO if enabled) rather than I/O
-strong ordering rules, and accesses to such pages are considered main
-memory rather than I/O for the purposes of FENCE, {\em.aq}, and {\em.rl}.
-In such cases it is the responsibility of software to insert FENCEs
-or other ordering mechanisms if necessary.
 
 \begin{commentary}
 A device driver written to rely on I/O strong ordering rules will not
 operate correctly if the address range is mapped as main memory by the
-page-based memory types.  Operating systems and hypervisors must take
-care to apply such a combination only when strong ordering is not
-actually needed.
+page-based memory types.  As such, this configuration is discouraged.
 
-In spite of the caveat above, it will often still be useful to map
-device memory regions in I/O as main memory so that write combining
-and speculative accesses can be performed, as such optimizations will
-likely improve performance when applied with adequate care.
+In spite of this caveat, it will often still be useful to map physical I/O
+regions using PBMT=1 so that write combining and speculative accesses can be
+performed.  Such optimizations will likely improve performance when applied
+with adequate care.
 \end{commentary}
-
-The coherence PMA is not affected by Svpbmt.  Non-coherent I/O address ranges
-re-mapped by PBMTs into main memory must still rely on platform-specific
-mechanisms to enforce coherence with respect to external devices.  However,
-RVWMO and RVTSO still require eventual visibility of writes from one harts to
-other harts in the system.
 
 When two-level paging is enabled within the H extension, the page-based memory
 types are applied in two stages.  First, the G-stage PTE PBMT bits (if enabled)
