@@ -8,19 +8,19 @@
 # build directory, copy the makefile there, and change the srcdir
 # variable accordingly.
 #
-# Note that the makefile assumes that the default dvips/ps2pdfwr 
-# commands "do the right thing" for fonts in pdfs. This is true on 
+# Note that the makefile assumes that the default dvips/ps2pdfwr
+# commands "do the right thing" for fonts in pdfs. This is true on
 # Athena/Linux and Fedora Core but is not true for older redhat installs ...
 #
 # At a minimum you should just change the main variable to be
-# the basename of your toplevel tex file. If you use a bibliography 
+# the basename of your toplevel tex file. If you use a bibliography
 # then you should set the bibfile variable to be the name of your
 # .bib file (assumed to be in the source directory).
 #
 
 srcdir  = ../src
 
-docs_with_bib = riscv-spec riscv-privileged 
+docs_with_bib = riscv-spec riscv-privileged riscv-plic
 docs_without_bib =
 
 srcs = $(wildcard $(srcdir)/*.tex)
