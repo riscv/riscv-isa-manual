@@ -53,30 +53,33 @@ When V=1, the hart is either in virtual S-mode (VS-mode), or in virtual U-mode
 When V=0, the hart is either in M-mode, in HS-mode, or in U-mode atop an OS
 running in HS-mode.
 The virtualization mode also indicates whether two-stage address translation
-is active (V=1) or inactive (V=0).  Table~\ref{h-operating-modes} lists the
-possible operating modes of a RISC-V hart with the hypervisor extension.
+is active (V=1) or inactive (V=0).  Table~\ref{tab:HPrivModes} lists the
+possible privilege modes of a RISC-V hart with the hypervisor extension.
 
 \begin{table*}[h!]
 \begin{center}
 \begin{tabular}{|c|c||l|l|l|}
   \hline
-   Virtualization & Privilege & \multirow{2}{*}{Abbreviation} & \multirow{2}{*}{Name} & Two-Stage \\
-   Mode (V)       & Encoding  &                               &                       & Translation \\ \hline
-   0              & 0         & U-mode  & User mode & Off \\
-   0              & 1         & HS-mode & Hypervisor-extended supervisor mode & Off \\
-   0              & 3         & M-mode  & Machine mode & Off \\
+   Virtualization & Nominal   & \multirow{2}{*}{Abbreviation} & \multirow{2}{*}{Name} & Two-Stage \\
+   Mode (V)       & Privilege &                               &                       & Translation \\ \hline
+   0              & U         & U-mode  & User mode & Off \\
+   0              & S         & HS-mode & Hypervisor-extended supervisor mode & Off \\
+   0              & M         & M-mode  & Machine mode & Off \\
   \hline
-   1              & 0         & VU-mode & Virtual user mode & On \\
-   1              & 1         & VS-mode & Virtual supervisor mode & On \\
+   1              & U         & VU-mode & Virtual user mode & On \\
+   1              & S         & VS-mode & Virtual supervisor mode & On \\
   \hline
  \end{tabular}
 \end{center}
-\caption{Operating modes with the hypervisor extension.}
-\label{h-operating-modes}
+\caption{Privilege modes with the hypervisor extension.}
+\label{tab:HPrivModes}
 \end{table*}
 
-For purposes of interrupt global enables, HS-mode is considered more privileged
-than VS-mode, and VS-mode is considered more privileged than VU-mode.
+For privilege modes U and VU, the \textit{nominal privilege mode} is~U,
+and for privilege modes HS and VS, the nominal privilege mode is~S.
+
+HS-mode is more privileged
+than VS-mode, and VS-mode is more privileged than VU-mode.
 VS-mode interrupts are globally disabled when executing in U-mode.
 
 \begin{commentary}
@@ -299,13 +302,14 @@ a virtual machine's memory.
 \end{commentary}
 
 The SPV bit (Supervisor Previous Virtualization mode) is written by the implementation
-whenever a trap is taken into HS-mode.  Just as the SPP bit in {\tt sstatus} is set to the privilege
+whenever a trap is taken into HS-mode.
+Just as the SPP bit in {\tt sstatus} is set to the (nominal) privilege
 mode at the time of the trap, the SPV bit in {\tt hstatus} is set to the value of the virtualization
 mode V at the time of the trap.  When an SRET instruction is executed when V=0,
 V is set to SPV.
 
 When V=1 and a trap is taken into HS-mode, bit SPVP (Supervisor Previous
-Virtual Privilege) is set to the privilege mode at the time of the trap,
+Virtual Privilege) is set to the nominal privilege mode at the time of the trap,
 the same as {\tt sstatus}.SPP.
 But if V=0 before a trap, SPVP is left unchanged on trap entry.
 SPVP controls the effective privilege of explicit memory accesses made by
@@ -2012,7 +2016,8 @@ The format of {\tt mstatus} is unchanged for RV32.}
 \end{figure*}
 
 The MPV bit (Machine Previous Virtualization Mode) is written by the implementation
-whenever a trap is taken into M-mode.  Just as the MPP bit is set to the privilege
+whenever a trap is taken into M-mode.
+Just as the MPP bit is set to the (nominal) privilege
 mode at the time of the trap, the MPV bit is set to the value of the virtualization
 mode V at the time of the trap.  When an MRET instruction is executed, the
 virtualization mode V is set to MPV, unless MPP=3, in which case V remains 0.
@@ -2037,7 +2042,7 @@ field, MPRV, of {\tt mstatus}.
 When MPRV=0, translation and protection behave as normal.
 When MPRV=1, explicit memory accesses are translated and protected, and
 endianness is applied, as though the current virtualization mode were set
-to MPV and the current privilege mode were set to MPP.
+to MPV and the current nominal privilege mode were set to MPP.
 Table~\ref{h-mprv} enumerates the cases.
 
 \begin{table*}[h!]
@@ -2045,7 +2050,7 @@ Table~\ref{h-mprv} enumerates the cases.
 \begin{tabular}{|c|c|c||p{4.5in}|}
   \hline
    MPRV & MPV & MPP & Effect \\ \hline \hline
-   0    & --  & --  & Normal access; current privilege and virtualization modes apply. \\ \hline
+   0    & --  & --  & Normal access; current privilege mode applies. \\ \hline
    1    & 0   & 0   & U-level access with HS-level translation and protection only. \\ \hline
    1    & 0   & 1   & HS-level access with HS-level translation and protection only.  \\ \hline
    1    & --  & 3   & M-level access with no translation. \\ \hline
@@ -2061,7 +2066,7 @@ memory accesses.}
 MPRV does not affect the virtual-machine load/store instructions, HLV,
 HLVX, and HSV.
 The explicit loads and stores of these instructions always act as though
-V=1 and the privilege mode were {\tt hstatus}.SPVP, overriding MPRV.
+V=1 and the nominal privilege mode were {\tt hstatus}.SPVP, overriding MPRV.
 
 The {\tt mstatus} register is a superset of the HS-level {\tt sstatus}
 register but is not a superset of {\tt vsstatus}.
@@ -2475,7 +2480,7 @@ preclude it.
 \subsection{Guest-Page Faults}
 
 Guest-page-fault traps may be delegated from M-mode to HS-mode under the
-control of CSR {\tt medeleg}, but cannot be delegated to other operating
+control of CSR {\tt medeleg}, but cannot be delegated to other privilege
 modes.
 On a guest-page fault, CSR {\tt mtval} or {\tt stval} is written with the
 faulting guest virtual address as usual, and {\tt mtval2} or {\tt htval} is
@@ -3197,22 +3202,22 @@ faulting instruction.
 \subsection{Trap Return}
 
 The MRET instruction is used to return from a trap taken into M-mode.
-MRET first determines what the new operating mode will be according to
+MRET first determines what the new privilege mode will be according to
 the values of MPP and MPV in {\tt mstatus} or {\tt mstatush}, as encoded in
 Table~\ref{h-mpp}.
 MRET then in {\tt mstatus}/{\tt mstatush} sets MPV=0, MPP=0, MIE=MPIE, and MPIE=1.
-Lastly, MRET sets the virtualization and privilege modes as previously
+Lastly, MRET sets the privilege mode as previously
 determined, and sets {\tt pc}={\tt mepc}.
 
 The SRET instruction is used to return from a trap taken into HS-mode or
 VS-mode.  Its behavior depends on the current virtualization mode.
 
 When executed in M-mode or HS-mode (i.e., V=0), SRET first determines
-what the new operating mode will be according to the values in
+what the new privilege mode will be according to the values in
 {\tt hstatus}.SPV and {\tt sstatus}.SPP, as encoded in Table~\ref{h-spp}.
 SRET then sets {\tt hstatus}.SPV=0, and in {\tt sstatus} sets SPP=0,
 SIE=SPIE, and SPIE=1.
-Lastly, SRET sets the virtualization and privilege modes as previously
+Lastly, SRET sets the privilege mode as previously
 determined, and sets {\tt pc}={\tt sepc}.
 
 When executed in VS-mode (i.e., V=1), SRET sets the privilege mode according to
