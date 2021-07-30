@@ -2616,22 +2616,32 @@ HS-mode and VS-mode ECALLs use different cause values so they can be delegated
 separately.
 \end{commentary}
 
-When V=1, a virtual instruction trap (not an illegal instruction trap) is
-taken for:
+When V=1, a virtual instruction exception (code 22) is normally
+raised instead of an illegal instruction exception if the attempted
+instruction would be valid to execute in HS-mode (for some values of
+the instruction's register operands) but is prevented when V=1 due to
+insufficient privilege or because the instruction is expressly disabled
+by a hypervisor CSR such as {\tt hcounteren}.
+Specifically, a virtual instruction exception is raised for the
+following cases, not necessarily a complete list:
 \begin{itemize}
 
 \item
+in VS-mode or VU-mode,
 attempts to access a counter CSR when the corresponding bit in
 {\tt hcounteren} is~0 and the same bit in {\tt mcounteren} is~1;
 
 \item
-attempts to execute a hypervisor instruction (HLV, HLVX, HSV, or HFENCE)
-or to access an implemented hypervisor CSR or VS CSR;
+in VS-mode or VU-mode,
+attempts to execute a hypervisor instruction (HLV, HLVX, HSV, or HFENCE),
+or to access an implemented hypervisor CSR or VS CSR when the same
+access (read/write) would be allowed in HS-mode;
 
 \item
 in VU-mode, attempts to execute WFI or a
 supervisor instruction (SRET or SFENCE),
-or to access an implemented supervisor CSR;
+or to access an implemented supervisor CSR when the same access
+(read/write) would be allowed in HS-mode;
 
 \item
 in VS-mode, attempts to execute WFI when {\tt hstatus}.VTW=1 and
@@ -2639,7 +2649,7 @@ in VS-mode, attempts to execute WFI when {\tt hstatus}.VTW=1 and
 implementation-specific, bounded time;
 
 \item
-in VS-mode, attempts to execute SRET when {\tt hstatus}.VTSR=1; or
+in VS-mode, attempts to execute SRET when {\tt hstatus}.VTSR=1; and
 
 \item
 in VS-mode, attempts to execute an SFENCE instruction or to access
@@ -2647,29 +2657,33 @@ in VS-mode, attempts to execute an SFENCE instruction or to access
 
 \end{itemize}
 
+Note that, partly contrary to the usual rule, the last two cases above
+are unaffected by the state of {\tt mstatus} fields TSR and TVM.
+For example, an attempt to execute SRET in VS-mode when
+{\tt hstatus}.VTSR=1 raises a virtual instruction exception even
+when SRET in HS-mode raises an illegal instruction exception as a
+consequence of {\tt mstatus}.TSR=1.
+Because TSR and TVM in {\tt mstatus} are intended to impact only S-mode
+(HS-mode), they are ignored for determining exceptions in VS-mode.
+
 On a virtual instruction trap, {\tt mtval} or {\tt stval} is written the
 same as for an illegal instruction trap.
 
 \begin{commentary}
-When V=1, privileged instructions that are invalid in VS-mode or
-VU-mode generally cause a virtual instruction trap instead of an illegal
-instruction trap.
-The same goes for attempts to access hypervisor- or supervisor-level CSRs
-that fail due to insufficient privilege when V=1, or attempts to access
-CSRs to which access has been expressly disabled by a hypervisor CSR
-(e.g.\ {\tt hcounteren}).
-It is not unusual that hypervisors must emulate such instructions, to
+It is not unusual that hypervisors must emulate the
+instructions that raise virtual instruction exceptions, to
 support nested hypervisors or for other reasons.
-When not emulating an instruction, a hypervisor should convert a virtual
-instruction trap into an illegal instruction exception for the guest
-virtual machine.
-
 Machine level is expected ordinarily to delegate virtual instruction
 traps directly to HS-level, whereas illegal instruction traps are likely
 to be processed first in M-mode before being conditionally delegated (by
 software) to HS-level.
 Consequently, virtual instruction traps are expected typically to be
 handled faster than illegal instruction traps.
+
+When not emulating the trapping instruction,
+a hypervisor should convert a virtual
+instruction trap into an illegal instruction exception for the guest
+virtual machine.
 \end{commentary}
 
 \subsection{Trap Entry}
