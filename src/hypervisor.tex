@@ -1,4 +1,4 @@
-\chapter{Hypervisor Extension, Version 0.6.1}
+\chapter{Hypervisor Extension, Version 0.6.2}
 \label{hypervisor}
 
 {\bf Warning! This draft specification may change before being
@@ -53,34 +53,37 @@ When V=1, the hart is either in virtual S-mode (VS-mode), or in virtual U-mode
 When V=0, the hart is either in M-mode, in HS-mode, or in U-mode atop an OS
 running in HS-mode.
 The virtualization mode also indicates whether two-stage address translation
-is active (V=1) or inactive (V=0).  Table~\ref{h-operating-modes} lists the
-possible operating modes of a RISC-V hart with the hypervisor extension.
+is active (V=1) or inactive (V=0).  Table~\ref{tab:HPrivModes} lists the
+possible privilege modes of a RISC-V hart with the hypervisor extension.
 
 \begin{table*}[h!]
 \begin{center}
 \begin{tabular}{|c|c||l|l|l|}
   \hline
-   Virtualization & Privilege & \multirow{2}{*}{Abbreviation} & \multirow{2}{*}{Name} & Two-Stage \\
-   Mode (V)       & Encoding  &                               &                       & Translation \\ \hline
-   0              & 0         & U-mode  & User mode & Off \\
-   0              & 1         & HS-mode & Hypervisor-extended supervisor mode & Off \\
-   0              & 3         & M-mode  & Machine mode & Off \\
+   Virtualization & Nominal   & \multirow{2}{*}{Abbreviation} & \multirow{2}{*}{Name} & Two-Stage \\
+   Mode (V)       & Privilege &                               &                       & Translation \\ \hline
+   0              & U         & U-mode  & User mode & Off \\
+   0              & S         & HS-mode & Hypervisor-extended supervisor mode & Off \\
+   0              & M         & M-mode  & Machine mode & Off \\
   \hline
-   1              & 0         & VU-mode & Virtual user mode & On \\
-   1              & 1         & VS-mode & Virtual supervisor mode & On \\
+   1              & U         & VU-mode & Virtual user mode & On \\
+   1              & S         & VS-mode & Virtual supervisor mode & On \\
   \hline
  \end{tabular}
 \end{center}
-\caption{Operating modes with the hypervisor extension.}
-\label{h-operating-modes}
+\caption{Privilege modes with the hypervisor extension.}
+\label{tab:HPrivModes}
 \end{table*}
 
-For purposes of interrupt global enables, HS-mode is considered more privileged
-than VS-mode, and VS-mode is considered more privileged than VU-mode.
+For privilege modes U and VU, the \textit{nominal privilege mode} is~U,
+and for privilege modes HS and VS, the nominal privilege mode is~S.
+
+HS-mode is more privileged
+than VS-mode, and VS-mode is more privileged than VU-mode.
 VS-mode interrupts are globally disabled when executing in U-mode.
 
 \begin{commentary}
-This description does not consider the possibility of U-mode or VU-mode interrupts and will be revised if the N extension for user-level interrupts is ultimately adopted.
+This description does not consider the possibility of U-mode or VU-mode interrupts and will be revised if an extension for user-level interrupts is adopted.
 \end{commentary}
 
 \section{Hypervisor and Virtual Supervisor CSRs}
@@ -116,8 +119,8 @@ do so.
 Conversely, when V=0, the VS CSRs do not ordinarily affect the behavior of
 the machine other than being readable and writable by CSR instructions.
 
-A few standard supervisor CSRs ({\tt scounteren} and, if the N extension
-is implemented, {\tt sedeleg} and {\tt sideleg}) have no matching VS CSR.
+Some standard supervisor CSRs ({\tt scounteren} and {\tt scontext},
+possibly others) have no matching VS CSR.
 These supervisor CSRs continue to have their usual function and
 accessibility even when V=1, except with VS-mode and VU-mode substituting for
 HS-mode and U-mode.
@@ -299,13 +302,14 @@ a virtual machine's memory.
 \end{commentary}
 
 The SPV bit (Supervisor Previous Virtualization mode) is written by the implementation
-whenever a trap is taken into HS-mode.  Just as the SPP bit in {\tt sstatus} is set to the privilege
+whenever a trap is taken into HS-mode.
+Just as the SPP bit in {\tt sstatus} is set to the (nominal) privilege
 mode at the time of the trap, the SPV bit in {\tt hstatus} is set to the value of the virtualization
 mode V at the time of the trap.  When an SRET instruction is executed when V=0,
 V is set to SPV.
 
 When V=1 and a trap is taken into HS-mode, bit SPVP (Supervisor Previous
-Virtual Privilege) is set to the privilege mode at the time of the trap,
+Virtual Privilege) is set to the nominal privilege mode at the time of the trap,
 the same as {\tt sstatus}.SPP.
 But if V=0 before a trap, SPVP is left unchanged on trap entry.
 SPVP controls the effective privilege of explicit memory accesses made by
@@ -322,15 +326,20 @@ HS-mode and U-mode.
 
 Field GVA (Guest Virtual Address) is written by the implementation
 whenever a trap is taken into HS-mode.
-For any trap (access fault, page fault, or guest-page fault) that writes
+For any trap (breakpoint, address misaligned,
+access fault, page fault, or guest-page fault) that writes
 a guest virtual address to {\tt stval}, GVA is set to~1.
 For any other trap into HS-mode, GVA is set to~0.
 
 \begin{commentary}
-For memory faults, GVA is redundant with field SPV (the two bits are set
+For memory access traps, GVA is redundant with field SPV (the two bits are set
 the same) except when the explicit memory access of an HLV, HLVX, or HSV
 instruction causes a fault.
 In that case, SPV=0 but GVA=1.
+
+If a breakpoint trap or instruction address misaligned trap writes zero to
+{\tt stval} instead of the faulting virtual address, then GVA=0 even if
+SPV=1.
 \end{commentary}
 
 The VSBE bit is a \warl\ field that controls the endianness of explicit
@@ -456,8 +465,7 @@ interrupt causes (codes 16 and above).
 
 Register {\tt hvip} is an HSXLEN-bit read/write register that a
 hypervisor can write to indicate virtual interrupts intended for VS-mode.
-The bit positions writable in {\tt hideleg} shall also be writable in
-{\tt hvip}, and the other bits of {\tt hvip} shall be hardwired to zeros.
+Bits of {\tt hvip} that are not writable are hardwired to zeros.
 
 \begin{figure}[h!]
 {\footnotesize
@@ -478,6 +486,7 @@ HSXLEN \\
 
 The standard portion (bits 15:0) of {\tt hvip} is formatted as shown in
 Figure~\ref{hvipreg-standard}.
+Bits VSEIP, VSTIP, and VSSIP of {\tt hvip} are writable.
 Setting VSEIP=1 in {\tt hvip} asserts a VS-level external interrupt;
 setting VSTIP asserts a VS-level timer interrupt; and setting VSSIP
 asserts a VS-level software interrupt.
@@ -1723,13 +1732,22 @@ except that \textit{execute} permission takes the place of \textit{read}
 permission during address translation.
 That is, the memory being read must be executable in both stages of
 address translation, but read permission is not required.
-HLVX.WU is valid for RV32, even though LWU and HLV.WU are not.
-(For RV32, HLVX.WU can be considered a variant of HLV.W, as sign
-extension is irrelevant for 32-bit values.)
+For the supervisor physical address that results from address
+translation, the supervisor physical memory attributes must grant both
+\textit{execute} and \textit{read} permissions.
+(The \textit{supervisor physical memory attributes} are the machine's
+physical memory attributes as modified by physical memory protection,
+Section~\ref{sec:pmp}, for supervisor level.)
 
+\begin{commentary}
 HLVX cannot override machine-level physical memory protection (PMP),
 so attempting to read memory that PMP designates as execute-only still
 results in an access-fault exception.
+\end{commentary}
+
+HLVX.WU is valid for RV32, even though LWU and HLV.WU are not.
+(For RV32, HLVX.WU can be considered a variant of HLV.W, as sign
+extension is irrelevant for 32-bit values.)
 
 Attempts to execute a virtual-machine load/store instruction (HLV, HLVX,
 or HSV) when V=1 cause a virtual instruction trap.
@@ -1998,14 +2016,16 @@ The format of {\tt mstatus} is unchanged for RV32.}
 \end{figure*}
 
 The MPV bit (Machine Previous Virtualization Mode) is written by the implementation
-whenever a trap is taken into M-mode.  Just as the MPP bit is set to the privilege
+whenever a trap is taken into M-mode.
+Just as the MPP bit is set to the (nominal) privilege
 mode at the time of the trap, the MPV bit is set to the value of the virtualization
 mode V at the time of the trap.  When an MRET instruction is executed, the
 virtualization mode V is set to MPV, unless MPP=3, in which case V remains 0.
 
 Field GVA (Guest Virtual Address) is written by the implementation
 whenever a trap is taken into M-mode.
-For any trap (access fault, page fault, or guest-page fault) that writes
+For any trap (breakpoint, address misaligned,
+access fault, page fault, or guest-page fault) that writes
 a guest virtual address to {\tt mtval}, GVA is set to~1.
 For any other trap into M-mode, GVA is set to~0.
 
@@ -2022,7 +2042,7 @@ field, MPRV, of {\tt mstatus}.
 When MPRV=0, translation and protection behave as normal.
 When MPRV=1, explicit memory accesses are translated and protected, and
 endianness is applied, as though the current virtualization mode were set
-to MPV and the current privilege mode were set to MPP.
+to MPV and the current nominal privilege mode were set to MPP.
 Table~\ref{h-mprv} enumerates the cases.
 
 \begin{table*}[h!]
@@ -2030,7 +2050,7 @@ Table~\ref{h-mprv} enumerates the cases.
 \begin{tabular}{|c|c|c||p{4.5in}|}
   \hline
    MPRV & MPV & MPP & Effect \\ \hline \hline
-   0    & --  & --  & Normal access; current privilege and virtualization modes apply. \\ \hline
+   0    & --  & --  & Normal access; current privilege mode applies. \\ \hline
    1    & 0   & 0   & U-level access with HS-level translation and protection only. \\ \hline
    1    & 0   & 1   & HS-level access with HS-level translation and protection only.  \\ \hline
    1    & --  & 3   & M-level access with no translation. \\ \hline
@@ -2046,7 +2066,7 @@ memory accesses.}
 MPRV does not affect the virtual-machine load/store instructions, HLV,
 HLVX, and HSV.
 The explicit loads and stores of these instructions always act as though
-V=1 and the privilege mode were {\tt hstatus}.SPVP, overriding MPRV.
+V=1 and the nominal privilege mode were {\tt hstatus}.SPVP, overriding MPRV.
 
 The {\tt mstatus} register is a superset of the HS-level {\tt sstatus}
 register but is not a superset of {\tt vsstatus}.
@@ -2460,7 +2480,7 @@ preclude it.
 \subsection{Guest-Page Faults}
 
 Guest-page-fault traps may be delegated from M-mode to HS-mode under the
-control of CSR {\tt medeleg}, but cannot be delegated to other operating
+control of CSR {\tt medeleg}, but cannot be delegated to other privilege
 modes.
 On a guest-page fault, CSR {\tt mtval} or {\tt stval} is written with the
 faulting guest virtual address as usual, and {\tt mtval2} or {\tt htval} is
@@ -2601,22 +2621,32 @@ HS-mode and VS-mode ECALLs use different cause values so they can be delegated
 separately.
 \end{commentary}
 
-When V=1, a virtual instruction trap (not an illegal instruction trap) is
-taken for:
+When V=1, a virtual instruction exception (code 22) is normally
+raised instead of an illegal instruction exception if the attempted
+instruction would be valid to execute in HS-mode (for some values of
+the instruction's register operands) but is prevented when V=1 due to
+insufficient privilege or because the instruction is expressly disabled
+by a hypervisor CSR such as {\tt hcounteren}.
+Specifically, a virtual instruction exception is raised for the
+following cases, not necessarily a complete list:
 \begin{itemize}
 
 \item
+in VS-mode or VU-mode,
 attempts to access a counter CSR when the corresponding bit in
 {\tt hcounteren} is~0 and the same bit in {\tt mcounteren} is~1;
 
 \item
-attempts to execute a hypervisor instruction (HLV, HLVX, HSV, or HFENCE)
-or to access an implemented hypervisor CSR or VS CSR;
+in VS-mode or VU-mode,
+attempts to execute a hypervisor instruction (HLV, HLVX, HSV, or HFENCE),
+or to access an implemented hypervisor CSR or VS CSR when the same
+access (read/write) would be allowed in HS-mode;
 
 \item
 in VU-mode, attempts to execute WFI or a
 supervisor instruction (SRET or SFENCE),
-or to access an implemented supervisor CSR;
+or to access an implemented supervisor CSR when the same access
+(read/write) would be allowed in HS-mode;
 
 \item
 in VS-mode, attempts to execute WFI when {\tt hstatus}.VTW=1 and
@@ -2624,7 +2654,7 @@ in VS-mode, attempts to execute WFI when {\tt hstatus}.VTW=1 and
 implementation-specific, bounded time;
 
 \item
-in VS-mode, attempts to execute SRET when {\tt hstatus}.VTSR=1; or
+in VS-mode, attempts to execute SRET when {\tt hstatus}.VTSR=1; and
 
 \item
 in VS-mode, attempts to execute an SFENCE instruction or to access
@@ -2632,29 +2662,33 @@ in VS-mode, attempts to execute an SFENCE instruction or to access
 
 \end{itemize}
 
+Note that, partly contrary to the usual rule, the last two cases above
+are unaffected by the state of {\tt mstatus} fields TSR and TVM.
+For example, an attempt to execute SRET in VS-mode when
+{\tt hstatus}.VTSR=1 raises a virtual instruction exception even
+when SRET in HS-mode raises an illegal instruction exception as a
+consequence of {\tt mstatus}.TSR=1.
+Because TSR and TVM in {\tt mstatus} are intended to impact only S-mode
+(HS-mode), they are ignored for determining exceptions in VS-mode.
+
 On a virtual instruction trap, {\tt mtval} or {\tt stval} is written the
 same as for an illegal instruction trap.
 
 \begin{commentary}
-When V=1, privileged instructions that are invalid in VS-mode or
-VU-mode generally cause a virtual instruction trap instead of an illegal
-instruction trap.
-The same goes for attempts to access hypervisor- or supervisor-level CSRs
-that fail due to insufficient privilege when V=1, or attempts to access
-CSRs to which access has been expressly disabled by a hypervisor CSR
-(e.g.\ {\tt hcounteren}).
-It is not unusual that hypervisors must emulate such instructions, to
+It is not unusual that hypervisors must emulate the
+instructions that raise virtual instruction exceptions, to
 support nested hypervisors or for other reasons.
-When not emulating an instruction, a hypervisor should convert a virtual
-instruction trap into an illegal instruction exception for the guest
-virtual machine.
-
 Machine level is expected ordinarily to delegate virtual instruction
 traps directly to HS-level, whereas illegal instruction traps are likely
 to be processed first in M-mode before being conditionally delegated (by
 software) to HS-level.
 Consequently, virtual instruction traps are expected typically to be
 handled faster than illegal instruction traps.
+
+When not emulating the trapping instruction,
+a hypervisor should convert a virtual
+instruction trap into an illegal instruction exception for the guest
+virtual machine.
 \end{commentary}
 
 \subsection{Trap Entry}
@@ -3168,22 +3202,22 @@ faulting instruction.
 \subsection{Trap Return}
 
 The MRET instruction is used to return from a trap taken into M-mode.
-MRET first determines what the new operating mode will be according to
+MRET first determines what the new privilege mode will be according to
 the values of MPP and MPV in {\tt mstatus} or {\tt mstatush}, as encoded in
 Table~\ref{h-mpp}.
 MRET then in {\tt mstatus}/{\tt mstatush} sets MPV=0, MPP=0, MIE=MPIE, and MPIE=1.
-Lastly, MRET sets the virtualization and privilege modes as previously
+Lastly, MRET sets the privilege mode as previously
 determined, and sets {\tt pc}={\tt mepc}.
 
 The SRET instruction is used to return from a trap taken into HS-mode or
 VS-mode.  Its behavior depends on the current virtualization mode.
 
 When executed in M-mode or HS-mode (i.e., V=0), SRET first determines
-what the new operating mode will be according to the values in
+what the new privilege mode will be according to the values in
 {\tt hstatus}.SPV and {\tt sstatus}.SPP, as encoded in Table~\ref{h-spp}.
 SRET then sets {\tt hstatus}.SPV=0, and in {\tt sstatus} sets SPP=0,
 SIE=SPIE, and SPIE=1.
-Lastly, SRET sets the virtualization and privilege modes as previously
+Lastly, SRET sets the privilege mode as previously
 determined, and sets {\tt pc}={\tt sepc}.
 
 When executed in VS-mode (i.e., V=1), SRET sets the privilege mode according to
