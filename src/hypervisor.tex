@@ -2629,30 +2629,81 @@ separately.
 
 When V=1, a virtual instruction exception (code 22) is normally
 raised instead of an illegal instruction exception if the attempted
-instruction would be valid to execute in HS-mode (for some values of
-the instruction's register operands) but is prevented when V=1 due to
+instruction is \textit{HS-qualified}
+but is prevented when V=1 due to
 insufficient privilege or because the instruction is expressly disabled
 by a hypervisor CSR such as {\tt hcounteren}.
+An instruction is \textit{HS-qualified} if it would be valid to execute
+in HS-mode (for some values of the instruction's register operands),
+assuming fields TSR and TVM of CSR {\tt mstatus} are both zero.
+
+Special rules apply for CSR instructions that access \mbox{32-bit}
+high-half CSRs such as {\tt cycleh} and {\tt htimedeltah}.
+When V=1 and XLEN$>$32, an attempt to access a high-half
+supervisor-level CSR, high-half hypervisor CSR, high-half VS CSR,
+or high-half unprivileged CSR always raises an illegal instruction
+exception.
+And in VS-mode, if the XLEN for VU-mode is greater than 32, an attempt
+to access a high-half user-level CSR (distinct from an unprivileged
+CSR) always raises an illegal instruction exception.
+On the other hand, when V=1 and XLEN=32, an invalid attempt to access a
+high-half S-level, hypervisor, VS, or unprivileged CSR raises a virtual
+instruction exception instead of an illegal instruction exception
+if the same CSR instruction for the partner \textit{low-half} CSR
+(e.g.\@ {\tt cycle} or {\tt htimedelta}) is HS-qualified.
+Likewise, in VS-mode, if the XLEN for VU-mode is 32, an invalid attempt
+to access a high-half user-level CSR raises a virtual instruction
+exception instead of an illegal instruction exception if the same CSR
+instruction for the partner low-half CSR is HS-qualified.
+
+\begin{commentary}
+The RISC-V Privileged Architecture currently defines no user-level
+CSRs, but they might be added by a future version of this standard or
+by an extension.
+\end{commentary}
+
 Specifically, a virtual instruction exception is raised for the
 following cases, not necessarily a complete list:
 \begin{itemize}
 
 \item
 in VS-mode or VU-mode,
-attempts to access a counter CSR when the corresponding bit in
+attempts to access a non-high-half counter CSR when the corresponding bit in
 {\tt hcounteren} is~0 and the same bit in {\tt mcounteren} is~1;
 
 \item
-in VS-mode or VU-mode,
-attempts to execute a hypervisor instruction (HLV, HLVX, HSV, or HFENCE),
-or to access an implemented hypervisor CSR or VS CSR when the same
-access (read/write) would be allowed in HS-mode;
+in VS-mode or VU-mode, if XLEN=32, attempts to access a high-half
+counter CSR when the corresponding bit in {\tt hcounteren} is~0 and the
+same bit in {\tt mcounteren} is~1;
 
 \item
-in VU-mode, attempts to execute WFI or a
-supervisor instruction (SRET or SFENCE),
-or to access an implemented supervisor CSR when the same access
-(read/write) would be allowed in HS-mode;
+in VS-mode or VU-mode,
+attempts to execute a hypervisor instruction (HLV, HLVX, HSV, or HFENCE);
+
+\item
+in VS-mode or VU-mode, attempts to access an implemented non-high-half
+hypervisor CSR or VS CSR when the same access (read/write) would be
+allowed in HS-mode, assuming {\tt mstatus}.TVM=0;
+
+\item
+in VS-mode or VU-mode, if XLEN=32, attempts to access an implemented
+high-half hypervisor CSR or high-half VS CSR when the same access
+(read/write) to the CSR's low-half partner would be allowed in HS-mode,
+assuming {\tt mstatus}.TVM=0;
+
+\item
+in VU-mode, attempts to execute WFI when {\tt mstatus}.TW=0, or to
+execute a supervisor instruction (SRET or SFENCE);
+
+\item
+in VU-mode, attempts to access an implemented non-high-half supervisor
+CSR when the same access (read/write) would be allowed in HS-mode,
+assuming {\tt mstatus}.TVM=0;
+
+\item
+in VU-mode, if XLEN=32, attempts to access an implemented high-half
+supervisor CSR when the same access to the CSR's low-half partner would
+be allowed in HS-mode, assuming {\tt mstatus}.TVM=0;
 
 \item
 in VS-mode, attempts to execute WFI when {\tt hstatus}.VTW=1 and
@@ -2667,15 +2718,6 @@ in VS-mode, attempts to execute an SFENCE instruction or to access
 {\tt satp}, when {\tt hstatus}.VTVM=1.
 
 \end{itemize}
-
-Note that, partly contrary to the usual rule, the last two cases above
-are unaffected by the state of {\tt mstatus} fields TSR and TVM.
-For example, an attempt to execute SRET in VS-mode when
-{\tt hstatus}.VTSR=1 raises a virtual instruction exception even
-when SRET in HS-mode raises an illegal instruction exception as a
-consequence of {\tt mstatus}.TSR=1.
-Because TSR and TVM in {\tt mstatus} are intended to impact only S-mode
-(HS-mode), they are ignored for determining exceptions in VS-mode.
 
 On a virtual instruction trap, {\tt mtval} or {\tt stval} is written the
 same as for an illegal instruction trap.
@@ -2695,6 +2737,11 @@ When not emulating the trapping instruction,
 a hypervisor should convert a virtual
 instruction trap into an illegal instruction exception for the guest
 virtual machine.
+\end{commentary}
+
+\begin{commentary}
+Because TSR and TVM in {\tt mstatus} are intended to impact only S-mode
+(HS-mode), they are ignored for determining exceptions in VS-mode.
 \end{commentary}
 
 \subsection{Trap Entry}
