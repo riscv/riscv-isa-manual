@@ -1518,16 +1518,16 @@ platform-specific interrupt controller.
 
 Bits {\tt mip}.MTIP and {\tt mie}.MTIE are the interrupt-pending and
 interrupt-enable bits for machine timer interrupts.
-MTIP is read-only in {\tt mip}, and is cleared by writing to the memory-mapped
-machine-mode timer compare register.
+MTIP is read-only in {\tt mip}, and is set or cleared via an
+implementation-defined mechanism.
 
 Bits {\tt mip}.MSIP and {\tt mie}.MSIE are the interrupt-pending and
 interrupt-enable bits for machine-level software interrupts.
-MSIP is read-only in {\tt mip}, and is written by accesses
-to memory-mapped control registers, which are used by remote harts to
+MSIP is read-only in {\tt mip}, and is written via an implementation-defined
+mechanism, which is used by remote harts to
 provide machine-level interprocessor interrupts.
 A hart can write its
-own MSIP bit using the same memory-mapped control register.
+own MSIP bit using the same mechanism.
 
 If supervisor mode is not implemented, bits SEIP, STIP, and SSIP of
 {\tt mip} and SEIE, STIE, and SSIE of {\tt mie} are hardwired to zeros.
@@ -1783,18 +1783,15 @@ counters, the counters can be directly exposed to lower privilege modes.
 
 The {\tt cycle}, {\tt instret}, and {\tt hpmcounter{\em n}} CSRs are
 read-only shadows of {\tt mcycle}, {\tt minstret}, and {\tt mhpmcounter{\em
-n}}, respectively.  The {\tt time} CSR is a read-only shadow of the
-memory-mapped {\tt mtime} register.  Analogously, on RV32I the {\tt cycleh},
+n}}, respectively.  Analogously, on RV32 the {\tt cycleh},
 {\tt instreth} and {\tt hpmcounter{\em n}} CSRs are read-only shadows of
 {\tt mcycleh}, {\tt minstreth} and {\tt mhpmcounter{\em n}h}, respectively.
-On RV32I the {\tt timeh} CSR is a read-only shadow of the upper 32 bits of
-the memory-mapped {\tt mtime} register, while {\tt time} shadows only the
-lower 32 bits of {\tt mtime}.
-\begin{commentary}
-Implementations can convert reads of the {\tt time} and {\tt timeh} CSRs
-into loads to the memory-mapped {\tt mtime} register, or emulate this
-functionality in M-mode software.
-\end{commentary}
+
+The {\tt time} CSR is a read-only shadow of an implementation-defined
+real-time counter.
+On RV32, the {\tt timeh} CSR is a read-only shadow of the upper 32 bits
+of the same counter, whereas {\tt time} shadows only the lower 32 bits
+of that counter.
 
 In systems with U-mode, the {\tt mcounteren} must be implemented, but all
 fields are \warl\ and may be hardwired to zero,
@@ -2263,7 +2260,7 @@ smaller of XLEN and ILEN.
 
 \subsection{Machine Timer Registers ({\tt mtime} and {\tt mtimecmp})}
 
-Platforms provide a real-time counter, exposed as a memory-mapped
+Platforms may provide a real-time counter, exposed as a memory-mapped
 machine-mode read-write register, {\tt mtime}.  {\tt mtime} must
 increment at constant frequency, and the platform must provide a
 mechanism for determining the timebase of {\tt mtime}.  The {\tt
@@ -2279,6 +2276,31 @@ The interrupt remains posted until {\tt mtimecmp} becomes greater than
 {\tt mtime} (typically as a result of writing {\tt mtimecmp}).
 The interrupt will only be taken if interrupts
 are enabled and the MTIE bit is set in the {\tt mie} register.
+
+If the {\tt mtime} and {\tt mtimecmp} registers are implemented, this
+machine timer interrupt appears in the read-only MTIP bit in the
+{\tt mip} CSR.
+Writes to {\tt mtime} and {\tt mtimecmp} are guaranteed to be reflected in
+MTIP eventually, but not necessarily immediately.
+
+\begin{commentary}
+	A spurious timer interrupt might occur if an interrupt handler increments {\tt
+		mtimecmp} then immediately returns, because MTIP might not yet have fallen in
+	the interim.  All software should be written to assume this event is possible,
+	but most software should assume this event is extremely unlikely.  It is
+	almost always more performant to incur an occasional spurious timer interrupt
+	than to poll MTIP until it falls.
+\end{commentary}
+
+If the {\tt mtime} register is implemented, then the {\tt time} CSR is
+a read-only shadow of {\tt mtime}.  For RV32, the {\tt timeh} CSR
+is a read-only shadow of the upper 32 bits of {\tt mtime}, whereas
+{\tt time} shadows only the lower 32 bits of {\tt mtime}.
+\begin{commentary}
+Implementations can convert reads of the {\tt time} and {\tt timeh} CSRs
+into loads to the memory-mapped {\tt mtime} register, or emulate this
+functionality in M-mode software.
+\end{commentary}
 
 \begin{figure}[h!]
 	{\footnotesize
@@ -2334,18 +2356,6 @@ are enabled and the MTIE bit is set in the {\tt mie} register.
 
 	Simple fixed-frequency systems can use a single clock for both cycle
 	counting and wall-clock time.
-\end{commentary}
-
-Writes to {\tt mtime} and {\tt mtimecmp} are guaranteed to be reflected in
-MTIP eventually, but not necessarily immediately.
-
-\begin{commentary}
-	A spurious timer interrupt might occur if an interrupt handler increments {\tt
-		mtimecmp} then immediately returns, because MTIP might not yet have fallen in
-	the interim.  All software should be written to assume this event is possible,
-	but most software should assume this event is extremely unlikely.  It is
-	almost always more performant to incur an occasional spurious timer interrupt
-	than to poll MTIP until it falls.
 \end{commentary}
 
 In RV32, memory-mapped writes to {\tt mtimecmp} modify only one 32-bit
