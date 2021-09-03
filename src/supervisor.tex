@@ -865,6 +865,45 @@ Modified interpretation of FENCE predecessor and successor sets in U-mode when F
 \label{tab:senvcfg-FIOM}
 \end{table}
 
+\begin{commentary}
+Bit FIOM exists for a specific circumstance when an I/O device is
+being emulated for U-mode and both of the following are true:
+(a)~the emulated device has a memory buffer that should be I/O space
+but is actually mapped to main memory via address translation, and
+(b)~multiple physical harts are involved in accessing this emulated
+device from U-mode.
+
+A hypervisor running in S-mode without the benefit of the hypervisor
+extension of Chapter~\ref{hypervisor} may need to emulate a device for
+U-mode if paravirtualization cannot be employed.
+If the same hypervisor provides a virtual machine (VM) with multiple
+virtual harts, mapped one-to-one to real harts, then multiple harts may
+concurrently access the emulated device, perhaps because:
+(a)~the guest OS within the VM assigns device interrupt handling to one
+hart while the device is also accessed by a different hart outside of
+an interrupt handler, or
+(b)~control of the device (or partial control) is being migrated
+from one hart to another, such as for interrupt load balancing within
+the VM.
+For such cases, guest software within the VM is expected to properly
+coordinate access to the (emulated) device across multiple harts using
+mutex locks and/or interprocessor interrupts as usual, which in part
+entails executing I/O fences.
+But those I/O fences may not be sufficient if some of the device
+``I/O'' is actually main memory, unknown to the guest.
+Setting FIOM=1 modifies those fences (and all other I/O fences executed
+in U-mode) to include main memory, too.
+
+Software can always avoid the need to set FIOM by never using main
+memory to emulate a device memory buffer that should be I/O space.
+However, this choice usually requires trapping all U-mode accesses
+to the emulated buffer, which might have a noticeable impact on
+performance.
+The alternative offered by FIOM is sufficiently inexpensive to implement that
+we consider it worth supporting even if only rarely enabled.
+\end{commentary}
+
+
 The definition of the CBZE field will be furnished by the
 forthcoming Zicboz extension.
 Its allocation within {\tt senvcfg} may change prior to the ratification
