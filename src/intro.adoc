@@ -1,0 +1,731 @@
+== Introduction
+
+RISC-V (pronounced `risk-five`) is a new instruction-set architecture
+(ISA) that was originally designed to support computer architecture
+research and education, but which we now hope will also become a
+standard free and open architecture for industry implementations. Our
+goals in defining RISC-V include:
+
+* A completely _open_ ISA that is freely available to academia and
+industry.
+* A _real_ ISA suitable for direct native hardware implementation, not
+just simulation or binary translation.
+* An ISA that avoids `over-architecting` for a particular
+microarchitecture style (e.g., microcoded, in-order, decoupled,
+out-of-order) or implementation technology (e.g., full-custom, ASIC,
+FPGA), but which allows efficient implementation in any of these.
+* An ISA separated into a _small_ base integer ISA, usable by itself as
+a base for customized accelerators or for educational purposes, and
+optional standard extensions, to support general-purpose software
+development.
+* Support for the revised 2008 IEEE-754 floating-point standard .
+* An ISA supporting extensive ISA extensions and specialized variants.
+* Both 32-bit and 64-bit address space variants for applications,
+operating system kernels, and hardware implementations.
+* An ISA with support for highly parallel multicore or manycore
+implementations, including heterogeneous multiprocessors.
+* Optional _variable-length instructions_ to both expand available
+instruction encoding space and to support an optional _dense instruction
+encoding_ for improved performance, static code size, and energy
+efficiency.
+* A fully virtualizable ISA to ease hypervisor development.
+* An ISA that simplifies experiments with new privileged architecture
+designs.
+
+[TIP]
+====
+Commentary on our design decisions is formatted as in this paragraph.
+This non-normative text can be skipped if the reader is only interested
+in the specification itself.
+====
+
+[NOTE]
+====
+The name RISC-V was chosen to represent the fifth major RISC ISA design
+from UC Berkeley (RISC-I cite:[riscI-isca1981], RISC-II cite:[Katevenis:1983], SOAR cite:[Ungar:1984], and SPUR cite:[spur-jsscc1989] were the first
+four). We also pun on the use of the Roman numeral `V` to signify
+`variations` and `vectors`, as support for a range of architecture
+research, including various data-parallel accelerators, is an explicit
+goal of the ISA design.
+====
+(((ISA, definition)))
+
+The RISC-V ISA is defined avoiding implementation details as much as
+possible (although commentary is included on implementation-driven
+decisions) and should be read as the software-visible interface to a
+wide variety of implementations rather than as the design of a
+particular hardware artifact. The RISC-V manual is structured in two
+volumes. This volume covers the design of the base _unprivileged_
+instructions, including optional unprivileged ISA extensions.
+Unprivileged instructions are those that are generally usable in all
+privilege modes in all privileged architectures, though behavior might
+vary depending on privilege mode and privilege architecture. The second
+volume provides the design of the first (`classic`) privileged
+architecture. The manuals use IEC 80000-13:2008 conventions, with a byte
+of 8 bits.
+
+[TIP]
+====
+In the unprivileged ISA design, we tried to remove any dependence on
+particular microarchitectural features, such as cache line size, or on
+privileged architecture details, such as page translation. This is both
+for simplicity and to allow maximum flexibility for alternative
+microarchitectures or alternative privileged architectures.
+====
+
+=== RISC-V Hardware Platform Terminology
+
+A RISC-V hardware platform can contain one or more RISC-V-compatible
+processing cores together with other non-RISC-V-compatible cores,
+fixed-function accelerators, various physical memory structures, I/O
+devices, and an interconnect structure to allow the components to
+communicate.
+(((core, component)))
+
+A component is termed a _core_ if it contains an independent instruction
+fetch unit. A RISC-V-compatible core might support multiple
+RISC-V-compatible hardware threads, or _harts_, through multithreading.
+(((core, extensions, coprocessor)))
+
+A RISC-V core might have additional specialized instruction-set
+extensions or an added _coprocessor_. We use the term _coprocessor_ to
+refer to a unit that is attached to a RISC-V core and is mostly
+sequenced by a RISC-V instruction stream, but which contains additional
+architectural state and instruction-set extensions, and possibly some
+limited autonomy relative to the primary RISC-V instruction stream.
+
+We use the term _accelerator_ to refer to either a non-programmable
+fixed-function unit or a core that can operate autonomously but is
+specialized for certain tasks. In RISC-V systems, we expect many
+programmable accelerators will be RISC-V-based cores with specialized
+instruction-set extensions and/or customized coprocessors. An important
+class of RISC-V accelerators are I/O accelerators, which offload I/O
+processing tasks from the main application cores.
+(((core, accelerator)))
+
+The system-level organization of a RISC-V hardware platform can range
+from a single-core microcontroller to a many-thousand-node cluster of
+shared-memory manycore server nodes. Even small systems-on-a-chip might
+be structured as a hierarchy of multicomputers and/or multiprocessors to
+modularize development effort or to provide secure isolation between
+subsystems.
+(((core, cluster, multiprocessors)))
+
+=== RISC-V Software Execution Environments and Harts
+
+The behavior of a RISC-V program depends on the execution environment in
+which it runs. A RISC-V execution environment interface (EEI) defines
+the initial state of the program, the number and type of harts in the
+environment including the privilege modes supported by the harts, the
+accessibility and attributes of memory and I/O regions, the behavior of
+all legal instructions executed on each hart (i.e., the ISA is one
+component of the EEI), and the handling of any interrupts or exceptions
+raised during execution including environment calls. Examples of EEIs
+include the Linux application binary interface (ABI), or the RISC-V
+supervisor binary interface (SBI). The implementation of a RISC-V
+execution environment can be pure hardware, pure software, or a
+combination of hardware and software. For example, opcode traps and
+software emulation can be used to implement functionality not provided
+in hardware. Examples of execution environment implementations include:
+
+* `Bare metal` hardware platforms where harts are directly implemented
+by physical processor threads and instructions have full access to the
+physical address space. The hardware platform defines an execution
+environment that begins at power-on reset.
+* RISC-V operating systems that provide multiple user-level execution
+environments by multiplexing user-level harts onto available physical
+processor threads and by controlling access to memory via virtual
+memory.
+* RISC-V hypervisors that provide multiple supervisor-level execution
+environments for guest operating systems.
+* RISC-V emulators, such as Spike, QEMU or rv8, which emulate RISC-V
+harts on an underlying x86 system, and which can provide either a
+user-level or a supervisor-level execution environment.
+
+[TIP]
+====
+A bare hardware platform can be considered to define an EEI, where the
+accessible harts, memory, and other devices populate the environment,
+and the initial state is that at power-on reset. Generally, most
+software is designed to use a more abstract interface to the hardware,
+as more abstract EEIs provide greater portability across different
+hardware platforms. Often EEIs are layered on top of one another, where
+one higher-level EEI uses another lower-level EEI.
+====
+(((hart, exectution environment)))
+
+From the perspective of software running in a given execution
+environment, a hart is a resource that autonomously fetches and executes
+RISC-V instructions within that execution environment. In this respect,
+a hart behaves like a hardware thread resource even if time-multiplexed
+onto real hardware by the execution environment. Some EEIs support the
+creation and destruction of additional harts, for example, via
+environment calls to fork new harts.
+
+The execution environment is responsible for ensuring the eventual
+forward progress of each of its harts. For a given hart, that
+responsibility is suspended while the hart is exercising a mechanism
+that explicitly waits for an event, such as the wait-for-interrupt
+instruction defined in Volume II of this specification; and that
+responsibility ends if the hart is terminated. The following events
+constitute forward progress:
+
+* The retirement of an instruction.
+* A trap, as defined in <<trap-defn>>.
+* Any other event defined by an extension to constitute forward
+progress.
+
+[TIP]
+====
+The term hart was introduced in the work on Lithe  cite:[lithe-pan-hotpar09] and cite:[lithe-pan-pldi10] to provide a term to
+represent an abstract execution resource as opposed to a software thread
+programming abstraction.
+
+The important distinction between a hardware thread (hart) and a
+software thread context is that the software running inside an execution
+environment is not responsible for causing progress of each of its
+harts; that is the responsibility of the outer execution environment. So
+the environment’s harts operate like hardware threads from the
+perspective of the software inside the execution environment.
+
+An execution environment implementation might time-multiplex a set of
+guest harts onto fewer host harts provided by its own execution
+environment but must do so in a way that guest harts operate like
+independent hardware threads. In particular, if there are more guest
+harts than host harts then the execution environment must be able to
+preempt the guest harts and must not wait indefinitely for guest
+software on a guest hart to “yield" control of the guest hart.
+====
+
+=== RISC-V ISA Overview
+
+A RISC-V ISA is defined as a base integer ISA, which must be present in
+any implementation, plus optional extensions to the base ISA. The base
+integer ISAs are very similar to that of the early RISC processors
+except with no branch delay slots and with support for optional
+variable-length instruction encodings. A base is carefully restricted to
+a minimal set of instructions sufficient to provide a reasonable target
+for compilers, assemblers, linkers, and operating systems (with
+additional privileged operations), and so provides a convenient ISA and
+software toolchain `skeleton` around which more customized processor
+ISAs can be built.
+
+Although it is convenient to speak of _the_ RISC-V ISA, RISC-V is
+actually a family of related ISAs, of which there are currently four
+base ISAs. Each base integer instruction set is characterized by the
+width of the integer registers and the corresponding size of the address
+space and by the number of integer registers. There are two primary base
+integer variants, RV32I and RV64I, described in
+<<rv32>> and <<rv64>>, which provide 32-bit
+or 64-bit address spaces respectively. We use the term XLEN to refer to
+the width of an integer register in bits (either 32 or 64).
+<<rv32e>> describes the RV32E subset variant of the
+RV32I base instruction set, which has been added to support small
+microcontrollers, and which has half the number of integer registers.
+<<rv128>> sketches a future RV128I variant of the
+base integer instruction set supporting a flat 128-bit address space
+(XLEN=128). The base integer instruction sets use a two’s-complement
+representation for signed integer values.
+
+Although 64-bit address spaces are a requirement for larger systems, we
+believe 32-bit address spaces will remain adequate for many embedded and
+client devices for decades to come and will be desirable to lower memory
+traffic and energy consumption. In addition, 32-bit address spaces are
+sufficient for educational purposes. A larger flat 128-bit address space
+might eventually be required, so we ensured this could be accommodated
+within the RISC-V ISA framework.
+
+The four base ISAs in RISC-V are treated as distinct base ISAs. A common
+question is why is there not a single ISA, and in particular, why is
+RV32I not a strict subset of RV64I? Some earlier ISA designs (SPARC,
+MIPS) adopted a strict superset policy when increasing address space
+size to support running existing 32-bit binaries on new 64-bit hardware.
+
+The main advantage of explicitly separating base ISAs is that each base
+ISA can be optimized for its needs without requiring to support all the
+operations needed for other base ISAs. For example, RV64I can omit
+instructions and CSRs that are only needed to cope with the narrower
+registers in RV32I. The RV32I variants can use encoding space otherwise
+reserved for instructions only required by wider address-space variants.
+
+The main disadvantage of not treating the design as a single ISA is that
+it complicates the hardware needed to emulate one base ISA on another
+(e.g., RV32I on RV64I). However, differences in addressing and illegal
+instruction traps generally mean some mode switch would be required in
+hardware in any case even with full superset instruction encodings, and
+the different RISC-V base ISAs are similar enough that supporting
+multiple versions is relatively low cost. Although some have proposed
+that the strict superset design would allow legacy 32-bit libraries to
+be linked with 64-bit code, this is impractical in practice, even with
+compatible encodings, due to the differences in software calling
+conventions and system-call interfaces.
+
+The RISC-V privileged architecture provides fields in` misa` to control
+the unprivileged ISA at each level to support emulating different base
+ISAs on the same hardware. We note that newer SPARC and MIPS ISA
+revisions have deprecated support for running 32-bit code unchanged on
+64-bit systems.
+
+A related question is why there is a different encoding for 32-bit adds
+in RV32I (ADD) and RV64I (ADDW)? The ADDW opcode could be used for
+32-bit adds in RV32I and ADDD for 64-bit adds in RV64I, instead of the
+existing design which uses the same opcode ADD for 32-bit adds in RV32I
+and 64-bit adds in RV64I with a different opcode ADDW for 32-bit adds in
+RV64I. This would also be more consistent with the use of the same LW
+opcode for 32-bit load in both RV32I and RV64I. The very first versions
+of RISC-V ISA did have a variant of this alternate design, but the
+RISC-V design was changed to the current choice in January 2011. Our
+focus was on supporting 32-bit integers in the 64-bit ISA not on
+providing compatibility with the 32-bit ISA, and the motivation was to
+remove the asymmetry that arose from having not all opcodes in RV32I
+have a *W suffix (e.g., ADDW, but AND not ANDW). In hindsight, this was
+perhaps not well-justified and a consequence of designing both ISAs at
+the same time as opposed to adding one later to sit on top of another,
+and also from a belief we had to fold platform requirements into the ISA
+spec which would imply that all the RV32I instructions would have been
+required in RV64I. It is too late to change the encoding now, but this
+is also of little practical consequence for the reasons stated above.
+
+It has been noted we could enable the *W variants as an extension to
+RV32I systems to provide a common encoding across RV64I and a future
+RV32 variant.
+
+RISC-V has been designed to support extensive customization and
+specialization. Each base integer ISA can be extended with one or more
+optional instruction-set extensions. An extension may be categorized as
+either standard, custom, or non-conforming. For this purpose, we divide
+each RISC-V instruction-set encoding space (and related encoding spaces
+such as the CSRs) into three disjoint categories: _standard_,
+_reserved_, and _custom_. Standard extensions and encodings are defined
+by the Foundation; any extensions not defined by the Foundation are
+_non-standard_. Each base ISA and its standard extensions use only
+standard encodings, and shall not conflict with each other in their uses
+of these encodings. Reserved encodings are currently not defined but are
+saved for future standard extensions; once thus used, they become
+standard encodings. Custom encodings shall never be used for standard
+extensions and are made available for vendor-specific non-standard
+extensions. Non-standard extensions are either custom extensions, that
+use only custom encodings, or _non-conforming_ extensions, that use any
+standard or reserved encoding. Instruction-set extensions are generally
+shared but may provide slightly different functionality depending on the
+base ISA. <<extensions>> describes various ways
+of extending the RISC-V ISA. We have also developed a naming convention
+for RISC-V base instructions and instruction-set extensions, described
+in detail in <<naming>>.
+
+To support more general software development, a set of standard
+extensions are defined to provide integer multiply/divide, atomic
+operations, and single and double-precision floating-point arithmetic.
+The base integer ISA is named `I` (prefixed by RV32 or RV64 depending
+on integer register width), and contains integer computational
+instructions, integer loads, integer stores, and control-flow
+instructions. The standard integer multiplication and division extension
+is named `M`, and adds instructions to multiply and divide values held
+in the integer registers. The standard atomic instruction extension,
+denoted by `A`, adds instructions that atomically read, modify, and
+write memory for inter-processor synchronization. The standard
+single-precision floating-point extension, denoted by `F`, adds
+floating-point registers, single-precision computational instructions,
+and single-precision loads and stores. The standard double-precision
+floating-point extension, denoted by `D`, expands the floating-point
+registers, and adds double-precision computational instructions, loads,
+and stores. The standard `C` compressed instruction extension provides
+narrower 16-bit forms of common instructions.
+
+Beyond the base integer ISA and the standard GC extensions, we believe
+it is rare that a new instruction will provide a significant benefit for
+all applications, although it may be very beneficial for a certain
+domain. As energy efficiency concerns are forcing greater
+specialization, we believe it is important to simplify the required
+portion of an ISA specification. Whereas other architectures usually
+treat their ISA as a single entity, which changes to a new version as
+instructions are added over time, RISC-V will endeavor to keep the base
+and each standard extension constant over time, and instead layer new
+instructions as further optional extensions. For example, the base
+integer ISAs will continue as fully supported standalone ISAs,
+regardless of any subsequent extensions.
+
+=== Memory
+
+A RISC-V hart has a single byte-addressable address space of
+latexmath:[$2^{\text{XLEN}}$] bytes for all memory accesses. A _word_ of
+memory is defined as (). Correspondingly, a _halfword_ is (), a
+_doubleword_ is (), and a _quadword_ is (). The memory address space is
+circular, so that the byte at address latexmath:[$2^{\text{XLEN}}-1$] is
+adjacent to the byte at address zero. Accordingly, memory address
+computations done by the hardware ignore overflow and instead wrap
+around modulo latexmath:[$2^{\text{XLEN}}$].
+
+The execution environment determines the mapping of hardware resources
+into a hart’s address space. Different address ranges of a hart’s
+address space may (1) be vacant, or (2) contain _main memory_, or
+(3) contain one or more _I/O devices_. Reads and writes of I/O devices
+may have visible side effects, but accesses to main memory cannot.
+Although it is possible for the execution environment to call everything
+in a hart’s address space an I/O device, it is usually expected that
+some portion will be specified as main memory.
+
+When a RISC-V platform has multiple harts, the address spaces of any two
+harts may be entirely the same, or entirely different, or may be partly
+different but sharing some subset of resources, mapped into the same or
+different address ranges.
+
+For a purely `bare metal` environment, all harts may see an identical
+address space, accessed entirely by physical addresses. However, when
+the execution environment includes an operating system employing address
+translation, it is common for each hart to be given a virtual address
+space that is largely or entirely its own.
+(((memory access, implicit and explicit)))
+
+Executing each RISC-V machine instruction entails one or more memory
+accesses, subdivided into _implicit_ and _explicit_ accesses. For each
+instruction executed, an _implicit_ memory read (instruction fetch) is
+done to obtain the encoded instruction to execute. Many RISC-V
+instructions perform no further memory accesses beyond instruction
+fetch. Specific load and store instructions perform an _explicit_ read
+or write of memory at an address determined by the instruction. The
+execution environment may dictate that instruction execution performs
+other _implicit_ memory accesses (such as to implement address
+translation) beyond those documented for the unprivileged ISA.
+
+The execution environment determines what portions of the non-vacant
+address space are accessible for each kind of memory access. For
+example, the set of locations that can be implicitly read for
+instruction fetch may or may not have any overlap with the set of
+locations that can be explicitly read by a load instruction; and the set
+of locations that can be explicitly written by a store instruction may
+be only a subset of locations that can be read. Ordinarily, if an
+instruction attempts to access memory at an inaccessible address, an
+exception is raised for the instruction. Vacant locations in the address
+space are never accessible.
+
+Except when specified otherwise, implicit reads that do not raise an
+exception and that have no side effects may occur arbitrarily early and
+speculatively, even before the machine could possibly prove that the
+read will be needed. For instance, a valid implementation could attempt
+to read all of main memory at the earliest opportunity, cache as many
+fetchable (executable) bytes as possible for later instruction fetches,
+and avoid reading main memory for instruction fetches ever again. To
+ensure that certain implicit reads are ordered only after writes to the
+same memory locations, software must execute specific fence or
+cache-control instructions defined for this purpose (such as the FENCE.I
+instruction defined in <<zifencei>>.
+(((memory access, implicit and explicit)))
+
+The memory accesses (implicit or explicit) made by a hart may appear to
+occur in a different order as perceived by another hart or by any other
+agent that can access the same memory. This perceived reordering of
+memory accesses is always constrained, however, by the applicable memory
+consistency model. The default memory consistency model for RISC-V is
+the RISC-V Weak Memory Ordering (RVWMO), defined in
+<<memorymodel>> and in appendices. Optionally,
+an implementation may adopt the stronger model of Total Store Ordering,
+as defined in <<ztso>>. The execution environment
+may also add constraints that further limit the perceived reordering of
+memory accesses. Since the RVWMO model is the weakest model allowed for
+any RISC-V implementation, software written for this model is compatible
+with the actual memory consistency rules of all RISC-V implementations.
+As with implicit reads, software must execute fence or cache-control
+instructions to ensure specific ordering of memory accesses beyond the
+requirements of the assumed memory consistency model and execution
+environment.
+
+=== Base Instruction-Length Encoding
+
+The base RISC-V ISA has fixed-length 32-bit instructions that must be
+naturally aligned on 32-bit boundaries. However, the standard RISC-V
+encoding scheme is designed to support ISA extensions with
+variable-length instructions, where each instruction can be any number
+of 16-bit instruction _parcels_ in length and parcels are naturally
+aligned on 16-bit boundaries. The standard compressed ISA extension
+described in <<compressed>> reduces code size by
+providing compressed 16-bit instructions and relaxes the alignment
+constraints to allow all instructions (16 bit and 32 bit) to be aligned
+on any 16-bit boundary to improve code density.
+
+We use the term IALIGN (measured in bits) to refer to the
+instruction-address alignment constraint the implementation enforces.
+IALIGN is 32 bits in the base ISA, but some ISA extensions, including
+the compressed ISA extension, relax IALIGN to 16 bits. IALIGN may not
+take on any value other than 16 or 32.
+(((ILEN)))
+
+We use the term ILEN (measured in bits) to refer to the maximum
+instruction length supported by an implementation, and which is always a
+multiple of IALIGN. For implementations supporting only a base
+instruction set, ILEN is 32 bits. Implementations supporting longer
+instructions have larger values of ILEN.
+
+<<instlengthcode>> illustrates the standard
+RISC-V instruction-length encoding convention. All the 32-bit
+instructions in the base ISA have their lowest two bits set to`11`. The
+optional compressed 16-bit instruction-set extensions have their lowest
+two bits equal to`00`,`01`, or`10`.
+
+==== Expanded Instruction-Length Encoding
+(((instruction length encoding)))
+
+A portion of the 32-bit instruction-encoding space has been tentatively
+allocated for instructions longer than 32 bits. The entirety of this
+space is reserved at this time, and the following proposal for encoding
+instructions longer than 32 bits is not considered frozen.
+
+Standard instruction-set extensions encoded with more than 32 bits have
+additional low-order bits set to`1`, with the conventions for 48-bit
+and 64-bit lengths shown in
+<<instlengthcode>>. Instruction lengths
+between 80 bits and 176 bits are encoded using a 3-bit field in bits
+[14:12] giving the number of 16-bit words in addition to the first
+5latexmath:[$\times$]16-bit words. The encoding with bits [14:12] set to
+`111` is reserved for future longer instruction encodings.
+
+[[instlengthcode]]
+[cols="^,^,^,^,<",]
+|===
+| | | |`xxxxxxxxxxxxxxaa` |16-bit (`aa` latexmath:[$\neq$]`11`)
+
+| | | | |
+
+| | |`xxxxxxxxxxxxxxxx` |`xxxxxxxxxxxbbb11` |32-bit (`bbb`
+latexmath:[$\neq$]`111`)
+
+| | | | |
+
+| |latexmath:[$\cdot\cdot\cdot$]`xxxx` |`xxxxxxxxxxxxxxxx`
+|`xxxxxxxxxx011111` |48-bit
+
+| | | | |
+
+| |latexmath:[$\cdot\cdot\cdot$]`xxxx` |`xxxxxxxxxxxxxxxx`
+|`xxxxxxxxx0111111` |64-bit
+
+| | | | |
+
+| |latexmath:[$\cdot\cdot\cdot$]`xxxx` |`xxxxxxxxxxxxxxxx`
+|`xnnnxxxxx1111111` |(80+16*`nnn`)-bit,`nnn`latexmath:[$\neq$]`111`
+
+| | | | |
+
+| |latexmath:[$\cdot\cdot\cdot$]`xxxx` |`xxxxxxxxxxxxxxxx`
+|`x111xxxxx1111111` |Reserved for latexmath:[$\geq$]192-bits
+
+| | | | |
+
+|Byte Address: |base+4 |base+2 |base |
+|===
+
+Given the code size and energy savings of a compressed format, we wanted
+to build in support for a compressed format to the ISA encoding scheme
+rather than adding this as an afterthought, but to allow simpler
+implementations we didn’t want to make the compressed format mandatory.
+We also wanted to optionally allow longer instructions to support
+experimentation and larger instruction-set extensions. Although our
+encoding convention required a tighter encoding of the core RISC-V ISA,
+this has several beneficial effects.
+(((IMAFED)))
+
+An implementation of the standard IMAFD ISA need only hold the
+most-significant 30 bits in instruction caches (a 6.25% saving). On
+instruction cache refills, any instructions encountered with either low
+bit clear should be recoded into illegal 30-bit instructions before
+storing in the cache to preserve illegal instruction exception behavior.
+
+Perhaps more importantly, by condensing our base ISA into a subset of
+the 32-bit instruction word, we leave more space available for
+non-standard and custom extensions. In particular, the base RV32I ISA
+uses less than 1/8 of the encoding space in the 32-bit instruction word.
+As described in Chapter link:#extensions[[extensions]], an
+implementation that does not require support for the standard compressed
+instruction extension can map 3 additional non-conforming 30-bit
+instruction spaces into the 32-bit fixed-width format, while preserving
+support for standard latexmath:[$\geq$]32-bit instruction-set
+extensions. Further, if the implementation also does not need
+instructions latexmath:[$>$]32-bits in length, it can recover a further
+four major opcodes for non-conforming extensions.
+
+Encodings with bits [15:0] all zeros are defined as illegal
+instructions. These instructions are considered to be of minimal length:
+16 bits if any 16-bit instruction-set extension is present, otherwise 32
+bits. The encoding with bits [ILEN-1:0] all ones is also illegal; this
+instruction is considered to be ILEN bits long.
+
+We consider it a feature that any length of instruction containing all
+zero bits is not legal, as this quickly traps erroneous jumps into
+zeroed memory regions. Similarly, we also reserve the instruction
+encoding containing all ones to be an illegal instruction, to catch the
+other common pattern observed with unprogrammed non-volatile memory
+devices, disconnected memory buses, or broken memory devices.
+
+Software can rely on a naturally aligned 32-bit word containing zero to
+act as an illegal instruction on all RISC-V implementations, to be used
+by software where an illegal instruction is explicitly desired. Defining
+a corresponding known illegal value for all ones is more difficult due
+to the variable-length encoding. Software cannot generally use the
+illegal value of ILEN bits of all 1s, as software might not know ILEN
+for the eventual target machine (e.g., if software is compiled into a
+standard binary library used by many different machines). Defining a
+32-bit word of all ones as illegal was also considered, as all machines
+must support a 32-bit instruction size, but this requires the
+instruction-fetch unit on machines with ILEN latexmath:[$>$]32 report an
+illegal instruction exception rather than an access-fault exception when
+such an instruction borders a protection boundary, complicating
+variable-instruction-length fetch and decode.
+(((endian, little and big)))
+
+RISC-V base ISAs have either little-endian or big-endian memory systems,
+with the privileged architecture further defining bi-endian operation.
+Instructions are stored in memory as a sequence of 16-bit little-endian
+parcels, regardless of memory system endianness. Parcels forming one
+instruction are stored at increasing halfword addresses, with the
+lowest-addressed parcel holding the lowest-numbered bits in the
+instruction specification.
+((bi-endian))
+(((endian, bi-)))
+
+We originally chose little-endian byte ordering for the RISC-V memory
+system because little-endian systems are currently dominant commercially
+(all x86 systems; iOS, Android, and Windows for ARM). A minor point is
+that we have also found little-endian memory systems to be more natural
+for hardware designers. However, certain application areas, such as IP
+networking, operate on big-endian data structures, and certain legacy
+code bases have been built assuming big-endian processors, so we have
+defined big-endian and bi-endian variants of RISC-V.
+
+We have to fix the order in which instruction parcels are stored in
+memory, independent of memory system endianness, to ensure that the
+length-encoding bits always appear first in halfword address order. This
+allows the length of a variable-length instruction to be quickly
+determined by an instruction-fetch unit by examining only the first few
+bits of the first 16-bit instruction parcel.
+
+We further make the instruction parcels themselves little-endian to
+decouple the instruction encoding from the memory system endianness
+altogether. This design benefits both software tooling and bi-endian
+hardware. Otherwise, for instance, a RISC-V assembler or disassembler
+would always need to know the intended active endianness, despite that
+in bi-endian systems, the endianness mode might change dynamically
+during execution. In contrast, by giving instructions a fixed
+endianness, it is sometimes possible for carefully written software to
+be endianness-agnostic even in binary form, much like
+position-independent code.
+
+The choice to have instructions be only little-endian does have
+consequences, however, for RISC-V software that encodes or decodes
+machine instructions. Big-endian JIT compilers, for example, must swap
+the byte order when storing to instruction memory.
+
+Once we had decided to fix on a little-endian instruction encoding, this
+naturally led to placing the length-encoding bits in the LSB positions
+of the instruction format to avoid breaking up opcode fields.
+
+[[trap-defn]]
+=== Exceptions, Traps, and Interrupts
+(((exceptions)))
+(((traps)))
+(((interrupts)))
+
+We use the term _exception_ to refer to an unusual condition occurring
+at run time associated with an instruction in the current RISC-V hart.
+We use the term _interrupt_ to refer to an external asynchronous event
+that may cause a RISC-V hart to experience an unexpected transfer of
+control. We use the term _trap_ to refer to the transfer of control to a
+trap handler caused by either an exception or an interrupt.
+
+The instruction descriptions in following chapters describe conditions
+that can raise an exception during execution. The general behavior of
+most RISC-V EEIs is that a trap to some handler occurs when an exception
+is signaled on an instruction (except for floating-point exceptions,
+which, in the standard floating-point extensions, do not cause traps).
+The manner in which interrupts are generated, routed to, and enabled by
+a hart depends on the EEI.
+
+Our use of `exception` and `trap` is compatible with that in the
+IEEE-754 floating-point standard.
+
+How traps are handled and made visible to software running on the hart
+depends on the enclosing execution environment. From the perspective of
+software running inside an execution environment, traps encountered by a
+hart at runtime can have four different effects:
+
+Contained Trap:::
+  The trap is visible to, and handled by, software running inside the
+  execution environment. For example, in an EEI providing both
+  supervisor and user mode on harts, an ECALL by a user-mode hart will
+  generally result in a transfer of control to a supervisor-mode handler
+  running on the same hart. Similarly, in the same environment, when a
+  hart is interrupted, an interrupt handler will be run in supervisor
+  mode on the hart.
+Requested Trap:::
+  The trap is a synchronous exception that is an explicit call to the
+  execution environment requesting an action on behalf of software
+  inside the execution environment. An example is a system call. In this
+  case, execution may or may not resume on the hart after the requested
+  action is taken by the execution environment. For example, a system
+  call could remove the hart or cause an orderly termination of the
+  entire execution environment.
+Invisible Trap:::
+  The trap is handled transparently by the execution environment and
+  execution resumes normally after the trap is handled. Examples include
+  emulating missing instructions, handling non-resident page faults in a
+  demand-paged virtual-memory system, or handling device interrupts for
+  a different job in a multiprogrammed machine. In these cases, the
+  software running inside the execution environment is not aware of the
+  trap (we ignore timing effects in these definitions).
+Fatal Trap:::
+  The trap represents a fatal failure and causes the execution
+  environment to terminate execution. Examples include failing a
+  virtual-memory page-protection check or allowing a watchdog timer to
+  expire. Each EEI should define how execution is terminated and
+  reported to an external environment.
+
+<<trapcharacteristics>> shows the characteristics of each
+kind of trap.
+
+[[trapcharacteristics]]
+.Characteristics of traps; 1) Termination may be requested. 2)
+Imprecise fatal traps might be observable by software.
+[cols="<,^,^,^,^",options="header",]
+|===
+| |Contained |Requested |Invisible |Fatal
+|Execution terminates |No |Nolatexmath:[$^{1}$] |No |Yes
+|Software is oblivious |No |No |Yes |Yeslatexmath:[$^{2}$]
+|Handled by environment |No |Yes |Yes |Yes
+|===
+
+The EEI defines for each trap whether it is handled precisely, though
+the recommendation is to maintain preciseness where possible. Contained
+and requested traps can be observed to be imprecise by software inside
+the execution environment. Invisible traps, by definition, cannot be
+observed to be precise or imprecise by software running inside the
+execution environment. Fatal traps can be observed to be imprecise by
+software running inside the execution environment, if known-errorful
+instructions do not cause immediate termination.
+
+Because this document describes unprivileged instructions, traps are
+rarely mentioned. Architectural means to handle contained traps are
+defined in the privileged architecture manual, along with other features
+to support richer EEIs. Unprivileged instructions that are defined
+solely to cause requested traps are documented here. Invisible traps
+are, by their nature, out of scope for this document. Instruction
+encodings that are not defined here and not defined by some other means
+may cause a fatal trap.
+
+=== UNSPECIFIED Behaviors and Values
+(((unspecified, behaviors)))
+(((unspecified, values)))
+
+The architecture fully describes what implementations must do and any
+constraints on what they may do. In cases where the architecture
+intentionally does not constrain implementations, the term  is
+explicitly used.
+
+The term _unspecified_ refers to a behavior or value that is intentionally
+unconstrained. The definition of these behaviors or values is open to
+extensions, platform standards, or implementations. Extensions, platform
+standards, or implementation documentation may provide normative content
+to further constrain cases that the base architecture defines as .
+
+Like the base architecture, extensions should fully describe allowable
+behavior and values and use the term _unspecified_ for cases that are intentionally
+unconstrained. These cases may be constrained or defined by other
+extensions, platform standards, or implementations.

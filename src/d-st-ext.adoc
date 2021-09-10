@@ -1,0 +1,255 @@
+== ``D`` Standard Extension for Double-Precision Floating-Point, Version 2.2
+
+This chapter describes the standard double-precision floating-point
+instruction-set extension, which is named `D` and adds
+double-precision floating-point computational instructions compliant
+with the IEEE 754-2008 arithmetic standard. The D extension depends on
+the base single-precision instruction subset F.
+((double-precision floaing point))
+
+=== D Register State
+
+The D extension widens the 32 floating-point registers, `f0`–` f31`, to
+64 bits (FLEN=64 in <<fprs-d>>. The `f` registers can
+now hold either 32-bit or 64-bit floating-point values as described
+below in <<nanboxing>>.
+
+FLEN can be 32, 64, or 128 depending on which of the F, D, and Q
+extensions are supported. There can be up to four different
+floating-point precisions supported, including H, F, D, and Q.
+(((floating-point, supported precisions)))
+
+[[nanboxing]]
+=== NaN Boxing of Narrower Values
+
+When multiple floating-point precisions are supported, then valid values
+of narrower latexmath:[$n$]-bit types, latexmath:[$n<$]FLEN, are
+represented in the lower latexmath:[$n$] bits of an FLEN-bit NaN value,
+in a process termed NaN-boxing. The upper bits of a valid NaN-boxed
+value must be all 1s. Valid NaN-boxed latexmath:[$n$]-bit values
+therefore appear as negative quiet NaNs (qNaNs) when viewed as any wider
+latexmath:[$m$]-bit value, latexmath:[$n < m \leq$]FLEN. Any operation
+that writes a narrower result to an `f` register must write all 1s to
+the uppermost FLENlatexmath:[$-n$] bits to yield a legal NaN-boxed
+value.
+(((floating-point, requirements)))
+
+
+Software might not know the current type of data stored in a
+floating-point register but has to be able to save and restore the
+register values, hence the result of using wider operations to transfer
+narrower values has to be defined. A common case is for callee-saved
+registers, but a standard convention is also desirable for features
+including varargs, user-level threading libraries, virtual machine
+migration, and debugging.
+
+Floating-point latexmath:[$n$]-bit transfer operations move external
+values held in IEEE standard formats into and out of the `f` registers,
+and comprise floating-point loads and stores
+(FLlatexmath:[$n$]/FSlatexmath:[$n$]) and floating-point move
+instructions (FMV.latexmath:[$n$].X/FMV.X.latexmath:[$n$]). A narrower
+latexmath:[$n$]-bit transfer, latexmath:[$n<$]FLEN, into the `f`
+registers will create a valid NaN-boxed value. A narrower
+latexmath:[$n$]-bit transfer out of the floating-point registers will
+transfer the lower latexmath:[$n$] bits of the register ignoring the
+upper FLENlatexmath:[$-n$] bits.
+
+Apart from transfer operations described in the previous paragraph, all
+other floating-point operations on narrower latexmath:[$n$]-bit
+operations, latexmath:[$n<$]FLEN, check if the input operands are
+correctly NaN-boxed, i.e., all upper FLENlatexmath:[$-n$] bits are 1. If
+so, the latexmath:[$n$] least-significant bits of the input are used as
+the input value, otherwise the input value is treated as an
+latexmath:[$n$]-bit canonical NaN.
+
+Earlier versions of this document did not define the behavior of feeding
+the results of narrower or wider operands into an operation, except to
+require that wider saves and restores would preserve the value of a
+narrower operand. The new definition removes this
+implementation-specific behavior, while still accommodating both
+non-recoded and recoded implementations of the floating-point unit. The
+new definition also helps catch software errors by propagating NaNs if
+values are used incorrectly.
+
+Non-recoded implementations unpack and pack the operands to IEEE
+standard format on the input and output of every floating-point
+operation. The NaN-boxing cost to a non-recoded implementation is
+primarily in checking if the upper bits of a narrower operation
+represent a legal NaN-boxed value, and in writing all 1s to the upper
+bits of a result.
+
+Recoded implementations use a more convenient internal format to
+represent floating-point values, with an added exponent bit to allow all
+values to be held normalized. The cost to the recoded implementation is
+primarily the extra tagging needed to track the internal types and sign
+bits, but this can be done without adding new state bits by recoding
+NaNs internally in the exponent field. Small modifications are needed to
+the pipelines used to transfer values in and out of the recoded format,
+but the datapath and latency costs are minimal. The recoding process has
+to handle shifting of input subnormal values for wide operands in any
+case, and extracting the NaN-boxed value is a similar process to
+normalization except for skipping over leading-1 bits instead of
+skipping over leading-0 bits, allowing the datapath muxing to be shared.
+
+[[fld_fsd]]
+=== Double-Precision Load and Store Instructions
+
+The FLD instruction loads a double-precision floating-point value from
+memory into floating-point register _rd_. FSD stores a double-precision
+value from the floating-point registers to memory.
+
+The double-precision value may be a NaN-boxed single-precision value.
+
+[[fprs-d]]
+
+M@R@F@R@O +
+& & & & +
+& & & & +
+& 5 & 3 & 5 & 7 +
+offset[11:0] & base & D & dest & LOAD-FP +
+
+O@R@R@F@R@O +
+& & & & & +
+& & & & & +
+& 5 & 5 & 3 & 5 & 7 +
+offset[11:5] & src & base & D & offset[4:0] & STORE-FP +
+
+FLD and FSD are only guaranteed to execute atomically if the effective
+address is naturally aligned and XLENlatexmath:[$\geq$]64.
+
+FLD and FSD do not modify the bits being transferred; in particular, the
+payloads of non-canonical NaNs are preserved.
+
+=== Double-Precision Floating-Point Computational Instructions
+
+The double-precision floating-point computational instructions are
+defined analogously to their single-precision counterparts, but operate
+on double-precision operands and produce double-precision results.
+
+R@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+FADD/FSUB & D & src2 & src1 & RM & dest & OP-FP +
+FMUL/FDIV & D & src2 & src1 & RM & dest & OP-FP +
+FMIN-MAX & D & src2 & src1 & MIN/MAX & dest & OP-FP +
+FSQRT & D & 0 & src & RM & dest & OP-FP +
+
+R@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+src3 & D & src2 & src1 & RM & dest & F[N]MADD/F[N]MSUB +
+
+=== Double-Precision Floating-Point Conversion and Move Instructions
+
+Floating-point-to-integer and integer-to-floating-point conversion
+instructions are encoded in the OP-FP major opcode space. FCVT.W.D or
+FCVT.L.D converts a double-precision floating-point number in
+floating-point register _rs1_ to a signed 32-bit or 64-bit integer,
+respectively, in integer register _rd_. FCVT.D.W or FCVT.D.L converts a
+32-bit or 64-bit signed integer, respectively, in integer register _rs1_
+into a double-precision floating-point number in floating-point register
+_rd_. FCVT.WU.D, FCVT.LU.D, FCVT.D.WU, and FCVT.D.LU variants convert to
+or from unsigned integer values. For RV64, FCVT.W[U].D sign-extends the
+32-bit result. FCVT.L[U].D and FCVT.D.L[U] are RV64-only instructions.
+The range of valid inputs for FCVT._int_.D and the behavior for invalid
+inputs are the same as for FCVT._int_.S.
+
+All floating-point to integer and integer to floating-point conversion
+instructions round according to the _rm_ field. Note FCVT.D.W[U] always
+produces an exact result and is unaffected by rounding mode.
+
+R@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+FCVT._int_.D & D & W[U]/L[U] & src & RM & dest & OP-FP +
+FCVT.D._int_ & D & W[U]/L[U] & src & RM & dest & OP-FP +
+
+The double-precision to single-precision and single-precision to
+double-precision conversion instructions, FCVT.S.D and FCVT.D.S, are
+encoded in the OP-FP major opcode space and both the source and
+destination are floating-point registers. The _rs2_ field encodes the
+datatype of the source, and the _fmt_ field encodes the datatype of the
+destination. FCVT.S.D rounds according to the RM field; FCVT.D.S will
+never round.
+
+R@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+FCVT.S.D & S & D & src & RM & dest & OP-FP +
+FCVT.D.S & D & S & src & RM & dest & OP-FP +
+
+Floating-point to floating-point sign-injection instructions, FSGNJ.D,
+FSGNJN.D, and FSGNJX.D are defined analogously to the single-precision
+sign-injection instruction.
+
+R@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+FSGNJ & D & src2 & src1 & J[N]/JX & dest & OP-FP +
+
+For XLENlatexmath:[$\geq$]64 only, instructions are provided to move bit
+patterns between the floating-point and integer registers. FMV.X.D moves
+the double-precision value in floating-point register _rs1_ to a
+representation in IEEE 754-2008 standard encoding in integer register
+_rd_. FMV.D.X moves the double-precision value encoded in IEEE 754-2008
+standard encoding from the integer register _rs1_ to the floating-point
+register _rd_.
+
+FMV.X.D and FMV.D.X do not modify the bits being transferred; in
+particular, the payloads of non-canonical NaNs are preserved.
+
+R@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+FMV.X.D & D & 0 & src & 000 & dest & OP-FP +
+FMV.D.X & D & 0 & src & 000 & dest & OP-FP +
+
+Early versions of the RISC-V ISA had additional instructions to allow
+RV32 systems to transfer between the upper and lower portions of a
+64-bit floating-point register and an integer register. However, these
+would be the only instructions with partial register writes and would
+add complexity in implementations with recoded floating-point or
+register renaming, requiring a pipeline read-modify-write sequence.
+Scaling up to handling quad-precision for RV32 and RV64 would also
+require additional instructions if they were to follow this pattern. The
+ISA was defined to reduce the number of explicit int-float register
+moves, by having conversions and comparisons write results to the
+appropriate register file, so we expect the benefit of these
+instructions to be lower than for other ISAs.
+
+We note that for systems that implement a 64-bit floating-point unit
+including fused multiply-add support and 64-bit floating-point loads and
+stores, the marginal hardware cost of moving from a 32-bit to a 64-bit
+integer datapath is low, and a software ABI supporting 32-bit wide
+address-space and pointers can be used to avoid growth of static data
+and dynamic memory traffic.
+
+=== Double-Precision Floating-Point Compare Instructions
+
+The double-precision floating-point compare instructions are defined
+analogously to their single-precision counterparts, but operate on
+double-precision operands.
+
+S@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+FCMP & D & src2 & src1 & EQ/LT/LE & dest & OP-FP +
+
+=== Double-Precision Floating-Point Classify Instruction
+
+The double-precision floating-point classify instruction, FCLASS.D, is
+defined analogously to its single-precision counterpart, but operates on
+double-precision operands.
+
+S@F@R@R@F@R@O +
+& & & & & & +
+& & & & & & +
+& 2 & 5 & 5 & 3 & 5 & 7 +
+FCLASS & D & 0 & src & 001 & dest & OP-FP +

@@ -1,0 +1,159 @@
+[[mstandard]]
+== `M` Standard Extension for Integer Multiplication and Division, Version 2.0
+
+This chapter describes the standard integer multiplication and division
+instruction extension, which is named `M` and contains instructions
+that multiply or divide values held in two integer registers.
+
+[TIP]
+====
+We separate integer multiply and divide out from the base to simplify
+low-end implementations, or for applications where integer multiply and
+divide operations are either infrequent or better handled in attached
+accelerators.
+====
+
+=== Multiplication Operations
+
+include::images/wavedrom/m-st-ext-for-int-mult.adoc[]
+[[m-st-ext-for-int-mult]]
+.Multiplication operation instructions
+image::image_placeholder.png[]
+(((MUL, MULH)))
+(((MUL, MULHU)))
+(((MUL, MULHSU)))
+
+MUL performs an XLEN-bitlatexmath:[$\times$]XLEN-bit multiplication of
+_rs1_ by _rs2_ and places the lower XLEN bits in the destination
+register. MULH, MULHU, and MULHSU perform the same multiplication but
+return the upper XLEN bits of the full 2latexmath:[$\times$]XLEN-bit
+product, for signedlatexmath:[$\times$]signed,
+unsignedlatexmath:[$\times$]unsigned, and latexmath:[$\times$]
+multiplication, respectively. If both the high and low bits of the same
+product are required, then the recommended code sequence is: MULH[[S]U]
+_rdh, rs1, rs2_; MUL _rdl, rs1, rs2_ (source register specifiers must be
+in same order and _rdh_ cannot be the same as _rs1_ or _rs2_).
+Microarchitectures can then fuse these into a single multiply operation
+instead of performing two separate multiplies.
+
+[NOTE]
+====
+MULHSU is used in multi-word signed multiplication to multiply the
+most-significant word of the multiplicand (which contains the sign bit)
+with the less-significant words of the multiplier (which are unsigned).
+====
+
+MULW is an RV64 instruction that multiplies the lower 32 bits of the
+source registers, placing the sign-extension of the lower 32 bits of the
+result into the destination register.
+
+[NOTE]
+====
+In RV64, MUL can be used to obtain the upper 32 bits of the 64-bit
+product, but signed arguments must be proper 32-bit signed values,
+whereas unsigned arguments must have their upper 32 bits clear. If the
+arguments are not known to be sign- or zero-extended, an alternative is
+to shift both arguments left by 32 bits, then use MULH[[S]U].
+====
+
+=== Division Operations
+
+include::images/wavedrom/division-op.adoc[]
+[[division-op]]
+.Division operation instructions
+image::image_placeholder.png[]
+(((MUL, DIV)))
+(((MUL, DIVU)))
+
+DIV and DIVU perform an XLEN bits by XLEN bits signed and unsigned
+integer division of _rs1_ by _rs2_, rounding towards zero. REM and REMU
+provide the remainder of the corresponding division operation. For REM,
+the sign of the result equals the sign of the dividend.
+
+[NOTE]
+====
+For both signed and unsigned division, it holds that
+latexmath:[$\textrm{dividend} = \textrm{divisor} \times \textrm{quotient} + \textrm{remainder}$].
+====
+
+If both the quotient and remainder are required from the same division,
+the recommended code sequence is: DIV[U] _rdq, rs1, rs2_; REM[U] _rdr,
+rs1, rs2_ (_rdq_ cannot be the same as _rs1_ or _rs2_).
+Microarchitectures can then fuse these into a single divide operation
+instead of performing two separate divides.
+
+DIVW and DIVUW are RV64 instructions that divide the lower 32 bits of
+_rs1_ by the lower 32 bits of _rs2_, treating them as signed and
+unsigned integers respectively, placing the 32-bit quotient in _rd_,
+sign-extended to 64 bits. REMW and REMUW are RV64 instructions that
+provide the corresponding signed and unsigned remainder operations
+respectively. Both REMW and REMUW always sign-extend the 32-bit result
+to 64 bits, including on a divide by zero.
+(((MUL, div by zero)))
+
+The semantics for division by zero and division overflow are summarized
+in <<divby0>>. The quotient of division by zero has all bits
+set, and the remainder of division by zero equals the dividend. Signed
+division overflow occurs only when the most-negative integer is divided
+by latexmath:[$-1$]. The quotient of a signed division with overflow is
+equal to the dividend, and the remainder is zero. Unsigned division
+overflow cannot occur.
+
+[[divby0]]
+.Semantics for division by zero and division overflow.
+[cols="<,^,^,^,^,^,^",options="header",]
+|===
+|Condition |Dividend |Divisor |DIVU[W] |REMU[W] |DIV[W] |REM[W]
+|Division by zero |latexmath:[$x$] |0 |latexmath:[$2^{L}-1$]
+|latexmath:[$x$] |latexmath:[$-1$] |latexmath:[$x$]
+
+|Overflow (signed only) |latexmath:[$-2^{L-1}$] |latexmath:[$-1$] |– |–
+|latexmath:[$-2^{L-1}$] |0
+|===
+
+In <<divby0>>, L is the width of the operation in bits: XLEN for DIV[U] and REM[U], or 32 for DIV[U]W and REM[U]W.
+
+[TIP]
+====
+We considered raising exceptions on integer divide by zero, with these
+exceptions causing a trap in most execution environments. However, this
+would be the only arithmetic trap in the standard ISA (floating-point
+exceptions set flags and write default values, but do not cause traps)
+and would require language implementors to interact with the execution
+environment’s trap handlers for this case. Further, where language
+standards mandate that a divide-by-zero exception must cause an
+immediate control flow change, only a single branch instruction needs to
+be added to each divide operation, and this branch instruction can be
+inserted after the divide and should normally be very predictably not
+taken, adding little runtime overhead.
+
+The value of all bits set is returned for both unsigned and signed
+divide by zero to simplify the divider circuitry. The value of all 1s is
+both the natural value to return for unsigned divide, representing the
+largest unsigned number, and also the natural result for simple unsigned
+divider implementations. Signed division is often implemented using an
+unsigned division circuit and specifying the same overflow result
+simplifies the hardware.
+====
+
+=== Zmmul Extension, Version 0.1
+
+The Zmmul extension implements the multiplication subset of the M
+extension. It adds all of the instructions defined in
+<<Multiplication Operations>>, namely: MUL, MULH, MULHU,
+MULHSU, and (for RV64 only) MULW. The encodings are identical to those
+of the corresponding M-extension instructions.
+(((MUL, Zmmul)))
+
+[NOTE]
+====
+The Zmmul extension enables low-cost implementations that require
+multiplication operations but not division. For many microcontroller
+applications, division operations are too infrequent to justify the cost
+of divider hardware. By contrast, multiplication operations are more
+frequent, making the cost of multiplier hardware more justifiable.
+Simple FPGA soft cores particularly benefit from eliminating division
+but retaining multiplication, since many FPGAs provide hardwired
+multipliers but require dividers be implemented in soft logic.
+====
+

@@ -1,0 +1,252 @@
+[[rv64]]
+== RV64I Base Integer Instruction Set, Version 2.1
+
+This chapter describes the RV64I base integer instruction set, which
+builds upon the RV32I variant described in <<rv32>>.
+This chapter presents only the differences with RV32I, so should be read
+in conjunction with the earlier chapter.
+
+=== Register State
+
+RV64I widens the integer registers and supported user address space to
+64 bits (XLEN=64 in <<gprs>>.
+
+=== Integer Computational Instructions
+
+Most integer computational instructions operate on XLEN-bit values.
+Additional instruction variants are provided to manipulate 32-bit values
+in RV64I, indicated by a `W` suffix to the opcode. These `\*W`
+instructions ignore the upper 32 bits of their inputs and always produce
+32-bit signed values, sign-extending them to 64 bits, i.e. bits XLEN-1
+through 31 are equal.
+
+The compiler and calling convention maintain an invariant that all
+32-bit values are held in a sign-extended format in 64-bit registers.
+Even 32-bit unsigned integers extend bit 31 into bits 63 through 32.
+Consequently, conversion between unsigned and signed 32-bit integers is
+a no-op, as is conversion from a signed 32-bit integer to a signed
+64-bit integer. Existing 64-bit wide SLTU and unsigned branch compares
+still operate correctly on unsigned 32-bit integers under this
+invariant. Similarly, existing 64-bit wide logical operations on 32-bit
+sign-extended integers preserve the sign-extension property. A few new
+instructions (ADD[I]W/SUBW/SxxW) are required for addition and shifts to
+ensure reasonable performance for 32-bit values.
+(((RV64I, shifts)))
+(((RV64I, compares)))
+
+==== Integer Register-Immediate Instructions
+
+include::images/wavedrom/rv64i-base-int.adoc[]
+[[rv64i-base-int]]
+.RV64I register-immediate instructions
+image::image_placeholder.png[]
+
+ADDIW is an RV64I instruction that adds the sign-extended 12-bit
+immediate to register _rs1_ and produces the proper sign-extension of a
+32-bit result in _rd_. Overflows are ignored and the result is the low
+32 bits of the result sign-extended to 64 bits. Note, ADDIW _rd, rs1, 0_
+writes the sign-extension of the lower 32 bits of register _rs1_ into
+register _rd_ (assembler pseudoinstruction SEXT.W).
+//`the following diagram doesn't match the tex spec`
+
+include::images/wavedrom/rv64i-addiw.adoc[]
+[[rv64i-addiw]]
+.RV64I register-immediate (descr ADDIW) instructions
+image::image_placeholder.png[]
+
+Shifts by a constant are encoded as a specialization of the I-type
+format using the same instruction opcode as RV32I. The operand to be
+shifted is in _rs1_, and the shift amount is encoded in the lower 6 bits
+of the I-immediate field for RV64I. The right shift type is encoded in
+bit 30. SLLI is a logical left shift (zeros are shifted into the lower
+bits); SRLI is a logical right shift (zeros are shifted into the upper
+bits); and SRAI is an arithmetic right shift (the original sign bit is
+copied into the vacated upper bits).
+(((RV64I, SLLI)))
+(((RV64I, SRKIW)))
+(((RV64I, SRLIW)))
+(((RV64I, RV64I-only)))
+
+
+SLLIW, SRLIW, and SRAIW are RV64I-only instructions that are analogously
+defined but operate on 32-bit values and sign-extend their 32-bit
+results to 64 bits. SLLIW, SRLIW, and SRAIW encodings with
+latexmath:[$imm[5] \neq 0$] are reserved.
+
+[NOTE]
+====
+Previously, SLLIW, SRLIW, and SRAIW with latexmath:[$imm[5] \neq 0$]
+were defined to cause illegal instruction exceptions, whereas now they
+are marked as reserved. This is a backwards-compatible change.
+====
+
+include::images/wavedrom/rv64_lui-auipc.adoc[]
+[[rv64_lui-auipc]]
+.RV64I register-immediate (descr) instructions
+image::image_placeholder.png[]
+
+LUI (load upper immediate) uses the same opcode as RV32I. LUI places the
+32-bit U-immediate into register _rd_, filling in the lowest 12 bits
+with zeros. The 32-bit result is sign-extended to 64 bits.
+
+AUIPC (add upper immediate to `pc`) uses the same opcode as RV32I. AUIPC
+is used to build ` pc`-relative addresses and uses the U-type format.
+AUIPC forms a 32-bit offset from the U-immediate, filling in the lowest
+12 bits with zeros, sign-extends the result to 64 bits, adds it to the
+address of the AUIPC instruction, then places the result in register
+_rd_.
+
+Note that the set of address offsets that can be formed by pairing LUI
+with LD, AUIPC with JALR, etc.in RV64I is
+[latexmath:[${-}2^{31}{-}2^{11}$], latexmath:[$2^{31}{-}2^{11}{-}1$]].
+
+==== Integer Register-Register Operations
+
+//`this diagrM doesn't match the tex specification`
+include::images/wavedrom/rv64i_int-reg-reg.adoc[]
+[[int_reg-reg]]
+.RV64I integer register-register instructions
+image::image_placeholder.png[]
+
+ADDW and SUBW are RV64I-only instructions that are defined analogously
+to ADD and SUB but operate on 32-bit values and produce signed 32-bit
+results. Overflows are ignored, and the low 32-bits of the result is
+sign-extended to 64-bits and written to the destination register.
+
+SLL, SRL, and SRA perform logical left, logical right, and arithmetic
+right shifts on the value in register _rs1_ by the shift amount held in
+register _rs2_. In RV64I, only the low 6 bits of _rs2_ are considered
+for the shift amount.
+
+SLLW, SRLW, and SRAW are RV64I-only instructions that are analogously
+defined but operate on 32-bit values and sign-extend their 32-bit
+results to 64 bits. The shift amount is given by _rs2[4:0]_.
+
+=== Load and Store Instructions
+
+RV64I extends the address space to 64 bits. The execution environment
+will define what portions of the address space are legal to access.
+
+include::images/wavedrom/load_store.adoc[]
+[[load_store]]
+.Load and store instructions
+image::image_placeholder.png[]
+
+The LD instruction loads a 64-bit value from memory into register _rd_
+for RV64I.
+(((RV64I, LD)))
+
+The LW instruction loads a 32-bit value from memory and sign-extends
+this to 64 bits before storing it in register _rd_ for RV64I. The LWU
+instruction, on the other hand, zero-extends the 32-bit value from
+memory for RV64I. LH and LHU are defined analogously for 16-bit values,
+as are LB and LBU for 8-bit values. The SD, SW, SH, and SB instructions
+store 64-bit, 32-bit, 16-bit, and 8-bit values from the low bits of
+register _rs2_ to memory respectively.
+
+[[sec:rv64i-hints]]
+=== HINT Instructions
+
+All instructions that are microarchitectural HINTs in RV32I (see
+<<rv32i-hints>> are also HINTs in RV64I.
+The additional computational instructions in RV64I expand both the
+standard and custom HINT encoding spaces.
+(((RV64I, HINT)))
+
+<<rv64i-hints>> lists all RV64I HINT code points. 91% of the
+HINT space is reserved for standard HINTs, but none are presently
+defined. The remainder of the HINT space is designated for custom HINTs;
+no standard HINTs will ever be defined in this subspace.
+
+[[rv64i-hints]]
+.RV64I HINT instructions.
+[cols="<,<,^,<",options="header",]
+|===
+|Instruction |Constraints |Code Points |Purpose
+|LUI |_rd_=`x0` |latexmath:[$2^{20}$] |_Reserved for future standard
+use_
+
+|AUIPC | |_rd_=`x0` |latexmath:[$2^{20}$]
+
+| | |_rd_=`x0`, and either |latexmath:[$2^{17}-1$]
+
+| | |_rs1_latexmath:[$\neq$]`x0` or _imm_latexmath:[$\neq$]0 |
+
+|ANDI | |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|ORI | |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|XORI | |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|ADDIW | |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|ADD | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SUB | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|AND | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|OR | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|XOR | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SLL | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRL | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRA | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|ADDW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SUBW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SLLW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRLW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRAW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+| | |_rd_=`x0`, _rs1_latexmath:[$\neq$]`x0`, |latexmath:[$2^{10}-63$]
+
+| | |_fm_=0, and either |
+
+| | |_pred_=0 or _succ_=0 |
+
+| | |_rd_latexmath:[$\neq$]`x0`, _rs1_=`x0`, |latexmath:[$2^{10}-63$]
+
+| | |_fm_=0, and either |
+
+| | |_pred_=0 or _succ_=0 |
+
+| | |_rd_=_rs1_=`x0`, _fm_=0, |15
+
+| | |_pred_=0, _succ_latexmath:[$\neq$]0 |
+
+| | |_rd_=_rs1_=`x0`, _fm_=0, |15
+
+| | |_pred_latexmath:[$\neq$]W, _succ_=0 |
+
+|FENCE | |_rd_=_rs1_=`x0`, _fm_=0, |1
+
+| |_pred_=W, _succ_=0 | |
+
+|SLTI |_rd_=`x0` |latexmath:[$2^{17}$] |_Designated for custom use_
+
+|SLTIU | |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|SLLI | |_rd_=`x0` |latexmath:[$2^{11}$]
+
+|SRLI | |_rd_=`x0` |latexmath:[$2^{11}$]
+
+|SRAI | |_rd_=`x0` |latexmath:[$2^{11}$]
+
+|SLLIW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRLIW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRAIW | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SLT | |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SLTU | |_rd_=`x0` |latexmath:[$2^{10}$]
+|===

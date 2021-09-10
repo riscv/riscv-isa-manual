@@ -1,0 +1,242 @@
+[[csrinsts]]
+== `Zicsr`, Control and Status Register (CSR) Instructions, Version 2.0
+
+RISC-V defines a separate address space of 4096 Control and Status
+registers associated with each hart. This chapter defines the full set
+of CSR instructions that operate on these CSRs.
+
+[NOTE]
+====
+While CSRs are primarily used by the privileged architecture, there are
+several uses in unprivileged code including for counters and timers, and
+for floating-point status.
+
+The counters and timers are no longer considered mandatory parts of the
+standard base ISAs, and so the CSR instructions required to access them
+have been moved out of <<rv32>> into this separate
+chapter.
+====
+
+=== CSR Instructions
+((CSR))
+
+All CSR instructions atomically read-modify-write a single CSR, whose
+CSR specifier is encoded in the 12-bit _csr_ field of the instruction
+held in bits 31–20. The immediate forms use a 5-bit zero-extended
+immediate encoded in the _rs1_ field.
+(((CSR, instructions)))
+
+include::images/wavedrom/csr-instr.adoc[]
+[[csr-instr]]
+.CSR instructions
+image::image_placeholder.png[]
+(((CSR, CSSRW)))
+
+The CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in
+the CSRs and integer registers. CSRRW reads the old value of the CSR,
+zero-extends the value to XLEN bits, then writes it to integer register
+_rd_. The initial value in _rs1_ is written to the CSR. If _rd_=`x0`,
+then the instruction shall not read the CSR and shall not cause any of
+the side effects that might occur on a CSR read.
+(((CSR, CSSRS)))
+
+The CSRRS (Atomic Read and Set Bits in CSR) instruction reads the value
+of the CSR, zero-extends the value to XLEN bits, and writes it to
+integer register _rd_. The initial value in integer register _rs1_ is
+treated as a bit mask that specifies bit positions to be set in the CSR.
+Any bit that is high in _rs1_ will cause the corresponding bit to be set
+in the CSR, if that CSR bit is writable. Other bits in the CSR are not
+explicitly written.
+(((CSR, CSRRC)))
+
+The CSRRC (Atomic Read and Clear Bits in CSR) instruction reads the
+value of the CSR, zero-extends the value to XLEN bits, and writes it to
+integer register _rd_. The initial value in integer register _rs1_ is
+treated as a bit mask that specifies bit positions to be cleared in the
+CSR. Any bit that is high in _rs1_ will cause the corresponding bit to
+be cleared in the CSR, if that CSR bit is writable. Other bits in the
+CSR are not explicitly written.
+
+For both CSRRS and CSRRC, if _rs1_=`x0`, then the instruction will not
+write to the CSR at all, and so shall not cause any of the side effects
+that might otherwise occur on a CSR write, nor raise illegal instruction
+exceptions on accesses to read-only CSRs. Both CSRRS and CSRRC always
+read the addressed CSR and cause any read side effects regardless of
+_rs1_ and _rd_ fields. Note that if _rs1_ specifies a register holding a
+zero value other than ` x0`, the instruction will still attempt to write
+the unmodified value back to the CSR and will cause any attendant side
+effects. A CSRRW with _rs1_=`x0` will attempt to write zero to the
+destination CSR.
+(((CSR, CSRRWI)))
+(((CSR, CSRRCI)))
+
+The CSRRWI, CSRRSI, and CSRRCI variants are similar to CSRRW, CSRRS, and
+CSRRC respectively, except they update the CSR using an XLEN-bit value
+obtained by zero-extending a 5-bit unsigned immediate (uimm[4:0]) field
+encoded in the _rs1_ field instead of a value from an integer register.
+For CSRRSI and CSRRCI, if the uimm[4:0] field is zero, then these
+instructions will not write to the CSR, and shall not cause any of the
+side effects that might otherwise occur on a CSR write, nor raise
+illegal instruction exceptions on accesses to read-only CSRs. For
+CSRRWI, if _rd_=`x0`, then the instruction shall not read the CSR and
+shall not cause any of the side effects that might occur on a CSR read.
+Both CSRRSI and CSRRCI will always read the CSR and cause any read side
+effects regardless of _rd_ and _rs1_ fields.
+(((CSR, side effects)))
+
+[[csrsideeffects]]
+.Conditions determining whether a CSR instruction reads or writes the
+specified CSR.
+[cols="<,^,^,^,^",options="header",]
+|===
+|Register operand | | | |
+|Instruction |_rd_ is `x0` |_rs1_ is `x0` |Reads CSR |Writes CSR
+
+|CSRRW |Yes |– |No |Yes
+
+|CSRRW |No |– |Yes |Yes
+
+|CSRRS/CSRRC |– |Yes |Yes |No
+
+|CSRRS/CSRRC |– |No |Yes |Yes
+
+|Immediate operand | | | |
+
+|Instruction |_rd_ is `x0` |_uimm_ latexmath:[$=$]0 |Reads CSR |Writes
+CSR
+
+|CSRRWI |Yes |– |No |Yes
+
+|CSRRWI |No |– |Yes |Yes
+
+|CSRRSI/CSRRCI |– |Yes |Yes |No
+
+|CSRRSI/CSRRCI |– |No |Yes |Yes
+|===
+(((CSR, defects)))
+
+<<csrsideeffects>> summarizes the behavior of the CSR
+instructions with respect to whether they read and/or write the CSR.
+
+For any event or consequence that occurs due to a CSR having a
+particular value, if a write to the CSR gives it that value, the
+resulting event or consequence is said to be an _indirect effect_ of the
+write. Indirect effects of a CSR write are not considered by the RISC-V
+ISA to be side effects of that write.
+
+[TIP]
+====
+An example of side effects for CSR accesses would be if reading from a
+specific CSR causes a light bulb to turn on, while writing an odd value
+to the same CSR causes the light to turn off. Assume writing an even
+value has no effect. In this case, both the read and write have side
+effects controlling whether the bulb is lit, as this condition is not
+determined solely from the CSR value. (Note that after writing an odd
+value to the CSR to turn off the light, then reading to turn the light
+on, writing again the same odd value causes the light to turn off again.
+Hence, on the last write, it is not a change in the CSR value that turns
+off the light.)
+
+On the other hand, if a bulb is rigged to light whenever the value of a
+particular CSR is odd, then turning the light on and off is not
+considered a side effect of writing to the CSR but merely an indirect
+effect of such writes.
+
+More concretely, the RISC-V privileged architecture defined in Volume II
+specifies that certain combinations of CSR values cause a trap to occur.
+When an explicit write to a CSR creates the conditions that trigger the
+trap, the trap is not considered a side effect of the write but merely
+an indirect effect.
+// check whether we are using "volume"
+
+Standard CSRs do not have any side effects on reads. Standard CSRs may
+have side effects on writes. Custom extensions might add CSRs for which
+accesses have side effects on either reads or writes.
+====
+
+Some CSRs, such as the instructions-retired counter, `instret`, may be
+modified as side effects of instruction execution. In these cases, if a
+CSR access instruction reads a CSR, it reads the value prior to the
+execution of the instruction. If a CSR access instruction writes such a
+CSR, the write is done instead of the increment. In particular, a value
+written to `instret` by one instruction will be the value read by the
+following instruction.
+
+The assembler pseudoinstruction to read a CSR, CSRR _rd, csr_, is
+encoded as CSRRS _rd, csr, x0_. The assembler pseudoinstruction to write
+a CSR, CSRW _csr, rs1_, is encoded as CSRRW _x0, csr, rs1_, while CSRWI
+_csr, uimm_, is encoded as CSRRWI _x0, csr, uimm_.
+
+Further assembler pseudoinstructions are defined to set and clear bits
+in the CSR when the old value is not required: CSRS/CSRC _csr, rs1_;
+CSRSI/CSRCI _csr, uimm_.
+
+==== CSR Access Ordering
+(((CSR, access ordering)))
+
+Each RISC-V hart normally observes its own CSR accesses, including its
+implicit CSR accesses, as performed in program order. In particular,
+unless specified otherwise, a CSR access is performed after the
+execution of any prior instructions in program order whose behavior
+modifies or is modified by the CSR state and before the execution of any
+subsequent instructions in program order whose behavior modifies or is
+modified by the CSR state. Furthermore, an explicit CSR read returns the
+CSR state before the execution of the instruction, while an explict CSR
+write suppresses and overrides any implicit writes or modifications to
+the same CSR by the same instruction.
+
+Likewise, any side effects from an explicit CSR access are normally
+observed to occur synchronously in program order. Unless specified
+otherwise, the full consequences of any such side effects are observable
+by the very next instruction, and no consequences may be observed
+out-of-order by preceding instructions. (Note the distinction made
+earlier between side effects and indirect effects of CSR writes.)
+
+For the RVWMO memory consistency model <<memorymodel>>, CSR accesses are weakly
+ordered by default, so other harts or devices may observe CSR accesses
+in an order different from program order. In addition, CSR accesses are
+not ordered with respect to explicit memory accesses, unless a CSR
+access modifies the execution behavior of the instruction that performs
+the explicit memory access or unless a CSR access and an explicit memory
+access are ordered by either the syntactic dependencies defined by the
+memory model or the ordering requirements defined by the Memory-Ordering
+PMAs section in Volume II of this manual. To enforce ordering in all
+other cases, software should execute a FENCE instruction between the
+relevant accesses. For the purposes of the FENCE instruction, CSR read
+accesses are classified as device input (I), and CSR write accesses are
+classified as device output (O).
+
+[NOTE]
+====
+Informally, the CSR space acts as a weakly ordered memory-mapped I/O
+region, as defined by the Memory-Ordering PMAs section in Volume II of
+this manual. As a result, the order of CSR accesses with respect to all
+other accesses is constrained by the same mechanisms that constrain the
+order of memory-mapped I/O accesses to such a region.
+
+These CSR-ordering constraints are imposed to support ordering main
+memory and memory-mapped I/O accesses with respect to CSR accesses that
+are visible to, or affected by, devices or other harts. Examples include
+the `time`, `cycle`, and `mcycle` CSRs, in addition to CSRs that reflect
+pending interrupts, like `mip` and `sip`. Note that implicit reads of
+such CSRs (e.g., taking an interrupt because of a change in `mip`) are
+also ordered as device input.
+====
+
+Most CSRs (including, e.g., the `fcsr`) are not visible to other harts;
+their accesses can be freely reordered in the global memory order with
+respect to FENCE instructions without violating this specification.
+
+The hardware platform may define that accesses to certain CSRs are
+strongly ordered, as defined by the Memory-Ordering PMAs section in
+Volume II of this manual. Accesses to strongly ordered CSRs have
+stronger ordering constraints with respect to accesses to both weakly
+ordered CSRs and accesses to memory-mapped I/O regions.
+
+[NOTE]
+====
+The rules for the reordering of CSR accesses in the global memory order
+should probably be moved to <<memorymodel>>
+concerning the RVWMO memory consistency model.
+====
+

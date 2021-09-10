@@ -1,0 +1,988 @@
+[[rv32]]
+== RV32I Base Integer Instruction Set, Version 2.1
+
+This chapter describes the RV32I base integer instruction set.
+
+[TIP]
+====
+RV32I was designed to be sufficient to form a compiler target and to
+support modern operating system environments. The ISA was also designed
+to reduce the hardware required in a minimal implementation. RV32I
+contains 40 unique instructions, though a simple implementation might
+cover the ECALL/EBREAK instructions with a single SYSTEM hardware
+instruction that always traps and might be able to implement the FENCE
+instruction as a NOP, reducing base instruction count to 38 total. RV32I
+can emulate almost any other ISA extension (except the A extension,
+which requires additional hardware support for atomicity).
+
+In practice, a hardware implementation including the machine-mode
+privileged architecture will also require the 6 CSR instructions.
+
+Subsets of the base integer ISA might be useful for pedagogical
+purposes, but the base has been defined such that there should be little
+incentive to subset a real hardware implementation beyond omitting
+support for misaligned memory accesses and treating all SYSTEM
+instructions as a single trap.
+====
+
+[NOTE]
+====
+The standard RISC-V assembly language syntax is documented in the
+Assembly Programmer’s Manual cite:[riscv-asm-manual].
+
+Most of the commentary for RV32I also applies to the RV64I base.
+====
+
+=== Programmers’ Model for Base Integer ISA
+
+<<img-gprs>> shows the unprivileged state for the base
+integer ISA. For RV32I, the 32 `x` registers are each 32 bits wide,
+i.e., XLEN=32. Register `x0` is hardwired with all bits equal to 0.
+General purpose registers `x1`–`x31` hold values that various
+instructions interpret as a collection of Boolean values, or as two’s
+complement signed binary integers or unsigned binary integers.
+
+There is one additional unprivileged register: the program counter `pc`
+holds the address of the current instruction.
+
+[[img-gprs]]
+.RISC-V base unprivileged integer register state.
+image::base-unpriv-reg-state.png[base,180,1000,align="center"]
+
+There is no dedicated stack pointer or subroutine return address link
+register in the Base Integer ISA; the instruction encoding allows any
+`x` register to be used for these purposes. However, the standard
+software calling convention uses register `x1` to hold the return
+address for a call, with register `x5` available as an alternate link
+register. The standard calling convention uses register `x2` as the
+stack pointer.
+
+Hardware might choose to accelerate function calls and returns that use
+`x1` or `x5`. See the descriptions of the JAL and JALR instructions.
+
+The optional compressed 16-bit instruction format is designed around the
+assumption that `x1` is the return address register and ` x2` is the
+stack pointer. Software using other conventions will operate correctly
+but may have greater code size.
+
+The number of available architectural registers can have large impacts
+on code size, performance, and energy consumption. Although 16 registers
+would arguably be sufficient for an integer ISA running compiled code,
+it is impossible to encode a complete ISA with 16 registers in 16-bit
+instructions using a 3-address format. Although a 2-address format would
+be possible, it would increase instruction count and lower efficiency.
+We wanted to avoid intermediate instruction sizes (such as Xtensa’s
+24-bit instructions) to simplify base hardware implementations, and once
+a 32-bit instruction size was adopted, it was straightforward to support
+32 integer registers. A larger number of integer registers also helps
+performance on high-performance code, where there can be extensive use
+of loop unrolling, software pipelining, and cache tiling.
+
+For these reasons, we chose a conventional size of 32 integer registers
+for RV32I. Dynamic register usage tends to be dominated by a few
+frequently accessed registers, and regfile implementations can be
+optimized to reduce access energy for the frequently accessed
+registers . The optional compressed 16-bit instruction format mostly
+only accesses 8 registers and hence can provide a dense instruction
+encoding, while additional instruction-set extensions could support a
+much larger register space (either flat or hierarchical) if desired.
+
+For resource-constrained embedded applications, we have defined the
+RV32E subset, which only has 16 registers
+(<<rv32e>>).
+
+=== Base Instruction Formats
+
+In the base RV32I ISA, there are four core instruction formats
+(R/I/S/U), as shown in <<base_instr>>. All are a fixed 32
+bits in length and must be aligned on a four-byte boundary in memory. An
+instruction-address-misaligned exception is generated on a taken branch
+or unconditional jump if the target address is not four-byte aligned.
+This exception is reported on the branch or jump instruction, not on the
+target instruction. No instruction-address-misaligned exception is
+generated for a conditional branch that is not taken.
+
+The alignment constraint for base ISA instructions is relaxed to a
+two-byte boundary when instruction extensions with 16-bit lengths or
+other odd multiples of 16-bit lengths are added (i.e., IALIGN=16).
+
+Instruction-address-misaligned exceptions are reported on the branch or
+jump that would cause instruction misalignment to help debugging, and to
+simplify hardware design for systems with IALIGN=32, where these are the
+only places where misalignment can occur.
+
+The behavior upon decoding a reserved instruction is UNSPECIFIED.
+
+Some platforms may require that opcodes reserved for standard use raise
+an illegal-instruction exception. Other platforms may permit reserved
+opcode space be used for non-conforming extensions.
+
+include::images/wavedrom/instruction_formats.adoc[]
+[[base_instr]]
+.Instruction formats
+image::image_placeholder.png[]
+
+[NOTE]
+====
+Each immediate subfield in <<base_instr>> above is labeled with the bit position (imm[x ]) in the immediate value being produced, rather than the bit position within the instruction’s immediate field as is usually done.
+====
+
+The RISC-V ISA keeps the source (_rs1_ and _rs2_) and destination (_rd_)
+registers at the same position in all formats to simplify decoding.
+Except for the 5-bit immediates used in CSR instructions
+(<<csrinsts>>), immediates are always
+sign-extended, and are generally packed towards the leftmost available
+bits in the instruction and have been allocated to reduce hardware
+complexity. In particular, the sign bit for all immediates is always in
+bit 31 of the instruction to speed sign-extension circuitry.
+
+[NOTE]
+====
+Decoding register specifiers is usually on the critical paths in
+implementations, and so the instruction format was chosen to keep all
+register specifiers at the same position in all formats at the expense
+of having to move immediate bits across formats (a property shared with
+RISC-IV aka. cite:[spur-jsscc1989]).
+
+In practice, most immediates are either small or require all XLEN bits.
+We chose an asymmetric immediate split (12 bits in regular instructions
+plus a special load-upper-immediate instruction with 20 bits) to
+increase the opcode space available for regular instructions.
+
+Immediates are sign-extended because we did not observe a benefit to
+using zero-extension for some immediates as in the MIPS ISA and wanted
+to keep the ISA as simple as possible.
+====
+
+=== Immediate Encoding Variants
+
+There are a further two variants of the instruction formats (B/J) based
+on the handling of immediates, as shown in <<baseinstformatsimm>>.
+
+include::images/wavedrom/immediate_variants.adoc[]
+[[baseinstformatsimm]]
+.RISC-V base instruction formats.
+image::image_placeholder.png[]
+
+[NOTE]
+====
+Each immediate subfield is labeled with the bit
+position (imm[x ]) in the immediate value being produced, rather than the bit position within the
+instruction’s immediate field as is usually done.
+====
+
+The only difference between the S and B formats is that the 12-bit
+immediate field is used to encode branch offsets in multiples of 2 in
+the B format. Instead of shifting all bits in the instruction-encoded
+immediate left by one in hardware as is conventionally done, the middle
+bits (imm[10:1]) and sign bit stay in fixed positions, while the lowest
+bit in S format (inst[7]) encodes a high-order bit in B format.
+
+Similarly, the only difference between the U and J formats is that the
+20-bit immediate is shifted left by 12 bits to form U immediates and by
+1 bit to form J immediates. The location of instruction bits in the U
+and J format immediates is chosen to maximize overlap with the other
+formats and with each other.
+
+<<immtypes>> shows the immediates produced by
+each of the base instruction formats, and is labeled to show which
+instruction bit `(inst[_y_])` produces each bit of the immediate value.
+
+include::images/wavedrom/immediate.adoc[]
+[[immtypes]]
+.Immediate variants for I, S, B, U, and J
+image::image_placeholder.png[]
+
+
+Sign-extension is one of the most critical operations on immediates
+(particularly for XLEN latexmath:[$>$]32), and in RISC-V the sign bit for
+all immediates is always held in bit 31 of the instruction to allow
+sign-extension to proceed in parallel with instruction decoding.
+
+Although more complex implementations might have separate adders for
+branch and jump calculations and so would not benefit from keeping the
+location of immediate bits constant across types of instruction, we
+wanted to reduce the hardware cost of the simplest implementations. By
+rotating bits in the instruction encoding of B and J immediates instead
+of using dynamic hardware muxes to multiply the immediate by 2, we
+reduce instruction signal fanout and immediate mux costs by around a
+factor of 2. The scrambled immediate encoding will add negligible time
+to static or ahead-of-time compilation. For dynamic generation of
+instructions, there is some small additional overhead, but the most
+common short forward branches have straightforward immediate encodings.
+
+=== Integer Computational Instructions
+
+Most integer computational instructions operate on XLEN bits of values
+held in the integer register file. Integer computational instructions
+are either encoded as register-immediate operations using the I-type
+format or as register-register operations using the R-type format. The
+destination is register _rd_ for both register-immediate and
+register-register instructions. No integer computational instructions
+cause arithmetic exceptions.
+
+We did not include special instruction-set support for overflow checks
+on integer arithmetic operations in the base instruction set, as many
+overflow checks can be cheaply implemented using RISC-V branches.
+Overflow checking for unsigned addition requires only a single
+additional branch instruction after the addition:
+`add t0, t1, t2; bltu t0, t1, overflow`.
+
+For signed addition, if one operand’s sign is known, overflow checking
+requires only a single branch after the addition:
+`addi t0, t1, +imm; blt t0, t1, overflow`. This covers the common case
+of addition with an immediate operand.
+
+For general signed addition, three additional instructions after the
+addition are required, leveraging the observation that the sum should be
+less than one of the operands if and only if the other operand is
+negative.
+
+[source,txt]
+....
+         add t0, t1, t2
+         slti t3, t2, 0
+         slt t4, t0, t1
+         bne t3, t4, overflow
+....
+
+In RV64I, checks of 32-bit signed additions can be optimized further by
+comparing the results of ADD and ADDW on the operands.
+
+==== Integer Register-Immediate Instructions
+
+include::images/wavedrom/integer_computational.adoc[]
+.Integer Computational Instructions
+image::image_placeholder.png[]
+
+ADDI adds the sign-extended 12-bit immediate to register _rs1_.
+Arithmetic overflow is ignored and the result is simply the low XLEN
+bits of the result. ADDI _rd, rs1, 0_ is used to implement the MV _rd,
+rs1_ assembler pseudoinstruction.
+
+SLTI (set less than immediate) places the value 1 in register _rd_ if
+register _rs1_ is less than the sign-extended immediate when both are
+treated as signed numbers, else 0 is written to _rd_. SLTIU is similar
+but compares the values as unsigned numbers (i.e., the immediate is
+first sign-extended to XLEN bits then treated as an unsigned number).
+Note, SLTIU _rd, rs1, 1_ sets _rd_ to 1 if _rs1_ equals zero, otherwise
+sets _rd_ to 0 (assembler pseudoinstruction SEQZ _rd, rs_).
+
+ANDI, ORI, XORI are logical operations that perform bitwise AND, OR, and
+XOR on register _rs1_ and the sign-extended 12-bit immediate and place
+the result in _rd_. Note, XORI _rd, rs1, -1_ performs a bitwise logical
+inversion of register _rs1_ (assembler pseudoinstruction NOT _rd, rs_).
+
+include::images/wavedrom/int-comp-slli-srli-srai.adoc[]
+[[int-comp-slli-srli-srai]]
+.Integer register-immediate, SLLI, SRLI, SRAI
+image::image_placeholder.png[]
+
+
+Shifts by a constant are encoded as a specialization of the I-type
+format. The operand to be shifted is in _rs1_, and the shift amount is
+encoded in the lower 5 bits of the I-immediate field. The right shift
+type is encoded in bit 30. SLLI is a logical left shift (zeros are
+shifted into the lower bits); SRLI is a logical right shift (zeros are
+shifted into the upper bits); and SRAI is an arithmetic right shift (the
+original sign bit is copied into the vacated upper bits).
+
+
+include::images/wavedrom/int-comp-lui-aiupc.adoc[]
+[[int-comp-lui-aiupc]]
+.Integer register-immediate, U-immediate
+image::image_placeholder.png[]
+
+
+LUI (load upper immediate) is used to build 32-bit constants and uses
+the U-type format. LUI places the 32-bit U-immediate value into the
+destination register _rd_, filling in the lowest 12 bits with zeros.
+
+AUIPC (add upper immediate to `pc`) is used to build `pc`-relative
+addresses and uses the U-type format. AUIPC forms a 32-bit offset from
+the U-immediate, filling in the lowest 12 bits with zeros, adds this
+offset to the address of the AUIPC instruction, then places the result
+in register _rd_.
+
+The assembly syntax for `lui` and `auipc` does not represent the lower
+12 bits of the U-immediate, which are always zero.
+
+The AUIPC instruction supports two-instruction sequences to access
+arbitrary offsets from the PC for both control-flow transfers and data
+accesses. The combination of an AUIPC and the 12-bit immediate in a JALR
+can transfer control to any 32-bit PC-relative address, while an AUIPC
+plus the 12-bit immediate offset in regular load or store instructions
+can access any 32-bit PC-relative data address.
+
+The current PC can be obtained by setting the U-immediate to 0. Although
+a JAL +4 instruction could also be used to obtain the local PC (of the
+instruction following the JAL), it might cause pipeline breaks in
+simpler microarchitectures or pollute BTB structures in more complex
+microarchitectures.
+
+==== Integer Register-Register Operations
+
+RV32I defines several arithmetic R-type operations. All operations read
+the _rs1_ and _rs2_ registers as source operands and write the result
+into register _rd_. The _funct7_ and _funct3_ fields select the type of
+operation.
+
+include::images/wavedrom/int_reg-reg.adoc[]
+[[int-reg-reg]]
+.Integer register-register
+image::image_placeholder.png[]
+
+ADD performs the addition of _rs1_ and _rs2_. SUB performs the
+subtraction of _rs2_ from _rs1_. Overflows are ignored and the low XLEN
+bits of results are written to the destination _rd_. SLT and SLTU
+perform signed and unsigned compares respectively, writing 1 to _rd_ if
+latexmath:[$\mbox{\em rs1} < \mbox{\em
+  rs2}$], 0 otherwise. Note, SLTU _rd_, _x0_, _rs2_ sets _rd_ to 1 if
+_rs2_ is not equal to zero, otherwise sets _rd_ to zero (assembler
+pseudoinstruction SNEZ _rd, rs_). AND, OR, and XOR perform bitwise
+logical operations.
+
+SLL, SRL, and SRA perform logical left, logical right, and arithmetic
+right shifts on the value in register _rs1_ by the shift amount held in
+the lower 5 bits of register _rs2_.
+
+==== NOP Instruction
+
+include::images/wavedrom/nop.adoc[]
+[[nop]]
+.NOP instructions
+image::image_placeholder.png[]
+
+The NOP instruction does not change any architecturally visible state,
+except for advancing the `pc` and incrementing any applicable
+performance counters. NOP is encoded as ADDI _x0, x0, 0_.
+
+NOPs can be used to align code segments to microarchitecturally
+significant address boundaries, or to leave space for inline code
+modifications. Although there are many possible ways to encode a NOP, we
+define a canonical NOP encoding to allow microarchitectural
+optimizations as well as for more readable disassembly output. The other
+NOP encodings are made available for HINT instructions
+(Section <<rv32i-hints>>).
+
+ADDI was chosen for the NOP encoding as this is most likely to take
+fewest resources to execute across a range of systems (if not optimized
+away in decode). In particular, the instruction only reads one register.
+Also, an ADDI functional unit is more likely to be available in a
+superscalar design as adds are the most common operation. In particular,
+address-generation functional units can execute ADDI using the same
+hardware needed for base+offset address calculations, while
+register-register ADD or logical/shift operations require additional
+hardware.
+
+=== Control Transfer Instructions
+
+RV32I provides two types of control transfer instructions: unconditional
+jumps and conditional branches. Control transfer instructions in RV32I
+do _not_ have architecturally visible delay slots.
+
+If an instruction access-fault or instruction page-fault exception
+occurs on the target of a jump or taken branch, the exception is
+reported on the target instruction, not on the jump or branch
+instruction.
+
+==== Unconditional Jumps
+
+The jump and link (JAL) instruction uses the J-type format, where the
+J-immediate encodes a signed offset in multiples of 2 bytes. The offset
+is sign-extended and added to the address of the jump instruction to
+form the jump target address. Jumps can therefore target a
+latexmath:[$\pm$] range. JAL stores the address of the instruction
+following the jump (`pc`+4) into register _rd_. The standard software
+calling convention uses `x1` as the return address register and `x5` as
+an alternate link register.
+
+The alternate link register supports calling millicode routines (e.g.,
+those to save and restore registers in compressed code) while preserving
+the regular return address register. The register `x5` was chosen as the
+alternate link register as it maps to a temporary in the standard
+calling convention, and has an encoding that is only one bit different
+than the regular link register.
+
+Plain unconditional jumps (assembler pseudoinstruction J) are encoded as
+a JAL with _rd_=`x0`.
+
+include::images/wavedrom/ct-unconditional.adoc[]
+[[ct-unconditional]]
+.Plain unconditional jumps
+image::image_placeholder.png[]
+
+The indirect jump instruction JALR (jump and link register) uses the
+I-type encoding. The target address is obtained by adding the
+sign-extended 12-bit I-immediate to the register _rs1_, then setting the
+least-significant bit of the result to zero. The address of the
+instruction following the jump (`pc`+4) is written to register _rd_.
+Register `x0` can be used as the destination if the result is not
+required.
+
+include::images/wavedrom/ct-unconditional-2.adoc[]
+[[ct-unconditional-2]]
+.Indirect unconditional jump
+image::image_placeholder.png[]
+
+The unconditional jump instructions all use PC-relative addressing to
+help support position-independent code. The JALR instruction was defined
+to enable a two-instruction sequence to jump anywhere in a 32-bit
+absolute address range. A LUI instruction can first load _rs1_ with the
+upper 20 bits of a target address, then JALR can add in the lower bits.
+Similarly, AUIPC then JALR can jump anywhere in a 32-bit `pc`-relative
+address range.
+
+Note that the JALR instruction does not treat the 12-bit immediate as
+multiples of 2 bytes, unlike the conditional branch instructions. This
+avoids one more immediate format in hardware. In practice, most uses of
+JALR will have either a zero immediate or be paired with a LUI or AUIPC,
+so the slight reduction in range is not significant.
+
+Clearing the least-significant bit when calculating the JALR target
+address both simplifies the hardware slightly and allows the low bit of
+function pointers to be used to store auxiliary information. Although
+there is potentially a slight loss of error checking in this case, in
+practice jumps to an incorrect instruction address will usually quickly
+raise an exception.
+
+When used with a base _rs1_latexmath:[$=$]`x0`, JALR can be used to
+implement a single instruction subroutine call to the lowest or highest
+address region from anywhere in the address space, which could be used
+to implement fast calls to a small runtime library. Alternatively, an
+ABI could dedicate a general-purpose register to point to a library
+elsewhere in the address space.
+
+The JAL and JALR instructions will generate an
+instruction-address-misaligned exception if the target address is not
+aligned to a four-byte boundary.
+
+Instruction-address-misaligned exceptions are not possible on machines
+that support extensions with 16-bit aligned instructions, such as the
+compressed instruction-set extension, C.
+
+Return-address prediction stacks are a common feature of
+high-performance instruction-fetch units, but require accurate detection
+of instructions used for procedure calls and returns to be effective.
+For RISC-V, hints as to the instructions’ usage are encoded implicitly
+via the register numbers used. A JAL instruction should push the return
+address onto a return-address stack (RAS) only when _rd_ is `x1` or
+`x5`. JALR instructions should push/pop a RAS as shown in <<rashints>>.
+
+[[rashints]]
+.Return-address stack prediction hints encoded in the register operands
+of a JALR instruction.
+[cols="^,^,^,<",options="header",]
+|===
+|_rd_ is `x1`/`x5` |_rs1_ is `x1`/`x5` |__rd__latexmath:[$=$]_rs1_ |RAS
+action
+|No |No |– |None
+
+|No |Yes |– |Pop
+
+|Yes |No |– |Push
+
+|Yes |Yes |No |Pop, then push
+
+|Yes |Yes |Yes |Push
+|===
+
+Some other ISAs added explicit hint bits to their indirect-jump
+instructions to guide return-address stack manipulation. We use implicit
+hinting tied to register numbers and the calling convention to reduce
+the encoding space used for these hints.
+
+When two different link registers (`x1` and `x5`) are given as _rs1_ and
+_rd_, then the RAS is both popped and pushed to support coroutines. If
+_rs1_ and _rd_ are the same link register (either `x1` or `x5`), the RAS
+is only pushed to enable macro-op fusion of the sequences:
+`lui ra, imm20; jalr ra, imm12(ra)`  and
+ `auipc ra, imm20; jalr ra, imm12(ra)`
+
+==== Conditional Branches
+
+All branch instructions use the B-type instruction format. The 12-bit
+B-immediate encodes signed offsets in multiples of 2 bytes. The offset
+is sign-extended and added to the address of the branch instruction to
+give the target address. The conditional branch range is
+latexmath:[$\pm$].
+
+include::images/wavedrom/ct-conditional.adoc[]
+[[ct-conditional]]
+.Conditional branches
+image::image_placeholder.png[]
+
+Branch instructions compare two registers. BEQ and BNE take the branch
+if registers _rs1_ and _rs2_ are equal or unequal respectively. BLT and
+BLTU take the branch if _rs1_ is less than _rs2_, using signed and
+unsigned comparison respectively. BGE and BGEU take the branch if _rs1_
+is greater than or equal to _rs2_, using signed and unsigned comparison
+respectively. Note, BGT, BGTU, BLE, and BLEU can be synthesized by
+reversing the operands to BLT, BLTU, BGE, and BGEU, respectively.
+
+Signed array bounds may be checked with a single BLTU instruction, since
+any negative index will compare greater than any nonnegative bound.
+
+Software should be optimized such that the sequential code path is the
+most common path, with less-frequently taken code paths placed out of
+line. Software should also assume that backward branches will be
+predicted taken and forward branches as not taken, at least the first
+time they are encountered. Dynamic predictors should quickly learn any
+predictable branch behavior.
+
+Unlike some other architectures, the RISC-V jump (JAL with _rd_=`x0`)
+instruction should always be used for unconditional branches instead of
+a conditional branch instruction with an always-true condition. RISC-V
+jumps are also PC-relative and support a much wider offset range than
+branches, and will not pollute conditional-branch prediction tables.
+
+The conditional branches were designed to include arithmetic comparison
+operations between two registers (as also done in PA-RISC, Xtensa, and
+MIPS R6), rather than use condition codes (x86, ARM, SPARC, PowerPC), or
+to only compare one register against zero (Alpha, MIPS), or two
+registers only for equality (MIPS). This design was motivated by the
+observation that a combined compare-and-branch instruction fits into a
+regular pipeline, avoids additional condition code state or use of a
+temporary register, and reduces static code size and dynamic instruction
+fetch traffic. Another point is that comparisons against zero require
+non-trivial circuit delay (especially after the move to static logic in
+advanced processes) and so are almost as expensive as arithmetic
+magnitude compares. Another advantage of a fused compare-and-branch
+instruction is that branches are observed earlier in the front-end
+instruction stream, and so can be predicted earlier. There is perhaps an
+advantage to a design with condition codes in the case where multiple
+branches can be taken based on the same condition codes, but we believe
+this case to be relatively rare.
+
+We considered but did not include static branch hints in the instruction
+encoding. These can reduce the pressure on dynamic predictors, but
+require more instruction encoding space and software profiling for best
+results, and can result in poor performance if production runs do not
+match profiling runs.
+
+We considered but did not include conditional moves or predicated
+instructions, which can effectively replace unpredictable short forward
+branches. Conditional moves are the simpler of the two, but are
+difficult to use with conditional code that might cause exceptions
+(memory accesses and floating-point operations). Predication adds
+additional flag state to a system, additional instructions to set and
+clear flags, and additional encoding overhead on every instruction. Both
+conditional move and predicated instructions add complexity to
+out-of-order microarchitectures, adding an implicit third source operand
+due to the need to copy the original value of the destination
+architectural register into the renamed destination physical register if
+the predicate is false. Also, static compile-time decisions to use
+predication instead of branches can result in lower performance on
+inputs not included in the compiler training set, especially given that
+unpredictable branches are rare, and becoming rarer as branch prediction
+techniques improve.
+
+We note that various microarchitectural techniques exist to dynamically
+convert unpredictable short forward branches into internally predicated
+code to avoid the cost of flushing pipelines on a branch mispredict cite:[heil-tr1996], cite:[Klauser-1998], cite:[Kim-micro2005] and
+have been implemented in commercial processors  cite:[ibmpower7]. The simplest techniques
+just reduce the penalty of recovering from a mispredicted short forward
+branch by only flushing instructions in the branch shadow instead of the
+entire fetch pipeline, or by fetching instructions from both sides using
+wide instruction fetch or idle instruction fetch slots. More complex
+techniques for out-of-order cores add internal predicates on
+instructions in the branch shadow, with the internal predicate value
+written by the branch instruction, allowing the branch and following
+instructions to be executed speculatively and out-of-order with respect
+to other code .
+
+The conditional branch instructions will generate an
+instruction-address-misaligned exception if the target address is not
+aligned to a four-byte boundary and the branch condition evaluates to
+true. If the branch condition evaluates to false, the
+instruction-address-misaligned exception will not be raised.
+
+Instruction-address-misaligned exceptions are not possible on machines
+that support extensions with 16-bit aligned instructions, such as the
+compressed instruction-set extension, C.
+
+[[ldst]]
+=== Load and Store Instructions
+
+RV32I is a load-store architecture, where only load and store
+instructions access memory and arithmetic instructions only operate on
+CPU registers. RV32I provides a 32-bit address space that is
+byte-addressed. The EEI will define what portions of the address space
+are legal to access with which instructions (e.g., some addresses might
+be read only, or support word access only). Loads with a destination of
+`x0` must still raise any exceptions and cause any other side effects
+even though the load value is discarded.
+
+The EEI will define whether the memory system is little-endian or
+big-endian. In RISC-V, endianness is byte-address invariant.
+
+In a system for which endianness is byte-address invariant, the
+following property holds: if a byte is stored to memory at some address
+in some endianness, then a byte-sized load from that address in any
+endianness returns the stored value.
+
+In a little-endian configuration, multibyte stores write the
+least-significant register byte at the lowest memory byte address,
+followed by the other register bytes in ascending order of their
+significance. Loads similarly transfer the contents of the lesser memory
+byte addresses to the less-significant register bytes.
+
+In a big-endian configuration, multibyte stores write the
+most-significant register byte at the lowest memory byte address,
+followed by the other register bytes in descending order of their
+significance. Loads similarly transfer the contents of the greater
+memory byte addresses to the less-significant register bytes.
+
+include::images/wavedrom/load_store.adoc[]
+[[load-store,load and store]]
+.Load and store instructions
+image::image_placeholder.png[]
+
+Load and store instructions transfer a value between the registers and
+memory. Loads are encoded in the I-type format and stores are S-type.
+The effective address is obtained by adding register _rs1_ to the
+sign-extended 12-bit offset. Loads copy a value from memory to register
+_rd_. Stores copy the value in register _rs2_ to memory.
+
+The LW instruction loads a 32-bit value from memory into _rd_. LH loads
+a 16-bit value from memory, then sign-extends to 32-bits before storing
+in _rd_. LHU loads a 16-bit value from memory but then zero extends to
+32-bits before storing in _rd_. LB and LBU are defined analogously for
+8-bit values. The SW, SH, and SB instructions store 32-bit, 16-bit, and
+8-bit values from the low bits of register _rs2_ to memory.
+
+Regardless of EEI, loads and stores whose effective addresses are
+naturally aligned shall not raise an address-misaligned exception. Loads
+and stores whose effective address is not naturally aligned to the
+referenced datatype (i.e., the effective address is not divisible by the
+size of the access in bytes) have behavior dependent on the EEI.
+
+An EEI may guarantee that misaligned loads and stores are fully
+supported, and so the software running inside the execution environment
+will never experience a contained or fatal address-misaligned trap. In
+this case, the misaligned loads and stores can be handled in hardware,
+or via an invisible trap into the execution environment implementation,
+or possibly a combination of hardware and invisible trap depending on
+address.
+
+An EEI may not guarantee misaligned loads and stores are handled
+invisibly. In this case, loads and stores that are not naturally aligned
+may either complete execution successfully or raise an exception. The
+exception raised can be either an address-misaligned exception or an
+access-fault exception. For a memory access that would otherwise be able
+to complete except for the misalignment, an access-fault exception can
+be raised instead of an address-misaligned exception if the misaligned
+access should not be emulated, e.g., if accesses to the memory region
+have side effects. When an EEI does not guarantee misaligned loads and
+stores are handled invisibly, the EEI must define if exceptions caused
+by address misalignment result in a contained trap (allowing software
+running inside the execution environment to handle the trap) or a fatal
+trap (terminating execution).
+
+Misaligned accesses are occasionally required when porting legacy code,
+and help performance on applications when using any form of packed-SIMD
+extension or handling externally packed data structures. Our rationale
+for allowing EEIs to choose to support misaligned accesses via the
+regular load and store instructions is to simplify the addition of
+misaligned hardware support. One option would have been to disallow
+misaligned accesses in the base ISAs and then provide some separate ISA
+support for misaligned accesses, either special instructions to help
+software handle misaligned accesses or a new hardware addressing mode
+for misaligned accesses. Special instructions are difficult to use,
+complicate the ISA, and often add new processor state (e.g., SPARC VIS
+align address offset register) or complicate access to existing
+processor state (e.g., MIPS LWL/LWR partial register writes). In
+addition, for loop-oriented packed-SIMD code, the extra overhead when
+operands are misaligned motivates software to provide multiple forms of
+loop depending on operand alignment, which complicates code generation
+and adds to loop startup overhead. New misaligned hardware addressing
+modes take considerable space in the instruction encoding or require
+very simplified addressing modes (e.g., register indirect only).
+
+Even when misaligned loads and stores complete successfully, these
+accesses might run extremely slowly depending on the implementation
+(e.g., when implemented via an invisible trap). Furthermore, whereas
+naturally aligned loads and stores are guaranteed to execute atomically,
+misaligned loads and stores might not, and hence require additional
+synchronization to ensure atomicity.
+
+We do not mandate atomicity for misaligned accesses so execution
+environment implementations can use an invisible machine trap and a
+software handler to handle some or all misaligned accesses. If hardware
+misaligned support is provided, software can exploit this by simply
+using regular load and store instructions. Hardware can then
+automatically optimize accesses depending on whether runtime addresses
+are aligned.
+
+[[fence]]
+=== Memory Ordering Instructions
+
+include::images/wavedrom/mem_order.adoc[]
+[[mem-order]]
+.Memory ordering instructions
+image::image_placeholder.png[]
+
+The FENCE instruction is used to order device I/O and memory accesses as
+viewed by other RISC-V harts and external devices or coprocessors. Any
+combination of device input (I), device output (O), memory reads \(R),
+and memory writes (W) may be ordered with respect to any combination of
+the same. Informally, no other RISC-V hart or external device can
+observe any operation in the _successor_ set following a FENCE before
+any operation in the _predecessor_ set preceding the FENCE.
+<<memorymodeL>> provides a precise description
+of the RISC-V memory consistency model.
+
+The FENCE instruction also orders memory reads and writes made by the
+hart as observed by memory reads and writes made by an external device.
+However, FENCE does not order observations of events made by an external
+device using any other signaling mechanism.
+
+A device might observe an access to a memory location via some external
+communication mechanism, e.g., a memory-mapped control register that
+drives an interrupt signal to an interrupt controller. This
+communication is outside the scope of the FENCE ordering mechanism and
+hence the FENCE instruction can provide no guarantee on when a change in
+the interrupt signal is visible to the interrupt controller. Specific
+devices might provide additional ordering guarantees to reduce software
+overhead but those are outside the scope of the RISC-V memory model.
+
+The EEI will define what I/O operations are possible, and in particular,
+which memory addresses when accessed by load and store instructions will
+be treated and ordered as device input and device output operations
+respectively rather than memory reads and writes. For example,
+memory-mapped I/O devices will typically be accessed with uncached loads
+and stores that are ordered using the I and O bits rather than the R and
+W bits. Instruction-set extensions might also describe new I/O
+instructions that will also be ordered using the I and O bits in a
+FENCE.
+
+[[fm]]
+.Fence mode encoding
+|===
+|_fm_ field |Mnemonic |Meaning
+|0000 |_none_ |Normal Fence
+|1000 |TSO |With FENCE RW,RW: exclude write-to-read ordering; otherwise: _Reserved for future use._
+|_other_ | |_Reserved for future use._
+|===
+
+The fence mode field _fm_ defines the semantics of the FENCE. A FENCE
+with _fm_=0000 orders all memory operations in its predecessor set
+before all memory operations in its successor set.
+
+The optional FENCE.TSO instruction is encoded as a FENCE instruction
+with _fm_=1000, _predecessor_=RW, and _successor_=RW. FENCE.TSO orders
+all load operations in its predecessor set before all memory operations
+in its successor set, and all store operations in its predecessor set
+before all store operations in its successor set. This leaves non-AMO
+store operations in the FENCE.TSO’s predecessor set unordered with
+non-AMO loads in its successor set.
+
+The FENCE.TSO encoding was added as an optional extension to the
+original base FENCE instruction encoding. The base definition requires
+that implementations ignore any set bits and treat the FENCE as global,
+and so this is a backwards-compatible extension.
+
+The unused fields in the FENCE instructions--_rs1_ and _rd_--are reserved
+for finer-grain fences in future extensions. For forward compatibility,
+base implementations shall ignore these fields, and standard software
+shall zero these fields. Likewise, many _fm_ and predecessor/successor
+set settings in <<fm>> are also reserved for future use.
+Base implementations shall treat all such reserved configurations as
+normal fences with _fm_=0000, and standard software shall use only
+non-reserved configurations.
+
+We chose a relaxed memory model to allow high performance from simple
+machine implementations and from likely future coprocessor or
+accelerator extensions. We separate out I/O ordering from memory R/W
+ordering to avoid unnecessary serialization within a device-driver hart
+and also to support alternative non-memory paths to control added
+coprocessors or I/O devices. Simple implementations may additionally
+ignore the _predecessor_ and _successor_ fields and always execute a
+conservative fence on all operations.
+
+=== Environment Call and Breakpoints
+
+SYSTEM instructions are used to access system functionality that might
+require privileged access and are encoded using the I-type instruction
+format. These can be divided into two main classes: those that
+atomically read-modify-write control and status registers (CSRs), and
+all other potentially privileged instructions. CSR instructions are
+described in <<csrinsts>>, and the base
+unprivileged instructions are described in the following section.
+
+
+[TIP]
+====
+The SYSTEM instructions are defined to allow simpler implementations to
+always trap to a single software trap handler. More sophisticated
+implementations might execute more of each system instruction in
+hardware.
+====
+
+include::images/wavedrom/env_call-breakpoint.adoc[]
+[[env-call]]
+.Evironment call and breakpoint instructions
+image::image_placeholder.png[]
+
+These two instructions cause a precise requested trap to the supporting
+execution environment.
+
+The ECALL instruction is used to make a service request to the execution
+environment. The EEI will define how parameters for the service request
+are passed, but usually these will be in defined locations in the
+integer register file.
+
+The EBREAK instruction is used to return control to a debugging
+environment.
+
+ECALL and EBREAK were previously named SCALL and SBREAK. The
+instructions have the same functionality and encoding, but were renamed
+to reflect that they can be used more generally than to call a
+supervisor-level operating system or debugger.
+
+EBREAK was primarily designed to be used by a debugger to cause
+execution to stop and fall back into the debugger. EBREAK is also used
+by the standard gcc compiler to mark code paths that should not be
+executed.
+
+Another use of EBREAK is to support _semihosting_, where the execution
+environment includes a debugger that can provide services over an
+alternate system call interface built around the EBREAK instruction.
+Because the RISC-V base ISAs do not provide more than one EBREAK
+instruction, RISC-V semihosting uses a special sequence of instructions
+to distinguish a semihosting EBREAK from a debugger inserted EBREAK.
+
+....
+    slli x0, x0, 0x1f   # Entry NOP
+    ebreak              # Break to debugger
+    srai x0, x0, 7      # NOP encoding the semihosting call number 7
+....
+
+Note that these three instructions must be 32-bit-wide instructions,
+i.e., they mustn’t be among the compressed 16-bit instructions described
+in <<compressed>>.
+
+The shift NOP instructions are still considered available for use as
+HINTs.
+
+Semihosting is a form of service call and would be more naturally
+encoded as an ECALL using an existing ABI, but this would require the
+debugger to be able to intercept ECALLs, which is a newer addition to
+the debug standard. We intend to move over to using ECALLs with a
+standard ABI, in which case, semihosting can share a service ABI with an
+existing standard.
+
+We note that ARM processors have also moved to using SVC instead of BKPT
+for semihosting calls in newer designs.
+
+=== HINT Instructions
+
+RV32I reserves a large encoding space for HINT instructions, which are
+usually used to communicate performance hints to the microarchitecture.
+Like the NOP instruction, HINTs do not change any architecturally
+visible state, except for advancing the `pc` and any applicable
+performance counters. Implementations are always allowed to ignore the
+encoded hints.
+
+Most RV32I HINTs are encoded as integer computational instructions with
+_rd_=x0. The other RV32I HINTs are encoded as FENCE instructions with
+a null predecessor or successor set and with _fm_=0.
+
+These HINT encodings have been chosen so that simple implementations can
+ignore HINTs altogether, and instead execute a HINT as a regular
+instruction that happens not to mutate the architectural state. For
+example, ADD is a HINT if the destination register is `x0`; the five-bit
+_rs1_ and _rs2_ fields encode arguments to the HINT. However, a simple
+implementation can simply execute the HINT as an ADD of _rs1_ and _rs2_
+that writes ` x0`, which has no architecturally visible effect.
+
+As another example, a FENCE instruction with a zero _pred_ field and a
+zero _fm_ field is a HINT; the _succ_, _rs1_, and _rd_ fields encode the
+arguments to the HINT. A simple implementation can simply execute the
+HINT as a FENCE that orders the null set of prior memory accesses before
+whichever subsequent memory accesses are encoded in the _succ_ field.
+Since the intersection of the predecessor and successor sets is null,
+the instruction imposes no memory orderings, and so it has no
+architecturally visible effect.
+
+<<t-rv32i-hints>> lists all RV32I HINT code points. 91% of the
+HINT space is reserved for standard HINTs. The remainder of the HINT
+space is designated for custom HINTs: no standard HINTs will ever be
+defined in this subspace.
+
+[TIP]
+====
+We anticipate standard hints to eventually include memory-system spatial
+and temporal locality hints, branch prediction hints, thread-scheduling
+hints, security tags, and instrumentation flags for
+simulation/emulation.
+====
+
+// this table isn't quite right and needs to be fixed--some rows might not have landed properly. It needs to be checked cell-by cell.
+
+[[t-rv32i-hints]]
+.RV32I HINT instructions.
+[cols="<,<,^,<",options="header"]
+|===
+|Instruction |Constraints |Code Points |Purpose
+
+|LUI |_rd_=`x0` |latexmath:[$2^{20}$] .22+<.>m|_Reserved for future standard use_
+
+|AUIPC |_rd_=`x0` |latexmath:[$2^{20}$]
+
+|ADDI |_rd_=`x0`, and either latexmath:[$2^{17}-1$] _rs1_ latexmath:[$\neq$]`x0` or _imm_latexmath:[$\neq$]0 |
+
+|ANDI |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|ORI |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|XORI |_rd_=`x0` |latexmath:[$2^{17}$]
+
+|ADD |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SUB |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|AND |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|OR |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|XOR |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SLL |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRL |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRA |_rd_=`x0` |latexmath:[$2^{10}$]
+
+| |_rd_=`x0`| _rs1_latexmath:[$\neq$]`x0`, latexmath:[$2^{10}-63$]
+
+| |_fm_=0, and either _pred_=0 or _succ_=0 |_rd_latexmath:[$\neq$]`x0`
+
+| | _rs1_=`x0` |latexmath:[$2^{10}-63$]
+
+| |_fm_=0, and either _pred_=0 or _succ_=0 |
+
+|FENCE |_rd_=_rs1_=`x0`, _fm_=0 |15
+
+|FENCE |_pred_=0| _succ_latexmath:[$\neq$]0
+
+|FENCE |_rd_=_rs1_=`x0`, _fm_=0 |15
+
+|FENCE |_pred_latexmath:[$\neq$]W, _succ_=0 |
+
+|FENCE |_rd_=_rs1_=`x0`, _fm_=0, _pred_=W, _succ_=0 |1 |PAUSE
+
+|SLTI |_rd_=`x0` |latexmath:[$2^{17}$] .7+<.>m|_Designated for custom use_
+
+|SLTIU|_rd_=`x0` |latexmath:[$2^{17}$]
+
+|SLLI |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRLI |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SRAI |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SLT |_rd_=`x0` |latexmath:[$2^{10}$]
+
+|SLTU |_rd_=`x0` |latexmath:[$2^{10}$]
+|===

@@ -1,0 +1,1412 @@
+[appendix]
+== Formal Memory Model Specifications, Version 0.1
+[[mm-formal]]
+
+To facilitate formal analysis of RVWMO, this chapter presents a set of
+formalizations using different tools and modeling approaches. Any
+discrepancies are unintended; the expectation is that the models
+describe exactly the same sets of legal behaviors.
+
+This appendix should be treated as commentary; all normative material is
+provided in <<memorymodel>> and in the rest of
+the main body of the ISA specification. All currently known
+discrepancies are listed in
+<<discrepancies>>. Any other
+discrepancies are unintentional.
+
+[[alloy]]
+=== Formal Axiomatic Specification in Alloy
+
+We present a formal specification of the RVWMO memory model in Alloy
+(http://alloy.mit.edu). This model is available online at
+https://github.com/daniellustig/riscv-memory-model.
+
+The online material also contains some litmus tests and some examples of
+how Alloy can be used to model check some of the mappings in
+Section #sec:memory:porting[[sec:memory:porting]].
+
+`  `
+
+....
+////////////////////////////////////////////////////////////////////////////////
+// =RVWMO PPO=
+
+// Preserved Program Order
+fun ppo : Event->Event {
+  // same-address ordering
+  po_loc :> Store
+  + rdw
+  + (AMO + StoreConditional) <: rfi
+
+  // explicit synchronization
+  + ppo_fence
+  + Acquire <: ^po :> MemoryEvent
+  + MemoryEvent <: ^po :> Release
+  + RCsc <: ^po :> RCsc
+  + pair
+
+  // syntactic dependencies
+  + addrdep
+  + datadep
+  + ctrldep :> Store
+
+  // pipeline dependencies
+  + (addrdep+datadep).rfi
+  + addrdep.^po :> Store
+}
+
+// the global memory order respects preserved program order
+fact { ppo in ^gmo }
+....
+
+`  `
+
+....
+////////////////////////////////////////////////////////////////////////////////
+// =RVWMO axioms=
+
+// Load Value Axiom
+fun candidates[r: MemoryEvent] : set MemoryEvent {
+  (r.~^gmo & Store & same_addr[r]) // writes preceding r in gmo
+  + (r.^~po & Store & same_addr[r]) // writes preceding r in po
+}
+
+fun latest_among[s: set Event] : Event { s - s.~^gmo }
+
+pred LoadValue {
+  all w: Store | all r: Load |
+    w->r in rf <=> w = latest_among[candidates[r]]
+}
+
+// Atomicity Axiom
+pred Atomicity {
+  all r: Store.~pair |            // starting from the lr,
+    no x: Store & same_addr[r] |  // there is no store x to the same addr
+      x not in same_hart[r]       // such that x is from a different hart,
+      and x in r.~rf.^gmo         // x follows (the store r reads from) in gmo,
+      and r.pair in x.^gmo        // and r follows x in gmo
+}
+
+// Progress Axiom implicit: Alloy only considers finite executions
+
+pred RISCV_mm { LoadValue and Atomicity /* and Progress */ }
+....
+
+`  `
+
+....
+////////////////////////////////////////////////////////////////////////////////
+// Basic model of memory
+
+sig Hart {  // hardware thread
+  start : one Event
+}
+sig Address {}
+abstract sig Event {
+  po: lone Event // program order
+}
+
+abstract sig MemoryEvent extends Event {
+  address: one Address,
+  acquireRCpc: lone MemoryEvent,
+  acquireRCsc: lone MemoryEvent,
+  releaseRCpc: lone MemoryEvent,
+  releaseRCsc: lone MemoryEvent,
+  addrdep: set MemoryEvent,
+  ctrldep: set Event,
+  datadep: set MemoryEvent,
+  gmo: set MemoryEvent,  // global memory order
+  rf: set MemoryEvent
+}
+sig LoadNormal extends MemoryEvent {} // l{b|h|w|d}
+sig LoadReserve extends MemoryEvent { // lr
+  pair: lone StoreConditional
+}
+sig StoreNormal extends MemoryEvent {}       // s{b|h|w|d}
+// all StoreConditionals in the model are assumed to be successful
+sig StoreConditional extends MemoryEvent {}  // sc
+sig AMO extends MemoryEvent {}               // amo
+sig NOP extends Event {}
+
+fun Load : Event { LoadNormal + LoadReserve + AMO }
+fun Store : Event { StoreNormal + StoreConditional + AMO }
+
+sig Fence extends Event {
+  pr: lone Fence, // opcode bit
+  pw: lone Fence, // opcode bit
+  sr: lone Fence, // opcode bit
+  sw: lone Fence  // opcode bit
+}
+sig FenceTSO extends Fence {}
+
+/* Alloy encoding detail: opcode bits are either set (encoded, e.g.,
+ * as f.pr in iden) or unset (f.pr not in iden).  The bits cannot be used for
+ * anything else */
+fact { pr + pw + sr + sw in iden }
+// likewise for ordering annotations
+fact { acquireRCpc + acquireRCsc + releaseRCpc + releaseRCsc in iden }
+// don't try to encode FenceTSO via pr/pw/sr/sw; just use it as-is
+fact { no FenceTSO.(pr + pw + sr + sw) }
+....
+
+`  `
+
+....
+////////////////////////////////////////////////////////////////////////////////
+// =Basic model rules=
+
+// Ordering annotation groups
+fun Acquire : MemoryEvent { MemoryEvent.acquireRCpc + MemoryEvent.acquireRCsc }
+fun Release : MemoryEvent { MemoryEvent.releaseRCpc + MemoryEvent.releaseRCsc }
+fun RCpc : MemoryEvent { MemoryEvent.acquireRCpc + MemoryEvent.releaseRCpc }
+fun RCsc : MemoryEvent { MemoryEvent.acquireRCsc + MemoryEvent.releaseRCsc }
+
+// There is no such thing as store-acquire or load-release, unless it's both
+fact { Load & Release in Acquire }
+fact { Store & Acquire in Release }
+
+// FENCE PPO
+fun FencePRSR : Fence { Fence.(pr & sr) }
+fun FencePRSW : Fence { Fence.(pr & sw) }
+fun FencePWSR : Fence { Fence.(pw & sr) }
+fun FencePWSW : Fence { Fence.(pw & sw) }
+
+fun ppo_fence : MemoryEvent->MemoryEvent {
+    (Load  <: ^po :> FencePRSR).(^po :> Load)
+  + (Load  <: ^po :> FencePRSW).(^po :> Store)
+  + (Store <: ^po :> FencePWSR).(^po :> Load)
+  + (Store <: ^po :> FencePWSW).(^po :> Store)
+  + (Load  <: ^po :> FenceTSO) .(^po :> MemoryEvent)
+  + (Store <: ^po :> FenceTSO) .(^po :> Store)
+}
+
+// auxiliary definitions
+fun po_loc : Event->Event { ^po & address.~address }
+fun same_hart[e: Event] : set Event { e + e.^~po + e.^po }
+fun same_addr[e: Event] : set Event { e.address.~address }
+
+// initial stores
+fun NonInit : set Event { Hart.start.*po }
+fun Init : set Event { Event - NonInit }
+fact { Init in StoreNormal }
+fact { Init->(MemoryEvent & NonInit) in ^gmo }
+fact { all e: NonInit | one e.*~po.~start }  // each event is in exactly one hart
+fact { all a: Address | one Init & a.~address } // one init store per address
+fact { no Init <: po and no po :> Init }
+....
+
+`  `
+
+....
+// po
+fact { acyclic[po] }
+
+// gmo
+fact { total[^gmo, MemoryEvent] } // gmo is a total order over all MemoryEvents
+
+//rf
+fact { rf.~rf in iden } // each read returns the value of only one write
+fact { rf in Store <: address.~address :> Load }
+fun rfi : MemoryEvent->MemoryEvent { rf & (*po + *~po) }
+
+//dep
+fact { no StoreNormal <: (addrdep + ctrldep + datadep) }
+fact { addrdep + ctrldep + datadep + pair in ^po }
+fact { datadep in datadep :> Store }
+fact { ctrldep.*po in ctrldep }
+fact { no pair & (^po :> (LoadReserve + StoreConditional)).^po }
+fact { StoreConditional in LoadReserve.pair } // assume all SCs succeed
+
+// rdw
+fun rdw : Event->Event {
+  (Load <: po_loc :> Load)  // start with all same_address load-load pairs,
+  - (~rf.rf)                // subtract pairs that read from the same store,
+  - (po_loc.rfi)            // and subtract out "fri-rfi" patterns
+}
+
+// filter out redundant instances and/or visualizations
+fact { no gmo & gmo.gmo } // keep the visualization uncluttered
+fact { all a: Address | some a.~address }
+
+////////////////////////////////////////////////////////////////////////////////
+// =Optional: opcode encoding restrictions=
+
+// the list of blessed fences
+fact { Fence in
+  Fence.pr.sr
+  + Fence.pw.sw
+  + Fence.pr.pw.sw
+  + Fence.pr.sr.sw
+  + FenceTSO
+  + Fence.pr.pw.sr.sw
+}
+
+pred restrict_to_current_encodings {
+  no (LoadNormal + StoreNormal) & (Acquire + Release)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// =Alloy shortcuts=
+pred acyclic[rel: Event->Event] { no iden & ^rel }
+pred total[rel: Event->Event, bag: Event] {
+  all disj e, e': bag | e->e' in rel + ~rel
+  acyclic[rel]
+}
+....
+
+[[sec:herd]]
+=== Formal Axiomatic Specification in Herd
+
+The tool [.sans-serif]#herd# takes a memory model and a litmus test as
+input and simulates the execution of the test on top of the memory
+model. Memory models are written in the domain specific language Cat.
+This section provides two Cat memory model of RVWMO. The first model,
+Figure #fig:herd2[[fig:herd2]], follows the _global memory order_,
+Chapter #ch:memorymodel[[ch:memorymodel]], definition of RVWMO, as much
+as is possible for a Cat model. The second model,
+Figure #fig:herd3[[fig:herd3]], is an equivalent, more efficient,
+partial order based RVWMO model.
+
+The simulator [.sans-serif]#herd# is part of the [.sans-serif]#diy# tool
+suite — see http://diy.inria.fr for software and documentation. The
+models and more are available online
+at http://diy.inria.fr/cats7/riscv/.
+
+`  `
+
+....
+(*************)
+(* Utilities *)
+(*************)
+
+(* All fence relations *)
+let fence.r.r = [R];fencerel(Fence.r.r);[R]
+let fence.r.w = [R];fencerel(Fence.r.w);[W]
+let fence.r.rw = [R];fencerel(Fence.r.rw);[M]
+let fence.w.r = [W];fencerel(Fence.w.r);[R]
+let fence.w.w = [W];fencerel(Fence.w.w);[W]
+let fence.w.rw = [W];fencerel(Fence.w.rw);[M]
+let fence.rw.r = [M];fencerel(Fence.rw.r);[R]
+let fence.rw.w = [M];fencerel(Fence.rw.w);[W]
+let fence.rw.rw = [M];fencerel(Fence.rw.rw);[M]
+let fence.tso =
+  let f = fencerel(Fence.tso) in
+  ([W];f;[W]) | ([R];f;[M])
+
+let fence = 
+  fence.r.r | fence.r.w | fence.r.rw |
+  fence.w.r | fence.w.w | fence.w.rw |
+  fence.rw.r | fence.rw.w | fence.rw.rw |
+  fence.tso
+
+(* Same address, no W to the same address in-between *)
+let po-loc-no-w = po-loc \ (po-loc?;[W];po-loc)
+(* Read same write *)
+let rsw = rf^-1;rf
+(* Acquire, or stronger  *)
+let AQ = Acq|AcqRel
+(* Release or stronger *)
+and RL = RelAcqRel
+(* All RCsc *)
+let RCsc = Acq|Rel|AcqRel
+(* Amo events are both R and W, relation rmw relates paired lr/sc *)
+let AMO = R & W
+let StCond = range(rmw)
+
+(*************)
+(* ppo rules *)
+(*************)
+
+(* Overlapping-Address Orderings *)
+let r1 = [M];po-loc;[W]
+and r2 = ([R];po-loc-no-w;[R]) \ rsw
+and r3 = [AMO|StCond];rfi;[R]
+(* Explicit Synchronization *)
+and r4 = fence
+and r5 = [AQ];po;[M]
+and r6 = [M];po;[RL]
+and r7 = [RCsc];po;[RCsc]
+and r8 = rmw
+(* Syntactic Dependencies *)
+and r9 = [M];addr;[M]
+and r10 = [M];data;[W]
+and r11 = [M];ctrl;[W]
+(* Pipeline Dependencies *)
+and r12 = [R];(addr|data);[W];rfi;[R]
+and r13 = [R];addr;[M];po;[W]
+
+let ppo = r1 | r2 | r3 | r4 | r5 | r6 | r7 | r8 | r9 | r10 | r11 | r12 | r13
+....
+
+`  `
+
+....
+Total
+
+(* Notice that herd has defined its own rf relation *)
+
+(* Define ppo *)
+include "riscv-defs.cat"
+
+(********************************)
+(* Generate global memory order *)
+(********************************)
+
+let gmo0 = (* precursor: ie build gmo as an total order that include gmo0 *)
+  loc & (W\FW) * FW | # Final write after any write to the same location
+  ppo |               # ppo compatible
+  rfe                 # includes herd external rf (optimization)
+
+(* Walk over all linear extensions of gmo0 *)
+with  gmo from linearizations(M\IW,gmo0)
+
+(* Add initial writes upfront -- convenient for computing rfGMO *)
+let gmo = gmo | loc & IW * (M\IW)
+
+(**********)
+(* Axioms *)
+(**********)
+
+(* Compute rf according to the load value axiom, aka rfGMO *)
+let WR = loc & ([W];(gmo|po);[R])
+let rfGMO = WR \ (loc&([W];gmo);WR)
+
+(* Check equality of herd rf and of rfGMO *)
+empty (rf\rfGMO)|(rfGMO\rf) as RfCons
+
+(* Atomicity axiom *)
+let infloc = (gmo & loc)^-1
+let inflocext = infloc & ext
+let winside  = (infloc;rmw;inflocext) & (infloc;rf;rmw;inflocext) & [W]
+empty winside as Atomic
+....
+
+`  `
+
+....
+Partial
+
+(***************)
+(* Definitions *)
+(***************)
+
+(* Define ppo *)
+include "riscv-defs.cat"
+
+(* Compute coherence relation *)
+include "cos-opt.cat"
+
+(**********)
+(* Axioms *)
+(**********)
+
+(* Sc per location *)
+acyclic co|rf|fr|po-loc as Coherence
+
+(* Main model axiom *)
+acyclic co|rfe|fr|ppo as Model
+
+(* Atomicity axiom *)
+empty rmw & (fre;coe) as Atomic
+....
+
+[[sec:operational]]
+=== An Operational Memory Model
+
+This is an alternative presentation of the RVWMO memory model in
+operational style. It aims to admit exactly the same extensional
+behavior as the axiomatic presentation: for any given program, admitting
+an execution if and only if the axiomatic presentation allows it.
+
+The axiomatic presentation is defined as a predicate on complete
+candidate executions. In contrast, this operational presentation has an
+abstract microarchitectural flavor: it is expressed as a state machine,
+with states that are an abstract representation of hardware machine
+states, and with explicit out-of-order and speculative execution (but
+abstracting from more implementation-specific microarchitectural details
+such as register renaming, store buffers, cache hierarchies, cache
+protocols, etc.). As such, it can provide useful intuition. It can also
+construct executions incrementally, making it possible to interactively
+and randomly explore the behavior of larger examples, while the
+axiomatic model requires complete candidate executions over which the
+axioms can be checked.
+
+The operational presentation covers mixed-size execution, with
+potentially overlapping memory accesses of different power-of-two byte
+sizes. Misaligned accesses are broken up into single-byte accesses.
+
+The operational model, together with a fragment of the RISC-V ISA
+semantics (RV64I and A), are integrated into the `rmem` exploration tool
+(https://github.com/rems-project/rmem). `rmem` can explore litmus tests
+(see #sec:litmustests[[sec:litmustests]]) and small ELF binaries
+exhaustively, pseudo-randomly and interactively. In `rmem`, the ISA
+semantics is expressed explicitly in Sail (see
+https://github.com/rems-project/sail for the Sail language, and
+https://github.com/rems-project/sail-riscv for the RISC-V ISA model),
+and the concurrency semantics is expressed in Lem (see
+https://github.com/rems-project/lem for the Lem language).
+
+`rmem` has a command-line interface and a web-interface. The
+web-interface runs entirely on the client side, and is provided online
+together with a library of litmus tests:
+http://www.cl.cam.ac.uk/~pes20/rmem. The command-line interface is
+faster than the web-interface, specially in exhaustive mode.
+
+Below is an informal introduction of the model states and transitions.
+The description of the formal model starts in the next subsection.
+
+Terminology: In contrast to the axiomatic presentation, here every
+memory operation is either a load or a store. Hence, AMOs give rise to
+two distinct memory operations, a load and a store. When used in
+conjunction with ``instruction``, the terms ``load`` and ``store`` refer
+to instructions that give rise to such memory operations. As such, both
+include AMO instructions. The term ``acquire`` refers to an instruction
+(or its memory operation) with the acquire-RCpc or acquire-RCsc
+annotation. The term ``release`` refers to an instruction (or its memory
+operation) with the release-RCpc or release-RCsc annotation.
+
+==== Model states
+
+A model state consists of a shared memory and a tuple of hart states.
+
+[cols="^,^,^",]
+|===
+| |*…* |Hart latexmath:[$n$]
+
+|latexmath:[$\big\uparrow$] latexmath:[$\big\downarrow$] |
+|latexmath:[$\big\uparrow$] latexmath:[$\big\downarrow$]
+
+|Shared Memory | |
+|===
+
+The shared memory state records all the memory store operations that
+have propagated so far, in the order they propagated (this can be made
+more efficient, but for simplicity of the presentation we keep it this
+way).
+
+Each hart state consists principally of a tree of instruction instances,
+some of which have been _finished_, and some of which have not.
+Non-finished instruction instances can be subject to _restart_, e.g. if
+they depend on an out-of-order or speculative load that turns out to be
+unsound.
+
+Conditional branch and indirect jump instructions may have multiple
+successors in the instruction tree. When such instruction is finished,
+any un-taken alternative paths are discarded.
+
+Each instruction instance in the instruction tree has a state that
+includes an execution state of the intra-instruction semantics (the ISA
+pseudocode for this instruction). The model uses a formalization of the
+intra-instruction semantics in Sail. One can think of the execution
+state of an instruction as a representation of the pseudocode control
+state, pseudocode call stack, and local variable values. An instruction
+instance state also includes information about the instance’s memory and
+register footprints, its register reads and writes, its memory
+operations, whether it is finished, etc.
+
+==== Model transitions
+
+The model defines, for any model state, the set of allowed transitions,
+each of which is a single atomic step to a new abstract machine state.
+Execution of a single instruction will typically involve many
+transitions, and they may be interleaved in operational-model execution
+with transitions arising from other instructions. Each transition arises
+from a single instruction instance; it will change the state of that
+instance, and it may depend on or change the rest of its hart state and
+the shared memory state, but it does not depend on other hart states,
+and it will not change them. The transitions are introduced below and
+defined in Section #sec:omm:transitions[1.3.5], with a precondition and
+a construction of the post-transition model state for each.
+
+Transitions for all instructions:
+
+* : This transition represents a fetch and decode of a new instruction
+instance, as a program order successor of a previously fetched
+instruction instance (or the initial fetch address).
++
+The model assumes the instruction memory is fixed; it does not describe
+the behavior of self-modifying code. In particular, the transition does
+not generate memory load operations, and the shared memory is not
+involved in the transition. Instead, the model depends on an external
+oracle that provides an opcode when given a memory location.
+* : This is a write of a register value.
+* : This is a read of a register value from the most recent
+program-order-predecessor instruction instance that writes to that
+register.
+* : This covers pseudocode internal computation: arithmetic, function
+calls, etc.
+* : At this point the instruction pseudocode is done, the instruction
+cannot be restarted, memory accesses cannot be discarded, and all memory
+effects have taken place. For conditional branch and indirect jump
+instructions, any program order successors that were fetched from an
+address that is not the one that was written to the _pc_ register are
+discarded, together with the sub-tree of instruction instances below
+them.
+
+Transitions specific to load instructions:
+
+* : At this point the memory footprint of the load instruction is
+provisionally known (it could change if earlier instructions are
+restarted) and its individual memory load operations can start being
+satisfied.
+* : This partially or entirely satisfies a single memory load operation
+by forwarding, from program-order-previous memory store operations.
+* : This entirely satisfies the outstanding slices of a single memory
+load operation, from memory.
+* : At this point all the memory load operations of the instruction have
+been entirely satisfied and the instruction pseudocode can continue
+executing. A load instruction can be subject to being restarted until
+the transition. But, under some conditions, the model might treat a load
+instruction as non-restartable even before it is finished (e.g. see ).
+
+Transitions specific to store instructions:
+
+* : At this point the memory footprint of the store is provisionally
+known.
+* : At this point the memory store operations have their values and
+program-order-successor memory load operations can be satisfied by
+forwarding from them.
+* : At this point the store operations are guaranteed to happen (the
+instruction can no longer be restarted or discarded), and they can start
+being propagated to memory.
+* : This propagates a single memory store operation to memory.
+* : At this point all the memory store operations of the instruction
+have been propagated to memory, and the instruction pseudocode can
+continue executing.
+
+Transitions specific to `sc` instructions:
+
+* : This causes the `sc` to fail, either a spontaneous fail or because
+it is not paired with a program-order-previous `lr`.
+* : This transition indicates the `sc` is paired with an `lr` and might
+succeed.
+* : This is an atomic execution of the transitions and , it is enabled
+only if the stores from which the `lr` read from have not been
+overwritten.
+* : This causes the `sc` to fail, either a spontaneous fail or because
+the stores from which the `lr` read from have been overwritten.
+
+Transitions specific to AMO instructions:
+
+* : This is an atomic execution of all the transitions needed to satisfy
+the load operation, do the required arithmetic, and propagate the store
+operation.
+
+Transitions specific to fence instructions:
+
+* {blank}
+
+The transitions labeled latexmath:[$\circ$] can always be taken eagerly,
+as soon as their precondition is satisfied, without excluding other
+behavior; the latexmath:[$\bullet$] cannot. Although is marked with a
+latexmath:[$\bullet$], it can be taken eagerly as long as it is not
+taken infinitely many times.
+
+An instance of a non-AMO load instruction, after being fetched, will
+typically experience the following transitions in this order:
+
+. {blank}
+. {blank}
+. and/or (as many as needed to satisfy all the load operations of the
+instance)
+. {blank}
+. {blank}
+. {blank}
+
+Before, between and after the transitions above, any number of
+transitions may appear. In addition, a transition for fetching the
+instruction in the next program location will be available until it is
+taken.
+
+This concludes the informal description of the operational model. The
+following sections describe the formal operational model.
+
+[[sec:omm:pseudocode_exec]]
+==== Intra-instruction Pseudocode Execution
+
+The intra-instruction semantics for each instruction instance is
+expressed as a state machine, essentially running the instruction
+pseudocode. Given a pseudocode execution state, it computes the next
+state. Most states identify a pending memory or register operation,
+requested by the pseudocode, which the memory model has to do. The
+states are (this is a tagged union; tags in small-caps):
+
+[cols="<,<",]
+|===
+|Load_mem(_kind_, _address_, _size_, _load_continuation_) |memory load
+operation
+
+|Early_sc_fail(_res_continuation_) |allow `sc` to fail early
+
+|Store_ea(_kind_, _address_, _size_, _next_state_) |memory store
+effective address
+
+|Store_memv(_mem_value_, _store_continuation_) |memory store value
+
+|Fence(_kind_, _next_state_) |fence
+
+|Read_reg(_reg_name_, _read_continuation_) |register read
+
+|Write_reg(_reg_name_, _reg_value_, _next_state_) |register write
+
+|Internal(_next_state_) |pseudocode internal step
+
+|Done |end of pseudocode
+|===
+
+Here:
+
+_mem_value_ and _reg_value_ are lists of bytes;
+
+_address_ is an integer of XLEN bits;
+
+for load/store, _kind_ identifies whether it is `lr/sc`,
+acquire-RCpc/release-RCpc, acquire-RCsc/release-RCsc,
+acquire-release-RCsc;
+
+for fence, _kind_ identifies whether it is a normal or TSO, and (for
+normal fences) the predecessor and successor ordering bits;
+
+_reg_name_ identifies a register and a slice thereof (start and end bit
+indices); and
+
+the continuations describe how the instruction instance will continue
+for each value that might be provided by the surrounding memory model
+(the _load_continuation_ and _read_continuation_ take the value loaded
+from memory and read from the previous register write, the
+_store_continuation_ takes _false_ for an `sc` that failed and _true_ in
+all other cases, and _res_continuation_ takes _false_ if the `sc` fails
+and _true_ otherwise).
+
+For example, given the load instruction `lw x1,0(x2)`, an execution will
+typically go as follows. The initial execution state will be computed
+from the pseudocode for the given opcode. This can be expected to be
+Read_reg(`x2`, _read_continuation_). Feeding the most recently written
+value of register `x2` (the instruction semantics will be blocked if
+necessary until the register value is available), say `0x4000`, to
+_read_continuation_ returns Load_mem(`plain_load`, `0x4000`, `4`,
+_load_continuation_). Feeding the 4-byte value loaded from memory
+location `0x4000`, say `0x42`, to _load_continuation_ returns
+Write_reg(`x1`, `0x42`, Done). Many Internal(_next_state_) states may
+appear before and between the states above.
+
+Notice that writing to memory is split into two steps, Store_ea and
+Store_memv: the first one makes the memory footprint of the store
+provisionally known, and the second one adds the value to be stored. We
+ensure these are paired in the pseudocode (Store_ea followed by
+Store_memv), but there may be other steps between them.
+
+It is observable that the Store_ea can occur before the value to be
+stored is determined. For example, for the litmus test
+LB+fence.r.rw+data-po to be allowed by the operational model (as it is
+by RVWMO), the first store in Hart 1 has to take the Store_ea step
+before its value is determined, so that the second store can see it is
+to a non-overlapping memory footprint, allowing the second store to be
+committed out of order without violating coherence.
+
+The pseudocode of each instruction performs at most one store or one
+load, except for AMOs that perform exactly one load and one store. Those
+memory accesses are then split apart into the architecturally atomic
+units by the hart semantics (see and below).
+
+Informally, each bit of a register read should be satisfied from a
+register write by the most recent (in program order) instruction
+instance that can write that bit (or from the hart’s initial register
+state if there is no such write). Hence, it is essential to know the
+register write footprint of each instruction instance, which we
+calculate when the instruction instance is created (see the action of
+below). We ensure in the pseudocode that each instruction does at most
+one register write to each register bit, and also that it does not try
+to read a register value it just wrote.
+
+Data-flow dependencies (address and data) in the model emerge from the
+fact that each register read has to wait for the appropriate register
+write to be executed (as described above).
+
+[[sec:omm:inst_state]]
+==== Instruction Instance State
+
+Each instruction instance latexmath:[$i$] has a state comprising:
+
+* _program_loc_, the memory address from which the instruction was
+fetched;
+* _instruction_kind_, identifying whether this is a load, store, AMO,
+fence, branch/jump or a `simple' instruction (this also includes a
+_kind_ similar to the one described for the pseudocode execution
+states);
+* _src_regs_, the set of source _reg_name_s (including system
+registers), as statically determined from the pseudocode of the
+instruction;
+* _dst_regs_, the destination _reg_name_s (including system registers),
+as statically determined from the pseudocode of the instruction;
+* _pseudocode_state_ (or sometimes just `state' for short), one of (this
+is a tagged union; tags in small-caps):
++
+[cols="<,<",]
+|===
+|Plain(_isa_state_) |ready to make a pseudocode transition
+
+|Pending_mem_loads(_load_continuation_) |requesting memory load
+operation(s)
+
+|Pending_mem_stores(_store_continuation_) |requesting memory store
+operation(s)
+|===
+* _reg_reads_, the register reads the instance has performed, including,
+for each one, the register write slices it read from;
+* _reg_writes_, the register writes the instance has performed;
+* _mem_loads_, a set of memory load operations, and for each one the
+as-yet-unsatisfied slices (the byte indices that have not been satisfied
+yet), and, for the satisfied slices, the store slices (each consisting
+of a memory store operation and subset of its byte indices) that
+satisfied it.
+* _mem_stores_, a set of memory store operations, and for each one a
+flag that indicates whether it has been propagated (passed to the shared
+memory) or not.
+* information recording whether the instance is committed, finished,
+etc.
+
+Each memory load operation includes a memory footprint (address and
+size). Each memory store operations includes a memory footprint, and,
+when available, a value.
+
+A load instruction instance with a non-empty _mem_loads_, for which all
+the load operations are satisfied (i.e. there are no unsatisfied load
+slices) is said to be _entirely satisfied_.
+
+Informally, an instruction instance is said to have _fully determined
+data_ if the load (and `sc`) instructions feeding its source registers
+are finished. Similarly, it is said to have a _fully determined memory
+footprint_ if the load (and `sc`) instructions feeding its memory
+operation address register are finished. Formally, we first define the
+notion of _fully determined register write_: a register write
+latexmath:[$w$] from _reg_writes_ of instruction instance
+latexmath:[$i$] is said to be _fully determined_ if one of the following
+conditions hold:
+
+. latexmath:[$i$] is finished; or
+. the value written by latexmath:[$w$] is not affected by a memory
+operation that latexmath:[$i$] has made (i.e. a value loaded from memory
+or the result of `sc`), and, for every register read that
+latexmath:[$i$] has made, that affects latexmath:[$w$], the register
+write from which latexmath:[$i$] read is fully determined (or
+latexmath:[$i$] read from the initial register state).
+
+Now, an instruction instance latexmath:[$i$] is said to have _fully
+determined data_ if for every register read latexmath:[$r$] from
+_reg_reads_, the register writes that latexmath:[$r$] reads from are
+fully determined. An instruction instance latexmath:[$i$] is said to
+have a _fully determined memory footprint_ if for every register read
+latexmath:[$r$] from _reg_reads_ that feeds into latexmath:[$i$]’s
+memory operation address, the register writes that latexmath:[$r$] reads
+from are fully determined.
+
+The `rmem` tool records, for every register write, the set of register
+writes from other instructions that have been read by this instruction
+at the point of performing the write. By carefully arranging the
+pseudocode of the instructions covered by the tool we were able to make
+it so that this is exactly the set of register writes on which the write
+depends on.
+
+==== Hart State
+
+The model state of a single hart comprises:
+
+* _hart_id_, a unique identifier of the hart;
+* _initial_register_state_, the initial register value for each
+register;
+* _initial_fetch_address_, the initial instruction fetch address;
+* _instruction_tree_, a tree of the instruction instances that have been
+fetched (and not discarded), in program order.
+
+==== Shared Memory State
+
+The model state of the shared memory comprises a list of memory store
+operations, in the order they propagated to the shared memory.
+
+When a store operation is propagated to the shared memory it is simply
+added to the end of the list. When a load operation is satisfied from
+memory, for each byte of the load operation, the most recent
+corresponding store slice is returned.
+
+For most purposes, it is simpler to think of the shared memory as an
+array, i.e., a map from memory locations to memory store operation
+slices, where each memory location is mapped to a one-byte slice of the
+most recent memory store operation to that location. However, this
+abstraction is not detailed enough to properly handle the `sc`
+instruction. The RVWMO allows store operations from the same hart as the
+`sc` to intervene between the store operation of the `sc` and the store
+operations the paired `lr` read from. To allow such store operations to
+intervene, and forbid others, the array abstraction must be extended to
+record more information. Here, we use a list as it is very simple, but a
+more efficient and scalable implementations should probably use
+something better.
+
+[[sec:omm:transitions]]
+==== Transitions
+
+Each of the paragraphs below describes a single kind of system
+transition. The description starts with a condition over the current
+system state. The transition can be taken in the current state only if
+the condition is satisfied. The condition is followed by an action that
+is applied to that state when the transition is taken, in order to
+generate the new system state.
+
+[[omm:fetch]]
+===== Fetch instruction
+
+A possible program-order-successor of instruction instance
+latexmath:[$i$] can be fetched from address _loc_ if:
+
+. it has not already been fetched, i.e., none of the immediate
+successors of latexmath:[$i$] in the hart’s _instruction_tree_ are from
+_loc_; and
+. if latexmath:[$i$]’s pseudocode has already written an address to
+_pc_, then _loc_ must be that address, otherwise _loc_ is:
+* for a conditional branch, the successor address or the branch target
+address;
+* for a (direct) jump and link instruction (`jal`), the target address;
+* for an indirect jump instruction (`jalr`), any address; and
+* for any other instruction, latexmath:[$i.\textit{program\_loc}+4$].
+
+Action: construct a freshly initialized instruction instance
+latexmath:[$i'$] for the instruction in the program memory at _loc_,
+with state Plain(_isa_state_), computed from the instruction pseudocode,
+including the static information available from the pseudocode such as
+its _instruction_kind_, _src_regs_, and _dst_regs_, and add
+latexmath:[$i'$] to the hart’s _instruction_tree_ as a successor of
+latexmath:[$i$].
+
+The possible next fetch addresses (_loc_) are available immediately
+after fetching latexmath:[$i$] and the model does not need to wait for
+the pseudocode to write to _pc_; this allows out-of-order execution, and
+speculation past conditional branches and jumps. For most instructions
+these addresses are easily obtained from the instruction pseudocode. The
+only exception to that is the indirect jump instruction (`jalr`), where
+the address depends on the value held in a register. In principle the
+mathematical model should allow speculation to arbitrary addresses here.
+The exhaustive search in the `rmem` tool handles this by running the
+exhaustive search multiple times with a growing set of possible next
+fetch addresses for each indirect jump. The initial search uses empty
+sets, hence there is no fetch after indirect jump instruction until the
+pseudocode of the instruction writes to _pc_, and then we use that value
+for fetching the next instruction. Before starting the next iteration of
+exhaustive search, we collect for each indirect jump (grouped by code
+location) the set of values it wrote to _pc_ in all the executions in
+the previous search iteration, and use that as possible next fetch
+addresses of the instruction. This process terminates when no new fetch
+addresses are detected.
+
+[[omm:initiate_load]]
+===== Initiate memory load operations
+
+An instruction instance latexmath:[$i$] in state Plain(Load_mem(_kind_,
+_address_, _size_, _load_continuation_)) can always initiate the
+corresponding memory load operations. Action:
+
+. Construct the appropriate memory load operations latexmath:[$mlos$]:
+* if _address_ is aligned to _size_ then latexmath:[$mlos$] is a single
+memory load operation of _size_ bytes from _address_;
+* otherwise, latexmath:[$mlos$] is a set of _size_ memory load
+operations, each of one byte, from the addresses
+latexmath:[$\textit{address}\ldots\textit{address}+\textit{size}-1$].
+. set _mem_loads_ of latexmath:[$i$] to latexmath:[$mlos$]; and
+. update the state of latexmath:[$i$] to
+Pending_mem_loads(_load_continuation_).
+
+In Section #sec:rvwmo:primitives[[sec:rvwmo:primitives]] it is said that
+misaligned memory accesses may be decomposed at any granularity. Here we
+decompose them to one-byte accesses as this granularity subsumes all
+others.
+
+[[omm:sat_by_forwarding]]
+===== Satisfy memory load operation by forwarding from unpropagated stores
+
+For a non-AMO load instruction instance latexmath:[$i$] in state
+Pending_mem_loads(_load_continuation_), and a memory load operation
+latexmath:[$mlo$] in latexmath:[$i.\textit{mem\_loads}$] that has
+unsatisfied slices, the memory load operation can be partially or
+entirely satisfied by forwarding from unpropagated memory store
+operations by store instruction instances that are program-order-before
+latexmath:[$i$] if:
+
+. all program-order-previous `fence` instructions with `.sr` and `.pw`
+set are finished;
+. for every program-order-previous `fence` instruction, latexmath:[$f$],
+with `.sr` and `.pr` set, and `.pw` not set, if latexmath:[$f$] is not
+finished then all load instructions that are program-order-before
+latexmath:[$f$] are entirely satisfied;
+. for every program-order-previous `fence.tso` instruction,
+latexmath:[$f$], that is not finished, all load instructions that are
+program-order-before latexmath:[$f$] are entirely satisfied;
+. if latexmath:[$i$] is a load-acquire-RCsc, all program-order-previous
+store-releases-RCsc are finished;
+. if latexmath:[$i$] is a load-acquire-release, all
+program-order-previous instructions are finished;
+. all non-finished program-order-previous load-acquire instructions are
+entirely satisfied; and
+. all program-order-previous store-acquire-release instructions are
+finished;
+
+Let latexmath:[$msoss$] be the set of all unpropagated memory store
+operation slices from non-`sc` store instruction instances that are
+program-order-before latexmath:[$i$] and have already calculated the
+value to be stored, that overlap with the unsatisfied slices of
+latexmath:[$mlo$], and which are not superseded by intervening store
+operations or store operations that are read from by an intervening
+load. The last condition requires, for each memory store operation slice
+latexmath:[$msos$] in latexmath:[$msoss$] from instruction
+latexmath:[$i'$]:
+
+that there is no store instruction program-order-between latexmath:[$i$]
+and latexmath:[$i'$] with a memory store operation overlapping
+latexmath:[$msos$]; and
+
+that there is no load instruction program-order-between latexmath:[$i$]
+and latexmath:[$i'$] that was satisfied from an overlapping memory store
+operation slice from a different hart.
+
+Action:
+
+. update latexmath:[$i.\textit{mem\_loads}$] to indicate that
+latexmath:[$mlo$] was satisfied by latexmath:[$msoss$]; and
+. restart any speculative instructions which have violated coherence as
+a result of this, i.e., for every non-finished instruction
+latexmath:[$i'$] that is a program-order-successor of latexmath:[$i$],
+and every memory load operation latexmath:[$mlo'$] of latexmath:[$i'$]
+that was satisfied from latexmath:[$msoss'$], if there exists a memory
+store operation slice latexmath:[$msos'$] in latexmath:[$msoss'$], and
+an overlapping memory store operation slice from a different memory
+store operation in latexmath:[$msoss$], and latexmath:[$msos'$] is not
+from an instruction that is a program-order-successor of
+latexmath:[$i$], restart latexmath:[$i'$] and its _restart-dependents_.
+
+Where, the _restart-dependents_ of instruction latexmath:[$j$] are:
+
+program-order-successors of latexmath:[$j$] that have data-flow
+dependency on a register write of latexmath:[$j$];
+
+program-order-successors of latexmath:[$j$] that have a memory load
+operation that reads from a memory store operation of latexmath:[$j$]
+(by forwarding);
+
+if latexmath:[$j$] is a load-acquire, all the program-order-successors
+of latexmath:[$j$];
+
+if latexmath:[$j$] is a load, for every `fence`, latexmath:[$f$], with
+`.sr` and `.pr` set, and `.pw` not set, that is a
+program-order-successor of latexmath:[$j$], all the load instructions
+that are program-order-successors of latexmath:[$f$];
+
+if latexmath:[$j$] is a load, for every `fence.tso`, latexmath:[$f$],
+that is a program-order-successor of latexmath:[$j$], all the load
+instructions that are program-order-successors of latexmath:[$f$]; and
+
+(recursively) all the restart-dependents of all the instruction
+instances above.
+
+Forwarding memory store operations to a memory load might satisfy only
+some slices of the load, leaving other slices unsatisfied.
+
+A program-order-previous store operation that was not available when
+taking the transition above might make latexmath:[$msoss$] provisionally
+unsound (violating coherence) when it becomes available. That store will
+prevent the load from being finished (see ), and will cause it to
+restart when that store operation is propagated (see ).
+
+A consequence of the transition condition above is that
+store-release-RCsc memory store operations cannot be forwarded to
+load-acquire-RCsc instructions: latexmath:[$msoss$] does not include
+memory store operations from finished stores (as those must be
+propagated memory store operations), and the condition above requires
+all program-order-previous store-releases-RCsc to be finished when the
+load is acquire-RCsc.
+
+[[omm:sat_from_mem]]
+===== Satisfy memory load operation from memory
+
+For an instruction instance latexmath:[$i$] of a non-AMO load
+instruction or an AMO instruction in the context of the ```` transition,
+any memory load operation latexmath:[$mlo$] in
+latexmath:[$i.\textit{mem\_loads}$] that has unsatisfied slices, can be
+satisfied from memory if all the conditions of are satisfied. Action:
+let latexmath:[$msoss$] be the memory store operation slices from memory
+covering the unsatisfied slices of latexmath:[$mlo$], and apply the
+action of .
+
+Note that might leave some slices of the memory load operation
+unsatisfied, those will have to be satisfied by taking the transition
+again, or taking . , on the other hand, will always satisfy all the
+unsatisfied slices of the memory load operation.
+
+[[omm:complete_loads]]
+===== Complete load operations
+
+A load instruction instance latexmath:[$i$] in state
+Pending_mem_loads(_load_continuation_) can be completed (not to be
+confused with finished) if all the memory load operations
+latexmath:[$i.\textit{mem\_loads}$] are entirely satisfied (i.e. there
+are no unsatisfied slices). Action: update the state of latexmath:[$i$]
+to Plain(_load_continuation(mem_value)_), where _mem_value_ is assembled
+from all the memory store operation slices that satisfied
+latexmath:[$i.\textit{mem\_loads}$].
+
+[[omm:early_sc_fail]]
+===== Early `sc` fail
+
+An `sc` instruction instance latexmath:[$i$] in state
+Plain(Early_sc_fail(_res_continuation_)) can always be made to fail.
+Action: update the state of latexmath:[$i$] to
+Plain(_res_continuation(false)_).
+
+[[omm:paired_sc]]
+===== Paired `sc`
+
+An `sc` instruction instance latexmath:[$i$] in state
+Plain(Early_sc_fail(_res_continuation_)) can continue its (potentially
+successful) execution if latexmath:[$i$] is paired with an `lr`. Action:
+update the state of latexmath:[$i$] to Plain(_res_continuation(true)_).
+
+[[omm:initiate_store_footprint]]
+===== Initiate memory store operation footprints
+
+An instruction instance latexmath:[$i$] in state Plain(Store_ea(_kind_,
+_address_, _size_, _next_state_)) can always announce its pending memory
+store operation footprint. Action:
+
+. construct the appropriate memory store operations latexmath:[$msos$]
+(without the store value):
+* if _address_ is aligned to _size_ then latexmath:[$msos$] is a single
+memory store operation of _size_ bytes to _address_;
+* otherwise, latexmath:[$msos$] is a set of _size_ memory store
+operations, each of one-byte size, to the addresses
+latexmath:[$\textit{address}\ldots\textit{address}+\textit{size}-1$].
+. set latexmath:[$i.\textit{mem\_stores}$] to latexmath:[$msos$]; and
+. update the state of latexmath:[$i$] to Plain(_next_state_).
+
+Note that after taking the transition above the memory store operations
+do not yet have their values. The importance of splitting this
+transition from the transition below is that it allows other
+program-order-successor store instructions to observe the memory
+footprint of this instruction, and if they don’t overlap, propagate out
+of order as early as possible (i.e. before the data register value
+becomes available).
+
+[[omm:instantiate_store_value]]
+===== Instantiate memory store operation values
+
+An instruction instance latexmath:[$i$] in state
+Plain(Store_memv(_mem_value_, _store_continuation_)) can always
+instantiate the values of the memory store operations
+latexmath:[$i.\textit{mem\_stores}$]. Action:
+
+. split _mem_value_ between the memory store operations
+latexmath:[$i.\textit{mem\_stores}$]; and
+. update the state of latexmath:[$i$] to
+Pending_mem_stores(_store_continuation_).
+
+[[omm:commit_stores]]
+===== Commit store instruction
+
+An uncommitted instruction instance latexmath:[$i$] of a non-`sc` store
+instruction or an `sc` instruction in the context of the ````
+transition, in state Pending_mem_stores(_store_continuation_), can be
+committed (not to be confused with propagated) if:
+
+. latexmath:[$i$] has fully determined data;
+. all program-order-previous conditional branch and indirect jump
+instructions are finished;
+. all program-order-previous `fence` instructions with `.sw` set are
+finished;
+. all program-order-previous `fence.tso` instructions are finished;
+. all program-order-previous load-acquire instructions are finished;
+. all program-order-previous store-acquire-release instructions are
+finished;
+. if latexmath:[$i$] is a store-release, all program-order-previous
+instructions are finished;
+. [#omm:commit_store:prev_addrs]#[omm:commit_store:prev_addrs]# all
+program-order-previous memory access instructions have a fully
+determined memory footprint;
+. [#omm:commit_store:prev_stores]#[omm:commit_store:prev_stores]# all
+program-order-previous store instructions, except for `sc` that failed,
+have initiated and so have non-empty _mem_stores_; and
+. [#omm:commit_store:prev_loads]#[omm:commit_store:prev_loads]# all
+program-order-previous load instructions have initiated and so have
+non-empty _mem_loads_.
+
+Action: record that latexmath:[$i$] is committed.
+
+Notice that if condition
+#omm:commit_store:prev_addrs[[omm:commit_store:prev_addrs]] is satisfied
+the conditions
+#omm:commit_store:prev_stores[[omm:commit_store:prev_stores]] and
+#omm:commit_store:prev_loads[[omm:commit_store:prev_loads]] are also
+satisfied, or will be satisfied after taking some eager transitions.
+Hence, requiring them does not strengthen the model. By requiring them,
+we guarantee that previous memory access instructions have taken enough
+transitions to make their memory operations visible for the condition
+check of , which is the next transition the instruction will take,
+making that condition simpler.
+
+[[omm:prop_store]]
+===== Propagate store operation
+
+For a committed instruction instance latexmath:[$i$] in state
+Pending_mem_stores(_store_continuation_), and an unpropagated memory
+store operation latexmath:[$mso$] in
+latexmath:[$i.\textit{mem\_stores}$], latexmath:[$mso$] can be
+propagated if:
+
+. all memory store operations of program-order-previous store
+instructions that overlap with latexmath:[$mso$] have already
+propagated;
+. all memory load operations of program-order-previous load instructions
+that overlap with latexmath:[$mso$] have already been satisfied, and
+(the load instructions) are _non-restartable_ (see definition below);
+and
+. all memory load operations that were satisfied by forwarding
+latexmath:[$mso$] are entirely satisfied.
+
+Where a non-finished instruction instance latexmath:[$j$] is
+_non-restartable_ if:
+
+. there does not exist a store instruction latexmath:[$s$] and an
+unpropagated memory store operation latexmath:[$mso$] of latexmath:[$s$]
+such that applying the action of the ```` transition to
+latexmath:[$mso$] will result in the restart of latexmath:[$j$]; and
+. there does not exist a non-finished load instruction latexmath:[$l$]
+and a memory load operation latexmath:[$mlo$] of latexmath:[$l$] such
+that applying the action of the ````/```` transition (even if
+latexmath:[$mlo$] is already satisfied) to latexmath:[$mlo$] will result
+in the restart of latexmath:[$j$].
+
+Action:
+
+. update the shared memory state with latexmath:[$mso$];
+. update latexmath:[$i.\textit{mem\_stores}$] to indicate that
+latexmath:[$mso$] was propagated; and
+. restart any speculative instructions which have violated coherence as
+a result of this, i.e., for every non-finished instruction
+latexmath:[$i'$] program-order-after latexmath:[$i$] and every memory
+load operation latexmath:[$mlo'$] of latexmath:[$i'$] that was satisfied
+from latexmath:[$msoss'$], if there exists a memory store operation
+slice latexmath:[$msos'$] in latexmath:[$msoss'$] that overlaps with
+latexmath:[$mso$] and is not from latexmath:[$mso$], and
+latexmath:[$msos'$] is not from a program-order-successor of
+latexmath:[$i$], restart latexmath:[$i'$] and its _restart-dependents_
+(see ).
+
+[[omm:commit_sc]]
+===== Commit and propagate store operation of an `sc`
+
+An uncommitted `sc` instruction instance latexmath:[$i$], from hart
+latexmath:[$h$], in state Pending_mem_stores(_store_continuation_), with
+a paired `lr` latexmath:[$i'$] that has been satisfied by some store
+slices latexmath:[$msoss$], can be committed and propagated at the same
+time if:
+
+. latexmath:[$i'$] is finished;
+. every memory store operation that has been forwarded to
+latexmath:[$i'$] is propagated;
+. the conditions of is satisfied;
+. the conditions of is satisfied (notice that an `sc` instruction can
+only have one memory store operation); and
+. for every store slice latexmath:[$msos$] from latexmath:[$msoss$],
+latexmath:[$msos$] has not been overwritten, in the shared memory, by a
+store that is from a hart that is not latexmath:[$h$], at any point
+since latexmath:[$msos$] was propagated to memory.
+
+Action:
+
+. apply the actions of ; and
+. apply the action of .
+
+[[omm:late_sc_fail]]
+===== Late `sc` fail
+
+An `sc` instruction instance latexmath:[$i$] in state
+Pending_mem_stores(_store_continuation_), that has not propagated its
+memory store operation, can always be made to fail. Action:
+
+. clear latexmath:[$i.\textit{mem\_stores}$]; and
+. update the state of latexmath:[$i$] to
+Plain(_store_continuation(false)_).
+
+For efficiency, the `rmem` tool allows this transition only when it is
+not possible to take the transition. This does not affect the set of
+allowed final states, but when explored interactively, if the `sc`
+should fail one should use the transition instead of waiting for this
+transition.
+
+[[omm:complete_stores]]
+===== Complete store operations
+
+A store instruction instance latexmath:[$i$] in state
+Pending_mem_stores(_store_continuation_), for which all the memory store
+operations in latexmath:[$i.\textit{mem\_stores}$] have been propagated,
+can always be completed (not to be confused with finished). Action:
+update the state of latexmath:[$i$] to
+Plain(_store_continuation(true)_).
+
+[[omm:do_amo]]
+===== Satisfy, commit and propagate operations of an AMO
+
+An AMO instruction instance latexmath:[$i$] in state
+Pending_mem_loads(_load_continuation_) can perform its memory access if
+it is possible to perform the following sequence of transitions with no
+intervening transitions:
+
+. {blank}
+. {blank}
+. (zero or more times)
+. {blank}
+. {blank}
+. {blank}
+. {blank}
+
+and in addition, the condition of , with the exception of not requiring
+latexmath:[$i$] to be in state Plain(Done), holds after those
+transitions. Action: perform the above sequence of transitions (this
+does not include ), one after the other, with no intervening
+transitions.
+
+Notice that program-order-previous stores cannot be forwarded to the
+load of an AMO. This is simply because the sequence of transitions above
+does not include the forwarding transition. But even if it did include
+it, the sequence will fail when trying to do the transition, as this
+transition requires all program-order-previous store operations to
+overlapping memory footprints to be propagated, and forwarding requires
+the store operation to be unpropagated.
+
+In addition, the store of an AMO cannot be forwarded to a
+program-order-successor load. Before taking the transition above, the
+store operation of the AMO does not have its value and therefore cannot
+be forwarded; after taking the transition above the store operation is
+propagated and therefore cannot be forwarded.
+
+[[omm:commit_fence]]
+===== Commit fence
+
+A fence instruction instance latexmath:[$i$] in state
+Plain(Fence(_kind_, _next_state_)) can be committed if:
+
+. if latexmath:[$i$] is a normal fence and it has `.pr` set, all
+program-order-previous load instructions are finished;
+. if latexmath:[$i$] is a normal fence and it has `.pw` set, all
+program-order-previous store instructions are finished; and
+. if latexmath:[$i$] is a `fence.tso`, all program-order-previous load
+and store instructions are finished.
+
+Action:
+
+. record that latexmath:[$i$] is committed; and
+. update the state of latexmath:[$i$] to Plain(_next_state_).
+
+[[omm:reg_read]]
+===== Register read
+
+An instruction instance latexmath:[$i$] in state
+Plain(Read_reg(_reg_name_, _read_cont_)) can do a register read of
+_reg_name_ if every instruction instance that it needs to read from has
+already performed the expected _reg_name_ register write.
+
+Let _read_sources_ include, for each bit of _reg_name_, the write to
+that bit by the most recent (in program order) instruction instance that
+can write to that bit, if any. If there is no such instruction, the
+source is the initial register value from _initial_register_state_. Let
+_reg_value_ be the value assembled from _read_sources_. Action:
+
+. add _reg_name_ to latexmath:[$i.\textit{reg\_reads}$] with
+_read_sources_ and _reg_value_; and
+. update the state of latexmath:[$i$] to Plain(_read_cont(reg_value)_).
+
+[[omm:reg_write]]
+===== Register write
+
+An instruction instance latexmath:[$i$] in state
+Plain(Write_reg(_reg_name_, _reg_value_, _next_state_)) can always do a
+_reg_name_ register write. Action:
+
+. add _reg_name_ to latexmath:[$i.\textit{reg\_writes}$] with
+latexmath:[$deps$] and _reg_value_; and
+. update the state of latexmath:[$i$] to Plain(_next_state_).
+
+where latexmath:[$deps$] is a pair of the set of all _read_sources_ from
+latexmath:[$i.\textit{reg\_reads}$], and a flag that is true iff
+latexmath:[$i$] is a load instruction instance that has already been
+entirely satisfied.
+
+[[omm:sail_interp]]
+===== Pseudocode internal step
+
+An instruction instance latexmath:[$i$] in state
+Plain(Internal(_next_state_)) can always do that pseudocode-internal
+step. Action: update the state of latexmath:[$i$] to
+Plain(_next_state_).
+
+[[omm:finish]]
+===== Finish instruction
+
+A non-finished instruction instance latexmath:[$i$] in state Plain(Done)
+can be finished if:
+
+. if latexmath:[$i$] is a load instruction:
+.. all program-order-previous load-acquire instructions are finished;
+.. all program-order-previous `fence` instructions with `.sr` set are
+finished;
+.. for every program-order-previous `fence.tso` instruction,
+latexmath:[$f$], that is not finished, all load instructions that are
+program-order-before latexmath:[$f$] are finished; and
+.. it is guaranteed that the values read by the memory load operations
+of latexmath:[$i$] will not cause coherence violations, i.e., for any
+program-order-previous instruction instance latexmath:[$i'$], let
+latexmath:[$\textit{cfp}$] be the combined footprint of propagated
+memory store operations from store instructions program-order-between
+latexmath:[$i$] and latexmath:[$i'$], and _fixed memory store
+operations_ that were forwarded to latexmath:[$i$] from store
+instructions program-order-between latexmath:[$i$] and latexmath:[$i'$]
+including latexmath:[$i'$], and let
+latexmath:[$\overline{\textit{cfp}}$] be the complement of
+latexmath:[$\textit{cfp}$] in the memory footprint of latexmath:[$i$].
+If latexmath:[$\overline{\textit{cfp}}$] is not empty:
+... latexmath:[$i'$] has a fully determined memory footprint;
+... latexmath:[$i'$] has no unpropagated memory store operations that
+overlap with latexmath:[$\overline{\textit{cfp}}$]; and
+... if latexmath:[$i'$] is a load with a memory footprint that overlaps
+with latexmath:[$\overline{\textit{cfp}}$], then all the memory load
+operations of latexmath:[$i'$] that overlap with
+latexmath:[$\overline{\textit{cfp}}$] are satisfied and latexmath:[$i'$]
+is _non-restartable_ (see the transition for how to determined if an
+instruction is non-restartable).
++
+Here, a memory store operation is called fixed if the store instruction
+has fully determined data.
+. latexmath:[$i$] has a fully determined data; and
+. if latexmath:[$i$] is not a fence, all program-order-previous
+conditional branch and indirect jump instructions are finished.
+
+Action:
+
+. if latexmath:[$i$] is a conditional branch or indirect jump
+instruction, discard any untaken paths of execution, i.e., remove all
+instruction instances that are not reachable by the branch/jump taken in
+_instruction_tree_; and
+. record the instruction as finished, i.e., set _finished_ to _true_.
+
+[[sec:omm:limitations]]
+==== Limitations
+
+* The model covers user-level RV64I and RV64A. In particular, it does
+not support the misaligned atomics extension ``Zam`` or the total store
+ordering extension ``Ztso``. It should be trivial to adapt the model to
+RV32I/A and to the G, Q and C extensions, but we have never tried it.
+This will involve, mostly, writing Sail code for the instructions, with
+minimal, if any, changes to the concurrency model.
+* The model covers only normal memory accesses (it does not handle I/O
+accesses).
+* The model does not cover TLB-related effects.
+* The model assumes the instruction memory is fixed. In particular, the
+transition does not generate memory load operations, and the shared
+memory is not involved in the transition. Instead, the model depends on
+an external oracle that provides an opcode when given a memory location.
+* The model does not cover exceptions, traps and interrupts.
