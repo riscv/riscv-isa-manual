@@ -2142,17 +2142,6 @@ translations with the same values for PTE bits 5--0.  Such ranges must be of a
 naturally aligned power-of-2 (NAPOT) granularity larger than the base page
 size.
 
-\begin{commentary}
-  The motivation for a NAPOT PTE is that it can be cached in a TLB as one or
-  more entries representing the contiguous region as if it were a single
-  (large) page covered by a single translation.  This compaction can help
-  relieve TLB pressure in some scenarios.  The encoding is designed to fit
-  within the pre-existing Sv39, Sv48, and Sv57 PTE formats so as not to disrupt
-  existing implementations or designs that choose not to implement the scheme.
-  It is also designed so as not to complicate the definition of the
-  address-translation algorithm.
-\end{commentary}
-
 \begin{table*}[h!]
 \begin{center}
 \begin{tabular}{|c|c||l|c|}
@@ -2172,62 +2161,34 @@ $\geq 1$ & {\tt x~xxxx~xxxx} & {\em Reserved}           & $-$ \\
 \label{ptenapot}
 \end{table*}
 
-\begin{commentary}
-  Depending on need, the NAPOT scheme may be extended to other intermediate
-  page sizes and/or to other levels of the page table in the future.  The
-  encoding is designed to accommodate other NAPOT sizes should that need
-  arise.  For example:
-
-  \begin{center}\em
-  \begin{tabular}{|c|c||l|c|}
-  \hline
-  i        & $pte.ppn[i]$      & Description                & $pte.napot\_bits$ \\
-  \hline
-  0        & {\tt x~xxxx~xxx1} & 8 KiB contiguous region    & 1 \\
-  0        & {\tt x~xxxx~xx10} & 16 KiB contiguous region   & 2 \\
-  0        & {\tt x~xxxx~x100} & 32 KiB contiguous region   & 3 \\
-  0        & {\tt x~xxxx~1000} & 64 KiB contiguous region   & 4 \\
-  0        & {\tt x~xxx1~0000} & 128 KiB contiguous region  & 5 \\
-  ...      & ...               & ...                        & ... \\
-  1        & {\tt x~xxxx~xxx1} & 4 MiB contiguous region    & 1 \\
-  1        & {\tt x~xxxx~xx10} & 8 MiB contiguous region    & 2 \\
-  ...      & ...               & ...                        & ... \\
-  \hline
-  \end{tabular}
-  \end{center}
-
-  In such a case, an implementation may or may not support all options, subject
-  to profile requirements.  The discoverability mechanism for this extension
-  would be extended to allow system software to determine which sizes are
-  supported.
-
-  Other sizes may remain deliberately excluded, so that PPN bits not being
-  used to indicate a valid NAPOT region size (e.g., the least-significant bit
-  of $pte.ppn[i]$) may be repurposed for other uses in the future.
-
-  However, in case finer-grained intermediate page size support prove not to
-  be useful, we have chosen to standardize only 64KiB support as a first step.
-\end{commentary}
-
-NAPOT PTEs behave just like non-NAPOT PTEs do within the address-translation
+NAPOT PTEs behave identically to non-NAPOT PTEs within the address-translation
 algorithm in Section~\ref{sv32algorithm}, except that:
 \begin{itemize}
   \item If the encoding in $pte$ is valid according to Table~\ref{ptenapot},
     then instead of returning the original value of $pte$, implicit reads of a
     NAPOT PTE return a copy of $pte$ in which $pte.ppn[pte.napot\_bits-1:0]$ is
     replaced by $vpn[i][pte.napot\_bits-1:0]$.  If the encoding in $pte$ is
-    {\em reserved} according to Table~\ref{ptenapot}, then a page-fault
-    exception must be raised.
+    reserved according to Table~\ref{ptenapot}, then a page-fault exception
+    must be raised.
   \item Implicit reads of NAPOT page table entries may create address-translation cache
     entries mapping $a + va.vpn[j] \times \textrm{PTESIZE}$ to a copy of $pte$
     in which $pte.ppn[pte.napot\_bits-1:0]$ is replaced by
     $vpn[0][pte.napot\_bits-1:0]$, for any or all $j$ such that
-    $j[8:napot\_bits]=i[8:napot\_bits]$, all for the address space identified
+    ${j[8:napot\_bits]}={i[8:napot\_bits]}$, all for the address space identified
     in {\em satp} as loaded by step 0.
 \end{itemize}
 
 \begin{commentary}
-  This added step captures the behavior that would result from the creation
+  The motivation for a NAPOT PTE is that it can be cached in a TLB as one or
+  more entries representing the contiguous region as if it were a single
+  (large) page covered by a single translation.  This compaction can help
+  relieve TLB pressure in some scenarios.  The encoding is designed to fit
+  within the pre-existing Sv39, Sv48, and Sv57 PTE formats so as not to disrupt
+  existing implementations or designs that choose not to implement the scheme.
+  It is also designed so as not to complicate the definition of the
+  address-translation algorithm.
+
+  The address translation cache abstraction captures the behavior that would result from the creation
   of a single TLB entry covering the entire NAPOT region.  It is also designed
   to be consistent with implementations that support NAPOT PTEs by splitting
   the NAPOT region into TLB entries covering any smaller power-of-two region
@@ -2267,6 +2228,40 @@ algorithm in Section~\ref{sv32algorithm}, except that:
 
   Just as with normal PTEs, TLBs are permitted to cache NAPOT PTEs whose V
   (Valid) bit is clear.
+
+  Depending on need, the NAPOT scheme may be extended to other intermediate
+  page sizes and/or to other levels of the page table in the future.  The
+  encoding is designed to accommodate other NAPOT sizes should that need
+  arise.  For example:
+
+  \begin{center}\em
+  \begin{tabular}{|c|c||l|c|}
+  \hline
+  i        & $pte.ppn[i]$      & Description                & $pte.napot\_bits$ \\
+  \hline
+  0        & {\tt x~xxxx~xxx1} & 8 KiB contiguous region    & 1 \\
+  0        & {\tt x~xxxx~xx10} & 16 KiB contiguous region   & 2 \\
+  0        & {\tt x~xxxx~x100} & 32 KiB contiguous region   & 3 \\
+  0        & {\tt x~xxxx~1000} & 64 KiB contiguous region   & 4 \\
+  0        & {\tt x~xxx1~0000} & 128 KiB contiguous region  & 5 \\
+  ...      & ...               & ...                        & ... \\
+  1        & {\tt x~xxxx~xxx1} & 4 MiB contiguous region    & 1 \\
+  1        & {\tt x~xxxx~xx10} & 8 MiB contiguous region    & 2 \\
+  ...      & ...               & ...                        & ... \\
+  \hline
+  \end{tabular}
+  \end{center}
+
+  In such a case, an implementation may or may not support all options.  The
+  discoverability mechanism for this extension would be extended to allow
+  system software to determine which sizes are supported.
+
+  Other sizes may remain deliberately excluded, so that PPN bits not being
+  used to indicate a valid NAPOT region size (e.g., the least-significant bit
+  of $pte.ppn[i]$) may be repurposed for other uses in the future.
+
+  However, in case finer-grained intermediate page size support proves not to
+  be useful, we have chosen to standardize only 64KiB support as a first step.
 \end{commentary}
 
 \chapter{``Svpbmt'' Standard Extension for Page-Based Memory Types, Version 0.1}
