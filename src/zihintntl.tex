@@ -7,23 +7,23 @@ The NTL instructions do not change architectural state, nor do they alter the
 architecturally visible effects of the target instruction.
 Three variants are provided:
 
-The NTL.L1 instruction indicates that the target instruction
+The NTL.P1 instruction indicates that the target instruction
 does not exhibit temporal locality within the capacity of the innermost level
-of cache in the memory hierarchy (e.g., an L1 cache).
-NTL.L1 is encoded as \mbox{ADD {\em x0, x0, x2}}.
+of private cache in the memory hierarchy.
+NTL.P1 is encoded as \mbox{ADD {\em x0, x0, x2}}.
 
-The NTL.L2 instruction indicates that the target instruction
+The NTL.P2 instruction indicates that the target instruction
 does not exhibit temporal locality within the capacity of the two innermost
-levels of cache in the memory hierarchy.
-NTL.L2 is encoded as \mbox{ADD {\em x0, x0, x3}}.
+levels of private cache in the memory hierarchy.
+NTL.P2 is encoded as \mbox{ADD {\em x0, x0, x3}}.
 
-The NTL.L3 instruction indicates that the target instruction
-does not exhibit temporal locality within the capacity of the three innermost
-levels of cache in the memory hierarchy.
-NTL.L3 is encoded as \mbox{ADD {\em x0, x0, x4}}.
+The NTL.S1 instruction indicates that the target instruction
+does not exhibit temporal locality within the capacity of the innermost level
+of shared cache in the memory hierarchy.
+NTL.S1 is encoded as \mbox{ADD {\em x0, x0, x4}}.
 
 The NTL.ALL instruction indicates that the target
-instruction does not exhibit temporal locality within the capacity of the last
+instruction does not exhibit temporal locality within the capacity of any
 level of cache in the memory hierarchy.
 NTL.ALL is encoded as \mbox{ADD {\em x0, x0, x5}}.
 
@@ -35,12 +35,11 @@ interactions.
 A microarchitecture might use the NTL instructions to inform the cache
 replacement policy, or to decide which cache to allocate into, or to avoid
 cache allocation altogether.
-For example, NTL.L1 might indicate that an implementation should not allocate
-a line in an L1 cache, but should allocate in L2.
-In another implementation, NTL.L1 might allocate the line in L1, but in
+For example, NTL.P1 might indicate that an implementation should not allocate
+a line in a private L1 cache, but should allocate in L2 (whether private or
+shared).
+In another implementation, NTL.P1 might allocate the line in L1, but in
 the least-recently used state.
-Many implementations will treat NTL.L2 and NTL.L3 analogously, but affecting
-all cache levels between L1 and the encoded level.
 
 NTL.ALL will typically inform implementations not to allocate anywhere in the
 cache hierarchy.
@@ -58,11 +57,85 @@ on LR and SC, but might respect NTL instructions for
 AMOs and regular loads and stores.
 \end{commentary}
 
+Table~\ref{tab:ntl-portable} lists several software use cases and the
+recommended NTL variant that {\em portable} software---i.e., software not
+tuned for any specific implementation's memory hierarchy---should use in each
+case.
+
+\begin{table}[h!]
+\begin{center}
+\begin{tabular}{|l|l|}
+\hline
+Scenario & Recommended NTL variant \\
+\hline
+Access to a working set between \wunits{64}{KiB} and \wunits{256}{KiB} in size & NTL.P1 \\
+Access to a working set between \wunits{256}{KiB} and \wunits{1}{MiB} in size  & NTL.P2 \\
+Access to a working set greater than \wunits{1}{MiB} in size                   & NTL.S1 \\
+Access with no exploitable temporal locality (e.g., streaming)                 & NTL.ALL \\
+Access to a contended synchronization variable                                 & NTL.P2 \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Recommended NTL variant for portable software to employ in various scenarios.}
+\label{tab:ntl-portable}
+\end{table}
+
+\begin{commentary}
+Cache sizes will obviously vary between implementations, and so the working-set
+sizes listed in Table~\ref{tab:ntl-portable} are merely rough guidelines.
+\end{commentary}
+
+Table~\ref{tab:ntl} lists several sample memory hierarchies and recommends
+how each NTL variant maps onto each cache level.
+The table also recommends which NTL variant that implementation-tuned
+software should use to avoid allocating in a particular cache level.
+For example, for a system with a private L1 and a shared L2, it is recommended
+that NTL.P1 and NTL.P2 indicate that temporal locality cannot be exploited by
+the L1, and that NTL.S1 and NTL.ALL indicate that temporal locality cannot be
+exploited by the L2.
+Furthermore, software tuned for such a system should use NTL.P1 to indicate
+a lack of temporal locality exploitable by the L1, or should use NTL.ALL
+indicate a lack of temporal locality exploitable by the L2.
+
+\begin{table}[h!]
+\begin{center}
+\scalebox{0.95}{
+\begin{tabular}{|l|WWWW|WWWW|}
+\hline
+Memory hierarchy & \multicolumn{4}{c|}{Recommended mapping of NTL}    & \multicolumn{4}{c|}{Recommended NTL variant for} \\
+                 & \multicolumn{4}{c|}{variant to actual cache level} & \multicolumn{4}{c|}{explicit cache management} \\
+\hline
+                                 & P1  & P2  & S1  & ALL    & L1  & L2  & L3  & L4/L5  \\
+\hline
+\multicolumn{9}{|c|}{Common Scenarios} \\
+\hline
+No caches             & \multicolumn{4}{c|}{---} & \multicolumn{4}{c|}{\em none} \\
+\hline
+Private L1 only                  & L1  & L1  & L1  & L1 & ALL & --- & --- & --- \\
+Private L1; shared L2            & L1  & L1  & L2  & L2 & P1  & ALL & --- & --- \\
+Private L1; shared L2/L3         & L1  & L1  & L2  & L3 & P1  & S1  & ALL & --- \\
+Private L1/L2                    & L1  & L2  & L2  & L2 & P1  & ALL & --- & --- \\
+Private L1/L2; shared L3         & L1  & L2  & L3  & L3 & P1  & P2  & ALL & --- \\
+Private L1/L2; shared L3/L4      & L1  & L2  & L3  & L4 & P1  & P2  & S1  & ALL \\
+\hline
+\multicolumn{9}{|c|}{Uncommon Scenarios} \\
+\hline
+Private L1/L2/L3; shared L4      & L1  & L3  & L4  & L4 & P1  & P1  & P2  & ALL \\
+Private L1; shared L2/L3/L4      & L1  & L1  & L2  & L4 & P1  & S1  & ALL & ALL \\
+Private L1/L2; shared L3/L4/L5   & L1  & L2  & L3  & L5 & P1  & P2  & S1  & ALL \\
+Private L1/L2/L3; shared L4/L5   & L1  & L3  & L4  & L5 & P1  & P1  & P2  & ALL \\
+\hline
+\end{tabular}}
+\end{center}
+\caption{Mapping of NTL variants to various memory hierarchies.}
+\label{tab:ntl}
+\end{table}
+
 If the C extension is provided, compressed variants of these HINTs are also
 provided:
-C.NTL.L1 is encoded as \mbox{C.ADD {\em x0, x2}};
-C.NTL.L2 is encoded as \mbox{C.ADD {\em x0, x3}};
-C.NTL.L3 is encoded as \mbox{C.ADD {\em x0, x4}};
+C.NTL.P1 is encoded as \mbox{C.ADD {\em x0, x2}};
+C.NTL.P2 is encoded as \mbox{C.ADD {\em x0, x3}};
+C.NTL.S1 is encoded as \mbox{C.ADD {\em x0, x4}};
 and C.NTL.ALL is encoded as \mbox{C.ADD {\em x0, x5}}.
 
 The NTL instructions affect all memory-access instructions, unless otherwise
@@ -76,7 +149,7 @@ as well as those defined within the hypervisor extension in Volume II.
 
 We also expect that the NTL instructions will affect some cache-maintenance
 operations.
-For example, NTL.L2 followed by a cache-line-zero instruction might indicate
+For example, NTL.P2 followed by a cache-line-zero instruction might indicate
 that the line should be allocated in L3 and zeroed, but not allocated in
 L1 or L2.
 \end{commentary}
