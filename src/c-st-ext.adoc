@@ -15,14 +15,14 @@ reduction.
 RVC uses a simple compression scheme that offers shorter 16-bit versions
 of common 32-bit RISC-V instructions when:
 
-the immediate or address offset is small, or
+* the immediate or address offset is small, or
 
-one of the registers is the zero register (`x0`), the ABI link register
+* one of the registers is the zero register (`x0`), the ABI link register
 (`x1`), or the ABI stack pointer (`x2`), or
 
-the destination register and the first source register are identical, or
+* the destination register and the first source register are identical, or
 
-the registers used are the 8 most popular ones.
+* the registers used are the 8 most popular ones.
 
 The C extension is compatible with all other standard instruction
 extensions. The C extension allows 16-bit instructions to be freely
@@ -31,8 +31,11 @@ on any 16-bit boundary, i.e., IALIGN=16. With the addition of the C
 extension, no instructions can raise instruction-address-misaligned
 exceptions.
 
+[NOTE]
+====
 Removing the 32-bit alignment constraint on the original 32-bit
 instructions allows significantly greater code density.
+====
 
 The compressed instruction encodings are mostly common across RV32C,
 RV64C, and RV128C, but as shown in
@@ -51,6 +54,8 @@ and/or D) is also implemented. In addition, RV32C includes a compressed
 jump and link instruction to compress short-range subroutine calls,
 where the same opcode is used to compress ADDIW for RV64C and RV128C.
 
+[TIP]
+====
 Double-precision loads and stores are a significant fraction of static
 and dynamic instructions, hence the motivation to include them in the
 RV32C and RV64C encoding.
@@ -73,29 +78,34 @@ complexity is small even for designs that support multiple base ISAs.
 The compressed floating-point load and store variants use the same
 instruction format with the same register specifiers as the wider
 integer loads and stores.
+====
 
 RVC was designed under the constraint that each RVC instruction expands
 into a single 32-bit instruction in either the base ISA (RV32I/E, RV64I,
 or RV128I) or the F and D standard extensions where present. Adopting
 this constraint has two main benefits:
 
-Hardware designs can simply expand RVC instructions during decode,
+* Hardware designs can simply expand RVC instructions during decode,
 simplifying verification and minimizing modifications to existing
 microarchitectures.
-
-Compilers can be unaware of the RVC extension and leave code compression
+* Compilers can be unaware of the RVC extension and leave code compression
 to the assembler and linker, although a compression-aware compiler will
 generally be able to produce better results.
 
+[TIP]
+====
 We felt the multiple complexity reductions of a simple one-one mapping
 between C and base IFD instructions far outweighed the potential gains
 of a slightly denser encoding that added additional instructions only
 supported in the C extension, or that allowed encoding of multiple IFD
 instructions in one C instruction.
+====
 
 It is important to note that the C extension is not designed to be a
 stand-alone ISA, and is meant to be used alongside a base ISA.
 
+[TIP]
+====
 Variable-length instruction sets have long been used to improve code
 density. For example, the IBM Stretch cite:[stretch], developed in the late 1950s, had
 an ISA with 32-bit and 64-bit instructions, where some of the 32-bit
@@ -157,7 +167,8 @@ embedded applications _and_ to improve performance and energy-efficiency
 for all applications due to fewer misses in the instruction cache.
 Waterman shows that RVC fetches 25%-30% fewer instruction bits, which
 reduces instruction cache misses by 20%-25%, or roughly the same
-performance impact as doubling the instruction cache size .
+performance impact as doubling the instruction cache size.
+====
 
 === Compressed Instruction Formats
 (((compressed, formats)))
@@ -173,11 +184,14 @@ so prevalent, and that they use the CI and CSS formats to allow access
 to all 32 data registers. CIW supplies an 8-bit immediate for the
 ADDI4SPN instruction.
 
+[NOTE]
+====
 The RISC-V ABI was changed to make the frequently used registers map to
 registers `x8`–`x15`. This simplifies the decompression decoder by
 having a contiguous naturally aligned set of register numbers, and is
 also compatible with the RV32E base ISA, which only has 16 integer
 registers.
+====
 (((compressed, loads and stores)))
 
 Compressed register-based floating-point loads and stores also use the
@@ -185,9 +199,12 @@ CL and CS formats respectively, with the eight registers mapping to `f8`
 to `f15`.
 (((calling convention, standard)))
 
+[NOTE]
+====
 The standard RISC-V calling convention maps the most frequently used
 floating-point registers to registers `f8` to `f15`, which allows the
 same register decompression decoding as for integer register numbers.
+====
 (((register source specifiers, c-ext)))
 
 The formats were designed to keep bits for the two register source
@@ -198,19 +215,22 @@ encoding. Where immediates are sign-extended, the sign-extension is
 always from bit 12. Immediate fields have been scrambled, as in the base
 specification, to reduce the number of immediate muxes required.
 
+[NOTE]
+====
 The immediate fields are scrambled in the instruction formats instead of
 in sequential order so that as many bits as possible are in the same
 position in every instruction, thereby simplifying implementations.
+====
 
 For many RVC instructions, zero-valued immediates are disallowed and
 `x0` is not a valid 5-bit register specifier. These restrictions free up
 encoding space for other instructions requiring fewer operand bits.
 
-include::images/wavedrom/cr-register.adoc[]
-[cr-register]
-.Compressed 16-bit RVC instruction formats
-image::image_placeholder.png[]
-(((compressed, 16-bit)))
+//include::images/wavedrom/cr-register.adoc[]
+//[cr-register]
+//.Compressed 16-bit RVC instruction formats
+//image::image_placeholder.png[]
+//(((compressed, 16-bit)))
 
 [[rvc-form]]
 .Compressed 16-bit RVC instruction formats.
@@ -271,7 +291,6 @@ registers.
 
 ==== Stack-Pointer-Based Loads and Stores
 
-.
 include::images/wavedrom/c-sp-load-store.adoc[]
 [c-sp-load-store]
 .Stack-Pointer-Based Loads and Stores
@@ -345,6 +364,8 @@ to memory. It computes an effective address by adding the
 _zero_-extended offset, scaled by 8, to the stack pointer, `x2`. It
 expands to `fsd rs2, offset(x2)`.
 
+[NOTE]
+====
 Register save/restore code at function entry/exit represents a
 significant portion of static code size. The stack-pointer-based
 compressed loads and stores in RVC are effective at reducing the
@@ -381,6 +402,7 @@ While reasonable architects might come to different conclusions, we
 decided to omit load and store multiple and instead use the
 software-only approach of calling save/restore millicode routines to
 attain the greatest code size reduction.
+====
 
 ==== Register-Based Loads and Stores
 
@@ -520,10 +542,13 @@ latexmath:[$\textit{rs1}{\neq}\texttt{x0}$]; the code point with
 latexmath:[$\textit{rs1}{=}\texttt{x0}$] corresponds to the C.EBREAK
 instruction.
 
+[TIP]
+====
 Strictly speaking, C.JALR does not expand exactly to a base RVI
 instruction as the value added to the PC to form the link address is 2
 rather than 4 as in the base ISA, but supporting both offsets of 2 and 4
 bytes is only a very minor change to the base microarchitecture.
+====
 
 S@S@S@T@Y +
 & & & & +
@@ -616,8 +641,11 @@ adjust the stack pointer in procedure prologues and epilogues. It
 expands into `addi x2, x2, nzimm`. C.ADDI16SP is only valid when
 _nzimm_latexmath:[$\neq$]0; the code point with _nzimm_=0 is reserved.
 
+[NOTE]
+====
 In the standard RISC-V calling convention, the stack pointer `sp` is
 always 16-byte aligned.
+====
 
 @S@K@S@Y +
 & & & +
@@ -676,6 +704,8 @@ amount must be non-zero; the code points with _shamt_=0 are HINTs.
 C.SRAI is defined analogously to C.SRLI, but instead performs an
 arithmetic right shift. C.SRAI expands to `srai rd, rd, shamt`.
 
+[NOTE]
+====
 Left shifts are usually more frequent than right shifts, as left shifts
 are frequently used to scale address values. Right shifts have therefore
 been granted less encoding space and are placed in an encoding quadrant
@@ -686,6 +716,7 @@ amounts of 96–127 will be more useful than 64–95, to allow extraction of
 tags located in the high portions of 128-bit address pointers. We note
 that RV128C will not be frozen at the same point as RV32C and RV64C, to
 allow evaluation of typical usage of 128-bit address-space codes.
+====
 
 S@W@Y@S@T@Y +
 & & & & & +
@@ -717,11 +748,14 @@ instruction. The code points with
 latexmath:[$\textit{rs2}{\neq}\texttt{x0}$] and
 latexmath:[$\textit{rd}{=}\texttt{x0}$] are HINTs.
 
+[NOTE]
+====
 C.MV expands to a different instruction than the canonical MV
 pseudoinstruction, which instead uses ADDI. Implementations that handle
 MV specially, e.g. using register-renaming hardware, may find it more
 convenient to expand C.MV to MV instead of ADD, at slight additional
 hardware cost.
+====
 
 C.ADD adds the values in registers _rd_ and _rs2_ and writes the result
 to register _rd_. C.ADD expands into `add rd, rd, rs2`. C.ADD is only
@@ -776,10 +810,13 @@ _rd latexmath:[$'$]_, then sign-extends the lower 32 bits of the
 difference before writing the result to register _rd latexmath:[$'$]_.
 C.SUBW expands into `subw rd', rd', rs2'`.
 
+[NOTE]
+====
 This group of six instructions do not provide large savings
 individually, but do not occupy much encoding space and are
 straightforward to implement, and as a group provide a worthwhile
 improvement in static and dynamic compression.
+====
 
 ==== Defined Illegal Instruction
 
@@ -792,6 +829,8 @@ SW@T@T@Y +
 A 16-bit instruction with all bits zero is permanently reserved as an
 illegal instruction.
 
+[NOTE]
+====
 We reserve all-zero instructions to be illegal instructions to help trap
 attempts to execute zero-ed or non-existent portions of the memory
 space. The all-zero value should not be redefined in any non-standard
@@ -799,6 +838,7 @@ extension. Similarly, we reserve instructions with all bits set to 1
 (corresponding to very long instructions in the RISC-V variable-length
 encoding scheme) as illegal to capture another common value seen in
 non-existent memory regions.
+====
 
 ==== NOP Instruction
 
@@ -833,9 +873,12 @@ I instructions permitted inside constrained LR/SC sequences, as
 described in <<lrscseq>>, are also permitted
 inside constrained LR/SC sequences.
 
+[NOTE]
+====
 The implication is that any implementation that claims to support both
 the A and C extensions must ensure that LR/SC sequences containing valid
 C instructions will eventually complete.
+====
 
 [[rvc-hints]]
 === HINT Instructions
@@ -942,46 +985,45 @@ RVC instructions.
 //[cols="<,<,<,<,<,<,<,<,<,<,<,<,<,<,<,<,<,<",]
 |===
 
-|000| |0 | | | | | | | |0 | | |00 | |_Illegal instruction_
+|000|0 |  | | | | | |0 | | |00 |_Illegal instruction_
 
-|000|
-|nzuimm[5:4latexmath:[$\vert$]9:6latexmath:[$\vert$]2latexmath:[$\vert$]3]
-| | | | | | | |rd latexmath:[$'$] | | |00 | |C.ADDI4SPN _(RES,
+|000|nzuimm[5:4latexmath:[$\vert$]9:6latexmath:[$\vert$]2latexmath:[$\vert$]3]
+| |  | | | | |rd latexmath:[$'$] | | |00 |C.ADDI4SPN _(RES,
 nzuimm=0)_
 
-|001| |uimm[5:3] | | |rs1 latexmath:[$'$] | | |uimm[7:6] |
-|rd latexmath:[$'$] | | |00 | |C.FLD _(RV32/64)_
+|001|uimm[5:3] | |rs1 latexmath:[$'$] | | |uimm[7:6] |
+|rd latexmath:[$'$] | |00 |C.FLD _(RV32/64)_
 
-|001| |uimm[5:4latexmath:[$\vert$]8] | | |rs1 latexmath:[$'$] | |
-|uimm[7:6] | |rd latexmath:[$'$] | | |00 | |C.LQ _(RV128)_
+|001|uimm[5:4latexmath:[$\vert$]8] | |rs1 latexmath:[$'$] | |
+|uimm[7:6] | |rd latexmath:[$'$] | | |00 |C.LQ _(RV128)_
 
-|010| |uimm[5:3] | | |rs1 latexmath:[$'$] | |
-|uimm[2latexmath:[$\vert$]6] | |rd latexmath:[$'$] | | |00 | |C.LW
+|010|uimm[5:3] | |rs1 latexmath:[$'$] | |
+|uimm[2latexmath:[$\vert$]6] | |rd latexmath:[$'$] | | |00 |C.LW
 
-|011| |uimm[5:3] | | |rs1 latexmath:[$'$] | |
-|uimm[2latexmath:[$\vert$]6] | |rd latexmath:[$'$] | | |00 | |C.FLW
+|011|uimm[5:3] | |rs1 latexmath:[$'$] | |
+|uimm[2latexmath:[$\vert$]6] | |rd latexmath:[$'$] | | |00 |C.FLW
 _(RV32)_
 
-|011| |uimm[5:3] | | |rs1 latexmath:[$'$] | | |uimm[7:6] |
-|rd latexmath:[$'$] | | |00 | |C.LD _(RV64/128)_
+|011|uimm[5:3] | |rs1 latexmath:[$'$] | | |uimm[7:6] |
+|rd latexmath:[$'$] | | |00 |C.LD _(RV64/128)_
 
-|100| |— | | | | | | | | | | |00 | |_Reserved_
+|100|— | | | | | | | | | |00 |_Reserved_
 
-|101| |uimm[5:3] | | |rs1 latexmath:[$'$] | | |uimm[7:6] |
-|rs2 latexmath:[$'$] | | |00 | |C.FSD _(RV32/64)_
+|101|uimm[5:3] | |rs1 latexmath:[$'$] | | |uimm[7:6] |
+|rs2 latexmath:[$'$] | | |00 |C.FSD _(RV32/64)_
 
-|101 | | |uimm[5:4latexmath:[$\vert$]8] | | |rs1 latexmath:[$'$] | |
-|uimm[7:6] | |rs2 latexmath:[$'$] | | |00 | |C.SQ _(RV128)_
+|101 |uimm[5:4latexmath:[$\vert$]8] | |rs1 latexmath:[$'$] | |
+|uimm[7:6] | |rs2 latexmath:[$'$] | | |00 |C.SQ _(RV128)_
 
-|110| |uimm[5:3] | | |rs1 latexmath:[$'$] | |
-|uimm[2latexmath:[$\vert$]6] | |rs2 latexmath:[$'$] | | |00 | |C.SW
+|110|uimm[5:3] | |rs1 latexmath:[$'$] | |
+|uimm[2latexmath:[$\vert$]6] | |rs2 latexmath:[$'$] | | |00 |C.SW
 
-|111| |uimm[5:3] | | |rs1 latexmath:[$'$] | |
-|uimm[2latexmath:[$\vert$]6] | |rs2 latexmath:[$'$] | | |00 | |C.FSW
+|111|uimm[5:3] | |rs1 latexmath:[$'$] | |
+|uimm[2latexmath:[$\vert$]6] | |rs2 latexmath:[$'$] | | |00 |C.FSW
 _(RV32)_
 
-|111| |uimm[5:3] | | |rs1 latexmath:[$'$] | | |uimm[7:6] |
-|rs2 latexmath:[$'$] | | |00 | |C.SD _(RV64/128)_
+|111|uimm[5:3] | |rs1 latexmath:[$'$] | | |uimm[7:6] |
+|rs2 latexmath:[$'$] | | |00 |C.SD _(RV64/128)_
 
 |===
 
