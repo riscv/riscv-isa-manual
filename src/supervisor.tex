@@ -38,8 +38,8 @@ the supervisor-level CSR descriptions.
 
 
 The {\tt sstatus} register is an SXLEN-bit read/write register
-formatted as shown in Figure~\ref{sstatusreg-rv32} for RV32 and
-Figure~\ref{sstatusreg} for RV64.  The {\tt sstatus}
+formatted as shown in Figure~\ref{sstatusreg-rv32} when SXLEN=32 and
+Figure~\ref{sstatusreg} when SXLEN=64.  The {\tt sstatus}
 register keeps track of the processor's current operating state.
 
 \begin{figure*}[h!]
@@ -87,7 +87,7 @@ register keeps track of the processor's current operating state.
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Supervisor-mode status register ({\tt sstatus}) for RV32.}
+\caption{Supervisor-mode status register ({\tt sstatus}) when SXLEN=32.}
 \label{sstatusreg-rv32}
 \end{figure*}
 
@@ -148,7 +148,7 @@ register keeps track of the processor's current operating state.
 \end{center}
 }
 \vspace{-0.1in}
-\caption{Supervisor-mode status register ({\tt sstatus}) for RV64.}
+\caption{Supervisor-mode status register ({\tt sstatus}) when SXLEN=64.}
 \label{sstatusreg}
 \end{figure*}
 
@@ -185,8 +185,8 @@ which may differ from the value of XLEN for S-mode, termed {\em SXLEN}.  The
 encoding of UXL is the same as that of the MXL field of {\tt misa}, shown in
 Table~\ref{misabase}.
 
-For RV32 systems, the UXL field does not exist, and UXLEN=32.  For RV64
-systems, it is a \warl\ field that encodes the current value of UXLEN.
+When SXLEN=32, the UXL field does not exist, and UXLEN=32.  When
+SXLEN=64, it is a \warl\ field that encodes the current value of UXLEN.
 In particular, an implementation may make UXL be a read-only field whose
 value always ensures that UXLEN=SXLEN.
 
@@ -368,12 +368,22 @@ SXLEN \\
 \label{siereg}
 \end{figure}
 
-An interrupt \textit{i} will be taken if bit \textit{i} is set in both
-{\tt sip} and {\tt sie}, and if supervisor-level interrupts are globally
-enabled.
-Supervisor-level interrupts are globally enabled if the hart's current
-privilege mode is less than S, or if the current privilege mode is S
-and the SIE bit in the {\tt sstatus} register is set.
+An interrupt~\textit{i} will trap to S-mode if both of the
+following are true:
+(a)~either the current privilege mode is S and the SIE bit in the
+{\tt sstatus} register is set, or the current privilege mode has less
+privilege than S-mode; and
+(b)~bit~\textit{i} is set in both {\tt sip} and {\tt sie}.
+
+These conditions for an interrupt trap to occur must be evaluated in a bounded
+amount of time from when an interrupt becomes, or ceases to be,
+pending in {\tt sip}, and must
+also be evaluated immediately following the execution of an SRET instruction
+or an explicit write to a CSR on which these interrupt trap conditions
+expressly depend (including {\tt sip}, {\tt sie} and {\tt sstatus}).
+
+Interrupts to S-mode take priority over any interrupts to lower privilege
+modes.
 
 Each individual bit in register {\tt sip} may be writable or may be
 read-only.
@@ -465,11 +475,8 @@ the execution environment.
 
 Bits {\tt sip}.SSIP and {\tt sie}.SSIE are the interrupt-pending and
 interrupt-enable bits for supervisor-level software interrupts.
-If implemented, SSIP is writable in {\tt sip}.
-A supervisor-level software interrupt is triggered
-on the current hart by writing 1 to SSIP,
-while a pending supervisor-level software
-interrupt can be cleared by writing 0 to SSIP.
+If implemented, SSIP is writable in {\tt sip} and may also be set
+to 1 by a platform-specific interrupt controller.
 
 \begin{commentary}
 Interprocessor interrupts are sent to other harts by implementation-specific
@@ -501,7 +508,6 @@ they are shown as hardwired to 0 in Figures~\ref{sipreg-standard} and
 Multiple simultaneous
 interrupts destined for supervisor mode are handled in the following
 decreasing priority order: SEI, SSI, STI.
-Synchronous exceptions are of lower priority than all interrupts.
 
 \subsection{Supervisor Timers and Performance Counters}
 
@@ -614,8 +620,9 @@ Though masked, {\tt sepc[1]} remains writable when IALIGN=32.
 
 {\tt sepc} is a \warl\ register that must be able to hold all valid
 virtual addresses.  It need not be capable of holding all possible invalid
-addresses.  Implementations may convert some invalid address patterns into
-other invalid addresses prior to writing them to {\tt sepc}.
+addresses.
+Prior to writing {\tt sepc}, implementations may convert an invalid address
+into some other invalid address that {\tt sepc} is capable of holding.
 
 When a trap is taken into S-mode, {\tt sepc} is written with the
 virtual address of the instruction that was interrupted or that
@@ -729,14 +736,10 @@ which exceptions must set {\tt stval} informatively and which may
 unconditionally set it to zero.
 
 
-When a breakpoint,
-address-misaligned, access-fault, or page-fault exception occurs
-on an instruction fetch, load, or store, {\tt stval}
-is written with the faulting virtual address.  On an illegal instruction trap,
-{\tt stval} may be written with the first XLEN or ILEN bits of the faulting
-instruction as described below.  For other exceptions, {\tt stval} is set to
-zero, but a future standard may redefine {\tt stval}'s setting for other
-exceptions.
+If {\tt stval} is written with a nonzero value when a breakpoint,
+address-misaligned, access-fault, or page-fault exception occurs on an
+instruction fetch, load, or store, then {\tt stval} will contain the faulting
+virtual address.
 
 \begin{figure}[h!]
 {\footnotesize
@@ -755,39 +758,156 @@ SXLEN \\
 \label{stvalreg}
 \end{figure}
 
-For misaligned loads and stores that cause access-fault or page-fault
-exceptions, {\tt stval} will contain the virtual address of the
-portion of the access that caused the fault.  For
-instruction access-fault or page-fault exceptions on systems
-with variable-length instructions, {\tt stval} will contain the
-virtual address of the portion of the instruction that caused
-the fault while {\tt sepc} will point to the beginning of the
-instruction.
+If {\tt stval} is written with a nonzero value when a misaligned load or store
+causes an access-fault or page-fault exception, then {\tt stval} will contain
+the virtual address of the portion of the access that caused the fault.
 
-The {\tt stval} register can optionally also be used to return the
-faulting instruction bits on an illegal instruction exception ({\tt
-  sepc} points to the faulting instruction in memory).
+If {\tt stval} is written with a nonzero value when an instruction access-fault
+or page-fault exception occurs on a system with variable-length instructions,
+then {\tt stval} will contain the virtual address of the portion of the
+instruction that caused the fault, while {\tt sepc} will point to the beginning
+of the instruction.
 
-If this feature is not provided, then {\tt stval} is set to zero on
-an illegal instruction fault.
-
-If this feature is provided, after an illegal instruction trap, {\tt stval}
-will contain the shortest of:
+The {\tt stval} register can optionally also be used to return the faulting
+instruction bits on an illegal instruction exception ({\tt sepc} points to the
+faulting instruction in memory).
+If {\tt stval} is written with a nonzero value when an illegal-instruction
+exception occurs, then {\tt stval} will contain the shortest of:
 \begin{compactitem}
 \item the actual faulting instruction
 \item the first ILEN bits of the faulting instruction
-\item the first XLEN bits of the faulting instruction
+\item the first SXLEN bits of the faulting instruction
 \end{compactitem}
-The value loaded into {\tt stval} is right-justified and all unused upper
-bits are cleared to zero.
+The value loaded into {\tt stval} on an illegal-instruction exception is
+right-justified and all unused upper bits are cleared to zero.
+
+For other traps, {\tt stval} is set to zero, but a future standard may
+redefine {\tt stval}'s setting for other traps.
 
 {\tt stval} is a \warl\ register that must be able to hold all valid
 virtual addresses and the value 0.  It need not be capable of holding all
-possible invalid addresses.  Implementations may convert some invalid address
-patterns into other invalid addresses prior to writing them to {\tt stval}.
+possible invalid addresses.
+Prior to writing {\tt stval}, implementations may convert an invalid address
+into some other invalid address that {\tt stval} is capable of holding.
 If the feature to return the faulting instruction bits is implemented, {\tt
 stval} must also be able to hold all values less than $2^N$, where $N$ is the
-smaller of XLEN and ILEN.
+smaller of SXLEN and ILEN.
+
+\subsection{Supervisor Environment Configuration Register ({\tt senvcfg})}
+
+The {\tt senvcfg} CSR is an SXLEN-bit read/write register,
+formatted as shown in Figure~\ref{fig:senvcfg},
+that controls certain characteristics of the U-mode execution environment.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}Kcc@{}W@{}Wc}
+\instbitrange{SXLEN-1}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbitrange{5}{4} &
+\instbitrange{3}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{CBZE} &
+\multicolumn{1}{c|}{CBCFE} &
+\multicolumn{1}{c|}{CBIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{FIOM} \\
+\hline
+SXLEN-8 & 1 & 1 & 2 & 3 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor environment configuration register ({\tt senvcfg}).}
+\label{fig:senvcfg}
+\end{figure}
+
+If bit FIOM (Fence of I/O implies Memory) is set to one in {\tt senvcfg},
+FENCE instructions executed in U-mode are modified so
+the requirement to order accesses to device I/O implies also the requirement
+to order main memory accesses.
+Table~\ref{tab:senvcfg-FIOM} details the modified interpretation of
+FENCE instruction bits PI, PO, SI, and SO in U-mode when FIOM=1.
+
+Similarly, for U-mode when FIOM=1,
+if an atomic instruction that accesses a region ordered as device I/O
+has its {\em aq} and/or {\em rl} bit set, then that instruction is ordered
+as though it accesses both device I/O and memory.
+
+If {\tt satp}.MODE is hardwired to Bare, the implementation may hardwire FIOM to zero.
+
+\begin{table}[h!]
+\begin{center}
+\begin{tabular}{|c|l|}
+\hline
+Instruction bit & Meaning when set \\
+\hline
+PI & Predecessor device input and memory reads   (PR implied) \\
+PO & Predecessor device output and memory writes (PW implied) \\
+\hline
+SI & Successor device input and memory reads     (SR implied) \\
+SO & Successor device output and memory writes   (SW implied) \\
+\hline
+\end{tabular}
+\end{center}
+\vspace{-0.1in}
+\caption{%
+Modified interpretation of FENCE predecessor and successor sets in U-mode when FIOM=1.}
+\label{tab:senvcfg-FIOM}
+\end{table}
+
+\begin{commentary}
+Bit FIOM exists for a specific circumstance when an I/O device is
+being emulated for U-mode and both of the following are true:
+(a)~the emulated device has a memory buffer that should be I/O space
+but is actually mapped to main memory via address translation, and
+(b)~multiple physical harts are involved in accessing this emulated
+device from U-mode.
+
+A hypervisor running in S-mode without the benefit of the hypervisor
+extension of Chapter~\ref{hypervisor} may need to emulate a device for
+U-mode if paravirtualization cannot be employed.
+If the same hypervisor provides a virtual machine (VM) with multiple
+virtual harts, mapped one-to-one to real harts, then multiple harts may
+concurrently access the emulated device, perhaps because:
+(a)~the guest OS within the VM assigns device interrupt handling to one
+hart while the device is also accessed by a different hart outside of
+an interrupt handler, or
+(b)~control of the device (or partial control) is being migrated
+from one hart to another, such as for interrupt load balancing within
+the VM.
+For such cases, guest software within the VM is expected to properly
+coordinate access to the (emulated) device across multiple harts using
+mutex locks and/or interprocessor interrupts as usual, which in part
+entails executing I/O fences.
+But those I/O fences may not be sufficient if some of the device
+``I/O'' is actually main memory, unknown to the guest.
+Setting FIOM=1 modifies those fences (and all other I/O fences executed
+in U-mode) to include main memory, too.
+
+Software can always avoid the need to set FIOM by never using main
+memory to emulate a device memory buffer that should be I/O space.
+However, this choice usually requires trapping all U-mode accesses
+to the emulated buffer, which might have a noticeable impact on
+performance.
+The alternative offered by FIOM is sufficiently inexpensive to implement that
+we consider it worth supporting even if only rarely enabled.
+\end{commentary}
+
+
+The definition of the CBZE field will be furnished by the
+forthcoming Zicboz extension.
+Its allocation within {\tt senvcfg} may change prior to the ratification
+of that extension.
+
+The definitions of the CBCFE and CBIE fields will be furnished by the
+forthcoming Zicbom extension.
+Their allocations within {\tt senvcfg} may change prior to the ratification
+of that extension.
 
 \subsection{Supervisor Address Translation and Protection ({\tt satp}) Register}
 \label{sec:satp}
@@ -819,7 +939,10 @@ register are described in Section~\ref{virt-control}.
 \end{center}
 }
 \vspace{-0.1in}
-\caption{RV32 Supervisor address translation and protection register {\tt satp}.}
+\caption{%
+Supervisor address translation and protection register {\tt satp}
+when SXLEN=32.%
+}
 \label{rv32satp}
 \end{figure}
 
@@ -851,8 +974,10 @@ main memory be representable.
 \end{center}
 }
 \vspace{-0.1in}
-\caption{RV64 Supervisor address translation and protection register {\tt satp}, for MODE
-values Bare, Sv39, Sv48, and Sv57.}
+\caption{%
+Supervisor address translation and protection register {\tt satp}
+when SXLEN=64, for MODE values Bare, Sv39, Sv48, and Sv57.%
+}
 \label{rv64satp}
 \end{figure}
 
@@ -864,21 +989,21 @@ translations, or vice-versa.  This approach also slightly reduces the cost of
 a context switch.
 \end{commentary}
 
-Table~\ref{tab:satp-mode} shows the encodings of the MODE field for RV32 and
-RV64.  When MODE=Bare, supervisor virtual addresses are equal to
+Table~\ref{tab:satp-mode} shows the encodings of the MODE field when SXLEN=32 and
+SXLEN=64.  When MODE=Bare, supervisor virtual addresses are equal to
 supervisor physical addresses, and there is no additional memory protection
 beyond the physical memory protection scheme described in
 Section~\ref{sec:pmp}.
 To select MODE=Bare, software must write zero to the remaining fields of
-{\tt satp} (bits 30--0 for RV32, or bits 59--0 for RV64).
+{\tt satp} (bits 30--0 when SXLEN=32, or bits 59--0 when SXLEN=64).
 Attempting to select MODE=Bare with a nonzero pattern in the remaining fields
 has an \unspecified\ effect on the value that the remaining fields assume
 and an \unspecified\ effect on address translation and protection behavior.
 
-For RV32, the {\tt satp} encodings corresponding to MODE=Bare and ASID[8:7]=3 are designated
+When SXLEN=32, the {\tt satp} encodings corresponding to MODE=Bare and ASID[8:7]=3 are designated
 for custom use, whereas the encodings corresponding to MODE=Bare and ASID[8:7]$\ne$3 are
 reserved for future standard use.
-For RV64, all {\tt satp} encodings corresponding to MODE=Bare are reserved for future
+When SXLEN=64, all {\tt satp} encodings corresponding to MODE=Bare are reserved for future
 standard use.
 
 \begin{commentary}
@@ -889,10 +1014,10 @@ additional translation and protection modes, particularly in RV32, for which
 all patterns of the existing MODE field have already been allocated.
 \end{commentary}
 
-For RV32, the only other valid setting for MODE is Sv32, a paged
+When SXLEN=32, the only other valid setting for MODE is Sv32, a paged
 virtual-memory scheme described in Section~\ref{sec:sv32}.
 
-For RV64, three paged virtual-memory schemes are defined: Sv39, Sv48, and Sv57,
+When SXLEN=64, three paged virtual-memory schemes are defined: Sv39, Sv48, and Sv57,
 described in Sections~\ref{sec:sv39}, \ref{sec:sv48}, and \ref{sec:sv57}, respectively.
 One additional scheme, Sv64, will be defined in a later version
 of this specification.  The remaining MODE settings are reserved
@@ -907,14 +1032,14 @@ no effect; no fields in {\tt satp} are modified.
 \begin{center}
 \begin{tabular}{|c|c|l|}
 \hline
-\multicolumn{3}{|c|}{RV32} \\
+\multicolumn{3}{|c|}{SXLEN=32} \\
 \hline
 Value  & Name & Description \\
 \hline
 0       & Bare  & No translation or protection. \\
 1       & Sv32  & Page-based 32-bit virtual addressing (see Section~\ref{sec:sv32}). \\
 \hline \hline
-\multicolumn{3}{|c|}{RV64} \\
+\multicolumn{3}{|c|}{SXLEN=64} \\
 \hline
 Value  & Name & Description \\
 \hline
@@ -1253,7 +1378,7 @@ When Sv32 is written to the MODE field in the {\tt satp} register (see
 Section~\ref{sec:satp}), the supervisor operates in a 32-bit paged
 virtual-memory system.  In this mode, supervisor and user virtual addresses
 are translated into supervisor physical addresses by traversing a radix-tree
-page table.  Sv32 is supported on RV32 systems and is designed to include
+page table.  Sv32 is supported when SXLEN=32 and is designed to include
 mechanisms sufficient for supporting modern Unix-based operating systems.
 
 \begin{commentary}
@@ -1266,6 +1391,19 @@ with decoupled specialized coprocessors.  An implementation can choose
 to implement software TLB refills using a machine-mode trap handler as
 an extension to M-mode.
 \end{commentary}
+
+\begin{commentary}
+Some ISAs architecturally expose \emph{virtually indexed, physically tagged}
+caches, in that accesses to the same physical address via different virtual
+addresses might not be coherent unless the virtual addresses lie within the
+same cache set.
+Implicitly, this specification does not permit such behavior to be
+architecturally exposed.
+\end{commentary}
+
+For implementations that hardwire {\tt satp}.MODE to Bare, attempts to
+execute an SFENCE.VMA instruction might raise an illegal instruction
+exception.
 
 \subsection{Addressing and Memory Protection}
 \label{sec:translation}
@@ -1677,8 +1815,8 @@ execution of the algorithm began.
 \section{Sv39: Page-Based 39-bit Virtual-Memory System}
 \label{sec:sv39}
 
-This section describes a simple paged virtual-memory system designed
-for RV64 systems, which supports 39-bit virtual address spaces.  The
+This section describes a simple paged virtual-memory system
+for SXLEN=64, which supports 39-bit virtual address spaces.  The
 design of Sv39 follows the overall scheme of Sv32, and this section
 details only the differences between the schemes.
 
@@ -1836,8 +1974,8 @@ Section~\ref{sv32algorithm}, except LEVELS equals 3 and PTESIZE equals 8.
 \section{Sv48: Page-Based 48-bit Virtual-Memory System}
 \label{sec:sv48}
 
-This section describes a simple paged virtual-memory system designed
-for RV64 systems, which supports 48-bit virtual address spaces.  Sv48
+This section describes a simple paged virtual-memory system
+for SXLEN=64, which supports 48-bit virtual address spaces.  Sv48
 is intended for systems for which a 39-bit virtual address space is
 insufficient.  It closely follows the design of Sv39, simply adding an
 additional level of page table, and so this chapter only details the

@@ -126,15 +126,15 @@ Bit & Character  & Description \\
   8 & I & RV32I/64I/128I base ISA \\
   9 & J & {\em Tentatively reserved for Dynamically Translated Languages extension} \\
  10 & K & {\em Reserved} \\
- 11 & L & {\em Tentatively reserved for Decimal Floating-Point extension} \\
+ 11 & L & {\em Reserved} \\
  12 & M & Integer Multiply/Divide extension \\
- 13 & N & User-level interrupts supported \\
+ 13 & N & {\em Tentatively reserved for User-Level Interrupts extension} \\
  14 & O & {\em Reserved} \\
  15 & P & {\em Tentatively reserved for Packed-SIMD extension} \\
  16 & Q & Quad-precision floating-point extension \\
  17 & R & {\em Reserved} \\
  18 & S & Supervisor mode implemented \\
- 19 & T & {\em Tentatively reserved for Transactional Memory extension} \\
+ 19 & T & {\em Reserved} \\
  20 & U & User mode implemented \\
  21 & V & {\em Tentatively reserved for Vector extension} \\
  22 & W & {\em Reserved} \\
@@ -222,7 +222,7 @@ codes in the Bank field, and encodes the final byte in the Offset field,
 discarding the parity bit.  For example, the JEDEC manufacturer ID
 {\tt 0x7f 0x7f 0x7f 0x7f 0x7f 0x7f 0x7f 0x7f 0x7f 0x7f 0x7f 0x7f 0x8a}
 (twelve continuation codes followed by {\tt 0x8a}) would be encoded in the
-{\tt mvendorid} field as {\tt 0x60a}.
+{\tt mvendorid} CSR as {\tt 0x60a}.
 
 \begin{commentary}
 In JEDEC's parlance, the bank number is one greater than the number of
@@ -231,8 +231,8 @@ that is one less than the JEDEC bank number.
 \end{commentary}
 
 \begin{commentary}
-Previously the vendor ID was to be a number allocated by the RISC-V
-Foundation, but this duplicates the work of JEDEC in maintaining a
+Previously the vendor ID was to be a number allocated by RISC-V
+International, but this duplicates the work of JEDEC in maintaining a
 manufacturer ID standard.  At time of writing, registering a
 manufacturer ID with JEDEC has a one-time cost of \$500.
 \end{commentary}
@@ -263,8 +263,8 @@ MXLEN \\
 \label{marchreg}
 \end{figure*}
 
-Open-source project architecture IDs are allocated globally by the
-RISC-V Foundation, and have non-zero architecture IDs with a zero
+Open-source project architecture IDs are allocated globally by
+RISC-V International, and have non-zero architecture IDs with a zero
 most-significant-bit (MSB).  Commercial architecture IDs are allocated
 by each commercial vendor independently, but must have the MSB set and
 cannot contain zero in the remaining MXLEN-1 bits.
@@ -276,7 +276,7 @@ occurs rather than a particular organization.  Commercial fabrications
 of open-source designs should (and might be required by the license
 to) retain the original architecture ID.  This will aid in reducing
 fragmentation and tool support costs, as well as provide attribution.
-Open-source architecture IDs should be administered by the Foundation
+Open-source architecture IDs are administered by RISC-V International
 and should only be allocated to released, functioning open-source
 projects.  Commercial architecture IDs can be managed independently by
 any registered vendor but are required to have IDs disjoint from the
@@ -524,9 +524,6 @@ as shown in Figure~\ref{mstatushreg}.
 Bits 30:4 of {\tt mstatush} generally contain the same fields found in
 bits 62:36 of {\tt mstatus} for RV64.
 Fields SD, SXL, and UXL do not exist in {\tt mstatush}.
-
-The {\tt mstatush} register is not required to be implemented if every field
-would be hardwired to zero.
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -919,8 +916,21 @@ Status  & FS Meaning & XS Meaning\\
 \label{fsxsencoding}
 \end{table*}
 
-In systems that do not implement S-mode and do not have a
-floating-point unit, the FS field is hardwired to zero.
+If the F extension is implemented, the FS field shall not be
+hardwired to zero.
+
+If neither the F extension nor S-mode is implemented, then FS is
+hardwired to zero.
+If S-mode is implemented but the F extension is not, FS may optionally
+be hardwired to zero.
+
+\begin{commentary}
+Implementations with S-mode but without the F extension are
+permitted, but not required, to hardwire the FS field to zero.
+Some such implementations will choose {\em not} to hardwire the FS
+field to zero, so as to enable emulation of the F extension for
+both S-mode and U-mode via invisible traps into M-mode.
+\end{commentary}
 
 In systems without additional user extensions requiring new state, the
 XS field is hardwired to zero.  Every additional extension with state
@@ -1218,8 +1228,7 @@ must exist, and setting a bit in
 {\tt medeleg} or {\tt mideleg} will delegate the corresponding trap, when
 occurring in S-mode or U-mode, to the S-mode trap handler.
 In systems without S-mode, the {\tt medeleg} and {\tt mideleg} registers
-should not exist (unless the N extension for user-mode interrupts is
-implemented).
+should not exist.
 
 \begin{commentary}
   In versions 1.9.1 and earlier , these registers existed but were
@@ -1369,17 +1378,25 @@ MXLEN \\
 \label{miereg}
 \end{figure}
 
-An interrupt \textit{i} will be taken if bit \textit{i} is set in both
-{\tt mip} and {\tt mie}, and if interrupts are globally enabled.  By
-default, M-mode interrupts are globally enabled if the hart's current
-privilege mode is less than M, or if the current privilege mode is M
-and the MIE bit in the {\tt mstatus} register is set.  If bit \textit{i}
-in {\tt mideleg} is set, however, interrupts are considered to be
-globally enabled if the hart's current privilege mode equals the
-delegated privilege mode and that mode's interrupt enable
-bit (\textit{x}\/IE in {\tt mstatus} for mode~\textit{x}) is set,
-or if the current
-privilege mode is less than the delegated privilege mode.
+An interrupt~\textit{i} will trap to M-mode (causing the privilege mode
+to change to M-mode) if all of the following are true:
+(a)~either the current privilege mode is M and the MIE bit in the
+{\tt mstatus} register is set, or the current privilege mode has less
+privilege than M-mode;
+(b)~bit~\textit{i} is set in both {\tt mip} and {\tt mie}; and
+(c)~if register {\tt mideleg} exists, bit~\textit{i} is not set in
+{\tt mideleg}.
+
+These conditions for an interrupt trap to occur must be evaluated in a bounded
+amount of time from when an interrupt becomes, or ceases to be,
+pending in {\tt mip}, and must
+also be evaluated immediately following the execution of an {\em x}\/RET
+instruction or an explicit write to a CSR on which these interrupt trap
+conditions expressly depend (including {\tt mip}, {\tt mie}, {\tt mstatus},
+and {\tt mideleg}).
+
+Interrupts to M-mode take priority over any interrupts to lower privilege
+modes.
 
 Each individual bit in register {\tt mip} may be writable or may be
 read-only.
@@ -1512,6 +1529,10 @@ to memory-mapped control registers, which are used by remote harts to
 provide machine-level interprocessor interrupts.
 A hart can write its
 own MSIP bit using the same memory-mapped control register.
+If a system has only one hart, or if a platform standard supports the
+delivery of machine-level interprocessor interrupts through external
+interrupts (MEI) instead, then {\tt mip}.MSIP and {\tt mie}.MSIE may
+both be hardwired to zeros.
 
 If supervisor mode is not implemented, bits SEIP, STIP, and SSIP of
 {\tt mip} and SEIE, STIE, and SSIE of {\tt mie} are hardwired to zeros.
@@ -1535,6 +1556,14 @@ Only the software-writable SEIP bit participates in the
 read-modify-write sequence of a CSRRS or CSRRC instruction.
 
 \begin{commentary}
+  For example, if we name the software-writable SEIP bit {\tt B} and the
+  signal from the external interrupt controller {\tt E}, then if \mbox{\tt csrrs
+  t0, mip, t1} is executed, {\tt t0[9]} is written with \mbox{\tt B || E}, then
+  {\tt B} is written with \mbox{\tt B || t1[9]}.
+  If \mbox{\tt csrrw t0, mip, t1} is executed, then {\tt t0[9]} is written with
+  \mbox{\tt B || E}, and {\tt B} is simply written with {\tt t1[9]}.
+  In neither case does {\tt B} depend upon {\tt E}.
+
   The SEIP field behavior is designed to allow a higher privilege
   layer to mimic external interrupts cleanly, without losing any real
   external interrupts.  The behavior of the CSR instructions is
@@ -1550,30 +1579,12 @@ written by M-mode software to deliver timer interrupts to S-mode.
 If supervisor mode is implemented, bits {\tt mip}.SSIP and {\tt mie}.SSIE
 are the interrupt-pending and interrupt-enable bits for supervisor-level
 software interrupts.
-SSIP is writable in {\tt mip}.
+SSIP is writable in {\tt mip} and may also be set to 1 by a platform-specific
+interrupt controller.
 
-\begin{commentary}
-Interprocessor
-interrupts at supervisor level are implemented through
-implementation-specific mechanisms, e.g., via calls to an SEE,
-which might ultimately result in
-a machine-mode write to the receiving hart's MSIP bit.
-
-We allow a hart to directly write only its own SSIP bit, not those of other
-harts, as other harts might be
-virtualized and possibly descheduled by higher privilege levels.  We
-rely on calls to the SEE to provide interprocessor interrupts
-for this reason.  Machine-mode harts are not virtualized and can
-directly interrupt other harts by setting their MSIP bits, typically
-using uncached I/O writes to memory-mapped control registers depending
-on the platform specification.
-\end{commentary}
-
-Multiple simultaneous interrupts destined for different privilege modes are
-handled in decreasing order of destined privilege mode.  Multiple simultaneous
-interrupts destined for the same privilege mode are handled in the following
+Multiple simultaneous
+interrupts destined for M-mode are handled in the following
 decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI.
-Synchronous exceptions are of lower priority than all interrupts.
 
 \begin{commentary}
   The machine-level interrupt fixed-priority ordering rules were developed
@@ -1600,9 +1611,6 @@ Synchronous exceptions are of lower priority than all interrupts.
   Software interrupts are located in the lowest four bits of {\tt mip}
   as these are often written by software, and this position allows the
   use of a single CSR instruction with a five-bit immediate.
-
-  Synchronous exceptions are given the lowest priority to minimize
-  worst-case interrupt latency.
 \end{commentary}
 
 Restricted views of the {\tt mip} and {\tt mie} registers appear as
@@ -1668,10 +1676,11 @@ A future revision of this specification will define a mechanism to generate an
 interrupt when a hardware performance monitor counter overflows.
 \end{commentary}
 
-On RV32 only, reads of the {\tt mcycle}, {\tt minstret}, and {\tt
-mhpmcounter{\em n}} CSRs return the low 32 bits, while reads of the {\tt
-mcycleh}, {\tt minstreth}, and {\tt mhpmcounter{\em n}h} CSRs return bits
-63--32 of the corresponding counter.
+When MXLEN=32, reads of the {\tt mcycle}, {\tt minstret}, and {\tt
+mhpmcounter{\em n}} CSRs return bits 31--0 of the corresponding counter, and
+writes change only bits 31--0; reads of the {\tt mcycleh}, {\tt minstreth},
+and {\tt mhpmcounter{\em n}h} CSRs return bits 63--32 of the corresponding
+counter, and writes change only bits 63--32.
 
 \begin{figure}[h!]
 {\footnotesize
@@ -1774,7 +1783,7 @@ The {\tt cycle}, {\tt instret}, and {\tt hpmcounter{\em n}} CSRs are
 read-only shadows of {\tt mcycle}, {\tt minstret}, and {\tt mhpmcounter{\em
 n}}, respectively.  The {\tt time} CSR is a read-only shadow of the
 memory-mapped {\tt mtime} register.  Analogously, on RV32I the {\tt cycleh},
-{\tt instreth} and {\tt hpmcounter{\em n}} CSRs are read-only shadows of
+{\tt instreth} and {\tt hpmcounter{\em n}h} CSRs are read-only shadows of
 {\tt mcycleh}, {\tt minstreth} and {\tt mhpmcounter{\em n}h}, respectively.
 On RV32I the {\tt timeh} CSR is a read-only shadow of the upper 32 bits of
 the memory-mapped {\tt mtime} register, while {\tt time} shadows only the
@@ -1912,8 +1921,9 @@ Though masked, {\tt mepc[1]} remains writable when IALIGN=32.
 
 {\tt mepc} is a \warl\ register that must be able to hold all valid
 virtual addresses.  It need not be capable of holding all possible invalid
-addresses.  Implementations may convert some invalid address patterns into
-other invalid addresses prior to writing them to {\tt mepc}.
+addresses.
+Prior to writing {\tt mepc}, implementations may convert an invalid address
+into some other invalid address that {\tt mepc} is capable of holding.
 
 \begin{commentary}
 When address translation is not in effect, virtual addresses and physical
@@ -2051,7 +2061,7 @@ a policy on whether these need to be distinguished, and if so, whether
 a given opcode should be treated as illegal or privileged.
 \end{commentary}
 
-If an instruction raises multiple synchronous exceptions, the
+If an instruction may raise multiple synchronous exceptions, the
 decreasing priority order of Table~\ref{exception-priority}
 indicates which exception is taken and reported in {\tt mcause}.
 The priority of any custom synchronous exceptions is implementation-defined.
@@ -2061,24 +2071,37 @@ The priority of any custom synchronous exceptions is implementation-defined.
 \begin{tabular}{|l|r|l|}
 
   \hline
-  Priority      & Exception Code & Description \\
+  Priority      & Exc.\@ Code & Description \\
   \hline
-  {\em Highest} &          3 & Instruction address breakpoint \\ \hline
-                &         12 & Instruction page fault \\ \hline
-                &          1 & Instruction access fault \\ \hline
+  {\em Highest} &          3 & Instruction address breakpoint \\
+  \hline
+                &            & During instruction address translation: \\
+                &      12, 1 & \quad First encountered page fault or
+                                 access fault \\
+  \hline
+                &            & With physical address for instruction: \\
+                &          1 & \quad Instruction access fault \\
+  \hline
                 &          2 & Illegal instruction \\
                 &          0 & Instruction address misaligned \\
                 &   8, 9, 11 & Environment call \\
                 &          3 & Environment break \\
-                &          3 & Load/Store/AMO address breakpoint \\ \hline
-  {\em Optionally, these may have}
-                &          6 & Store/AMO address misaligned \\
-  {\em lowest priority instead.}
-                &          4 & Load address misaligned \\ \hline
-                &         15 & Store/AMO page fault \\
-                &         13 & Load page fault \\ \hline
-                &          7 & Store/AMO access fault \\
-                &          5 & Load access fault \\
+                &          3 & Load/store/AMO address breakpoint \\
+  \hline
+                &            & Optionally: \\
+                &       4, 6 & \quad Load/store/AMO address misaligned \\
+  \hline
+                &            & During address translation for an explicit
+                                 memory access: \\
+              & 13, 15, 5, 7 & \quad First encountered page fault or
+                                 access fault \\
+  \hline
+                &            & With physical address for an explicit
+                                 memory access: \\
+                &       5, 7 & \quad Load/store/AMO access fault \\
+  \hline
+                &            & If not higher priority: \\
+  {\em Lowest}  &       4, 6 & \quad Load/store/AMO address misaligned \\
   \hline
 
 \end{tabular}
@@ -2087,7 +2110,11 @@ The priority of any custom synchronous exceptions is implementation-defined.
 \label{exception-priority}
 \end{table*}
 
-Note that load/store/AMO address-misaligned exceptions may have
+When a virtual address is translated into
+a physical address, the address translation
+algorithm determines what specific exception may be raised.
+
+Load/store/AMO address-misaligned exceptions may have
 either higher or lower priority than load/store/AMO page-fault and
 access-fault exceptions.
 \begin{commentary}
@@ -2125,25 +2152,14 @@ software in handling the trap.  Otherwise, {\tt mtval} is never written by the
 implementation, though it may be explicitly written by software.  The hardware
 platform will specify which exceptions must set {\tt mtval} informatively and
 which may unconditionally set it to zero.
+If the hardware platform specifies that no exceptions set {\tt mtval} to a
+nonzero value, then {\tt mtval} is hardwired to zero.
 
-When a breakpoint,
-address-misaligned, access-fault, or page-fault exception occurs
-on an instruction fetch, load, or store, {\tt
-  mtval} is written with the faulting virtual address.  On an illegal
-instruction trap, {\tt mtval} may be written with the first XLEN or ILEN
-bits of the faulting instruction as described below.  For other traps,
-{\tt mtval} is set to zero, but a future standard may redefine {\tt
-  mtval}'s setting for other traps.
+If {\tt mtval} is written with a nonzero value when a breakpoint,
+address-misaligned, access-fault, or page-fault exception occurs on an
+instruction fetch, load, or store, then {\tt mtval} will contain the faulting
+virtual address.
 
-\begin{commentary}
-  The {\tt mtval} register replaces the {\tt mbadaddr} register in
-  the previous specification.  In addition to providing bad addresses,
-  the register can now provide the bad instruction that triggered an
-  illegal instruction trap (and may in future be used to return other
-  information).  Returning the instruction bits accelerates instruction emulation and also
-  removes some races that might be present when trying to emulate
-  illegal instructions.
-\end{commentary}
 \begin{commentary}
   When page-based virtual memory is enabled, {\tt mtval} is written with
   the faulting virtual address, even for physical-memory access-fault exceptions.
@@ -2168,29 +2184,28 @@ MXLEN \\
 \label{mtvalreg}
 \end{figure}
 
-For misaligned loads and stores that cause access-fault or page-fault exceptions,
-{\tt mtval} will contain the virtual address of the portion of the access that
-caused the fault.  For instruction access-fault or page-fault exceptions on
-systems with variable-length instructions, {\tt mtval} will contain the
-virtual address of the portion of the instruction that caused the fault while
-{\tt mepc} will point to the beginning of the instruction.
+If {\tt mtval} is written with a nonzero value when a misaligned load or store
+causes an access-fault or page-fault exception, then {\tt mtval} will contain
+the virtual address of the portion of the access that caused the fault.
 
-The {\tt mtval} register can optionally also be used to return the
-faulting instruction bits on an illegal instruction exception ({\tt
-  mepc} points to the faulting instruction in memory).
+If {\tt mtval} is written with a nonzero value when an instruction
+access-fault or page-fault exception occurs on a system with variable-length
+instructions, then {\tt mtval} will contain the virtual address of the portion
+of the instruction that caused the fault, while {\tt mepc} will point to the
+beginning of the instruction.
 
-If this feature is not provided, then {\tt mtval} is set to zero on
-an illegal instruction fault.
-
-If this feature is provided, after an illegal instruction trap, {\tt mtval}
-will contain the shortest of:
+The {\tt mtval} register can optionally also be used to return the faulting
+instruction bits on an illegal instruction exception ({\tt mepc} points to the
+faulting instruction in memory).
+If {\tt mtval} is written with a nonzero value when an illegal-instruction
+exception occurs, then {\tt mtval} will contain the shortest of:
 \begin{compactitem}
 \item the actual faulting instruction
 \item the first ILEN bits of the faulting instruction
-\item the first XLEN bits of the faulting instruction
+\item the first MXLEN bits of the faulting instruction
 \end{compactitem}
-The value loaded into {\tt mtval} is right-justified and all unused upper
-bits are cleared to zero.
+The value loaded into {\tt mtval} on an illegal-instruction exception is
+right-justified and all unused upper bits are cleared to zero.
 
 \begin{commentary}
   Capturing the faulting instruction in {\tt mtval} reduces the
@@ -2202,7 +2217,7 @@ bits are cleared to zero.
   instruction memory, as might occur in a dynamic translation system.
 
   A requirement is that the entire instruction (or at least the first
-  XLEN bits) are fetched into {\tt mtval} before taking the trap.
+  MXLEN bits) are fetched into {\tt mtval} before taking the trap.
   This should not constrain implementations, which would typically
   fetch the entire instruction before attempting to decode the
   instruction, and avoids complicating software handlers.
@@ -2215,15 +2230,221 @@ bits are cleared to zero.
   appropriate trap handling before runtime).
 \end{commentary}
 
-If the hardware platform specifies that no exceptions set {\tt mtval} to a
-nonzero value, then it may be hardwired to zero.  Otherwise,
-{\tt mtval} is a \warl\ register that must be able to hold all valid
-virtual addresses and the value 0.  It need not be capable of holding all
-possible invalid addresses.  Implementations may convert some invalid address
-patterns into other invalid addresses prior to writing them to {\tt mtval}.
+For other traps, {\tt mtval} is set to zero, but a future standard may
+redefine {\tt mtval}'s setting for other traps.
+
+If {\tt mtval} is not hardwired to zero, it is a \warl\ register that must be
+able to hold all valid virtual addresses and the value zero.
+It need not be capable of holding all
+possible invalid addresses.
+Prior to writing {\tt mtval}, implementations may convert an invalid address
+into some other invalid address that {\tt mtval} is capable of holding.
 If the feature to return the faulting instruction bits is implemented, {\tt
 mtval} must also be able to hold all values less than $2^N$, where $N$ is the
-smaller of XLEN and ILEN.
+smaller of MXLEN and ILEN.
+
+\subsection{Machine Configuration Pointer Register ({\tt mconfigptr})}
+
+{\tt mconfigptr} is an MXLEN-bit read-only CSR, formatted as shown in
+Figure~\ref{mconfigptrreg}, that holds the physical address of a configuration
+data structure.
+Software can traverse this data structure to discover information about
+the harts, the platform, and their configuration.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{MXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt mconfigptr} \\
+\hline
+MXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Machine Configuration Pointer register.}
+\label{mconfigptrreg}
+\end{figure}
+
+The pointer alignment in bits must be no smaller than the greatest supported
+MXLEN: i.e., if the greatest supported MXLEN is $8\times n$, then
+{\tt mconfigptr}[$\log_2n$-1:0] must be hardwired to zero.
+
+{\tt mconfigptr} must be implemented, but it may be hardwired to zero to
+indicate the configuration data structure does not exist or that an
+alternative mechanism must be used to locate it.
+
+\begin{commentary}
+The format and schema of the configuration data structure have yet to be standardized.
+\end{commentary}
+
+\begin{commentary}
+While {\tt mconfigptr} will simply be hardwired in some implementations, other
+implementations may provide a means to configure the value returned on CSR
+reads.
+For example, {\tt mconfigptr} might present the value of a memory-mapped
+register that is programmed by the platform or by M-mode software towards the
+beginning of the boot process.
+\end{commentary}
+
+\subsection{%
+ Machine Environment Configuration Registers
+ ({\tt menvcfg} and {\tt menvcfgh})%
+}
+
+The {\tt menvcfg} CSR is an MXLEN-bit read/write register,
+formatted for MXLEN=64 as shown in Figure~\ref{fig:menvcfg},
+that controls certain characteristics of the execution environment
+for modes less privileged than M.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{c@{}Kcc@{}W@{}Wc}
+\instbit{63} &
+\instbitrange{62}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbitrange{5}{4} &
+\instbitrange{3}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{STCE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{CBZE} &
+\multicolumn{1}{c|}{CBCFE} &
+\multicolumn{1}{c|}{CBIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{FIOM} \\
+\hline
+1 & 55 & 1 & 1 & 2 & 3 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Machine environment configuration register ({\tt menvcfg}) for MXLEN=64.}
+\label{fig:menvcfg}
+\end{figure}
+
+If bit FIOM (Fence of I/O implies Memory) is set to one in {\tt menvcfg},
+FENCE instructions executed in modes less privileged than M are modified so
+the requirement to order accesses to device I/O implies also the requirement
+to order main memory accesses.
+Table~\ref{tab:menvcfg-FIOM} details the modified interpretation of
+FENCE instruction bits PI, PO, SI, and SO for modes less privileged than M
+when FIOM=1.
+
+Similarly, for modes less privileged than M when FIOM=1,
+if an atomic instruction that accesses a region ordered as device I/O
+has its {\em aq} and/or {\em rl} bit set, then that instruction is ordered
+as though it accesses both device I/O and memory.
+
+If S-mode is not supported, or if {\tt satp}.MODE is hardwired to Bare,
+the implementation may hardwire FIOM to zero.
+
+\begin{table}[h!]
+\begin{center}
+\begin{tabular}{|c|l|}
+\hline
+Instruction bit & Meaning when set \\
+\hline
+PI & Predecessor device input and memory reads   (PR implied) \\
+PO & Predecessor device output and memory writes (PW implied) \\
+\hline
+SI & Successor device input and memory reads     (SR implied) \\
+SO & Successor device output and memory writes   (SW implied) \\
+\hline
+\end{tabular}
+\end{center}
+\vspace{-0.1in}
+\caption{%
+Modified interpretation of FENCE predecessor and successor sets
+for modes less privileged than M when FIOM=1.%
+}
+\label{tab:menvcfg-FIOM}
+\end{table}
+
+\begin{commentary}
+Bit FIOM is needed in {\tt menvcfg} so M-mode can emulate the
+hypervisor extension of Chapter~\ref{hypervisor}, which has an
+equivalent FIOM bit in the hypervisor CSR {\tt henvcfg}.
+\end{commentary}
+
+The definition of the STCE field will be furnished by the
+forthcoming Sstc extension.
+Its allocation within {\tt menvcfg} may change prior to the ratification
+of that extension.
+
+The definition of the CBZE field will be furnished by the
+forthcoming Zicboz extension.
+Its allocation within {\tt menvcfg} may change prior to the ratification
+of that extension.
+
+The definitions of the CBCFE and CBIE fields will be furnished by the
+forthcoming Zicbom extension.
+Their allocations within {\tt menvcfg} may change prior to the ratification
+of that extension.
+
+When MXLEN=32, {\tt menvcfg} contains the same fields as bits 31:0
+of {\tt menvcfg} when MXLEN=64.
+Additionally, when MXLEN=32, {\tt menvcfgh} is a 32-bit read/write register that
+contains the same fields as bits 63:32 of {\tt menvcfg} when
+MXLEN=64.
+Register {\tt menvcfgh} does not exist when MXLEN=64.
+
+If U-mode is not supported, then registers {\tt menvcfg} and {\tt menvcfgh} do
+not exist.
+
+\subsection{Machine Security Configuration Register ({\tt mseccfg})}
+\label{sec:mseccfg}
+
+{\tt mseccfg} is an optional MXLEN-bit read/write register, formatted as shown
+in Figure~\ref{fig:mseccfg}, that controls security features.
+
+When MXLEN=32 only, {\tt mseccfgh} is a 32-bit read/write register that
+contains the same fields as {\tt mseccfg} bits 63:32 when MXLEN=64.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{MccFccc}
+\instbitrange{XLEN-1}{10} &
+\instbit{9} &
+\instbit{8} &
+\instbitrange{7}{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{SSEED} &
+\multicolumn{1}{c|}{USEED} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{RLB} &
+\multicolumn{1}{c|}{MMWP} &
+\multicolumn{1}{c|}{MML} \\
+\hline
+XLEN-10 & 1 & 1 & 5 & 1 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Machine security configuration register ({\tt mseccfg}).}
+\label{fig:mseccfg}
+\end{figure*}
+
+The definitions of the SSEED and USEED fields will be furnished by the
+forthcoming entropy-source extension, Zkr.
+Their allocations within {\tt mseccfg} may change prior to the ratification
+of that extension.
+
+The definitions of the RLB, MMWP, and MML fields will be furnished by the
+forthcoming PMP-enhancement extension, Smepmp.
+Their allocations within {\tt mseccfg} may change prior to the ratification
+of that extension.
 
 \section{Machine-Level Memory-Mapped Registers}
 
@@ -2339,7 +2560,7 @@ to the intermediate value of the comparand:
 \end{figure}
 
 For RV64, naturally aligned 64-bit memory accesses to the {\tt mtime} and {\tt
-	mtimecmp} registers are atomic.
+	mtimecmp} registers are additionally supported and are atomic.
 
 \section{Machine-Mode Privileged Instructions}
 
@@ -2432,15 +2653,6 @@ mode stack.  In addition to manipulating the privilege stack as
 described in Section~\ref{privstack}, {\em x}\/RET sets the {\tt pc}
 to the value stored in the {\em x}\/{\tt epc} register.
 
-\begin{commentary}
-Previously, there was only a single ERET instruction (which was also
-earlier known as SRET).  To support the addition of user-level
-interrupts, we needed to add a separate URET instruction to continue
-to allow classic virtualization of OS code using the ERET instruction.
-It then became more orthogonal to support a different {\em x}\/RET
-instruction per privilege level.
-\end{commentary}
-
 If the A extension is supported, the {\em x}\/RET instruction is
 allowed to clear any outstanding LR address reservation but is not
 required to.  Trap handlers should explicitly clear the reservation if
@@ -2531,9 +2743,9 @@ discarded before the WFI is executed.
 As implementations are free to implement WFI as a NOP, software must
 explicitly check for any relevant pending but disabled interrupts in
 the code following an WFI, and should loop back to the WFI if no
-suitable interrupt was detected.  The {\tt mip}, {\tt sip},
-or {\tt uip} registers can be interrogated to determine the presence
-of any interrupt in machine, supervisor, or user mode
+suitable interrupt was detected.  The {\tt mip} or {\tt sip}
+registers can be interrogated to determine the presence
+of any interrupt in machine or supervisor mode
 respectively.
 
 The operation of WFI is unaffected by the delegation register settings.
@@ -2550,6 +2762,46 @@ extensions that wait on memory locations changing, or message
 arrival.
 \end{commentary}
 
+\subsection{Custom SYSTEM Instructions}
+\label{sec:customsys}
+
+The subspace of the SYSTEM major opcode shown in Figure~\ref{fig:customsys}
+is designated for custom use.
+It is recommended that these instructions use bits 29:28 to designate the
+minimum required privilege mode, as do other SYSTEM instructions.
+
+\begin{figure}[h!]
+\begin{center}
+\begin{tabular}{Y@{}S@{}F@{}Y@{}Rc}
+\\
+\instbitrange{31}{26} &
+\instbitrange{25}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\cline{1-5}
+\multicolumn{1}{|c|}{funct6} &
+\multicolumn{1}{c|}{\em custom} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{\em custom} &
+\multicolumn{1}{c|}{opcode} &
+Recommended Purpose \\
+\cline{1-5}
+6 & 11 & 3 & 5 & 7 \\
+100011 & {\em custom} & 0 & {\em custom} & SYSTEM & Unprivileged or User-Level \\
+110011 & {\em custom} & 0 & {\em custom} & SYSTEM & Unprivileged or User-Level \\
+100111 & {\em custom} & 0 & {\em custom} & SYSTEM & Supervisor-Level \\
+110111 & {\em custom} & 0 & {\em custom} & SYSTEM & Supervisor-Level \\
+101011 & {\em custom} & 0 & {\em custom} & SYSTEM & Hypervisor-Level \\
+111011 & {\em custom} & 0 & {\em custom} & SYSTEM & Hypervisor-Level \\
+101111 & {\em custom} & 0 & {\em custom} & SYSTEM & Machine-Level \\
+111111 & {\em custom} & 0 & {\em custom} & SYSTEM & Machine-Level \\
+\end{tabular}
+\end{center}
+\caption{SYSTEM instruction encodings designated for custom use.}
+\label{fig:customsys}
+\end{figure}
+
 \section{Reset}
 \label{sec:reset}
 
@@ -2564,13 +2816,14 @@ reset vector.  The {\tt mcause} register is set to a value indicating the
 cause of the reset.
 Writable PMP registers' A and L fields are set to 0, unless the platform
 mandates a different reset value for some PMP registers' A and L fields.
+No \warl\ field contains an illegal value.
 All other hart state is \unspecified.
 
 The {\tt mcause} values after reset have implementation-specific
 interpretation, but the value 0 should be returned on implementations
 that do not distinguish different reset conditions. Implementations
 that distinguish different reset conditions should only use 0 to
-indicate the most complete reset (e.g., hard reset).
+indicate the most complete reset.
 
 \begin{commentary}
 Some designs may have multiple causes of reset (e.g., power-on reset,
@@ -2978,6 +3231,19 @@ because they will be fixed as either uncached, read-only, hardware
 cache-coherent, or only accessed by one agent.
 \end{commentary}
 
+If a PMA indicates non-cacheability, then accesses to that region must
+be satisfied by the memory itself, not by any caches.
+
+\begin{commentary}
+For implementations with a cacheability-control mechanism, the situation
+may arise that a program uncacheably accesses a memory location that is
+currently cache-resident.
+In this situation, the cached copy must be ignored.
+This constraint is necessary to prevent more-privileged modes' speculative
+cache refills from affecting the behavior of less-privileged modes'
+uncacheable accesses.
+\end{commentary}
+
 \subsection{Idempotency PMAs}
 
 Idempotency PMAs describe whether reads and writes to an address
@@ -3006,6 +3272,21 @@ address-misaligned exceptions, indicating that software should not emulate the
 misaligned access using multiple smaller accesses, which could cause
 unexpected side effects.
 \end{commentary}
+
+For non-idempotent regions, implicit reads and writes must not be performed
+early or speculatively, with the following exceptions.
+When a non-speculative implicit read is performed, an implementation is
+permitted to additionally read any of the bytes within a naturally aligned
+power-of-2 region containing the address of the non-speculative implicit read.
+Furthermore, when a non-speculative instruction fetch is performed, an
+implementation is permitted to additionally read any of the bytes within the
+{\em next} naturally aligned power-of-2 region of the same size (with the
+address of the region taken modulo $2^{\text{XLEN}}$).
+The results of these additional reads may be used to satisfy subsequent early
+or speculative implicit reads.
+The size of these naturally aligned power-of-2 regions is
+implementation-defined, but, for systems with page-based virtual memory, must
+not exceed the smallest supported page size.
 
 \section{Physical Memory Protection}
 \label{sec:pmp}
@@ -3052,7 +3333,8 @@ PMP entries are described by an 8-bit configuration register and one MXLEN-bit
 address register.  Some PMP settings additionally use the address register
 associated with the preceding PMP entry.
 Up to 64 PMP entries are supported.
-Implementations may implement zero, 16, or 64 PMP CSRs.
+Implementations may implement zero, 16, or 64 PMP CSRs; the lowest-numbered
+PMP CSRs must be implemented first.
 All PMP CSR fields are \warl\ and may be hardwired to zero.
 PMP CSRs are only accessible to M-mode.
 
@@ -3255,9 +3537,10 @@ space, so the RV64 PMP address registers impose the same limit.
 Figure~\ref{pmpcfg} shows the layout of a PMP configuration register.  The R,
 W, and X bits, when set, indicate that the PMP entry permits read, write, and
 instruction execution, respectively.  When one of these bits is clear, the
-corresponding access type is denied.  The combination R=0 and W=1 is reserved
-for future use.  The remaining two fields, A and L, are
-described in the following sections.
+corresponding access type is denied.
+The R, W, and X fields form a collective \warl\ field for which the
+combinations with R=0 and W=1 are reserved.
+The remaining two fields, A and L, are described in the following sections.
 
 \begin{figure}[h!]
 {\footnotesize

@@ -42,3 +42,5 @@ CV32E40S      | OpenHW Group                    | [Arjan Bink](mailto:arjan.bink
 Ibex          | lowRISC                         | [lowRISC Hardware Team](mailto:hardware@lowrisc.org)        | 22                | https://github.com/lowRISC/ibex
 RudolV        | Jörg Mische                     | [Jörg Mische](mailto:bobbl@gmx.de)                          | 23                | https://github.com/bobbl/rudolv
 Steel Core    | Rafael Calcada                  | [Rafael Calcada](mailto:rafaelcalcada@gmail.com)            | 24                | https://github.com/rafaelcalcada/steel-core
+XiangShan     | ICT, CAS                        | [XiangShan Team](mailto:xiangshan-all@ict.ac.cn)            | 25                | https://github.com/OpenXiangShan/XiangShan
+Hummingbirdv2 E203  | Nuclei System Technology  | [Can Hu](mailto:canhu@nucleisys.com), Nuclei System Technology  | 26            | https://github.com/riscv-mcu/e203_hbirdv2
