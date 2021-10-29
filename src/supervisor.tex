@@ -1082,8 +1082,24 @@ multi-level TLB hierarchies are quite inexpensive relative to the
 multi-level cache hierarchies whose address space they map.
 \end{commentary}
 
+The {\tt satp} register is considered {\em active} when the effective
+privilege mode is S-mode or U-mode, i.e., when in S-mode or U-mode,
+or when MPRV=1 and either MPP=S or MPP=U.  Executions of the
+address-translation algorithm may only begin using a given value of {\tt satp}
+when {\tt satp} is active.
+
+\begin{commentary}
+Translations that began while {\tt satp} was active are not required to
+complete or terminate when {\tt satp} is no longer active, unless an
+SFENCE.VMA instruction matching the address and ASID is executed.  The
+SFENCE.VMA instruction must be used to ensure that updates to the
+address-translation data structures are observed by subsequent implicit reads
+to those structures by a hart.
+\end{commentary}
+
 Note that writing {\tt satp} does not imply any ordering constraints
-between page-table updates and subsequent address translations.
+between page-table updates and subsequent address translations, nor does
+it imply any invalidation of address-translation caches.
 If the new address space's page tables have been modified, or if an
 ASID is reused, it may be necessary to execute an SFENCE.VMA instruction
 (see Section~\ref{sec:sfence.vma}) after writing {\tt satp}.
@@ -1132,8 +1148,13 @@ current execution.  Instruction execution causes implicit reads and writes to
 these data structures; however, these implicit references are ordinarily not
 ordered with respect to explicit loads and stores.  Executing
 an SFENCE.VMA instruction guarantees that any previous stores already visible
-to the current RISC-V hart are ordered before all subsequent implicit references
-from that hart to the memory-management data structures.
+to the current RISC-V hart are ordered before certain implicit references by
+subsequent instructions in that hart to the memory-management data structures.
+The specific set of operations ordered by SFENCE.VMA is
+determined by {\em rs1} and {\em rs2}, as described below.
+SFENCE.VMA is also used to invalidate entries in the
+address-translation cache associated with a hart (see
+Section~\ref{sv32algorithm}).
 Further details on the behavior of this instruction are
 described in Section~\ref{virt-control} and Section~\ref{pmp-vmem}.
 
@@ -1172,44 +1193,93 @@ SFENCE.VMA depends on {\em rs1} and {\em rs2} as follows:
 \begin{itemize}
 \item If {\em rs1}={\tt x0} and {\em rs2}={\tt x0}, the fence orders all
       reads and writes made to any level of the page tables, for all
-      address spaces.
+      address spaces.  The fence also invalidates all address-translation
+      cache entries, for all address spaces.
 \item If {\em rs1}={\tt x0} and {\em rs2}$\neq${\tt x0}, the fence orders
       all reads and writes made to any level of the page tables, but only
       for the address space identified by integer register {\em rs2}.
       Accesses to {\em global} mappings (see Section~\ref{sec:translation})
-      are not ordered.
+      are not ordered.  The fence also invalidates all address-translation
+      cache entries matching the address space identified by integer register
+      {\em rs2}, except for entries containing global mappings.
 \item If {\em rs1}$\neq${\tt x0} and {\em rs2}={\tt x0}, the fence orders
       only reads and writes made to leaf page table entries corresponding
       to the virtual address in {\em rs1}, for all address spaces.
+      The fence also invalidates all address-translation cache entries that
+      contain leaf page table entries corresponding to the virtual address
+      in {\em rs1}, for all address spaces.
 \item If {\em rs1}$\neq${\tt x0} and {\em rs2}$\neq${\tt x0}, the fence
       orders only reads and writes made to leaf page table entries
       corresponding to the virtual address in {\em rs1}, for the address
       space identified by integer register {\em rs2}.
-      Accesses to global mappings are not ordered.
+      Accesses to global mappings are not ordered.  The fence also
+      invalidates all address-translation cache entries that contain leaf
+      page table entries corresponding to the virtual address in {\em rs1}
+      and that match the address space identified by integer register {\em
+      rs2}, except for entries containing global mappings.
 \end{itemize}
 
+If the value held in {\em rs1} is not a valid virtual address, then the
+SFENCE.VMA instruction has no effect.  No exception is raised in this case.
+
 When {\em rs2}$\neq${\tt x0}, bits SXLEN-1:ASIDMAX of the value held in {\em
-rs2} are reserved for future use and should be zeroed by software and ignored
+rs2} are reserved for future standard use.  Until their use is defined by a
+standard extension, they should be zeroed by software and ignored
 by current implementations.  Furthermore, if ASIDLEN~$<$~ASIDMAX, the
 implementation shall ignore bits ASIDMAX-1:ASIDLEN of the value held in {\em
 rs2}.
 
 \begin{commentary}
-Simpler implementations can ignore the virtual address in {\em rs1} and
-the ASID value in {\em rs2} and always perform a global fence.
+It is always legal to over-fence, e.g., by fencing only based on a subset
+of the bits in {\em rs1} and/or {\em rs2}, and/or by simply treating all
+SFENCE.VMA instructions as having {\em rs1}={\tt x0} and/or
+{\em rs2}={\tt x0}.  For example, simpler implementations can ignore the
+virtual address in {\em rs1} and the ASID value in {\em rs2} and always perform
+a global fence.  The choice not to raise an exception when an invalid virtual
+address is held in {\em rs1} facilicates this type of simplification.
 \end{commentary}
 
-Implementations may perform implicit reads of the translation data structures
-pointed to by the current {\tt satp} register arbitrarily early and
-speculatively.  The results of these reads may be held in an incoherent cache
-but not shared with other harts.  Cache entries may only be established for
-the ASID currently loaded into the {\tt satp} register, or for global entries.
-The cache may only satisfy implicit reads for entries that have been
-established for the ASID currently loaded into {\tt satp}, or for global
-entries.  Changes in the {\tt satp} register do not necessarily flush any such
-translation caches.  To ensure the implicit reads observe writes to the same
-memory locations, an SFENCE.VMA instruction must be executed after the writes
-to flush the relevant cached translations.
+\begin{figure}[h!]
+\begin{center}
+\begin{verbatim}
+  # a0 holds the address of the first VA to be invalidated
+  # a1 holds PAGESIZE
+  # a2 holds the upper bound
+loop:
+  sfence.vma a0
+  add        a0,a0,a1
+  bgtu       a2,a0,loop
+\end{verbatim}
+\end{center}
+\caption{Sample code to synchronize a range of page table entries.}
+\label{consecutive_sfences}
+\end{figure}
+
+\begin{commentary}
+When synchronizing the address-translation data structures for multiple
+individual pages page at once, e.g., when updating a range of page table
+entries, it is recommended to insert at most one compressed or uncompressed
+integer {\tt add} instruction and one compressed or uncompressed branch
+instruction between consecutive SFENCE.VMA instructions.  This idiom, one form
+of which is demonstrated in Figure~\ref{consecutive_sfences}, will make it
+easier for certain implementations to detect the pattern and amortize any
+synchronization overheads across the whole sequence.  This idiom is recommended
+strictly as a performance optimization; the functionality of the SFENCE.VMA
+instructions is unaffected regardless of whether the idiom is used.
+\end{commentary}
+
+An implicit read of the memory-management data structures may return any
+translation for an address that was valid at
+any time since the most recent SFENCE.VMA that subsumes that address.  The
+ordering implied by SFENCE.VMA does not place implicit reads and writes to the
+memory-management data structures into the global memory order in a way that
+interacts cleanly with the standard RVWMO ordering rules.  In particular, even
+though an SFENCE.VMA orders prior explicit accesses before subsequent implicit
+accesses, and those implicit accesses are ordered before their associated
+explicit accesses, SFENCE.VMA does not necessarily place prior explicit
+accesses before subsequent explicit accesses in the global memory order.  These
+implicit loads also need not otherwise obey normal program order semantics with
+respect to prior loads or stores to the same address.
 
 \begin{commentary}
 A consequence of this specification is that an implementation may use any
@@ -1227,6 +1297,11 @@ clearing the original non-leaf PTE's valid bit and executing an SFENCE.VMA with
 In this case, a similar remark applies: it is unpredictable whether the old
 non-leaf PTE or the new leaf PTE is used, but the behavior is otherwise well
 defined.
+
+Another consequence of this specification is that it is generally unsafe to
+update a PTE using a set of stores of a width less than the width of the PTE,
+as it is legal for the implementation to read the PTE at any time, including
+when only some of the partial stores have taken effect.
 \end{commentary}
 
 \begin{commentary}
@@ -1355,6 +1430,18 @@ number (PPN), while the 12-bit page offset is untranslated.  The
 resulting supervisor-level physical addresses are then checked using
 any physical memory protection structures (Sections~\ref{sec:pmp}),
 before being directly converted to machine-level physical addresses.
+If necessary, supervisor-level physical addresses are zero-extended
+to the number of physical address bits found in the implementation.
+
+\begin{commentary}
+For example, consider an RV32 system supporting 34 bits of physical
+address.  When the value of {\tt satp}.MODE is Sv32, a 34-bit physical
+address is produced directly, and therefore no zero-extension is needed.
+When the value of {\tt satp}.MODE is Bare, the 32-bit virtual address is
+translated (unmodified) into a 32-bit physical address, and then that
+physical address is zero-extended into a 34-bit machine-level physical
+address.
+\end{commentary}
 
 \begin{figure*}[h!]
 {\footnotesize
@@ -1530,8 +1617,9 @@ Two schemes to manage the A and D bits are permitted:
       written and the D bit is clear, the implementation sets the
       corresponding bit(s) in the PTE.  The PTE update must be atomic with
       respect to other accesses to the PTE, and must atomically check
-      that the PTE is valid and grants sufficient permissions.  The
-      PTE update must be exact (i.e., not speculative), and observed
+      that the PTE is valid and grants sufficient permissions.  Updates
+      of the A bit may be performed as a result of speculation, but updates
+      to the D bit must be exact (i.e., not speculative), and observed
       in program order by the local hart.  Furthermore, the PTE update
       must appear in the global memory order no later than the explicit
       memory access, or any subsequent explicit memory access to that
@@ -1548,9 +1636,22 @@ Two schemes to manage the A and D bits are permitted:
 All harts in a system must employ the same PTE-update scheme as each other.
 
 \begin{commentary}
-Mandating that the PTE updates to be exact, atomic, and in program order
-simplifies the specification, and makes the feature more useful for system
-software.  Simple implementations may instead generate page-fault exceptions.
+Prior versions of this specification required PTE A bit updates to be exact,
+but allowing the A bit to be updated as a result of speculation simplifies
+the implementation of address translation prefetchers.  System software
+typically uses the A bit as a page replacement policy hint, but does not
+require exactness for functional correctness.  On the other hand, D bit updates
+are still required to be exact and performed in program order, as the D bit
+affects the functional correctness of page eviction.
+
+Implementations are of course still permitted to perform both A and D bit
+updates only in an exact manner.
+
+In both cases, requiring atomicity ensures that the PTE update will not be
+interrupted by other intervening writes to the page table, as such interruptions
+could lead to A/D bits being set on PTEs that have been reused for other
+purposes, on memory that has been reclaimed for other purposes, and so on.
+Simple implementations may instead generate page-fault exceptions.
 
 The A and D bits are never cleared by the implementation.  If the
 supervisor software does not rely on accessed and/or dirty bits,
@@ -1564,7 +1665,8 @@ supports 4 MiB {\em megapages}.  A megapage must be virtually and
 physically aligned to a 4 MiB boundary; a page-fault exception is raised
 if the physical address is insufficiently aligned.
 
-For non-leaf PTEs, the D, A, and U bits are reserved for future standard use and
+For non-leaf PTEs, the D, A, and U bits are reserved for future standard
+use.  Until their use is defined by a standard extension, they
 must be cleared by software for forward compatibility.
 
 For implementations with both page-based virtual memory and the ``A'' standard
@@ -1580,14 +1682,17 @@ follows:
 \begin{enumerate}
 
 \item Let $a$ be ${\tt satp}.ppn \times \textrm{PAGESIZE}$, and let $i=\textrm{LEVELS} - 1$. (For Sv32, PAGESIZE=$2^{12}$ and LEVELS=2.)
+  The {\tt satp} register must be {\em active}, i.e., the effective privilege
+  mode must be S-mode or U-mode.
 
 \item Let $pte$ be the value of the PTE at address
   $a+va.vpn[i]\times \textrm{PTESIZE}$. (For Sv32, PTESIZE=4.)
   If accessing $pte$ violates a PMA or PMP check, raise an
   access-fault exception corresponding to the original access type.
 
-\item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, stop and raise a
-  page-fault exception corresponding to the original access type.
+\item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, or if any bits or encodings
+  that are reserved for future standard use are set within $pte$, stop and
+  raise a page-fault exception corresponding to the original access type.
 
 \item Otherwise, the PTE is valid.
   If $pte.r=1$ or $pte.x=1$, go to step 5.
@@ -1605,16 +1710,18 @@ follows:
 \item If $i>0$ and $pte.ppn[i-1:0]\neq 0$, this is a misaligned superpage;
   stop and raise a page-fault exception corresponding to the original access type.
 
-\item If $pte.a=0$, or if the memory access is a store and $pte.d=0$, either
+\item If $pte.a=0$, or if the original memory access is a store and $pte.d=0$, either
   raise a page-fault exception corresponding to the original access type, or:
   \begin{itemize}
-  \item Set $pte.a$ to 1 and, if the memory access is a store, also set
-    $pte.d$ to 1.
-  \item If this access violates a PMA or PMP check, raise an access-fault exception
-    corresponding to the original access type.
-  \item This update and the loading of $pte$ in step 2 must be atomic; in
-    particular, no intervening store to the PTE may be perceived to have
-    occurred in-between.
+  \item If a store to $pte$ would violate a PMA or PMP check, raise an
+    access-fault exception corresponding to the original access type.
+  \item Perform the following steps atomically:
+    \begin{itemize}
+      \item Compare $pte$ to the value of the PTE at address $a+va.vpn[i]\times \textrm{PTESIZE}$.
+      \item If the values match, set $pte.a$ to 1 and, if the original memory
+        access is a store, also set $pte.d$ to 1.
+      \item If the comparison fails, return to step 2
+    \end{itemize}
   \end{itemize}
 
 \item The translation is successful. The translated physical address is
@@ -1626,6 +1733,86 @@ follows:
 \end{itemize}
 
 \end{enumerate}
+
+All implicit accesses to the address-translation data structures in this
+algorithm are performed using width PTESIZE.
+
+\begin{commentary}
+This implies, for example, that an Sv48 implementation may not use two separate
+4B reads to non-atomically access a single 8B PTE, and that A/D bit updates
+performed by the implementation are treated as atomically updating the entire
+PTE, rather than just the A and/or D bit alone (even though the PTE value does
+not otherwise change).
+\end{commentary}
+
+The results of implicit address-translation reads in step 2 may be held in a
+read-only, incoherent {\em address-translation cache} but not shared with other
+harts.  The address-translation cache may hold an arbitrary number of entries,
+including an arbitrary number of entries for the same address and ASID.
+Entries in the address-translation cache may then satisfy subsequent step 2
+reads if the ASID associated with the entry matches the ASID loaded in step 0
+or if the entry is associated with a {\em global} mapping.  To ensure that
+implicit reads observe writes to the same memory locations, an SFENCE.VMA
+instruction must be executed after the writes to flush the relevant cached
+translations.
+
+The address-translation cache cannot be used in step 7; accessed and
+dirty bits may only be updated in memory directly.
+
+\begin{commentary}
+  It is permitted for multiple address-translation cache entries to co-exist
+  for the same address.  This represents the fact that in a conventional TLB
+  hierarchy, it is possible for multiple entries to match a single address if, for
+  example, a page is upgraded to a superpage without first clearing the
+  original non-leaf PTE's valid bit and executing an SFENCE.VMA with {\em
+  rs1}={\tt x0}, or if multiple TLBs exist in parallel at a given level of the
+  hierarchy.  In this case, just as if an SFENCE.VMA is not executed between
+  a write to the memory-management tables and subsequent implicit read of the
+  same address: it is unpredictable whether the old non-leaf PTE or the new leaf
+  PTE is used, but the behavior is otherwise well defined.
+\end{commentary}
+
+Implementations may also execute the address-translation algorithm
+speculatively at any time, for any virtual address, as long as {\tt satp} is
+active (as defined in Section~\ref{sec:satp}).  Such speculative executions
+have the effect of pre-populating the address-translation cache.
+
+Speculative executions of the address-translation algorithm behave as
+non-speculative executions of the algorithm do, except that they must not set the
+dirty bit for a PTE, they must not trigger an exception, and they must not create
+address-translation cache entries if those entries would have been invalidated
+by any SFENCE.VMA instruction executed by the hart since the speculative
+execution of the algorithm began.
+
+\begin{commentary}
+  For instance, it is illegal for both non-speculative and speculative
+  executions of the translation algorithm to begin, read the level 2 page table,
+  pause while the hart executes an SFENCE.VMA with {\em rs1}={\em rs2}={\tt x0},
+  then resume using the now-stale level 2 PTE, as subsequent implicit reads
+  could populate the address-translation cache with stale PTEs.
+
+  In many implementations, an SFENCE.VMA instruction with {\em rs1}={\tt x0}
+  will therefore either terminate all previously-launched speculative
+  executions of the address-translation algorithm (for the specified ASID, if
+  applicable), or simply wait for them to complete (in which case any
+  address-translation cache entries created will be invalidated by the
+  SFENCE.VMA as appropriate).  Likewise, an SFENCE.VMA instruction with {\em
+  rs1}$\neq${\tt x0} generally must either ensure that previously-launched
+  speculative executions of the address-translation algorithm (for the specified
+  ASID, if applicable) are prevented from creating new address-translation cache
+  entries mapping leaf PTEs, or wait for them to complete.
+
+  A consequence of implementations being permitted to read the translation data
+  structures arbitrarily early and speculatively is that at any time, all
+  page table entries reachable by executing the algorithm may be loaded into
+  the address-translation cache.
+
+  Although it would be uncommon to place page tables in non-idempotent memory,
+  there is no explicit prohibition against doing so.  Since the algorithm may
+  only touch page tables reachable from the root page table indicated in {\tt
+  satp}, the range of addresses that an implementation's page table walker will
+  touch is fully under supervisor control.
+\end{commentary}
 
 \section{Sv39: Page-Based 39-bit Virtual-Memory System}
 \label{sec:sv39}
@@ -1657,8 +1844,8 @@ a page-fault exception will occur.  The 27-bit VPN is translated into a
 is untranslated.
 
 \begin{commentary}
-When mapping between narrower and wider addresses, RISC-V usually
-zero-extends a narrower address to a wider size.  The mapping
+When mapping between narrower and wider addresses, RISC-V
+zero-extends a narrower physical address to a wider size.  The mapping
 between 64-bit virtual addresses and the 39-bit usable address
 space of Sv39 is not based on zero-extension but instead follows an
 entrenched convention that allows an OS to use one or a few of the
@@ -1760,7 +1947,9 @@ root page table is stored in the {\tt satp} register's PPN field.
 
 The PTE format for Sv39 is shown in Figure~\ref{sv39pte}.  Bits 9--0
 have the same meaning as for Sv32.  Bits 63--54 are reserved
-for future standard use and must be zeroed by software for forward compatibility.
+for future standard use and, until their use is defined by some standard
+extension, must be zeroed by software for forward compatibility.
+If any of these bits are set, a page-fault exception is raised.
 
 \begin{commentary}
 We reserved several PTE bits for a possible extension that improves
@@ -1905,8 +2094,8 @@ is untranslated.
 \label{sv48pte}
 \end{figure*}
 
-The PTE format for Sv48 is shown in Figure~\ref{sv48pte}.  Bits 9--0
-have the same meaning as for Sv32.  Any level of PTE may be a leaf
+The PTE format for Sv48 is shown in Figure~\ref{sv48pte}.  Bits 63--54 and 9--0
+have the same meaning as for Sv39.  Any level of PTE may be a leaf
 PTE, so in addition to \wunits{4}{KiB} pages, Sv48 supports
 \wunits{2}{MiB} {\em megapages}, \wunits{1}{GiB} {\em gigapages}, and
 \wunits{512}{GiB} {\em terapages}, each of which must be virtually and
