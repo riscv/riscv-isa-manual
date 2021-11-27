@@ -2434,22 +2434,6 @@ However, accesses to such pages are
 considered to be {\em both} I/O and main memory accesses for the purposes of FENCE,
 {\em.aq}, and {\em.rl}.
 
-When Svpbmt is used with non-zero PBMT encodings,
-it is possible for multiple virtual aliases of the same
-physical page to exist simultaneously with different memory attributes.  It is
-also possible for a U-mode or S-mode mapping through a PTE with Svpbmt enabled
-to observe different memory attributes for a given region of physical memory
-than a concurrent access to the same page performed by M-mode or when
-MODE=Bare.  In such cases, the behaviors dictated by the attributes (including
-coherence, which is otherwise unaffected) may be violated, and
-platform-specific mechanisms must be used to restore the expected behaviors.
-
-\begin{commentary}
-The forthcoming Zicbom extension and the FENCE instruction will collectively
-form a standard mechanism for restoring coherence in scenarios with
-mismatched page attributes.
-\end{commentary}
-
 \begin{commentary}
 A device driver written to rely on I/O strong ordering rules will not
 operate correctly if the address range is mapped with PBMT=NC.
@@ -2458,6 +2442,43 @@ As such, this configuration is discouraged.
 It will often still be useful to map physical I/O regions using PBMT=NC so that
 write combining and speculative accesses can be performed.  Such optimizations
 will likely improve performance when applied with adequate care.
+\end{commentary}
+
+When Svpbmt is used with non-zero PBMT encodings,
+it is possible for multiple virtual aliases of the same
+physical page to exist simultaneously with different memory attributes.  It is
+also possible for a U-mode or S-mode mapping through a PTE with Svpbmt enabled
+to observe different memory attributes for a given region of physical memory
+than a concurrent access to the same page performed by M-mode or when
+MODE=Bare.  In such cases, the behaviors dictated by the attributes (including
+coherence, which is otherwise unaffected) may be violated.
+
+Accessing the same location using different attributes that are both non-cacheable
+(e.g., NC and IO) does not cause loss of coherence, but might result in weaker
+memory ordering than the stricter attribute ordinarily guarantees.
+Executing a {\tt fence iorw, iorw} instruction between such accesses suffices
+to prevent loss of memory ordering.
+
+Accessing the same location using different cacheability attributes may cause loss
+of coherence.
+Executing the following sequence between such accesses prevents both loss of
+coherence and loss of memory ordering:
+{\tt fence iorw, iorw}, followed by {\tt cbo.flush} to a cacheable address of
+that location, followed by a {\tt fence iorw, iorw}.
+Note, it is {\em not} sufficient for the {\tt cbo.flush} to target
+a non-cacheable address of that location.
+
+\begin{commentary}
+It follows that, if the same location might later be referenced using the
+original attributes, then this sequence must be repeated beforehand.
+\end{commentary}
+
+\begin{commentary}
+In certain cases, a weaker sequence might suffice to prevent loss of
+coherence.
+These situations will be detailed following the forthcoming formalization of
+the interaction of the RVWMO memory model with the instructions in the Zicbom
+extension.
 \end{commentary}
 
 When two-stage address translation is enabled within the H extension, the
