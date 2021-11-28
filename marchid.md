@@ -44,3 +44,4 @@ RudolV        | Jörg Mische                     | [Jörg Mische](mailto:bobbl@g
 Steel Core    | Rafael Calcada                  | [Rafael Calcada](mailto:rafaelcalcada@gmail.com)            | 24                | https://github.com/rafaelcalcada/steel-core
 XiangShan     | ICT, CAS                        | [XiangShan Team](mailto:xiangshan-all@ict.ac.cn)            | 25                | https://github.com/OpenXiangShan/XiangShan
 Hummingbirdv2 E203  | Nuclei System Technology  | [Can Hu](mailto:canhu@nucleisys.com), Nuclei System Technology  | 26            | https://github.com/riscv-mcu/e203_hbirdv2
+Hazard3       | Luke Wren                       | [Luke Wren](mailto:wren6991@gmail.com)                       | 27                | https://github.com/wren6991/hazard3
