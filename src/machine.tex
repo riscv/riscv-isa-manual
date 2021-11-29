@@ -418,7 +418,7 @@ state.  A restricted view of {\tt mstatus} appears as the
 \multicolumn{1}{|c|}{XS[1:0]} &
 \multicolumn{1}{c|}{FS[1:0]} &
 \multicolumn{1}{c|}{MPP[1:0]} &
-\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{VS[1:0]} &
 \multicolumn{1}{c|}{SPP} &
 \multicolumn{1}{c|}{MPIE} &
 \multicolumn{1}{c|}{UBE} &
@@ -499,7 +499,7 @@ state.  A restricted view of {\tt mstatus} appears as the
 \multicolumn{1}{c|}{XS[1:0]} &
 \multicolumn{1}{c|}{FS[1:0]} &
 \multicolumn{1}{c|}{MPP[1:0]} &
-\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{VS[1:0]} &
 \multicolumn{1}{c|}{SPP} &
 \multicolumn{1}{c|}{MPIE} &
 \multicolumn{1}{c|}{UBE} &
@@ -877,12 +877,18 @@ arbitrary user-mode state extensions.
   additional state beyond the floating-point CSR and data registers.
 \end{commentary}
 
-The FS[1:0] \warl\ field and the XS[1:0] read-only field are used
+The FS[1:0] and VS[1:0] \warl\ fields and the XS[1:0] read-only field are used
 to reduce the cost of context save and restore by setting and tracking
 the current state of the floating-point unit and any other user-mode
-extensions respectively.  The FS field encodes the status of the
-floating-point unit, including the CSR {\tt fcsr} and floating-point
-data registers {\tt f0}--{\tt f31}, while the XS field encodes the
+extensions respectively.
+The FS field encodes the status of the floating-point unit state, including
+the floating-point registers {\tt f0}--{\tt f31} and the CSRs
+{\tt fcsr}, {\tt frm}, and {\tt fflags}.
+The VS field encodes the status of the vector extension state, including
+the vector registers {\tt v0}--{\tt v31} and the CSRs
+{\tt vcsr}, {\tt vxrm}, {\tt vxsat}, {\tt vstart}, {\tt vl}, {\tt vtype},
+and {\tt vlenb}.
+The XS field encodes the
 status of additional user-mode extensions and associated state.
 These fields can be checked by a context switch routine to quickly
 determine whether a state save or restore is required.  If a save or
@@ -895,7 +901,7 @@ required to effect and optimize the process.
   other extensions, so provides a fast check via the SD bit.
 \end{commentary}
 
-The FS and XS fields use the same status encoding as shown in
+The FS, VS, and XS fields use the same status encoding as shown in
 Table~\ref{fsxsencoding}, with the four possible status values being
 Off, Initial, Clean, and Dirty.
 
@@ -903,7 +909,7 @@ Off, Initial, Clean, and Dirty.
 \begin{center}
 \begin{tabular}{|r|l|l|}
 \hline
-Status  & FS Meaning & XS Meaning\\
+Status  & FS and VS Meaning & XS Meaning\\
 \hline
 0 & Off     &  All off \\
 1 & Initial &  None dirty or clean, some on\\
@@ -912,7 +918,7 @@ Status  & FS Meaning & XS Meaning\\
 \hline
 \end{tabular}
 \end{center}
-\caption{Encoding of FS[1:0] and XS[1:0] status fields.}
+\caption{Encoding of FS[1:0], VS[1:0], and XS[1:0] status fields.}
 \label{fsxsencoding}
 \end{table*}
 
@@ -932,6 +938,14 @@ field be read-only zero, so as to enable emulation of the F extension for
 both S-mode and U-mode via invisible traps into M-mode.
 \end{commentary}
 
+If the {\tt v} registers are implemented, the VS field shall not be
+read-only zero.
+
+If neither the {\tt v} registers nor S-mode is implemented, then VS
+is read-only zero.
+If S-mode is implemented but the {\tt v} registers are not, VS may
+optionally be read-only zero.
+
 In systems without additional user extensions requiring new state, the
 XS field is read-only zero.  Every additional extension with state
 provides a CSR field that encodes the equivalent of the XS states.
@@ -944,9 +958,9 @@ user-extension status fields, though individual extensions can use a
 different encoding than XS.
 \end{commentary}
 
-The SD bit is a read-only bit that summarizes whether either the FS
-field or XS field signals the presence of some dirty state that will
-require saving extended user context to memory.  If both XS and FS are
+The SD bit is a read-only bit that summarizes whether either the FS,
+VS, or XS fields signal the presence of some dirty state that will
+require saving extended user context to memory.  If FS, XS, and VS are all
 read-only zero, then SD is also always zero.
 
 When an extension's status is set to Off, any instruction that
@@ -1002,8 +1016,10 @@ have been used by another context meantime.
 
 Changing the setting of FS has no effect on the contents of the floating-point
 register state.  In particular, setting FS=Off does not destroy the state, nor
-does setting FS=Initial clear the contents.  Other extensions might not
-preserve state when set to Off.
+does setting FS=Initial clear the contents.
+Similarly, the setting of VS has no effect on the contents of the vector register
+state.
+Other extensions, however, might not preserve state when set to Off.
 
 Implementations may choose to track the dirtiness of the floating-point
 register state imprecisely by reporting the state to be dirty even when
@@ -1022,9 +1038,16 @@ If an instruction explicitly or implicitly writes a floating-point register or
 the {\tt fcsr} but does not alter its contents, and FS=Initial or FS=Clean, it
 is implementation-defined whether FS transitions to Dirty.
 
+Implementations may choose to track the dirtiness of the vector register in an
+analogous imprecise fashion, including possibly setting VS to Dirty when
+software attempts to set VS=Initial or VS=Clean.
+When VS=Initial or VS=Clean, it is implementation-defined whether an
+instruction that writes a vector register or vector CSR but does not alter its
+contents causes VS to transition to Dirty.
+
 Table~\ref{fsxsstates} shows all the possible state transitions for
-the FS or XS status bits.  Note that the standard floating-point
-extensions do not support user-mode unconfigure or disable/enable
+the FS, VS, or XS status bits.  Note that the standard floating-point
+and vector extensions do not support user-mode unconfigure or disable/enable
 instructions.
 
 \begin{table*}[h!]
@@ -1078,7 +1101,7 @@ Next state     & Initial   & Initial & Initial & Initial   \\
 \hline
 \end{tabular}
 \end{center}
-\caption{FS and XS state transitions.}
+\caption{FS, VS, and XS state transitions.}
 \label{fsxsstates}
 \end{table*}
 
@@ -1103,8 +1126,8 @@ The XS field provides a summary of all added extension state, but
 additional microarchitectural bits might be maintained in the
 extension to further reduce context save and restore overhead.
 
-The SD bit is read-only and is set when either the FS or XS bits
-encode a Dirty state (i.e., SD=((FS==11) OR (XS==11))).  This allows
+The SD bit is read-only and is set when either the FS, VS, or XS bits
+encode a Dirty state (i.e., SD=((FS==11) OR (XS==11) OR (VS==11))).  This allows
 privileged code to quickly determine when no additional context save is
 required beyond the integer register set and PC.
 
@@ -1113,11 +1136,11 @@ restored using standard instructions (F, D, and/or Q), and privileged
 code must be aware of FLEN to determine the appropriate space to
 reserve for each {\tt f} register.
 
-All privileged modes share a single copy of the FS and XS bits.  In a
-system with more than one privileged mode, supervisor mode would
-normally use the FS and XS bits directly to record the status with
-respect to the supervisor-level saved context.  Other more-privileged
-active modes must be more conservative in saving and restoring the
+Machine and Supervisor modes share a single copy of the FS, VS, and XS bits.
+Supervisor-level software
+normally uses the FS, VS, and XS bits directly to record the status with
+respect to the supervisor-level saved context.
+Machine-level software must be more conservative in saving and restoring the
 extension state in their corresponding version of the context.
 
 \begin{commentary}
