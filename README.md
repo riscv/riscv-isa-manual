@@ -1,4 +1,4 @@
-RISC-V Instruction Set Manual [![Build Status](https://travis-ci.com/riscv/riscv-isa-manual.svg?branch=master)](https://travis-ci.com/riscv/riscv-isa-manual)
+RISC-V Instruction Set Manual [![Build Status](https://app.travis-ci.com/riscv/riscv-isa-manual.svg?branch=master)](https://app.travis-ci.com/riscv/riscv-isa-manual)
 =============================
 
 This repository contains the LaTeX source for the draft RISC-V Instruction Set
