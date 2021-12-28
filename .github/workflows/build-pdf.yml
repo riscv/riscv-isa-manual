@@ -1,0 +1,58 @@
+# This workflow installs dependencies for PDF generation, generates the PDF,
+# and uploads the PDF as an artifact.
+
+name: Build Document PDF
+
+on:
+  push:
+    branches: [ convert2adoc ]
+  pull_request:
+    branches: [ convert2adoc ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      APT_PACKAGES_FILE: ${{ github.workspace }}/dependencies/apt_packages.txt
+      BUNDLE_GEMFILE: ${{ github.workspace }}/dependencies/Gemfile
+      BUNDLE_BIN: ${{ github.workspace }}/bin
+      NPM_PACKAGE_FOLDER: ${{ github.workspace }}/dependencies
+      PDF_RESULT: unpriv-isa-asciidoc.pdf
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install Ubuntu packages
+      run: |
+        sudo apt-get update
+        grep -vE '^#' ${APT_PACKAGES_FILE} | xargs sudo apt-get install --yes --no-install-recommends
+    # Ruby for asciidoctor
+    - name: Setup Ruby and Gemfile content
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: "2.6"
+        bundler-cache: true
+    # Node.js for wavedrom
+    - uses: actions/cache@v2
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+    - name: Setup Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+    - name: Install Node.js dependencies
+      run: npm install ${NPM_PACKAGE_FOLDER}
+    - name: Generate PDF
+      working-directory: ./build
+      run: |
+        PATH=${PATH}:${BUNDLE_BIN}:$(npm bin) \
+        make
+    - name: Archive PDF result
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.PDF_RESULT }}
+        path: ./build/${{ env.PDF_RESULT }}
+        retention-days: 7
