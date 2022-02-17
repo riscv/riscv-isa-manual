@@ -18,7 +18,7 @@ ID.
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Project Name  | Maintainers                     | Point of Contact                                            | Architecture ID   | Project URL                                         
 ------------- | ------------------------------- | ----------------------------------------------------------- | ----------------- | --------------------------------------------------- 
-Rocket        | SiFive, UC Berkeley             | [Andrew Waterman](mailto:andrew@sifive.com), SiFive         | 1                 | https://github.com/freechipsproject/rocket-chip     
+Rocket        | SiFive, UC Berkeley             | [Andrew Waterman](mailto:andrew@sifive.com), SiFive         | 1                 | https://github.com/chipsalliance/rocket-chip
 BOOM          | UC Berkeley                     | [Christopher Celio](mailto:celio@berkeley.edu)              | 2                 | https://github.com/ucb-bar/riscv-boom               
 CVA6          | OpenHW Group                    | [Florian Zaruba](mailto:florian@openhwgroup.org), OpenHW Group | 3                 | https://github.com/openhwgroup/cva6             
 CV32E40P      | OpenHW Group                    | [Davide Schiavone](mailto:davide@openhwgroup.org), OpenHW Group | 4                 | https://github.com/openhwgroup/cv32e40p
