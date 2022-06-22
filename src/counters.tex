@@ -3,8 +3,8 @@
 
 RISC-V ISAs provide a set of up to thirty-two 64-bit performance counters and
 timers that are accessible via unprivileged XLEN-bit read-only CSR
-registers {\tt 0xC00}--{\tt 0xC1F} (with the upper 32 bits accessed
-via CSR registers {\tt 0xC80}--{\tt 0xC9F} on RV32).
+registers {\tt 0xC00}--{\tt 0xC1F} (when XLEN=32, the upper 32 bits
+are accessed via CSR registers {\tt 0xC80}--{\tt 0xC9F}).
 These counters are divided between the ``Zicntr'' and ``Zihpm'' extensions.
 
 \section{``Zicntr'' Standard Extension for Base Counters and Timers}
@@ -38,29 +38,32 @@ RDINSTRET[H] & 0 & CSRRS  & dest & SYSTEM \\
 \end{tabular}
 \end{center}
 
-RV32I provides a number of 64-bit read-only user-level counters, which
-are mapped into the 12-bit CSR address space and accessed in 32-bit
-pieces using CSRRS instructions.  In RV64I, the CSR instructions can
-manipulate 64-bit CSRs.  In particular, the RDCYCLE, RDTIME, and
+For base ISAs with XLEN$\geq$64, CSRRS instructions can access the full
+64-bit CSRs directly.  In particular, the RDCYCLE, RDTIME, and
 RDINSTRET pseudoinstructions read the full 64 bits of the {\tt cycle},
-{\tt time}, and {\tt instret} counters.  Hence, the RDCYCLEH, RDTIMEH,
-and RDINSTRETH instructions are RV32I-only.
+{\tt time}, and {\tt instret} counters.
+
+For base ISAs with XLEN=32, the Zicntr extension enables the three
+64-bit read-only user-level counters to be accessed in 32-bit pieces.
+The RDCYCLE, RDTIME, and RDINSTRET instructions provide the lower 32
+bits, and the RDCYCLEH, RDTIMEH, and RDINSTRETH instructions provide
+the upper 32 bits of the respective counters.
 
 \begin{commentary}
-Some execution environments might prohibit access to counters to
-impede timing side-channel attacks.
+Some execution environments might prohibit access to counters, for
+example, to impede timing side-channel attacks.
 \end{commentary}
 
 The RDCYCLE pseudoinstruction reads the low XLEN bits of the {\tt
   cycle} CSR which holds a count of the number of clock cycles
 executed by the processor core on which the hart is running from an
-arbitrary start time in the past.  RDCYCLEH is an RV32I-only
-instruction that reads bits 63--32 of the same cycle counter.  The
-underlying 64-bit counter should never overflow in practice.  The rate
-at which the cycle counter advances will depend on the implementation
-and operating environment.  The execution environment should provide a
-means to determine the current rate (cycles/second) at which the cycle
-counter is incrementing.
+arbitrary start time in the past.  RDCYCLEH is only provided when
+XLEN=32 and is an instruction that reads bits 63--32 of the same cycle
+counter.  The underlying 64-bit counter should never overflow in
+practice.  The rate at which the cycle counter advances will depend on
+the implementation and operating environment.  The execution
+environment should provide a means to determine the current rate
+(cycles/second) at which the cycle counter is incrementing.
 
 \begin{commentary}
 RDCYCLE is intended to return the number of cycles executed by the
@@ -116,7 +119,7 @@ mind.
 The RDTIME pseudoinstruction reads the low XLEN bits of the {\tt
   time} CSR, which counts wall-clock real time that has passed from an
 arbitrary start time in the past.
-RDTIMEH is an RV32I-only instruction that reads bits 63--32 of the same
+RDTIMEH is only present with XLEN=32 and reads bits 63--32 of the same
 real-time counter.
 The underlying 64-bit counter increments by one with each tick of the
 real-time clock, and, for realistic real-time clock frequencies, should never
@@ -139,7 +142,7 @@ return the same result.
 The RDINSTRET pseudoinstruction reads the low XLEN bits of the {\tt
   instret} CSR, which counts the number of instructions retired by
 this hart from some arbitrary start point in the past.  RDINSTRETH is
-an RV32I-only instruction that reads bits 63--32 of the same
+only present when XLEN=32 and reads bits 63--32 of the same
 instruction counter. The underlying 64-bit counter should never
 overflow in practice.
 
@@ -162,7 +165,7 @@ and lower halves.
         bne          x3, x4, again
 \end{verbatim}
 \end{center}
-\caption{Sample code for reading the 64-bit cycle counter in RV32.}
+\caption{Sample code for reading the 64-bit cycle counter when XLEN=32.}
 \label{rdcycle}
 \end{figure}
 
@@ -174,13 +177,13 @@ real-time streams.  Additional counters should be provided to help
 diagnose performance problems and these should be made accessible from
 user-level application code with low overhead.
 
-We required the counters be 64 bits wide, even on RV32, as otherwise
+We required the counters be 64 bits wide, even when XLEN=32, as otherwise
 it is very difficult for software to determine if values have
 overflowed.  For a low-end implementation, the upper 32 bits of each
 counter can be implemented using software counters incremented by a
 trap handler triggered by overflow of the lower 32 bits.  The sample
 code described above shows how the full 64-bit width value can be
-safely read using the individual 32-bit instructions.
+safely read using the individual 32-bit width instructions.
 
 In some applications, it is important to be able to read multiple
 counters at the same instant in time.  When run under a multitasking
@@ -198,7 +201,7 @@ context, especially for implementations with a richer set of counters.
 
 The Zihpm extension comprises the 29 additional unprivileged 64-bit
 hardware performance counters, {\tt hpmcounter3}--{\tt hpmcounter31}.
-For RV32, the upper 32 bits of these performance counters are
+When XLEN=32, the upper 32 bits of these performance counters are
 accessible via additional CSRs {\tt hpmcounter3h}--{\tt
   hpmcounter31h}.  These counters count platform-specific events and
 are configured via additional privileged registers.  The number and
