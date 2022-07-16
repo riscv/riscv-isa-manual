@@ -46,3 +46,4 @@ XiangShan     | ICT, CAS                        | [XiangShan Team](mailto:xiangs
 Hummingbirdv2 E203  | Nuclei System Technology  | [Can Hu](mailto:canhu@nucleisys.com), Nuclei System Technology  | 26            | https://github.com/riscv-mcu/e203_hbirdv2
 Hazard3       | Luke Wren                       | [Luke Wren](mailto:wren6991@gmail.com)                       | 27                | https://github.com/wren6991/hazard3
 CV32E41P      | OpenHW Group                    | [Mark Hill](mailto:mark.hill@huawei.com), OpenHW Group        | 28            | https://github.com/openhwgroup/cv32e41p
+Rift          | Jianhu Lab, WUT                 | [Ruige Lee](mailto:295054118@whut.edu.cn)                     | 29            | [RiftCore](https://github.com/whutddk/RiftCore), [Rift2Core](https://github.com/whutddk/Rift2Core)
