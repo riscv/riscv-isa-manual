@@ -1,7 +1,7 @@
 [[atomics]]
-== A Standard Extension for Atomic Instructions, Version 2.1
+== ``A'' Standard Extension for Atomic Instructions, Version 2.1
 
-The standard atomic-instruction extension, named A, contains
+The standard atomic-instruction extension, named ``A'', contains
 instructions that atomically read-modify-write memory to support
 synchronization between multiple RISC-V harts running in the same memory
 space. The two forms of atomic instruction provided are
@@ -9,15 +9,12 @@ load-reserved/store-conditional instructions and atomic fetch-and-op
 memory instructions. Both types of atomic instruction support various
 memory consistency orderings including unordered, acquire, release, and
 sequentially consistent semantics. These instructions allow RISC-V to
-support the RCsc memory consistency model cite:[Gharachorloo90memoryconsistency].
+support the RCsc memory consistency model .
 
-[TIP]
-====
 After much debate, the language community and architecture community
 appear to have finally settled on release consistency as the standard
 memory consistency model and so the RISC-V atomic support is built
 around this model.
-====
 
 === Specifying Ordering of Atomic Instructions
 
@@ -27,7 +24,7 @@ space is divided by the execution environment into memory and I/O
 domains, and the FENCE instruction provides options to order accesses to
 one or both of these two address domains.
 
-To provide more efficient support for release consistency cite:[Gharachorloo90memoryconsistency], each atomic
+To provide more efficient support for release consistency , each atomic
 instruction has two bits, _aq_ and _rl_, used to specify additional
 memory ordering constraints as viewed by other RISC-V harts. The bits
 order accesses to one of the two address domains, memory or I/O,
@@ -48,13 +45,15 @@ and cannot be observed to happen before any earlier memory operations or
 after any later memory operations in the same RISC-V hart and to the
 same address domain.
 
-[[lrsc]]
+[[sec:lrsc]]
 === Load-Reserved/Store-Conditional Instructions
 
-include::images/wavedrom/load-reserve-st-conditional.adoc[]
-[[load-res-st]]
-.Load-Reserved/Store-Conditional Instructions
-image::image_placeholder.png[]
+R@W@W@R@R@F@R@O +
+& & & & & & & +
+& & & & & & & +
+& 1 & 1 & 5 & 5 & 3 & 5 & 7 +
+LR.W/D & & 0 & addr & width & dest & AMO +
+SC.W/D & & src & addr & width & dest & AMO +
 
 Complex atomic memory operations on a single memory word or doubleword
 are performed with the load-reserved (LR) and store-conditional (SC)
@@ -71,8 +70,6 @@ invalidates any reservation held by this hart. LR.D and SC.D act
 analogously on doublewords and are only available on RV64. For RV64,
 LR.W and SC.W sign-extend the value placed in _rd_.
 
-[TIP]
-====
 Both compare-and-swap (CAS) and LR/SC can be used to build lock-free
 data structures. After extensive discussion, we opted for LR/SC for
 several reasons: 1) CAS suffers from the ABA problem, which LR/SC avoids
@@ -103,19 +100,15 @@ x86, which might cause a move away from DW-CAS.
 More generally, a multi-word atomic primitive is desirable, but there is
 still considerable debate about what form this should take, and
 guaranteeing forward progress adds complexity to a system.
-====
 
-The failure code with value 1 is reserved to encode an unspecified
-failure. Other failure codes are reserved at this time, and portable
-software should only assume the failure code will be non-zero.
+The failure code with value 1 encodes an unspecified failure. Other
+failure codes are reserved at this time. Portable software should only
+assume the failure code will be non-zero.
 
-[NOTE]
-====
-We reserve a failure code of 1 to mean *unspecified* so that simple
+We reserve a failure code of 1 to mean ``unspecified'' so that simple
 implementations may return this value using the existing mux required
 for the SLT/SLTU instructions. More specific failure codes might be
 defined in future versions or extensions to the ISA.
-====
 
 For LR and SC, the A extension requires that the address held in _rs1_
 be naturally aligned to the size of the operand (i.e., eight-byte
@@ -125,16 +118,12 @@ access-fault exception will be generated. The access-fault exception can
 be generated for a memory access that would otherwise be able to
 complete except for the misalignment, if the misaligned access should
 not be emulated.
-(((alignment, misaligned)))
 
-[NOTE]
-====
 Emulating misaligned LR/SC sequences is impractical in most systems.
 
 Misaligned LR/SC sequences also raise the possibility of accessing
 multiple reservation sets at once, which present definitions do not
 provide for.
-====
 
 An implementation can register an arbitrarily large reservation set on
 each LR, provided the reservation set includes all bytes of the
@@ -147,22 +136,17 @@ device other than a hart to the bytes accessed by the LR instruction can
 be observed to have occurred between the LR and SC. Note this LR might
 have had a different effective address and data size, but reserved the
 SC’s address as part of the reservation set.
-(((alignment, reservation set)))
 
-[NOTE]
-====
 Following this model, in systems with memory translation, an SC is
 allowed to succeed if the earlier LR reserved the same location using an
 alias with a different virtual address, but is also allowed to fail if
 the virtual address is different.
-
 
 To accommodate legacy devices and buses, writes from devices other than
 RISC-V harts are only required to invalidate reservations when they
 overlap the bytes accessed by the LR. These writes are not required to
 invalidate the reservation when they access other bytes in the
 reservation set.
-====
 
 The SC must fail if the address is not within the reservation set of the
 most recent LR in program order. The SC must fail if a store to the
@@ -174,18 +158,13 @@ bytes accessed by the LR, the SC may or may not fail.) An SC must fail
 if there is another SC (to any address) between the LR and the SC in
 program order. The precise statement of the atomicity requirements for
 successful LR/SC sequences is defined by the Atomicity Axiom in
-<<rvwmo>>.
+Section #sec:rvwmo[[sec:rvwmo]].
 
-
-[TIP]
-====
 The platform should provide a means to determine the size and shape of
 the reservation set.
 
 A platform specification may constrain the size and shape of the
-reservation set. For example, the Unix platform is expected to require
-of main memory that the reservation set be of fixed size, contiguous,
-naturally aligned, and no greater than the virtual memory page size.
+reservation set.
 
 A store-conditional instruction to a scratch word of memory should be
 used to forcibly invalidate any existing load reservation:
@@ -193,13 +172,12 @@ used to forcibly invalidate any existing load reservation:
 * during a preemptive context switch, and
 * if necessary when changing virtual to physical address mappings, such
 as when migrating pages that might contain an active reservation.
-====
 
 The invalidation of a hart’s reservation when it executes an LR or SC
 imply that a hart can only hold one reservation at a time, and that an
 SC can only pair with the most recent LR, and LR with the next following
 SC, in program order. This is a restriction to the Atomicity Axiom in
-<<rvwmo>> that ensures software runs correctly on
+Section #sec:rvwmo[[sec:rvwmo]] that ensures software runs correctly on
 expected common implementations that operate in this manner.
 
 An SC instruction can never be observed by another RISC-V hart before
@@ -223,10 +201,8 @@ instruction unless the _rl_ bit is also set. LR._rl_ and SC._aq_
 instructions are not guaranteed to provide any stronger ordering than
 those with both bits clear, but may result in lower performance.
 
-.Sample code for compare-and-swap function using LR/SC.
-[source,cmd]
 ....
-        # a0 holds address of memory location 
+        # a0 holds address of memory location
         # a1 holds expected value
         # a2 holds desired value
         # a0 holds return value, 0 if successful, !0 otherwise
@@ -244,10 +220,10 @@ those with both bits clear, but may result in lower performance.
 
 LR/SC can be used to construct lock-free data structures. An example
 using LR/SC to implement a compare-and-swap function is shown in
-<<cas>>. If inlined, compare-and-swap functionality need
+Figure link:#cas[[cas]]. If inlined, compare-and-swap functionality need
 only take four instructions.
 
-[[lrscseq]]
+[[sec:lrscseq]]
 === Eventual Success of Store-Conditional Instructions
 
 The standard A extension defines _constrained LR/SC loops_, which have
@@ -258,10 +234,10 @@ sequence in the case of failure, and must comprise at most 16
 instructions placed sequentially in memory.
 * An LR/SC sequence begins with an LR instruction and ends with an SC
 instruction. The dynamic code executed between the LR and SC
-instructions can only contain instructions from the base _I_
+instructions can only contain instructions from the base ``I''
 instruction set, excluding loads, stores, backward jumps, taken backward
-branches, JALR, FENCE, and SYSTEM instructions. If the _C_ extension
-is supported, then compressed forms of the aforementioned _I_
+branches, JALR, FENCE, and SYSTEM instructions. If the ``C'' extension
+is supported, then compressed forms of the aforementioned ``I''
 instructions are also permitted.
 * The code to retry a failing LR/SC sequence can contain backwards jumps
 and/or branches to repeat the LR/SC sequence, but otherwise has the same
@@ -277,8 +253,6 @@ _unconstrained_. Unconstrained LR/SC sequences might succeed on some
 attempts on some implementations, but might never succeed on other
 implementations.
 
-[TIP]
-====
 We restricted the length of LR/SC loops to fit within 64 contiguous
 instruction bytes in the base ISA to avoid undue restrictions on
 instruction cache and TLB size and associativity. Similarly, we
@@ -295,7 +269,6 @@ portable software must detect the case that the sequence repeatedly
 fails, then fall back to an alternate code sequence that does not rely
 on an unconstrained LR/SC sequence. Implementations are permitted to
 unconditionally fail any unconstrained LR/SC sequence.
-====
 
 If a hart _H_ enters a constrained LR/SC loop, the execution environment
 must guarantee that one of the following events eventually occurs:
@@ -308,15 +281,10 @@ loop, or some other device in the system writes to that reservation set.
 * _H_ executes a branch or jump that exits the constrained LR/SC loop.
 * _H_ traps.
 
-[NOTE]
-====
 Note that these definitions permit an implementation to fail an SC
 instruction occasionally for any reason, provided the aforementioned
 guarantee is not violated.
-====
 
-[TIP]
-====
 As a consequence of the eventuality guarantee, if some harts in an
 execution environment are executing constrained LR/SC loops, and no
 other harts or devices in the execution environment execute an
@@ -339,10 +307,7 @@ progress indefinitely.
 These definitions admit the possibility that SC instructions may
 spuriously fail for implementation reasons, provided progress is
 eventually made.
-====
 
-[NOTE]
-====
 One advantage of CAS is that it guarantees that some hart eventually
 makes progress, whereas an LR/SC atomic sequence could livelock
 indefinitely on some systems. To avoid this concern, we added an
@@ -352,15 +317,21 @@ Earlier versions of this specification imposed a stronger
 starvation-freedom guarantee. However, the weaker livelock-freedom
 guarantee is sufficient to implement the C11 and C++11 languages, and is
 substantially easier to provide in some microarchitectural styles.
-====
 
-[[amo]]
+[[sec:amo]]
 === Atomic Memory Operations
 
-include::images/wavedrom/atomic-mem.adoc[]
-[[atomic-mem]]
-.Atomic memory operations
-image::image_placeholder.png[]
+O@W@W@R@R@F@R@R +
+& & & & & & & +
+& & & & & & & +
+& 1 & 1 & 5 & 5 & 3 & 5 & 7 +
+AMOSWAP.W/D & & src & addr & width & dest & AMO +
+AMOADD.W/D & & src & addr & width & dest & AMO +
+AMOAND.W/D & & src & addr & width & dest & AMO +
+AMOOR.W/D & & src & addr & width & dest & AMO +
+AMOXOR.W/D & & src & addr & width & dest & AMO +
+AMOMAX[U].W/D & & src & addr & width & dest & AMO +
+AMOMIN[U].W/D & & src & addr & width & dest & AMO +
 
 The atomic memory operation (AMO) instructions perform read-modify-write
 operations for multiprocessor synchronization and are encoded with an
@@ -379,31 +350,28 @@ is not naturally aligned, an address-misaligned exception or an
 access-fault exception will be generated. The access-fault exception can
 be generated for a memory access that would otherwise be able to
 complete except for the misalignment, if the misaligned access should
-not be emulated. The _Zam_ extension, described in
-<<zam>>, relaxes this requirement and specifies the
+not be emulated. The ``Zam'' extension, described in
+Chapter #sec:zam[[sec:zam]], relaxes this requirement and specifies the
 semantics of misaligned AMOs.
 
 The operations supported are swap, integer add, bitwise AND, bitwise OR,
 bitwise XOR, and signed and unsigned integer maximum and minimum.
 Without ordering constraints, these AMOs can be used to implement
 parallel reduction operations, where typically the return value would be
-discarded by writing to _x0_.
+discarded by writing to `x0`.
 
-[TIP]
-====
 We provided fetch-and-op style atomic primitives as they scale to highly
 parallel systems better than LR/SC or CAS. A simple microarchitecture
 can implement AMOs using the LR/SC primitives, provided the
 implementation can guarantee the AMO eventually completes. More complex
 implementations might also implement AMOs at memory controllers, and can
-optimize away fetching the original value when the destination is *x0*.
+optimize away fetching the original value when the destination is `x0`.
 
 The set of AMOs was chosen to support the C11/C++11 atomic memory
 operations efficiently, and also to support parallel reductions in
 memory. Another use of AMOs is to provide atomic updates to
 memory-mapped device registers (e.g., setting, clearing, or toggling
 bits) in the I/O space.
-====
 
 To help implement multiprocessor synchronization, the AMOs optionally
 provide release consistency semantics. If the _aq_ bit is set, then no
@@ -415,24 +383,19 @@ an AMO makes the sequence sequentially consistent, meaning that it
 cannot be reordered with earlier or later memory operations from the
 same hart.
 
-[TIP]
-====
 The AMOs were designed to implement the C11 and C++11 memory models
 efficiently. Although the FENCE R, RW instruction suffices to implement
 the _acquire_ operation and FENCE RW, W suffices to implement _release_,
 both imply additional unnecessary ordering as compared to AMOs with the
 corresponding _aq_ or _rl_ bit set.
-====
 
 An example code sequence for a critical section guarded by a
 test-and-test-and-set spinlock is shown in
-<<critical>>. Note the first AMO is marked _aq_ to
+Figure link:#critical[[critical]]. Note the first AMO is marked _aq_ to
 order the lock acquisition before the critical section, and the second
 AMO is marked _rl_ to order the critical section before the lock
 relinquishment.
 
-[[critical]]
-.Sample code for mutual exclusion. a0 contains the address of the lock.
 ....
         li           t0, 1        # Initialize swap value.
     again:
@@ -446,16 +409,12 @@ relinquishment.
         amoswap.w.rl x0, x0, (a0) # Release lock by storing 0.
 ....
 
-[NOTE]
-====
 We recommend the use of the AMO Swap idiom shown above for both lock
 acquire and release to simplify the implementation of speculative lock
-elision cite:[Rajwar:2001:SLE].
-====
+elision .
 
-The instructions in the _A_ extension can also be used to provide
+The instructions in the ``A'' extension can also be used to provide
 sequentially consistent loads and stores. A sequentially consistent load
 can be implemented as an LR with both _aq_ and _rl_ set. A sequentially
 consistent store can be implemented as an AMOSWAP that writes the old
 value to x0 and has both _aq_ and _rl_ set.
-
