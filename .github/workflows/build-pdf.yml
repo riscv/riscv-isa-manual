@@ -9,20 +9,40 @@ on:
   pull_request:
     branches: [ riscv-isa-asciidoc ]
   workflow_dispatch:
+  workflow_call:
+    outputs:
+      name:
+        description: "The base name of the pdf file (without .pdf extensions)"
+        value: ${{ jobs.build.outputs.name }}
+      pdf-name:
+        description: "The name of the pdf file (with .pdf extensions)"
+        value: ${{ jobs.build.outputs.pdf-name }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     env:
+      NAME: unpriv-isa-asciidoc
       APT_PACKAGES_FILE: ${{ github.workspace }}/dependencies/apt_packages.txt
       BUNDLE_GEMFILE: ${{ github.workspace }}/dependencies/Gemfile
       BUNDLE_BIN: ${{ github.workspace }}/bin
       NPM_PACKAGE_FOLDER: ${{ github.workspace }}/dependencies
-      PDF_RESULT: unpriv-isa-asciidoc.pdf
+    outputs:
+      name: ${{ steps.step1.outputs.name }}
+      pdf-name: ${{ steps.step2.outputs.pdf-name }}
     if: contains(github.ref, 'riscv-isa-asciidoc')
     steps:
-    - uses: actions/checkout@v2
+    - name: Set outputs.name
+      id: step1
+      run: echo "name=$NAME" >> $GITHUB_OUTPUT
+    - name: Set outputs.pdf-name
+      id: step2
+      run: echo "pdf-name=$NAME.pdf" >> $GITHUB_OUTPUT
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: 'true'
     - name: Install Ubuntu packages
       run: |
         sudo apt-get update
@@ -34,16 +54,16 @@ jobs:
         ruby-version: "2.6"
         bundler-cache: true
     # Node.js for wavedrom
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       with:
         path: ~/.npm
         key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
         restore-keys: |
           ${{ runner.os }}-node-
     - name: Setup Node.js
-      uses: actions/setup-node@v2
+      uses: actions/setup-node@v3
       with:
-        node-version: '14'
+        node-version: '16'
     - name: Install Node.js dependencies
       run: npm install ${NPM_PACKAGE_FOLDER}
     - name: Generate PDF
@@ -52,8 +72,8 @@ jobs:
         PATH=${PATH}:${BUNDLE_BIN}:$(npm bin) \
         make
     - name: Archive PDF result
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
-        name: ${{ env.PDF_RESULT }}
-        path: ./build/${{ env.PDF_RESULT }}
+        name: ${{ env.NAME }}.pdf
+        path: ${{ env.NAME }}.pdf
         retention-days: 7
