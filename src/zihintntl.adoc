@@ -6,8 +6,8 @@ This draft specification may change before being
 accepted as standard by RISC-V International.
 ====
 The NTL instructions are HINTs that indicate that the explicit memory
-accesses of the immediately subsequent instruction (henceforth ``target
-instruction'') exhibit poor temporal locality of reference. The NTL
+accesses of the immediately subsequent instruction (henceforth "target
+instruction") exhibit poor temporal locality of reference. The NTL
 instructions do not change architectural state, nor do they alter the
 architecturally visible effects of the target instruction. Four variants
 are provided:
@@ -15,20 +15,20 @@ are provided:
 The NTL.P1 instruction indicates that the target instruction does not
 exhibit temporal locality within the capacity of the innermost level of
 private cache in the memory hierarchy. NTL.P1 is encoded as
-ADD _x0, x0, x2_.
+ADD _x0, x0,i x2_.
 
 The NTL.PALL instruction indicates that the target instruction does not
 exhibit temporal locality within the capacity of any level of private
-cache in the memory hierarchy. NTL.PALL is encoded as ADD _x0, x0, x3_.
+cache in the memory hierarchy. NTL.PALL is encoded as ADD _x0, x0, x3_.
 
 The NTL.S1 instruction indicates that the target instruction does not
 exhibit temporal locality within the capacity of the innermost level of
 shared cache in the memory hierarchy. NTL.S1 is encoded as
-ADD _x0, x0, x4_.
+ADD _x0, x0, x4_.
 
 The NTL.ALL instruction indicates that the target instruction does not
 exhibit temporal locality within the capacity of any level of cache in
-the memory hierarchy. NTL.ALL is encoded as ADD _x0, x0, x5_.
+the memory hierarchy. NTL.ALL is encoded as ADD _x0, x0, x5_.
 
 The NTL instructions can be used to avoid cache pollution when streaming
 data or traversing large data structures, or to reduce latency in
@@ -56,14 +56,11 @@ a cache line in the exclusive state in L1 might ignore NTL instructions
 on LR and SC, but might respect NTL instructions for AMOs and regular
 loads and stores.
 
-Table #tab:ntl-portable[1.1] lists several software use cases and the
-recommended NTL variant that _portable_ software—i.e., software not
-tuned for any specific implementation’s memory hierarchy—should use in
+<<ntl-portable, Table: Recommended NTL Variants>> lists several software use cases and the recommended NTL variant that _portable_ software—i.e., software not tuned for any specific implementation's memory hierarchy—should use in
 each case.
 
-[[tab:ntl-portable]]
-.Recommended NTL variant for portable software to employ in various
-scenarios.
+[[ntl-portable]]
+.Recommended NTL variant for portable software to employ in various scenarios.
 [cols="<,<",options="header",]
 |===
 |Scenario |Recommended NTL variant
@@ -74,12 +71,15 @@ scenarios.
 |Access to a contended synchronization variable |NTL.PALL
 |===
 
-The working-set sizes listed in Table~\ref{tab:ntl-portable} are not meant to
+[NOTE]
+====
+The working-set sizes listed in <<ntl-portable, Table: Recommended NTL Variants>> are not meant to
 constrain implementers' cache-sizing decisions.
 Cache sizes will obviously vary between implementations, and so software
 writers should only take these working-set sizes as rough guidelines.
+====
 
-Table #tab:ntl[[tab:ntl]] lists several sample memory hierarchies and
+<<ntl>> lists several sample memory hierarchies and
 recommends how each NTL variant maps onto each cache level. The table
 also recommends which NTL variant that implementation-tuned software
 should use to avoid allocating in a particular cache level. For example,
@@ -92,13 +92,15 @@ exploitable by the L1, or should use NTL.ALL indicate a lack of temporal
 locality exploitable by the L2.
 
 If the C extension is provided, compressed variants of these HINTs are
-also provided: C.NTL.P1 is encoded as C.ADD _x0, x2_; C.NTL.PALL is
-encoded as C.ADD _x0, x3_; C.NTL.S1 is encoded as C.ADD _x0, x4_; and
-C.NTL.ALL is encoded as C.ADD _x0, x5_.
+also provided: C.NTL.P1 is encoded as C.ADDi _x0, x2_; C.NTL.PALL is
+encoded as C.ADD _x0, x3_; C.NTL.S1 is encoded as C.ADD _x0, x4_; and
+C.NTL.ALL is encoded as C.ADD _x0, x5_.
 
 The NTL instructions affect all memory-access instructions except the
 cache-management instructions in the Zicbom extension.
 
+[NOTE]
+====
 As of this writing, there are no other exceptions to this rule, and so
 the NTL instructions affect all memory-access instructions defined in
 the base ISAs and the A, F, D, Q, C, and V standard extensions, as well
@@ -108,11 +110,36 @@ The NTL instructions can affect cache-management operations other than
 those in the Zicbom extension. For example, NTL.PALL followed by
 CBO.ZERO might indicate that the line should be allocated in L3 and
 zeroed, but not allocated in L1 or L2.
+====
+
+[[ntl]]
+[cols="~,~,~",options="header"]
+.Mapping of NTL variants to various memory hierarchies.
+|===
+| Memory hierarchy ^| Recommended mapping of NTL variant to actual cache level ^| Recommended NTL variant for explicit cache management  
+|
+^|&nbsp;&nbsp;&nbsp;&nbsp;P1&nbsp; &nbsp;&nbsp;&nbsp;PALL&nbsp;&nbsp;&nbsp;&nbsp;S1&nbsp;&nbsp;&nbsp;&nbsp;ALL&nbsp;&nbsp;&nbsp;&nbsp; ^|&nbsp;&nbsp;&nbsp;&nbsp;L1&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L3&nbsp;&nbsp;&nbsp;&nbsp;L4/L5
+3+^| Common Scenarios
+| No caches ^|--- ^|none                   
+<|Private L1 only ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L1&nbsp;&nbsp;&nbsp;&nbsp;L1&nbsp;&nbsp;&nbsp;&nbsp;L1 ^|ALL&nbsp;&nbsp;&nbsp;&nbsp;---&nbsp;&nbsp;&nbsp;&nbsp;---&nbsp;&nbsp;&nbsp;&nbsp;---
+<|Private L1; shared L2 ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L1&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L2 ^|&nbsp;&nbsp;&nbsp;&nbsp;P1&nbsp;&nbsp;&nbsp;&nbsp;ALL&nbsp;&nbsp;&nbsp;&nbsp;---&nbsp;&nbsp;&nbsp;&nbsp;---  
+<|Private L1; shared L2/L3 ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L1&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L3 ^|P1&nbsp;&nbsp;&nbsp;&nbsp;S1&nbsp;&nbsp;&nbsp;&nbsp;ALL&nbsp;&nbsp;&nbsp;&nbsp;---
+<|Private L1/L2 ^|L1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L2 ^|P1&nbsp;&nbsp;&nbsp;&nbsp;ALL&nbsp;&nbsp;&nbsp;&nbsp;---&nbsp;&nbsp;&nbsp;&nbsp;---
+<|Private L1/L2; shared L3 ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L3&nbsp;&nbsp;&nbsp;&nbsp;L3&nbsp;&nbsp;&nbsp;&nbsp; ^|P1&nbsp;&nbsp;&nbsp;&nbsp;PALL&nbsp;&nbsp;&nbsp;&nbsp;ALL&nbsp;&nbsp;&nbsp;&nbsp;---
+<|Private L1/L2; shared L3/L4 ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L3&nbsp;&nbsp;&nbsp;&nbsp;L4 ^|P1&nbsp;&nbsp;&nbsp;&nbsp;PALL&nbsp;&nbsp;&nbsp;&nbsp;S1&nbsp;&nbsp;&nbsp;&nbsp;ALL
+3+^| Uncommon Scenarios
+<|Private L1/L2/L3; shared L4 ^| L1&nbsp;&nbsp;&nbsp;&nbsp; L3&nbsp;&nbsp;&nbsp;&nbsp;L4&nbsp;&nbsp;&nbsp;&nbsp;L4 ^|P1&nbsp;&nbsp;&nbsp;&nbsp;P1&nbsp;&nbsp;&nbsp;&nbsp;PALL&nbsp;&nbsp;&nbsp;&nbsp;ALL
+<|Private L1; shared L2/L3/L4 ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L1&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L4 ^|P1&nbsp;&nbsp;&nbsp;&nbsp;S1&nbsp;&nbsp;&nbsp;&nbsp;ALL&nbsp;&nbsp;&nbsp;&nbsp;ALL  
+<|Private L1/L2; shared L3/L4/L5  ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L2&nbsp;&nbsp;&nbsp;&nbsp;L3&nbsp;&nbsp;&nbsp;&nbsp;L5 ^|P1&nbsp;&nbsp;&nbsp;&nbsp;PALL&nbsp;&nbsp;&nbsp;&nbsp;S1&nbsp;&nbsp;&nbsp;&nbsp;ALL  
+<|Private L1/L2/L3; shared L4/L5  ^|L1&nbsp;&nbsp;&nbsp;&nbsp;L3&nbsp;&nbsp;&nbsp;&nbsp;L4&nbsp;&nbsp;&nbsp;&nbsp;L5 ^|P1&nbsp;&nbsp;&nbsp;&nbsp;P1&nbsp;&nbsp;&nbsp;&nbsp;PALL&nbsp;&nbsp;&nbsp;&nbsp;ALL  
+|===
 
 When an NTL instruction is applied to a prefetch hint in the Zicbop
 extension, it indicates that a cache line should be prefetched into a
 cache that is _outer_ from the level specified by the NTL.
 
+[NOTE]
+====
 For example, in a system with a private L1 and shared L2, NTL.P1
 followed by PREFETCH.R might prefetch into L2 with read intent.
 
@@ -122,6 +149,7 @@ prefetch instruction with an NTL instruction.
 In some systems, NTL.ALL followed by a prefetch instruction might
 prefetch into a cache or prefetch buffer internal to a memory
 controller.
+====
 
 Software is discouraged from following an NTL instruction with an
 instruction that does not explicitly access memory. Nonadherence to this
@@ -133,6 +161,8 @@ implementations are discouraged from applying the NTL to the first
 instruction in the trap handler. Instead, implementations are
 recommended to ignore the HINT in this case.
 
+[NOTE]
+====
 If an interrupt occurs between the execution of an NTL instruction and
 its target instruction, execution will normally resume at the target
 instruction. That the NTL instruction is not reexecuted does not change
@@ -149,3 +179,4 @@ LR/SC loops without voiding the forward-progress guarantee. But, since
 using other loads and stores within an LR/SC loop _does_ void the
 forward-progress guarantee, the only reason to use an NTL within such a
 loop is to modify the LR or the SC.
+====
