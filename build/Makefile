@@ -11,9 +11,6 @@ all: $(PDF_RESULT)
 $(PDF_RESULT): $(SOURCES)
 	asciidoctor-pdf \
     --attribute=mathematical-format=svg \
-    --attribute=pdf-fontsdir=../src/resources/fonts \
-    --attribute=pdf-style=../src/resources/themes/riscv-spec.yml \
-    --theme default-with-font-fallbacks \
     --failure-level=ERROR \
     --require=asciidoctor-bibtex \
     --require=asciidoctor-diagram \
