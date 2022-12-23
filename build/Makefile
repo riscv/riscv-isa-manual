@@ -4,6 +4,7 @@ PDF_RESULT := unpriv-isa-asciidoc.pdf
 # images/ and resources/ content.  Once they are the target can remove the
 # phony use.
 SOURCES := $(HEADER_SOURCE)
+PDF-THEME := ../src/resources/themes/riscv-spec.yml
 
 all: $(PDF_RESULT)
 
