@@ -49,3 +49,4 @@ CV32E41P      | OpenHW Group                    | [Mark Hill](mailto:mark.hill@h
 Rift          | Jianhu Lab, WUT                 | [Ruige Lee](mailto:295054118@whut.edu.cn)                     | 29            | [RiftCore](https://github.com/whutddk/RiftCore), [Rift2Core](https://github.com/whutddk/Rift2Core)
 RISu064       | Wenting Zhang                   | [Wenting Zhang](mailto:zephray@outlook.com)                 | 30                | https://github.com/zephray/RISu064
 AIRISC        | Fraunhofer IMS                  | [AIRISC Support](mailto:airisc@ims.fraunhofer.de)           | 31               | https://github.com/Fraunhofer-IMS/airisc_core_complex
+Proteus       | imec-DistriNet, KU Leuven       | [Marton Bognar](mailto:marton.bognar@kuleuven.be)           | 32               | https://github.com/proteus-core/proteus
