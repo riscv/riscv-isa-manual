@@ -525,7 +525,7 @@ a construction of the post-transition model state for each.
 
 Transitions for all instructions:
 
-* <<fetch, Fetch instruction>>: This transition represents a fetch and decode of a new instruction instance, as a program order successor of a previously fetched
+latexmath:[$\bullet$] <<fetch, Fetch instruction>>: This transition represents a fetch and decode of a new instruction instance, as a program order successor of a previously fetched
 instruction instance (or the initial fetch address).
 
 The model assumes the instruction memory is fixed; it does not describe
@@ -556,9 +556,9 @@ latexmath:[$\circ$] <<initiate_load, Initiate memory load operations>>: At this 
 provisionally known (it could change if earlier instructions are
 restarted) and its individual memory load operations can start being
 satisfied.
-* <<sat_from_forwarding, Satisfy memory load operation by forwarding from unpropogated stores>>: This partially or entirely satisfies a single memory load operation
+latexmath:[$\bullet$] <<sat_from_forwarding, Satisfy memory load operation by forwarding from unpropogated stores>>: This partially or entirely satisfies a single memory load operation
 by forwarding, from program-order-previous memory store operations.
-* <<sat_from_mem, Satisfy memory load operation from memory>>: This entirely satisfies the outstanding slices of a single memory
+latexmath:[$\bullet$] <<sat_from_mem, Satisfy memory load operation from memory>>: This entirely satisfies the outstanding slices of a single memory
 load operation, from memory.
 latexmath:[$\circ$] <<complete_loads, Complete load operations>>: At this point all the memory load operations of the instruction have
 been entirely satisfied and the instruction pseudocode can continue
@@ -576,26 +576,26 @@ forwarding from them.
 latexmath:[$\circ$] <<commit_stores, Commit store instruction>>: At this point the store operations are guaranteed to happen (the
 instruction can no longer be restarted or discarded), and they can start
 being propagated to memory.
-* <<prop_store, Propagate store operation>>: This propagates a single memory store operation to memory.
+latexmath:[$\bullet$] <<prop_store, Propagate store operation>>: This propagates a single memory store operation to memory.
 latexmath:[$\circ$] <<complete_stores, Complete store operations>>: At this point all the memory store operations of the instruction
 have been propagated to memory, and the instruction pseudocode can
 continue executing.
 
 Transitions specific to `sc` instructions:
 
-* <<early_sc_fail, Early sc fail>>: This causes the `sc` to fail, either a spontaneous fail or because
+latexmath:[$\bullet$] <<early_sc_fail, Early sc fail>>: This causes the `sc` to fail, either a spontaneous fail or because
 it is not paired with a program-order-previous `lr`.
-* <<paired_sc, Paired sc>>: This transition indicates the `sc` is paired with an `lr` and might
+latexmath:[$\bullet$] <<paired_sc, Paired sc>>: This transition indicates the `sc` is paired with an `lr` and might
 succeed.
-* <<commit_sc, Commit and propagate store operation of an sc>>: This is an atomic execution of the transitions <<commit_stores, Commit store instruction>> and <<prop_store, Propagate store operation>>, it is enabled
+latexmath:[$\bullet$] <<commit_sc, Commit and propagate store operation of an sc>>: This is an atomic execution of the transitions <<commit_stores, Commit store instruction>> and <<prop_store, Propagate store operation>>, it is enabled
 only if the stores from which the `lr` read from have not been
 overwritten.
-* <<late_sc_fail, Late sc fail>>: This causes the `sc` to fail, either a spontaneous fail or because
+latexmath:[$\bullet$] <<late_sc_fail, Late sc fail>>: This causes the `sc` to fail, either a spontaneous fail or because
 the stores from which the `lr` read from have been overwritten.
 
 Transitions specific to AMO instructions:
 
-* <<do_amo, Satisfy, commit and propagate operations of an AMO>>: This is an atomic execution of all the transitions needed to satisfy
+latexmath:[$\bullet$] <<do_amo, Satisfy, commit and propagate operations of an AMO>>: This is an atomic execution of all the transitions needed to satisfy
 the load operation, do the required arithmetic, and propagate the store
 operation.
 
@@ -698,7 +698,8 @@ Store_memv: the first one makes the memory footprint of the store
 provisionally known, and the second one adds the value to be stored. We
 ensure these are paired in the pseudocode (Store_ea followed by
 Store_memv), but there may be other steps between them.
-
+[NOTE]
+====
 It is observable that the Store_ea can occur before the value to be
 stored is determined. For example, for the litmus test
 LB+fence.r.rw+data-po to be allowed by the operational model (as it is
@@ -706,18 +707,18 @@ by RVWMO), the first store in Hart 1 has to take the Store_ea step
 before its value is determined, so that the second store can see it is
 to a non-overlapping memory footprint, allowing the second store to be
 committed out of order without violating coherence.
-
+====
 The pseudocode of each instruction performs at most one store or one
 load, except for AMOs that perform exactly one load and one store. Those
 memory accesses are then split apart into the architecturally atomic
-units by the hart semantics (see and below).
+units by the hart semantics (see <<initiate_load, Initiate memory load operations>> and <<initiate_store_footprint, Initiate memory store operation footprints>> below).
 
 Informally, each bit of a register read should be satisfied from a
 register write by the most recent (in program order) instruction
 instance that can write that bit (or from the hart’s initial register
 state if there is no such write). Hence, it is essential to know the
 register write footprint of each instruction instance, which we
-calculate when the instruction instance is created (see the action of
+calculate when the instruction instance is created (see the <<fetch, Festch instruction>> action of
 below). We ensure in the pseudocode that each instruction does at most
 one register write to each register bit, and also that it does not try
 to read a register value it just wrote.
@@ -746,14 +747,14 @@ as statically determined from the pseudocode of the instruction;
 is a tagged union; tags in small-caps): +
 
 
-[cols="<,<",]
+[cols="<,<",grid="none"]
 |===
-|Plain(_isa_state_) |ready to make a pseudocode transition
+|Plain(_isa_state_) |- ready to make a pseudocode transition
 
-|Pending_mem_loads(_load_continuation_) |requesting memory load
+|Pending_mem_loads(_load_continuation_) |- requesting memory load
 operation(s)
 
-|Pending_mem_stores(_store_continuation_) |requesting memory store
+|Pending_mem_stores(_store_continuation_) |- requesting memory store
 operation(s)
 |===
 * _reg_reads_, the register reads the instance has performed, including,
@@ -804,13 +805,15 @@ have a _fully determined memory footprint_ if for every register read
 latexmath:[$r$] from _reg_reads_ that feeds into latexmath:[$i$]’s
 memory operation address, the register writes that latexmath:[$r$] reads
 from are fully determined.
-
+[NOTE]
+====
 The `rmem` tool records, for every register write, the set of register
 writes from other instructions that have been read by this instruction
 at the point of performing the write. By carefully arranging the
 pseudocode of the instructions covered by the tool we were able to make
 it so that this is exactly the set of register writes on which the write
 depends on.
+====
 
 ==== Hart State
 
@@ -832,7 +835,8 @@ When a store operation is propagated to the shared memory it is simply
 added to the end of the list. When a load operation is satisfied from
 memory, for each byte of the load operation, the most recent
 corresponding store slice is returned.
-
+[NOTE]
+====
 For most purposes, it is simpler to think of the shared memory as an
 array, i.e., a map from memory locations to memory store operation
 slices, where each memory location is mapped to a one-byte slice of the
@@ -845,6 +849,7 @@ intervene, and forbid others, the array abstraction must be extended to
 record more information. Here, we use a list as it is very simple, but a
 more efficient and scalable implementations should probably use
 something better.
+====
 
 [[transitions]]
 ==== Transitions
