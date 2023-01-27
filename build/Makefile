@@ -1,5 +1,5 @@
-HEADER_SOURCE := ../src/riscv-isa-unpr-conv-review.adoc ../src/riscv-privileged.adoc
-PDF_RESULT := unpriv-isa-asciidoc.pdf priv-isa-asciidoc.pdf
+HEADER_SOURCE := ../src/riscv-isa-unpr-conv-review.adoc
+PDF_RESULT := unpriv-isa-asciidoc.pdf
 # Not all document sources are yet listed here.  Not just adoc files but
 # images/ and resources/ content.  Once they are the target can remove the
 # phony use.
