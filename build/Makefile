@@ -1,5 +1,5 @@
-HEADER_SOURCE := ../src/riscv-privileged.adoc
-#HEADER_SOURCE := ../src/riscv-isa-unpr-conv-review.adoc
+#HEADER_SOURCE := ../src/riscv-privileged.adoc
+HEADER_SOURCE := ../src/riscv-isa-unpr-conv-review.adoc
 PDF_RESULT := priv-isa-asciidoc.pdf
 #PDF_RESULT := unpriv-isa-asciidoc.pdf
 # Not all document sources are yet listed here.  Not just adoc files but
