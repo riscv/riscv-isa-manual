@@ -653,10 +653,13 @@ and hence we define a standard interface to allow unchanged
 privileged-mode code, particularly a supervisor-level OS, to support
 arbitrary user-mode state extensions.
 
+[NOTE]
+====
 To date, the V extension is the only standard extension that defines
 additional state beyond the floating-point CSR and data registers.
+====
 
-The FS[1:0] and VS[1:0]  fields and the XS[1:0] read-only field are used
+The FS[1:0] and VS[1:0] *WARL* fields and the XS[1:0] read-only field are used
 to reduce the cost of context save and restore by setting and tracking
 the current state of the floating-point unit and any other user-mode
 extensions respectively. The FS field encodes the status of the
@@ -671,15 +674,20 @@ state save or restore is required. If a save or restore is required,
 additional instructions and CSRs are typically required to effect and
 optimize the process.
 
+[NOTE]
+====
 The design anticipates that most context switches will not need to
 save/restore state in either or both of the floating-point unit or other
 extensions, so provides a fast check via the SD bit.
+====
 
 The FS, VS, and XS fields use the same status encoding as shown in
 <<fsxsencoding>>, with the four possible status
 values being Off, Initial, Clean, and Dirty.
 
-[cols=">,<,<",options="header",]
+[[fsxsecnoding]]
+.Encoding of FS[1:0], VS[1:0], and XS[1:0] status fields
+[%autowidth,float="center",align="center",cols=">,<,<",options="header",]
 |===
 |Status |FS and VS Meaning |XS Meaning
 |0 |Off |All off
@@ -695,11 +703,14 @@ If neither the F extension nor S-mode is implemented, then FS is
 read-only zero. If S-mode is implemented but the F extension is not, FS
 may optionally be read-only zero.
 
+[NOTE]
+====
 Implementations with S-mode but without the F extension are permitted,
 but not required, to make the FS field be read-only zero. Some such
 implementations will choose _not_ to have the FS field be read-only
 zero, so as to enable emulation of the F extension for both S-mode and
 U-mode via invisible traps into M-mode.
+====
 
 If the `v` registers are implemented, the VS field shall not be
 read-only zero.
@@ -714,9 +725,12 @@ provides a CSR field that encodes the equivalent of the XS states. The
 XS field represents a summary of all extensions’ status as shown in
 <<fsxsencoding>>.
 
+[NOTE]
+====
 The XS field effectively reports the maximum status value across all
 user-extension status fields, though individual extensions can use a
 different encoding than XS.
+====
 
 The SD bit is a read-only bit that summarizes whether either the FS, VS,
 or XS fields signal the presence of some dirty state that will require
@@ -790,9 +804,12 @@ dirtiness might not be tracked at all, in which case the valid FS states
 are Off and Dirty, and an attempt to set FS to Initial or Clean causes
 it to be set to Dirty.
 
+[NOTE]
+====
 This definition of FS does not disallow setting FS to Dirty as a result
 of errant speculation. Some platforms may choose to disallow
 speculatively writing FS to close a potential side channel.
+====
 
 If an instruction explicitly or implicitly writes a floating-point
 register or the `fcsr` but does not alter its contents, and FS=Initial
@@ -811,50 +828,52 @@ transitions for the FS, VS, or XS status bits. Note that the standard
 floating-point and vector extensions do not support user-mode
 unconfigure or disable/enable instructions.
 
-[cols="<,<,<,<,<",]
+[[fsxsstates]]
+.FS, FS, and XS state transitions.
+[%autowidth,float="center",align="center",cols="<,<,<,<,<",]
 |===
 |Current State |Off |Initial |Clean |Dirty
 
-|Action | | | |
+5+|Action
 
-|At context save in privileged code | | | |
+5+^|At context save in privileged code
 
 |Save state? |No |No |No |Yes
 
 |Next state |Off |Initial |Clean |Clean
 
-|At context restore in privileged code | | | |
+5+^|At context restore in privileged code
 
 |Restore state? |No |Yes, to initial |Yes, from memory |N/A
 
 |Next state |Off |Initial |Clean |N/A
 
-|Execute instruction to read state | | | |
+5+^|Execute instruction to read state
 
 |Action? |Exception |Execute |Execute |Execute
 
 |Next state |Off |Initial |Clean |Dirty
 
-|Execute instruction that possibly modifies state, including
-configuration | | | |
+5+^|Execute instruction that possibly modifies state, including
+configuration
 
 |Action? |Exception |Execute |Execute |Execute
 
 |Next state |Off |Dirty |Dirty |Dirty
 
-|Execute instruction to unconfigure unit | | | |
+5+^|Execute instruction to unconfigure unit
 
 |Action? |Exception |Execute |Execute |Execute
 
 |Next state |Off |Initial |Initial |Initial
 
-|Execute instruction to disable unit | | | |
+5+^|Execute instruction to disable unit
 
 |Action? |Execute |Execute |Execute |Execute
 
 |Next state |Off |Off |Off |Off
 
-|Execute instruction to enable unit | | | |
+5+^|Execute instruction to enable unit
 
 |Action? |Execute |Execute |Execute |Execute
 
@@ -865,6 +884,8 @@ Standard privileged instructions to initialize, save, and restore
 extension state are provided to insulate privileged code from details of
 the added extension state by treating the state as an opaque object.
 
+[NOTES]
+====
 Many coprocessor extensions are only used in limited contexts that
 allows software to safely unconfigure or even disable units when done.
 This reduces the context-switch overhead of large stateful coprocessors.
@@ -873,6 +894,7 @@ We separate out floating-point state from other extension state, as when
 a floating-point unit is present the floating-point registers are part
 of the standard calling convention, and so user-mode software cannot
 know when it is safe to disable the floating-point unit.
+====
 
 The XS field provides a summary of all added extension state, but
 additional microarchitectural bits might be maintained in the extension
@@ -895,21 +917,24 @@ context. Machine-level software must be more conservative in saving and
 restoring the extension state in their corresponding version of the
 context.
 
+[NOTE]
+====
 In any reasonable use case, the number of context switches between user
 and supervisor level should far outweigh the number of context switches
 to other privilege levels. Note that coprocessors should not require
 their context to be saved and restored to service asynchronous
 interrupts, unless the interrupt results in a user-level context swap.
+====
 
 ==== Machine Trap-Vector Base-Address Register (`mtvec`)
 
-The `mtvec` register is an MXLEN-bit  read/write register that holds
+The `mtvec` register is an MXLEN-bit *WARL* read/write register that holds
 trap vector configuration, consisting of a vector base address (BASE)
 and a vector mode (MODE).
 
-J@S & +
-& +
-MXLEN-2 & 2 +
+[[mtvec-mode]]
+.Encoding of mtvec MODE field.
+include::images/bytefield/mtvec.adoc[]
 
 The `mtvec` register must always be implemented, but can contain a
 read-only value. If `mtvec` is writable, the set of values the register
