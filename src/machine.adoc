@@ -1394,10 +1394,11 @@ for use by machine mode. Typically, it is used to hold a pointer to a
 machine-mode hart-local context space and swapped with a user register
 upon entry to an M-mode trap handler.
 
-@J +
- +
-MXLEN +
+.Machine-mode scratch register.
+include::images/bytefield/mscratch.adoc[]
 
+[NOTE]
+====
 The MIPS ISA allocated two user registers (`k0`/`k1`) for use by the
 operating system. Although the MIPS scheme provides a fast and simple
 implementation, it also reduces available user registers, and does not
@@ -1411,6 +1412,7 @@ with any OS-dependent features. The RISC-V CSR swap instructions can
 quickly save/restore values to the `mscratch` register. Unlike the MIPS
 design, the OS can rely on holding a value in the ` mscratch` register
 while the user context is running.
+====
 
 ==== Machine Exception Program Counter (`mepc`)
 
@@ -1425,25 +1427,28 @@ masked on reads so that it appears to be 0. This masking occurs also for
 the implicit read by the MRET instruction. Though masked, `mepc[1]`
 remains writable when IALIGN=32.
 
-`mepc` is a  register that must be able to hold all valid virtual
+`mepc` is a *WARL* register that must be able to hold all valid virtual
 addresses. It need not be capable of holding all possible invalid
 addresses. Prior to writing `mepc`, implementations may convert an
 invalid address into some other invalid address that `mepc` is capable
 of holding.
 
+[NOTE]
+====
 When address translation is not in effect, virtual addresses and
 physical addresses are equal. Hence, the set of addresses `mepc` must be
 able to represent includes the set of physical addresses that can be
 used as a valid `pc` or effective address.
+====
 
 When a trap is taken into M-mode, `mepc` is written with the virtual
 address of the instruction that was interrupted or that encountered the
 exception. Otherwise, `mepc` is never written by the implementation,
 though it may be explicitly written by software.
 
-@J +
- +
-MXLEN +
+[[mepcref]]
+.Machine exception program counter register.
+include::images/bytefield/mepcreg.adoc[]
 
 [[mcause]]
 ==== Machine Cause Register (`mcause`)
@@ -1458,61 +1463,24 @@ The Interrupt bit in the `mcause` register is set if the trap was caused
 by an interrupt. The Exception Code field contains a code identifying
 the last exception or interrupt. <<mcauses>> lists
 the possible machine-level exception codes. The Exception Code is a
- field, so is only guaranteed to hold supported exception codes.
+*WLRL* field, so is only guaranteed to hold supported exception codes.
 
-c@U & +
-& +
-& MXLEN-1 +
-[[mcauses]]
-.Machine cause register (mcause) values after trap.
-[%autowidth,float="center",align="center",cols=">,>,<,<",options="header",]
-|===
-|Interrupt |Exception Code |Description |
-|1 |0 |_Reserved_ |
-|1 |1 |Supervisor software interrupt |
-|1 |2 |_Reserved_ |
-|1 |3 |Machine software interrupt |
-|1 |4 |_Reserved_ |
-|1 |5 |Supervisor timer interrupt |
-|1 |6 |_Reserved_ |
-|1 |7 |Machine timer interrupt |
-|1 |8 |_Reserved_ |
-|1 |9 |Supervisor external interrupt |
-|1 |10 |_Reserved_ |
-|1 |11 |Machine external interrupt |
-|1 |12–15 |_Reserved_ |
-|1 |latexmath:[$\ge$]16 |_Designated for platform use_ |
-|0 |0 |Instruction address misaligned |
-|0 |1 |Instruction access fault |
-|0 |2 |Illegal instruction |
-|0 |3 |Breakpoint |
-|0 |4 |Load address misaligned |
-|0 |5 |Load access fault |
-|0 |6 |Store/AMO address misaligned |
-|0 |7 |Store/AMO access fault |
-|0 |8 |Environment call from U-mode |
-|0 |9 |Environment call from S-mode |
-|0 |10 |_Reserved_ |
-|0 |11 |Environment call from M-mode |
-|0 |12 |Instruction page fault |
-|0 |13 |Load page fault |
-|0 |14 |_Reserved_ |
-|0 |15 |Store/AMO page fault |
-|0 |16–23 |_Reserved_ |
-|0 |24–31 |_Designated for custom use_ |
-|0 |32–47 |_Reserved_ |
-|0 |48–63 |_Designated for custom use_ |
-|0 |latexmath:[$\ge$]64 |_Reserved_ |
-|===
+[[mcausereg]]
+.Machine Cause register `mcause`.
+include::images/bytefield/mcausereg.adoc[]
 
 Note that load and load-reserved instructions generate load exceptions,
 whereas store, store-conditional, and AMO instructions generate
 store/AMO exceptions.
 
+[NOTE]
+====
 Interrupts can be separated from other traps with a single branch on the
 sign of the `mcause` register value. A shift left can remove the
 interrupt bit and scale the exception codes to index into a trap vector
 table.
+
+***
 
 We do not distinguish privileged instruction exceptions from illegal
 opcode exceptions. This simplifies the architecture and also hides
@@ -1520,34 +1488,84 @@ details of which higher-privilege instructions are supported by an
 implementation. The privilege level servicing the trap can implement a
 policy on whether these need to be distinguished, and if so, whether a
 given opcode should be treated as illegal or privileged.
-
+====
 If an instruction may raise multiple synchronous exceptions, the
 decreasing priority order of
 <<exception-priority>> indicates which
 exception is taken and reported in `mcause`. The priority of any custom
 synchronous exceptions is implementation-defined.
 
-[cols="<,>,<",options="header",]
+[[mcauses]]
+.Machine cause register (mcause) values after trap.
+[%autowidth,float="center",align="center",cols=">,>,<",options="header",]
+|===
+|Interrupt |Exception Code |Description 
+|1 |0 |_Reserved_ 
+|1 |1 |Supervisor software interrupt 
+|1 |2 |_Reserved_ 
+|1 |3 |Machine software interrupt 
+|1 |4 |_Reserved_ 
+|1 |5 |Supervisor timer interrupt 
+|1 |6 |_Reserved_ 
+|1 |7 |Machine timer interrupt 
+|1 |8 |_Reserved_ 
+|1 |9 |Supervisor external interrupt 
+|1 |10 |_Reserved_ 
+|1 |11 |Machine external interrupt 
+|1 |12–15 |_Reserved_ 
+|1 |latexmath:[$\ge$]16 |_Designated for platform use_ 
+|0 |0 |Instruction address misaligned 
+|0 |1 |Instruction access fault 
+|0 |2 |Illegal instruction 
+|0 |3 |Breakpoint 
+|0 |4 |Load address misaligned 
+|0 |5 |Load access fault 
+|0 |6 |Store/AMO address misaligned 
+|0 |7 |Store/AMO access fault 
+|0 |8 |Environment call from U-mode 
+|0 |9 |Environment call from S-mode 
+|0 |10 |_Reserved_ 
+|0 |11 |Environment call from M-mode 
+|0 |12 |Instruction page fault 
+|0 |13 |Load page fault 
+|0 |14 |_Reserved_ 
+|0 |15 |Store/AMO page fault 
+|0 |16–23 |_Reserved_ 
+|0 |24–31 |_Designated for custom use_ 
+|0 |32–47 |_Reserved_ 
+|0 |48–63 |_Designated for custom use_ 
+|0 |latexmath:[$\ge$]64 |_Reserved_ 
+|===
+
+[[exception-priority]]
+.Synchronous exception priority in decreasing priority order.
+[%autowidth,float="center",align="center",cols="<,>,<",options="header",]
 |===
 |Priority |Exc.Code |Description
 |_Highest_ |3 |Instruction address breakpoint
-| | |During instruction address translation:
-| |12, 1 |First encountered page fault or access fault
-| | |With physical address for instruction:
-| |1 |Instruction access fault
-| |2 |Illegal instruction
-| |0 |Instruction address misaligned
-| |8, 9, 11 |Environment call
-| |3 |Environment break
-| |3 |Load/store/AMO address breakpoint
-| | |Optionally:
-| |4, 6 |Load/store/AMO address misaligned
-| | |During address translation for an explicit memory access:
-| |13, 15, 5, 7 |First encountered page fault or access fault
-| | |With physical address for an explicit memory access:
-| |5, 7 |Load/store/AMO access fault
-| | |If not higher priority:
-|_Lowest_ |4, 6 |Load/store/AMO address misaligned
+| .>|12, 1 .<|During instruction address translation: +
+First encountered page fault or access fault
+| .>|1 .<|With physical address for instruction: +
+Instruction access fault
+
+| .>|2 +
+0 +
+8,9,11 +
+3 +
+3 .<|Illegal instruction +
+Instruction address misaligned +
+Environment call +
+Environment break +
+Load/store/AMO address breakpoint
+
+| .>|4,6 .<|Optionally: +
+Load/store/AMO address misaligned
+| .>|13, 15, 5, 7 .<|During address translation for an explicit memory access: +
+First encountered page fault or access fault
+| .>|5,7 .<|With physical address for an explicit memory access: +
+Load/store/AMO access fault
+.>|_Lowest_ .>|4,6 .<|If not higher priority: +
+Load/store/AMO address misaligned
 |===
 
 When a virtual address is translated into a physical address, the
