@@ -984,23 +984,25 @@ within the same cache set. Implicitly, this specification does not
 permit such behavior to be architecturally exposed.
 ====
 
-[[sec:translation]]
+[[translation]]
 ==== Addressing and Memory Protection
 
 Sv32 implementations support a 32-bit virtual address space, divided
 into pages. An Sv32 virtual address is partitioned into a virtual page
-number (VPN) and page offset, as shown in Figure link:#sv32va[[sv32va]].
+number (VPN) and page offset, as shown in <<sv32va>>.
 When Sv32 virtual memory mode is selected in the MODE field of the
 `satp` register, supervisor virtual addresses are translated into
 supervisor physical addresses via a two-level page table. The 20-bit VPN
 is translated into a 22-bit physical page number (PPN), while the 12-bit
 page offset is untranslated. The resulting supervisor-level physical
 addresses are then checked using any physical memory protection
-structures (Sections #sec:pmp[[sec:pmp]]), before being directly
+structures (<<pmp>>), before being directly
 converted to machine-level physical addresses. If necessary,
 supervisor-level physical addresses are zero-extended to the number of
 physical address bits found in the implementation.
 
+[NOTE]
+====
 For example, consider an RV32 system supporting 34 bits of physical
 address. When the value of `satp`.MODE is Sv32, a 34-bit physical
 address is produced directly, and therefore no zero-extension is needed.
@@ -1008,35 +1010,37 @@ When the value of `satp`.MODE is Bare, the 32-bit virtual address is
 translated (unmodified) into a 32-bit physical address, and then that
 physical address is zero-extended into a 34-bit machine-level physical
 address.
-
-@O@O@E & & +
-& & +
-& 10 & 12 +
-
-@E@O@E & & +
-& & +
-& 10 & 12 +
-
-@E@O@Fcccccccc & & & & & & & & & & +
-& & & & & & & & & & +
-& 10 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 +
+====
+[[sv32va]]
+.Sv32 virtual address.
+include::images/bytefield/sv32va.edn[]
 
 Sv32 page tables consist of latexmath:[$2^{10}$] page-table entries
 (PTEs), each of four bytes. A page table is exactly the size of a page
 and must always be aligned to a page boundary. The physical page number
 of the root page table is stored in the `satp` register.
 
-The PTE format for Sv32 is shown in Figures link:#sv32pte[[sv32pte]].
+[[sv32pa]]
+.SV32 physical address.
+include::images/bytefield/sv32pa.edn[]
+
+[[sv32pte]]
+.Sv32 page table entry.
+include::images/bytefield/sv32pte.edn[]
+
+The PTE format for Sv32 is shown in <<sv32pte>>.
 The V bit indicates whether the PTE is valid; if it is 0, all other bits
 in the PTE are don’t-cares and may be used freely by software. The
 permission bits, R, W, and X, indicate whether the page is readable,
 writable, and executable, respectively. When all three are zero, the PTE
 is a pointer to the next level of the page table; otherwise, it is a
 leaf PTE. Writable pages must also be marked readable; the contrary
-combinations are reserved for future use. Table link:#pteperm[[pteperm]]
+combinations are reserved for future use. <<pteperm>>
 summarizes the encoding of the permission bits.
 
-[cols="^,^,^,<",options="header",]
+[[pteperm]]
+.Encoding of PTE R/W/X fields.
+[%autowidth,float="center",align="center",cols="^,^,^,<",options="header"]
 |===
 |X |W |R |Meaning
 |0 |0 |0 |Pointer to next level of page table.
@@ -1057,9 +1061,12 @@ exception. Attempting to execute a store, store-conditional, or AMO
 instruction whose effective address lies within a page without write
 permissions raises a store page-fault exception.
 
+[NOTE]
+====
 AMOs never raise load page-fault exceptions. Since any unreadable page
 is also unwritable, attempting to perform an AMO on an unreadable page
 always raises a store page-fault exception.
+====
 
 The U bit indicates whether the page is accessible to user mode. U-mode
 software may only access the page when U=1. If the SUM bit in the
@@ -1069,10 +1076,12 @@ bit clear, in which case, supervisor code will fault on accesses to
 user-mode pages. Irrespective of SUM, the supervisor may not execute
 code on pages with U=1.
 
+[NOTE]
+====
 An alternative PTE format would support different permissions for
 supervisor and user. We omitted this feature because it would be largely
-redundant with the SUM mechanism (see Section #sec:sum[1.1.1.2]) and
-would require more encoding space in the PTE.
+redundant with the SUM mechanism (see <<sum>>) and would require more encoding space in the PTE.
+====
 
 The G bit designates a _global_ mapping. Global mappings are those that
 exist in all address spaces. For non-leaf PTEs, the global setting
@@ -1083,10 +1092,13 @@ software bug that, after switching to an address space with a different
 non-global mapping for that address range, can unpredictably result in
 either mapping being used.
 
+[NOTE]
+====
 Global mappings need not be stored redundantly in address-translation
 caches for multiple ASIDs. Additionally, they need not be flushed from
 local address-translation caches when an SFENCE.VMA instruction is
 executed with _rs2_latexmath:[$\neq$]`x0`.
+====
 
 The RSW field is reserved for use by supervisor software; the
 implementation shall ignore this field.
@@ -1122,6 +1134,8 @@ PTE update is globally visible.
 All harts in a system must employ the same PTE-update scheme as each
 other.
 
+[NOTE]
+====
 Prior versions of this specification required PTE A bit updates to be
 exact, but allowing the A bit to be updated as a result of speculation
 simplifies the implementation of address translation prefetchers. System
@@ -1146,6 +1160,7 @@ supervisor software does not rely on accessed and/or dirty bits, e.g. if
 it does not swap memory pages to secondary storage or if the pages are
 being used to map I/O space, it should always set them to 1 in the PTE
 to improve performance.
+====
 
 Any level of PTE may be a leaf PTE, so in addition to 4 KiB pages, Sv32
 supports 4 MiB _megapages_. A megapage must be virtually and physically
@@ -1156,9 +1171,9 @@ For non-leaf PTEs, the D, A, and U bits are reserved for future standard
 use. Until their use is defined by a standard extension, they must be
 cleared by software for forward compatibility.
 
-For implementations with both page-based virtual memory and the ``A''
+For implementations with both page-based virtual memory and the "A"
 standard extension, the LR/SC reservation set must lie completely within
-a single base physical page (i.e., a naturally aligned physical-memory
+a single base physical page (i.e., a naturally aligned 4 KiB physical-memory
 region).
 
 [[sv32algorithm]]
