@@ -1182,13 +1182,14 @@ region).
 A virtual address latexmath:[$va$] is translated into a physical address
 latexmath:[$pa$] as follows:
 
+*TODO Fix this latexmath*
 . Let latexmath:[$a$] be
 latexmath:[${\tt satp}.ppn \times \textrm{PAGESIZE}$], and let
 latexmath:[$i=\textrm{LEVELS} - 1$]. (For Sv32,
 PAGESIZE=latexmath:[$2^{12}$] and LEVELS=2.) The `satp` register must be
 _active_, i.e., the effective privilege mode must be S-mode or U-mode.
 . Let latexmath:[$pte$] be the value of the PTE at address
-latexmath:[$a+va.vpn[i]\times \textrm{PTESIZE}$]. (For Sv32, PTESIZE=4.)
+latexmath:[${\tt a+va}.vpn\[i\] \times \textrm{PTESIZE}$]. (For Sv32, PTESIZE=4.)
 If accessing latexmath:[$pte$] violates a PMA or PMP check, raise an
 access-fault exception corresponding to the original access type.
 . If latexmath:[$pte.v=0$], or if latexmath:[$pte.r=0$] and
@@ -1232,11 +1233,14 @@ latexmath:[$pa.ppn[i-1:0]=va.vpn[i-1:0]$].
 All implicit accesses to the address-translation data structures in this
 algorithm are performed using width PTESIZE.
 
+[NOTE]
+====
 This implies, for example, that an Sv48 implementation may not use two
 separate 4B reads to non-atomically access a single 8B PTE, and that A/D
 bit updates performed by the implementation are treated as atomically
 updating the entire PTE, rather than just the A and/or D bit alone (even
 though the PTE value does not otherwise change).
+====
 
 The results of implicit address-translation reads in step 2 may be held
 in a read-only, incoherent _address-translation cache_ but not shared
@@ -1251,7 +1255,8 @@ the writes to flush the relevant cached translations.
 
 The address-translation cache cannot be used in step 7; accessed and
 dirty bits may only be updated in memory directly.
-
+[NOTE]
+====
 It is permitted for multiple address-translation cache entries to
 co-exist for the same address. This represents the fact that in a
 conventional TLB hierarchy, it is possible for multiple entries to match
@@ -1263,10 +1268,11 @@ SFENCE.VMA is not executed between a write to the memory-management
 tables and subsequent implicit read of the same address: it is
 unpredictable whether the old non-leaf PTE or the new leaf PTE is used,
 but the behavior is otherwise well defined.
+====
 
 Implementations may also execute the address-translation algorithm
 speculatively at any time, for any virtual address, as long as `satp` is
-active (as defined in Section #sec:satp[1.1.11]). Such speculative
+active (as defined in <<satp>>). Such speculative
 executions have the effect of pre-populating the address-translation
 cache.
 
@@ -1277,6 +1283,8 @@ they must not create address-translation cache entries if those entries
 would have been invalidated by any SFENCE.VMA instruction executed by
 the hart since the speculative execution of the algorithm began.
 
+[NOTE]
+====
 For instance, it is illegal for both non-speculative and speculative
 executions of the translation algorithm to begin, read the level 2 page
 table, pause while the hart executes an SFENCE.VMA with
@@ -1290,7 +1298,7 @@ executions of the address-translation algorithm (for the specified ASID,
 if applicable), or simply wait for them to complete (in which case any
 address-translation cache entries created will be invalidated by the
 SFENCE.VMA as appropriate). Likewise, an SFENCE.VMA instruction with
-_rs1_latexmath:[$\neq$]`x0` generally must either ensure that
+__rs1__latexmath:[$\neq$]`x0` generally must either ensure that
 previously-launched speculative executions of the address-translation
 algorithm (for the specified ASID, if applicable) are prevented from
 creating new address-translation cache entries mapping leaf PTEs, or
@@ -1307,10 +1315,13 @@ algorithm may only touch page tables reachable from the root page table
 indicated in ` satp`, the range of addresses that an implementation’s
 page table walker will touch is fully under supervisor control.
 
+***
+
 The algorithm does not admit the possibility of ignoring high-order PPN
 bits for implementations with narrower physical addresses.
+====
 
-[[sec:sv39]]
+[[sv39]]
 === Sv39: Page-Based 39-bit Virtual-Memory System
 
 This section describes a simple paged virtual-memory system for
@@ -1318,6 +1329,8 @@ SXLEN=64, which supports 39-bit virtual address spaces. The design of
 Sv39 follows the overall scheme of Sv32, and this section details only
 the differences between the schemes.
 
+[NOTE]
+====
 We specified multiple virtual memory systems for RV64 to relieve the
 tension between providing a large address space and minimizing
 address-translation cost. For many systems, of virtual-address space is
@@ -1327,18 +1340,21 @@ the latency of page-table traversals, and the size of hardware
 structures that store virtual addresses. Sv57 increases the virtual
 address space, page table capacity requirement, and translation latency
 even further.
+====
 
 [[addressing-and-memory-protection]]
 ==== Addressing and Memory Protection
 
 Sv39 implementations support a 39-bit virtual address space, divided
 into pages. An Sv39 address is partitioned as shown in
-Figure link:#sv39va[[sv39va]]. Instruction fetch addresses and load and
+<<sv39va>>. Instruction fetch addresses and load and
 store effective addresses, which are 64 bits, must have bits 63–39 all
 equal to bit 38, or else a page-fault exception will occur. The 27-bit
 VPN is translated into a 44-bit PPN via a three-level page table, while
 the 12-bit page offset is untranslated.
 
+[NOTE]
+====
 When mapping between narrower and wider addresses, RISC-V zero-extends a
 narrower physical address to a wider size. The mapping between 64-bit
 virtual addresses and the 39-bit usable address space of Sv39 is not
@@ -1346,37 +1362,40 @@ based on zero-extension but instead follows an entrenched convention
 that allows an OS to use one or a few of the most-significant bits of a
 full-size (64-bit) virtual address to quickly distinguish user and
 supervisor address regions.
+====
 
-@O@O@O@O & & & +
-& & & +
-& 9 & 9 & 12 +
+[[sv39va]]
+.Sv39 virtual address.
+include::images/bytefield/sv39va.edn[]
 
-@T@O@O@O & & & +
-& & & +
-& 9 & 9 & 12 +
+[[sv39pa]]
+.Sv39 physical address.
+include::images/bytefield/sv39pa.edn[]
 
-cF@Y@Y@Y@Y@Fcccccccc & & & & & & & & & & & & & & +
-& & & & & & & & & & & & & & +
-& 2 & 7 & 26 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 +
+[[sv39pte]]
+.Sv39 page table entry.
+include::images/bytefield/sv39pte.edn[]
 
 Sv39 page tables contain latexmath:[$2^9$] page table entries (PTEs),
 eight bytes each. A page table is exactly the size of a page and must
 always be aligned to a page boundary. The physical page number of the
 root page table is stored in the `satp` register’s PPN field.
 
-The PTE format for Sv39 is shown in Figure link:#sv39pte[[sv39pte]].
+The PTE format for Sv39 is shown in <<sv39pte>>.
 Bits 9–0 have the same meaning as for Sv32. Bit 63 is reserved for use
-by the Svnapot extension in Chapter link:#svnapot[2]. If Svnapot is not
+by the Svnapot extension in <<svnapot>>. If Svnapot is not
 implemented, bit 63 remains reserved and must be zeroed by software for
 forward compatibility, or else a page-fault exception is raised. Bits
 62–61 are reserved for use by the Svpbmt extension in
-Chapter link:#svpbmt[3]. If Svpbmt is not implemented, bits 62–61 remain
+<<svpbmt>>. If Svpbmt is not implemented, bits 62–61 remain
 reserved and must be zeroed by software for forward compatibility, or
 else a page-fault exception is raised. Bits 60–54 are reserved for
 future standard use and, until their use is defined by some standard
 extension, must be zeroed by software for forward compatibility. If any
 of these bits are set, a page-fault exception is raised.
 
+[NOTE]
+====
 We reserved several PTE bits for a possible extension that improves
 support for sparse address spaces by allowing page-table levels to be
 skipped, reducing memory usage and TLB refill latency. These reserved
@@ -1384,15 +1403,14 @@ bits may also be used to facilitate research experimentation. The cost
 is reducing the physical address space, but is presently ample. When it
 no longer suffices, the reserved bits that remain unallocated could be
 used to expand the physical address space.
+====
 
-Any level of PTE may be a leaf PTE, so in addition to pages, Sv39
-supports _megapages_ and _gigapages_, each of which must be virtually
-and physically aligned to a boundary equal to its size. A page-fault
+Any level of PTE may be a leaf PTE, so in addition to 4 KiB pages, Sv39
+supports 2 MiB _megapages_ and 1 GiB _gigapages_, each of which must be virtually and physically aligned to a boundary equal to its size. A page-fault
 exception is raised if the physical address is insufficiently aligned.
 
 The algorithm for virtual-to-physical address translation is the same as
-in Section link:#sv32algorithm[1.3.2], except LEVELS equals 3 and
-PTESIZE equals 8.
+in <<sv32algorithm>>, except LEVELS equals 3 and PTESIZE equals 8.
 
 [[sec:sv48]]
 === Sv48: Page-Based 48-bit Virtual-Memory System
