@@ -744,18 +744,12 @@ sufficiently large ASID space.
 
 === Supervisor Instructions
 
-In addition to the SRET instruction defined in
-Section link:#otherpriv[[otherpriv]], one new supervisor-level
-instruction is provided.
+In addition to the SRET instruction defined in <<otherpriv>>, one new supervisor-level instruction is provided.
 
 [[sfence.vma]]
 ==== Supervisor Memory-Management Fence Instruction
+include::images/wavedrom/sfencevma.edn[]
 
-O@R@R@F@R@S +
-& & & & & +
-& & & & & +
-& 5 & 5 & 3 & 5 & 7 +
-SFENCE.VMA & asid & vaddr & PRIV & 0 & SYSTEM +
 
 The supervisor memory-management fence instruction SFENCE.VMA is used to
 synchronize updates to in-memory memory-management data structures with
@@ -768,12 +762,10 @@ implicit references by subsequent instructions in that hart to the
 memory-management data structures. The specific set of operations
 ordered by SFENCE.VMA is determined by _rs1_ and _rs2_, as described
 below. SFENCE.VMA is also used to invalidate entries in the
-address-translation cache associated with a hart (see
-Section link:#sv32algorithm[1.3.2]). Further details on the behavior of
-this instruction are described in
-Section link:#virt-control[[virt-control]] and
-Section link:#pmp-vmem[[pmp-vmem]].
+address-translation cache associated with a hart (see <<sv32algorithm>>). Further details on the behavior of this instruction are described in <<virt-control>> and <<pmp-vmem>>.
 
+[NOTE]
+====
 The SFENCE.VMA is used to flush any local hardware caches related to
 address translation. It is specified as a fence rather than a TLB flush
 to provide cleaner semantics with respect to which instructions are
@@ -781,10 +773,13 @@ affected by the flush operation and to support a wider variety of
 dynamic caching structures and memory-management schemes. SFENCE.VMA is
 also used by higher privilege levels to synchronize page table writes
 and the address translation hardware.
+====
 
 SFENCE.VMA orders only the local hart’s implicit references to the
 memory-management data structures.
 
+[NOTE]
+====
 Consequently, other harts must be notified separately when the
 memory-management data structures have been modified. One approach is to
 use 1) a local data fence to ensure local writes are visible globally,
@@ -792,6 +787,7 @@ then 2) an interprocessor interrupt to the other thread, then 3) a local
 SFENCE.VMA in the interrupt handler of the remote thread, and finally 4)
 signal back to originating thread that operation is complete. This is,
 of course, the RISC-V analog to a TLB shootdown.
+====
 
 For the common case that the translation data structures have only been
 modified for a single address mapping (i.e., one page or superpage),
@@ -801,24 +797,24 @@ case that the translation data structures have only been modified for a
 single address-space identifier, _rs2_ can specify the address space.
 The behavior of SFENCE.VMA depends on _rs1_ and _rs2_ as follows:
 
-* If _rs1_=`x0` and _rs2_=`x0`, the fence orders all reads and writes
+* If __rs1__=`x0` and __rs2__=`x0`, the fence orders all reads and writes
 made to any level of the page tables, for all address spaces. The fence
 also invalidates all address-translation cache entries, for all address
 spaces.
-* If _rs1_=`x0` and _rs2_latexmath:[$\neq$]`x0`, the fence orders all
+* If __rs1__=`x0` and __rs2__latexmath:[$\neq$]`x0`, the fence orders all
 reads and writes made to any level of the page tables, but only for the
 address space identified by integer register _rs2_. Accesses to _global_
-mappings (see Section #sec:translation[1.3.1]) are not ordered. The
+mappings (see <<translation>>) are not ordered. The
 fence also invalidates all address-translation cache entries matching
 the address space identified by integer register _rs2_, except for
 entries containing global mappings.
-* If _rs1_latexmath:[$\neq$]`x0` and _rs2_=`x0`, the fence orders only
+* If __rs1__latexmath:[$\neq$]`x0` and __rs2__=`x0`, the fence orders only
 reads and writes made to leaf page table entries corresponding to the
-virtual address in _rs1_, for all address spaces. The fence also
+virtual address in __rs1__, for all address spaces. The fence also
 invalidates all address-translation cache entries that contain leaf page
 table entries corresponding to the virtual address in _rs1_, for all
 address spaces.
-* If _rs1_latexmath:[$\neq$]`x0` and _rs2_latexmath:[$\neq$]`x0`, the
+* If __rs1__latexmath:[$\neq$]`x0` and __rs2__latexmath:[$\neq$]`x0`, the
 fence orders only reads and writes made to leaf page table entries
 corresponding to the virtual address in _rs1_, for the address space
 identified by integer register _rs2_. Accesses to global mappings are
@@ -831,13 +827,15 @@ If the value held in _rs1_ is not a valid virtual address, then the
 SFENCE.VMA instruction has no effect. No exception is raised in this
 case.
 
-When _rs2_latexmath:[$\neq$]`x0`, bits SXLEN-1:ASIDMAX of the value held
+When __rs2__latexmath:[$\neq$]`x0`, bits SXLEN-1:ASIDMAX of the value held
 in _rs2_ are reserved for future standard use. Until their use is
 defined by a standard extension, they should be zeroed by software and
 ignored by current implementations. Furthermore, if
 ASIDLEN latexmath:[$<$] ASIDMAX, the implementation shall ignore bits
 ASIDMAX-1:ASIDLEN of the value held in _rs2_.
 
+[NOTE]
+====
 It is always legal to over-fence, e.g., by fencing only based on a
 subset of the bits in _rs1_ and/or _rs2_, and/or by simply treating all
 SFENCE.VMA instructions as having _rs1_=`x0` and/or _rs2_=`x0`. For
@@ -845,6 +843,7 @@ example, simpler implementations can ignore the virtual address in _rs1_
 and the ASID value in _rs2_ and always perform a global fence. The
 choice not to raise an exception when an invalid virtual address is held
 in _rs1_ facilitates this type of simplification.
+====
 
 An implicit read of the memory-management data structures may return any
 translation for an address that was valid at any time since the most
@@ -860,6 +859,8 @@ accesses in the global memory order. These implicit loads also need not
 otherwise obey normal program order semantics with respect to prior
 loads or stores to the same address.
 
+[NOTE]
+====
 A consequence of this specification is that an implementation may use
 any translation for an address that was valid at any time since the most
 recent SFENCE.VMA that subsumes that address. In particular, if a leaf
@@ -870,7 +871,7 @@ unpredictable. The behavior is otherwise well-defined.
 In a conventional TLB design, it is possible for multiple entries to
 match a single address if, for example, a page is upgraded to a
 superpage without first clearing the original non-leaf PTE’s valid bit
-and executing an SFENCE.VMA with _rs1_=`x0`. In this case, a similar
+and executing an SFENCE.VMA with __rs1__=`x0`. In this case, a similar
 remark applies: it is unpredictable whether the old non-leaf PTE or the
 new leaf PTE is used, but the behavior is otherwise well defined.
 
@@ -879,10 +880,13 @@ to update a PTE using a set of stores of a width less than the width of
 the PTE, as it is legal for the implementation to read the PTE at any
 time, including when only some of the partial stores have taken effect.
 
+***
+
 This specification permits the caching of PTEs whose V (Valid) bit is
 clear. Operating systems must be written to cope with this possibility,
 but implementers are reminded that eagerly caching invalid PTEs will
 reduce performance by causing additional page faults.
+====
 
 Implementations must only perform implicit reads of the translation data
 structures pointed to by the current contents of the `satp` register or
@@ -896,24 +900,26 @@ without the need to execute an SFENCE.VMA instruction. Changing
 immediately, without the need to execute an SFENCE.VMA instruction.
 Likewise, changes to `satp`.ASID take effect immediately.
 
+[TIP]
+====
 The following common situations typically require executing an
 SFENCE.VMA instruction:
 
 * When software recycles an ASID (i.e., reassociates it with a different
 page table), it should _first_ change `satp` to point to the new page
-table using the recycled ASID, _then_ execute SFENCE.VMA with _rs1_=`x0`
+table using the recycled ASID, _then_ execute SFENCE.VMA with __rs1__=`x0`
 and _rs2_ set to the recycled ASID. Alternatively, software can execute
 the same SFENCE.VMA instruction while a different ASID is loaded into
 `satp`, provided the next time `satp` is loaded with the recycled ASID,
 it is simultaneously loaded with the new page table.
 * If the implementation does not provide ASIDs, or software chooses to
 always use ASID 0, then after every `satp` write, software should
-execute SFENCE.VMA with _rs1_=`x0`. In the common case that no global
+execute SFENCE.VMA with __rs1__=`x0`. In the common case that no global
 translations have been modified, _rs2_ should be set to a register other
 than `x0` but which contains the value zero, so that global translations
 are not flushed.
 * If software modifies a non-leaf PTE, it should execute SFENCE.VMA with
-_rs1_=`x0`. If any PTE along the traversal path had its G bit set, _rs2_
+__rs1__=`x0`. If any PTE along the traversal path had its G bit set, _rs2_
 must be `x0`; otherwise, _rs2_ should be set to the ASID for which the
 translation is being modified.
 * If software modifies a leaf PTE, it should execute SFENCE.VMA with
@@ -926,24 +932,28 @@ the SFENCE.VMA lazily. After modifying the PTE but before executing
 SFENCE.VMA, either the new or old permissions will be used. In the
 latter case, a page-fault exception might occur, at which point software
 should execute SFENCE.VMA in accordance with the previous bullet point.
+====
 
 If a hart employs an address-translation cache, that cache must appear
 to be private to that hart. In particular, the meaning of an ASID is
 local to a hart; software may choose to use the same ASID to refer to
 different address spaces on different harts.
 
+[NOTE]
+====
 A future extension could redefine ASIDs to be global across the SEE,
 enabling such options as shared translation caches and hardware support
 for broadcast TLB shootdown. However, as OSes have evolved to
 significantly reduce the scope of TLB shootdowns using novel
 ASID-management techniques, we expect the local-ASID scheme to remain
 attractive for its simplicity and possibly better scalability.
+====
 
 For implementations that make `satp`.MODE read-only zero (always Bare),
 attempts to execute an SFENCE.VMA instruction might raise an illegal
 instruction exception.
 
-[[sec:sv32]]
+[[sv32]]
 === Sv32: Page-Based 32-bit Virtual-Memory Systems
 
 When Sv32 is written to the MODE field in the `satp` register (see
