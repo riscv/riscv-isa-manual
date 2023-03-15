@@ -1530,6 +1530,8 @@ base page size.
 
 The Svnapot extension depends on Sv39.
 
+[[ptenapot]]
+.Page table entry encodings when __pte__.N=1
 [%autowidth,float="center",align="center",cols="^,^,<,^",options="header"]
 |===
 |i |latexmath:[$pte.ppn[i]$] |Description |latexmath:[$pte.napot\_bits$]
@@ -1542,17 +1544,17 @@ The Svnapot extension depends on Sv39.
 |===
 
 NAPOT PTEs behave identically to non-NAPOT PTEs within the
-address-translation algorithm in Section link:#sv32algorithm[1.3.2],
+address-translation algorithm in <<sv32algorithm>>,
 except that:
 
 * If the encoding in latexmath:[$pte$] is valid according to
-Table link:#ptenapot[[ptenapot]], then instead of returning the original
+<<ptenapot>>, then instead of returning the original
 value of latexmath:[$pte$], implicit reads of a NAPOT PTE return a copy
 of latexmath:[$pte$] in which
 latexmath:[$pte.ppn[i][pte.napot\_bits-1:0]$] is replaced by
 latexmath:[$vpn[i][pte.napot\_bits-1:0]$]. If the encoding in
 latexmath:[$pte$] is reserved according to
-Table link:#ptenapot[[ptenapot]], then a page-fault exception must be
+<<ptenapot>>, then a page-fault exception must be
 raised.
 * Implicit reads of NAPOT page table entries may create
 address-translation cache entries mapping
@@ -1563,6 +1565,8 @@ latexmath:[$j$] such that
 latexmath:[${j >> napot\_bits}={vpn[i] >> napot\_bits}$], all for the
 address space identified in _satp_ as loaded by step 1.
 
+[NOTE]
+====
 The motivation for a NAPOT PTE is that it can be cached in a TLB as one
 or more entries representing the contiguous region as if it were a
 single (large) page covered by a single translation. This compaction can
@@ -1591,7 +1595,7 @@ to be made, the OS generally should first mark all of the PTEs invalid,
 then issue SFENCE.VMA instruction(s) covering all 4 KiB regions within
 the range (either via a single SFENCE.VMA with _rs1_=`x0`, or with
 multiple SFENCE.VMA instructions with _rs1_latexmath:[$\neq$]`x0`), then
-update the PTE(s), as described in Section #sec:sfence.vma[1.2.1],
+update the PTE(s), as described in <<sfence.vma>>,
 unless any inconsistencies are known to be benign. If any
 inconsistencies do exist, then the effect is the same as when SFENCE.VMA
 is used incorrectly: one of the translations will be chosen, but the
@@ -1617,7 +1621,7 @@ that need arise. For example:
 
 __
 
-[cols="^,^,<,^",options="header",]
+[%autowidth,float="center",align="center",cols="^,^,<,^",options="header"]
 |===
 |i |latexmath:[$pte.ppn[i]$] |Description |latexmath:[$pte.napot\_bits$]
 |0 |`x xxxx xxx1` |8 KiB contiguous region |1
@@ -1643,32 +1647,35 @@ future.
 However, in case finer-grained intermediate page size support proves not
 to be useful, we have chosen to standardize only 64 KiB support as a
 first step.
+====
 
 [[svpbmt]]
-== ``Svpbmt'' Standard Extension for Page-Based Memory Types, Version 1.0
+== "Svpbmt" Standard Extension for Page-Based Memory Types, Version 1.0
 
 In Sv39, Sv48, and Sv57, bits 62–61 of a leaf page table entry indicate
 the use of page-based memory types that override the PMA(s) for the
 associated memory pages. The encoding for the PBMT bits is captured in
-Table link:#pbmt[[pbmt]].
+<<pbmt>>.
 
 The Svpbmt extension depends on Sv39.
 
-[cols="^,^,<",options="header",]
+[[pbmt]]
+.Encodings for PBMT field in Sv39, Sv48, and Sv57 PTEs.  Attributes not mentioned are inherited from PMA associated with the physical address.
+[%autowidth,float="center",align="center",cols="^,^,<",options="header"]
 |===
 |Mode |Value |Requested Memory Attributes
 |PMA |0 |None
-
 |NC |1 |Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory
-
 |IO |2 |Non-cacheable, non-idempotent, strongly-ordered (I/O ordering),
 I/O
-
 |latexmath:[$-$] |3 |_Reserved for future standard use_
 |===
 
+[NOTE]
+====
 Future extensions may provide more and/or finer-grained control over
 which PMAs can be overridden.
+====
 
 For non-leaf PTEs, bits 62–61 are reserved for future standard use.
 Until their use is defined by a standard extension, they must be cleared
@@ -1698,6 +1705,8 @@ memory and to other accesses to pages with PBMT=IO. However, accesses to
 such pages are considered to be _both_ I/O and main memory accesses for
 the purposes of FENCE, _.aq_, and _.rl_.
 
+[NOTE]
+====
 A device driver written to rely on I/O strong ordering rules will not
 operate correctly if the address range is mapped with PBMT=NC. As such,
 this configuration is discouraged.
@@ -1706,6 +1715,7 @@ It will often still be useful to map physical I/O regions using PBMT=NC
 so that write combining and speculative accesses can be performed. Such
 optimizations will likely improve performance when applied with adequate
 care.
+====
 
 When Svpbmt is used with non-zero PBMT encodings, it is possible for
 multiple virtual aliases of the same physical page to exist
@@ -1728,13 +1738,18 @@ accesses prevents both loss of coherence and loss of memory ordering:
 `fence iorw, iorw`, followed by `cbo.flush` to an address of that
 location, followed by a `fence iorw, iorw`.
 
+[NOTE]
+====
 It follows that, if the same location might later be referenced using
 the original attributes, then this sequence must be repeated beforehand.
+
+***
 
 In certain cases, a weaker sequence might suffice to prevent loss of
 coherence. These situations will be detailed following the forthcoming
 formalization of the interaction of the RVWMO memory model with the
 instructions in the Zicbom extension.
+====
 
 When two-stage address translation is enabled within the H extension,
 the page-based memory types are also applied in two stages. First, if
@@ -1747,7 +1762,7 @@ attributes used by accesses to the page in question. Otherwise, the
 intermediate attributes are used as the final set of attributes.
 
 [[svinval]]
-== ``Svinval'' Standard Extension for Fine-Grained Address-Translation Cache Invalidation, Version 1.0
+== "Svinval" Standard Extension for Fine-Grained Address-Translation Cache Invalidation, Version 1.0
 
 The Svinval extension splits SFENCE.VMA, HFENCE.VVMA, and HFENCE.GVMA
 instructions into finer-grained invalidation and ordering operations
