@@ -254,22 +254,55 @@ same endianness as HS-mode.
 ==== Hypervisor Trap Delegation Registers (`hedeleg` and `hideleg`)
 
 Registers `hedeleg` and `hideleg` are HSXLEN-bit read/write registers,
-formatted as shown in Figures link:#hedelegreg[[hedelegreg]] and
-link:#hidelegreg[[hidelegreg]] respectively. By default, all traps at
+formatted as shown in <<hedelegreg>> and
+<<hidelegreg>> respectively. By default, all traps at
 any privilege level are handled in M-mode, though M-mode usually uses
 the `medeleg` and `mideleg` CSRs to delegate some traps to HS-mode. The
 `hedeleg` and `hideleg` CSRs allow these traps to be further delegated
 to a VS-mode guest; their layout is the same as `medeleg` and `mideleg`.
 
-@J +
- +
-HSXLEN +
+[[hedelegreg]]
+.Hypervisor exception delegation register (`hedeleg`).
+include::images/bytefield/hedelegreg.edn[]
 
-@J +
- +
-HSXLEN +
+[[hidelegreg]]
+.Hypervisor exception delegation register (`hideleg`).
+include::images/bytefield/hidelegreg.edn[]
 
-[cols=">,<,<",options="header",]
+A synchronous trap that has been delegated to HS-mode (using `medeleg`)
+is further delegated to VS-mode if V=1 before the trap and the
+corresponding `hedeleg` bit is set. Each bit of `hedeleg` shall be
+either writable or read-only zero. Many bits of `hedeleg` are required
+specifically to be writable or zero, as enumerated in
+<<hedeleg-bits>>. Bit 0, corresponding to
+instruction address misaligned exceptions, must be writable if
+IALIGN=32.
+
+[NOTE]
+====
+Requiring that certain bits of `hedeleg` be writable reduces some of the
+burden on a hypervisor to handle variations of implementation.
+====
+
+An interrupt that has been delegated to HS-mode (using `mideleg`) is
+further delegated to VS-mode if the corresponding `hideleg` bit is set.
+Among bits 15:0 of `hideleg`, bits 10, 6, and 2 (corresponding to the
+standard VS-level interrupts) are writable, and bits 12, 9, 5, and 1
+(corresponding to the standard S-level interrupts) are read-only zeros.
+
+When a virtual supervisor external interrupt (code 10) is delegated to
+VS-mode, it is automatically translated by the machine into a supervisor
+external interrupt (code 9) for VS-mode, including the value written to
+`vscause` on an interrupt trap. Likewise, a virtual supervisor timer
+interrupt (6) is translated into a supervisor timer interrupt (5) for
+VS-mode, and a virtual supervisor software interrupt (2) is translated
+into a supervisor software interrupt (1) for VS-mode. Similar
+translations may or may not be done for platform or custom interrupt
+causes (codes 16 and above).
+
+[[hedeleg-bits]]
+.Bits of `hedeleg` that must be writable or muse be read-only zero.
+[%autowidth,float="center",align="center",cols=">,<,<",options="header"]
 |===
 |Bit |Attribute |Corresponding Exception
 |0 |(See text) |Instruction address misaligned
@@ -293,35 +326,7 @@ HSXLEN +
 |23 |Read-only 0 |Store/AMO guest-page fault
 |===
 
-A synchronous trap that has been delegated to HS-mode (using `medeleg`)
-is further delegated to VS-mode if V=1 before the trap and the
-corresponding `hedeleg` bit is set. Each bit of `hedeleg` shall be
-either writable or read-only zero. Many bits of `hedeleg` are required
-specifically to be writable or zero, as enumerated in
-Table #tab:hedeleg-bits[[tab:hedeleg-bits]]. Bit 0, corresponding to
-instruction address misaligned exceptions, must be writable if
-IALIGN=32.
-
-Requiring that certain bits of `hedeleg` be writable reduces some of the
-burden on a hypervisor to handle variations of implementation.
-
-An interrupt that has been delegated to HS-mode (using `mideleg`) is
-further delegated to VS-mode if the corresponding `hideleg` bit is set.
-Among bits 15:0 of `hideleg`, bits 10, 6, and 2 (corresponding to the
-standard VS-level interrupts) are writable, and bits 12, 9, 5, and 1
-(corresponding to the standard S-level interrupts) are read-only zeros.
-
-When a virtual supervisor external interrupt (code 10) is delegated to
-VS-mode, it is automatically translated by the machine into a supervisor
-external interrupt (code 9) for VS-mode, including the value written to
-`vscause` on an interrupt trap. Likewise, a virtual supervisor timer
-interrupt (6) is translated into a supervisor timer interrupt (5) for
-VS-mode, and a virtual supervisor software interrupt (2) is translated
-into a supervisor software interrupt (1) for VS-mode. Similar
-translations may or may not be done for platform or custom interrupt
-causes (codes 16 and above).
-
-[[sec:hinterruptregs]]
+[[hinterruptregs]]
 ==== Hypervisor Interrupt Registers (`hvip`, `hip`, and `hie`)
 
 Register `hvip` is an HSXLEN-bit read/write register that a hypervisor
