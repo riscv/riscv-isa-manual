@@ -1,22 +1,41 @@
-#HEADER_SOURCE := ../src/riscv-privileged.adoc
-HEADER_SOURCE := ../src/riscv-isa-unpr-conv-review.adoc
-#PDF_RESULT := priv-isa-asciidoc.pdf
-PDF_RESULT := unpriv-isa-asciidoc.pdf
-# Not all document sources are yet listed here.  Not just adoc files but
-# images/ and resources/ content.  Once they are the target can remove the
-# phony use.
-SOURCES := $(HEADER_SOURCE)
+# Makefile
 
-all: $(PDF_RESULT)
+# Build Targets
+TARGETS := priv unpriv
 
-.PHONY: $(PDF_RESULT)
-$(PDF_RESULT): $(SOURCES)
-	asciidoctor-pdf \
-    --attribute=mathematical-format=svg \
-    --failure-level=ERROR \
-    --require=asciidoctor-bibtex \
-    --require=asciidoctor-diagram \
-    --require=asciidoctor-mathematical \
-    --trace \
-    --out-file=$@ \
-    $(HEADER_SOURCE)
+.PHONY: all $(TARGETS)
+
+all: $(TARGETS)
+
+ASCIIDOCTOR_OPTS := --attribute=mathematical-format=svg \
+                    --failure-level=ERROR \
+                    --require=asciidoctor-bibtex \
+                    --require=asciidoctor-diagram \
+                    --require=asciidoctor-mathematical \
+                    --trace
+
+SRCDIR := ../src
+
+# Privilege ISA
+priv: priv-isa-asciidoc.pdf
+
+priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc
+	@echo "Building Privilege ISA"
+	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+
+# Unprivilege ISA
+unpriv: unpriv-isa-asciidoc.pdf
+
+unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc
+	@echo "Building Unprivilege ISA"
+	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+
+clean:
+	@if [ -f priv-isa-asciidoc.pdf ]; then \
+		echo "Removing priv-isa-asciidoc.pdf"; \
+		rm -f priv-isa-asciidoc.pdf; \
+	fi
+	@if [ -f unpriv-isa-asciidoc.pdf ]; then \
+		echo "Removing unpriv-isa-asciidoc.pdf"; \
+		rm -f unpriv-isa-asciidoc.pdf; \
+	fi
