@@ -16,14 +16,14 @@ ASCIIDOCTOR_OPTS := --attribute=mathematical-format=svg \
 
 SRCDIR := ../src
 
-# Privilege ISA
+# Privileged ISA
 priv: priv-isa-asciidoc.pdf
 
-priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc
+priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privilege ISA"
 	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
-# Unprivilege ISA
+# Unprivileged ISA
 unpriv: unpriv-isa-asciidoc.pdf
 
 unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc
