@@ -1,4 +1,4 @@
-#=======================================================================
+#----------------------------------------------------------------------
 # Makefile for generating LaTeX documents
 #-----------------------------------------------------------------------
 #
@@ -18,14 +18,14 @@
 # .bib file (assumed to be in the source directory).
 #
 
-srcdir  = ../src
+srcdir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/../src
 
-docs_with_bib = riscv-spec riscv-privileged
-docs_without_bib =
+docs_with_bib := riscv-spec riscv-privileged
+docs_without_bib :=
 
-srcs = $(wildcard $(srcdir)/*.tex)
-figs = $(wildcard $(srcdir)/figs/*)
-bibs = $(srcdir)/riscv-spec.bib
+srcs := $(wildcard $(srcdir)/*.tex)
+figs := $(wildcard $(srcdir)/figs/*)
+bibs := $(srcdir)/riscv-spec.bib
 
 #=======================================================================
 # You shouldn't need to change anything below this
@@ -39,9 +39,9 @@ default : pdf
 #------------------------------------------------------------
 # PDF
 
-pdfs_with_bib = $(addsuffix .pdf, $(docs_with_bib))
-pdfs_without_bib = $(addsuffix .pdf, $(docs_without_bib))
-pdfs = $(pdfs_with_bib) $(pdfs_without_bib)
+pdfs_with_bib := $(addsuffix .pdf, $(docs_with_bib))
+pdfs_without_bib := $(addsuffix .pdf, $(docs_without_bib))
+pdfs := $(pdfs_with_bib) $(pdfs_without_bib)
 
 pdf : $(pdfs)
 .PHONY: pdf open
@@ -59,7 +59,7 @@ $(pdfs_without_bib): %.pdf: $(srcdir)/%.tex $(srcs) $(figs)
 	$(PDFLATEX) $*
 	$(PDFLATEX) $*
 
-junk += $(pdfs) *.aux *.log *.bbl *.blg *.toc *.out
+junk := $(pdfs) *.aux *.log *.bbl *.blg *.toc *.out
 
 #------------------------------------------------------------
 # Other Targets
