@@ -20,15 +20,19 @@ SRCDIR := ../src
 priv: priv-isa-asciidoc.pdf
 
 priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-privileged.adoc
-	@echo "Building Privilege ISA"
-	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	@echo "Building Privileged ISA"
+	rm -f $@.tmp
+	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
+	mv $@.tmp $@
 
 # Unprivileged ISA
 unpriv: unpriv-isa-asciidoc.pdf
 
 unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc
-	@echo "Building Unprivilege ISA"
-	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	@echo "Building Unprivileged ISA"
+	rm -f $@.tmp
+	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
+	mv $@.tmp $@
 
 clean:
 	@if [ -f priv-isa-asciidoc.pdf ]; then \
