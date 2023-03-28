@@ -1015,13 +1015,7 @@ instructions and two privileged fence instructions.
 
 ==== Hypervisor Virtual-Machine Load and Store Instructions
 
-@O@R@R@F@R@S +
-& & & & & +
-& & & & & +
-& 5 & 5 & 3 & 5 & 7 +
-HLV._width_ & [U] & addr & PRIVM & dest & SYSTEM +
-HLVX.HU/WU & HLVX & addr & PRIVM & dest & SYSTEM +
-HSV._width_ & src & addr & PRIVM & 0 & SYSTEM +
+include::images/wavedrom/hypv-virt-load-and-store.edn[]
 
 The hypervisor virtual-machine load and store instructions are valid
 only in M-mode or HS-mode, or in U-mode when `hstatus`.HU=1. Each
@@ -1051,9 +1045,11 @@ not required. For the supervisor physical address that results from
 address translation, the supervisor physical memory attributes must
 grant both _execute_ and _read_ permissions. (The _supervisor physical
 memory attributes_ are the machine’s physical memory attributes as
-modified by physical memory protection, Section #sec:pmp[[sec:pmp]], for
+modified by physical memory protection, <<pmp>>, for
 supervisor level.)
 
+[NOTE]
+====
 HLVX cannot override machine-level physical memory protection (PMP), so
 attempting to read memory that PMP designates as execute-only still
 results in an access-fault exception.
@@ -1061,6 +1057,7 @@ results in an access-fault exception.
 Although HLVX instructions’ explicit memory accesses require execute
 permissions, they still raise the same exceptions as other load
 instructions, rather than raising fetch exceptions instead.
+====
 
 HLVX.WU is valid for RV32, even though LWU and HLV.WU are not. (For
 RV32, HLVX.WU can be considered a variant of HLV.W, as sign extension is
@@ -1071,19 +1068,14 @@ or HSV) when V=1 cause a virtual instruction trap. Attempts to execute
 one of these same instructions from U-mode when `hstatus`.HU=0 cause an
 illegal instruction trap.
 
-[[sec:hfence.vma]]
+[[hfence.vma]]
 ==== Hypervisor Memory-Management Fence Instructions
 
-@O@R@R@F@R@S +
-& & & & & +
-& & & & & +
-& 5 & 5 & 3 & 5 & 7 +
-HFENCE.VVMA & asid & vaddr & PRIV & 0 & SYSTEM +
-HFENCE.GVMA & vmid & gaddr & PRIV & 0 & SYSTEM +
+include::images/wavedrom/hypv-mm-fence.edn[]
 
 The hypervisor memory-management fence instructions, HFENCE.VVMA and
 HFENCE.GVMA, perform a function similar to SFENCE.VMA
-(Section #sec:sfence.vma[[sec:sfence.vma]]), except applying to the
+(<<sfence.vma>>), except applying to the
 VS-level memory-management data structures controlled by CSR `vsatp`
 (HFENCE.VVMA) or the guest-physical memory-management data structures
 controlled by CSR `hgatp` (HFENCE.GVMA). Instruction SFENCE.VMA applies
@@ -1096,32 +1088,37 @@ an HFENCE.VVMA guarantees that any previous stores already visible to
 the current hart are ordered before all implicit reads by that hart done
 for VS-stage address translation for instructions that
 
-are subsequent to the HFENCE.VVMA, and
-
-execute when `hgatp`.VMID has the same setting as it did when
+* are subsequent to the HFENCE.VVMA, and
+* execute when `hgatp`.VMID has the same setting as it did when
 HFENCE.VVMA executed.
 
 Implicit reads need not be ordered when `hgatp`.VMID is different than
 at the time HFENCE.VVMA executed. If operand
-_rs1_latexmath:[$\neq$]`x0`, it specifies a single guest virtual
-address, and if operand _rs2_latexmath:[$\neq$]`x0`, it specifies a
+__rs1__latexmath:[$\neq$]`x0`, it specifies a single guest virtual
+address, and if operand __rs2__latexmath:[$\neq$]`x0`, it specifies a
 single guest address-space identifier (ASID).
 
+[NOTE]
+====
 An HFENCE.VVMA instruction applies only to a single virtual machine,
 identified by the setting of `hgatp`.VMID when HFENCE.VVMA executes.
+====
 
-When _rs2_latexmath:[$\neq$]`x0`, bits XLEN-1:ASIDMAX of the value held
+When __rs2__latexmath:[$\neq$]`x0`, bits XLEN-1:ASIDMAX of the value held
 in _rs2_ are reserved for future standard use. Until their use is
 defined by a standard extension, they should be zeroed by software and
 ignored by current implementations. Furthermore, if
 ASIDLEN latexmath:[$<$] ASIDMAX, the implementation shall ignore bits
 ASIDMAX-1:ASIDLEN of the value held in _rs2_.
 
+[NOTE]
+====
 Simpler implementations of HFENCE.VVMA can ignore the guest virtual
 address in _rs1_ and the guest ASID value in _rs2_, as well as
 `hgatp`.VMID, and always perform a global fence for the VS-level memory
 management of all virtual machines, or even a global fence for all
 memory-management data structures.
+====
 
 Neither `mstatus`.TVM nor `hstatus`.VTVM causes HFENCE.VVMA to trap.
 
@@ -1130,11 +1127,13 @@ HFENCE.GVMA is valid only in HS-mode when `mstatus`.TVM=0, or in M-mode
 guarantees that any previous stores already visible to the current hart
 are ordered before all implicit reads by that hart done for G-stage
 address translation for instructions that follow the HFENCE.GVMA. If
-operand _rs1_latexmath:[$\neq$]`x0`, it specifies a single guest
+operand __rs1__latexmath:[$\neq$]`x0`, it specifies a single guest
 physical address, shifted right by 2 bits, and if operand
-_rs2_latexmath:[$\neq$]`x0`, it specifies a single virtual machine
+__rs2__latexmath:[$\neq$]`x0`, it specifies a single virtual machine
 identifier (VMID).
 
+[NOTE]
+====
 Conceptually, an implementation might contain two address-translation
 caches: one that maps guest virtual addresses to guest physical
 addresses, and another that maps guest physical addresses to supervisor
@@ -1152,21 +1151,27 @@ the guest physical address, which is costly, and so a common technique
 is to flush all entries that match the HFENCE.GVMA’s VMID argument,
 regardless of the address argument.
 
+***
+
 Like for a guest physical address written to `htval` on a trap, a guest
 physical address specified in _rs1_ is shifted right by 2 bits to
 accommodate addresses wider than the current XLEN.
+====
 
-When _rs2_latexmath:[$\neq$]`x0`, bits XLEN-1:VMIDMAX of the value held
+When __rs2__latexmath:[$\neq$]`x0`, bits XLEN-1:VMIDMAX of the value held
 in _rs2_ are reserved for future standard use. Until their use is
 defined by a standard extension, they should be zeroed by software and
 ignored by current implementations. Furthermore, if
 VMIDLEN latexmath:[$<$] VMIDMAX, the implementation shall ignore bits
 VMIDMAX-1:VMIDLEN of the value held in _rs2_.
 
+[NOTE]
+====
 Simpler implementations of HFENCE.GVMA can ignore the guest physical
 address in _rs1_ and the VMID value in _rs2_ and always perform a global
 fence for the guest-physical memory management of all virtual machines,
 or even a global fence for all memory-management data structures.
+====
 
 If `hgatp`.MODE is changed for a given VMID, an HFENCE.GVMA with
 _rs1_=`x0` (and _rs2_ set to either `x0` or the VMID) must be executed
