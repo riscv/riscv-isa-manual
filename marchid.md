@@ -50,3 +50,4 @@ Rift          | Jianhu Lab, WUT                 | [Ruige Lee](mailto:295054118@w
 RISu064       | Wenting Zhang                   | [Wenting Zhang](mailto:zephray@outlook.com)                 | 30                | https://github.com/zephray/RISu064
 AIRISC        | Fraunhofer IMS                  | [AIRISC Support](mailto:airisc@ims.fraunhofer.de)           | 31               | https://github.com/Fraunhofer-IMS/airisc_core_complex
 Proteus       | imec-DistriNet, KU Leuven       | [Marton Bognar](mailto:marton.bognar@kuleuven.be)           | 32               | https://github.com/proteus-core/proteus
+VexRiscv      | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 33               | https://github.com/SpinalHDL/VexRiscv
