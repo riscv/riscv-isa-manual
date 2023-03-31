@@ -1,7 +1,7 @@
 # Makefile
 
 # Build Targets
-TARGETS := priv unpriv
+TARGETS := priv-pdf unpriv-pdf priv-html unpriv-html
 
 .PHONY: all $(TARGETS)
 
@@ -34,6 +34,20 @@ unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc $(SRCDIR)/*.a
 	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
 	mv $@.tmp $@
 
+# Privileged ISA HTML
+priv-html: priv-isa-asciidoc.html
+
+priv-isa-asciidoc.html: $(SRCDIR)/riscv-privileged.adoc
+	@echo "Building Privilege ISA HTML"
+	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+
+# Unprivileged ISA HTML
+unpriv-html: unpriv-isa-asciidoc.html
+
+unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc
+	@echo "Building Unprivilege ISA HTML"
+	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+
 clean:
 	@if [ -f priv-isa-asciidoc.pdf ]; then \
 		echo "Removing priv-isa-asciidoc.pdf"; \
@@ -42,4 +56,12 @@ clean:
 	@if [ -f unpriv-isa-asciidoc.pdf ]; then \
 		echo "Removing unpriv-isa-asciidoc.pdf"; \
 		rm -f unpriv-isa-asciidoc.pdf; \
+	fi
+	@if [ -f priv-isa-asciidoc.html ]; then \
+		echo "Removing priv-isa-asciidoc.html"; \
+		rm -f priv-isa-asciidoc.html; \
+	fi
+	@if [ -f unpriv-isa-asciidoc.html ]; then \
+		echo "Removing unpriv-isa-asciidoc.html"; \
+		rm -f unpriv-isa-asciidoc.html; \
 	fi
