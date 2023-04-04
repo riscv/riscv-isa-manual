@@ -1,7 +1,7 @@
 # Makefile
 
 # Build Targets
-TARGETS := priv-pdf unpriv-pdf priv-html unpriv-html
+TARGETS := priv unpriv priv-html unpriv-html
 
 .PHONY: all $(TARGETS)
 
