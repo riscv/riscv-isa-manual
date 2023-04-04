@@ -28,7 +28,7 @@ priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
 # Unprivileged ISA
 unpriv: unpriv-isa-asciidoc.pdf
 
-unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc $(SRCDIR)/*.adoc
+unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Unprivileged ISA"
 	rm -f $@.tmp
 	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
@@ -44,7 +44,7 @@ priv-isa-asciidoc.html: $(SRCDIR)/riscv-privileged.adoc
 # Unprivileged ISA HTML
 unpriv-html: unpriv-isa-asciidoc.html
 
-unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-isa-unpr-conv-review.adoc
+unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivilege ISA HTML"
 	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
