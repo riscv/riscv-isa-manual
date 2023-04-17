@@ -1,12 +1,9 @@
 RISC-V Instruction Set Manual [![Build Status](https://app.travis-ci.com/riscv/riscv-isa-manual.svg?branch=master)](https://app.travis-ci.com/riscv/riscv-isa-manual)
 =============================
 
-This repository contains the LaTeX source for the draft RISC-V Instruction Set
-Manual.  The preface of each document indicates the version of each
-standard that has been formally ratified by RISC-V International.
+This repository contains the LaTeX source for the Privileged RISC-V Instruction Set Manual and the AsciiDoc source for the Unprivileged RISC-V Instruction Set Manual.  The preface of each document indicates the version of each standard that has been formally ratified by RISC-V International.
 
-This work is licensed under a Creative Commons Attribution 4.0 International
-License.  See the LICENSE file for details.
+This work is licensed under a Creative Commons Attribution 4.0 International License.  See the LICENSE file for details.
 
 The Manual is split up into the following volumes:
 - Volume I: User-Level ISA
