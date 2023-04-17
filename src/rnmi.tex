@@ -1,0 +1,234 @@
+\chapter{``Smrnmi'' Standard Extension for Resumable Non-Maskable Interrupts, Version 0.4}
+\label{chap:rnmi}
+
+{\bf Warning! This draft specification may change before being
+accepted as standard by RISC-V International.}
+
+The base machine-level architecture supports only
+unresumable non-maskable interrupts (UNMIs), where the NMI jumps to a
+handler in machine mode, overwriting the current {\tt mepc} and {\tt mcause}
+register values.  If the hart had been executing machine-mode code in
+a trap handler, the previous values in {\tt mepc} and {\tt mcause} would not
+be recoverable and so execution is not generally resumable.
+
+The Smrnmi extension adds support for resumable non-maskable interrupts
+(RNMIs) to RISC-V.  The extension adds four new CSRs ({\tt mnepc},
+{\tt mncause}, {\tt mnstatus}, and {\tt mnscratch}) to hold the interrupted state,
+and one new instruction, MNRET, to resume from the RNMI handler.
+
+\section{RNMI Interrupt Signals}
+
+The {\tt rnmi} interrupt signals are inputs to
+the hart.  These interrupts have higher priority than any other
+interrupt or exception on the hart and cannot be disabled by software.
+Specifically, they are not disabled by clearing the {\tt mstatus}.MIE
+register.
+
+\section{RNMI Handler Addresses}
+
+The RNMI interrupt trap handler address is implementation-defined.
+
+RNMI also has an associated exception trap handler address, which is
+implementation defined.
+
+\section{RNMI CSRs}
+
+This proposal adds additional M-mode CSRs to enable a resumable
+non-maskable interrupt (RNMI).
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{J}
+\instbitrange{MXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt mnscratch} \\
+\hline
+MXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Resumable NMI scratch register {\tt mnscratch}.}
+\label{fig:mnscratch}
+\end{figure*}
+
+The {\tt mnscratch} CSR holds an MXLEN-bit read-write register which
+enables the NMI trap handler to save and restore the context that was
+interrupted.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{J}
+\instbitrange{MXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{{\tt mnepc} (\warl)} \\
+\hline
+MXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Resumable NMI program counter {\tt mnepc}.}
+\label{fig:mnepc}
+\end{figure*}
+
+The {\tt mnepc} CSR is an MXLEN-bit read-write register which on entry
+to the NMI trap handler holds the PC of the instruction that took the
+interrupt.
+
+The low bit of {\tt mnepc} ({\tt mnepc[0]}) is
+always zero.  On implementations that support only IALIGN=32, the two low bits
+({\tt mnepc[1:0]}) are always zero.
+
+If an implementation allows IALIGN to be either 16 or 32 (by
+changing CSR {\tt misa}, for example), then, whenever IALIGN=32, bit
+{\tt mnepc[1]} is masked on reads so that it appears to be 0.  This
+masking occurs also for the implicit read by the MRET instruction.
+Though masked, {\tt mnepc[1]} remains writable when IALIGN=32.
+
+{\tt mnepc} is a \warl\ register that must be able to hold all valid
+virtual addresses.  It need not be capable of holding all possible invalid
+addresses.
+Prior to writing {\tt mnepc}, implementations may convert an invalid address
+into some other invalid address that {\tt mnepc} is capable of holding.
+
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{cU}
+\instbit{MXLEN-1} &
+\instbitrange{MXLEN-2}{0} \\
+\hline
+\multicolumn{1}{|c|}{1} &
+\multicolumn{1}{c|}{NMI Cause (\warl)} \\
+\hline
+1 & MXLEN-1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Resumable NMI cause {\tt mncause}.}
+\label{fig:mncause}
+\end{figure*}
+
+The {\tt mncause} CSR holds the reason for the NMI, with bit MXLEN-1 set to
+1, and the NMI cause encoded in the least-significant bits or zero if
+NMI causes are not supported.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{TRFcFcF}
+\instbitrange{MXLEN-1}{13} &
+\instbitrange{12}{11} &
+\instbitrange{10}{8} &
+\instbit{7} &
+\instbitrange{6}{4} &
+\instbit{3} &
+\instbitrange{2}{0} \\
+\hline
+\multicolumn{1}{|c|}{\em Reserved} &
+\multicolumn{1}{c|}{MNPP (\warl)} &
+\multicolumn{1}{c|}{\em Reserved} &
+\multicolumn{1}{c|}{MNPV (\warl)} &
+\multicolumn{1}{c|}{\em Reserved} &
+\multicolumn{1}{c|}{NMIE} &
+\multicolumn{1}{c|}{\em Reserved} \\
+\hline
+MXLEN-13 & 2 & 3 & 1 & 3 & 1 & 3 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Resumable NMI status register {\tt mnstatus}.}
+\label{fig:mnstatus}
+\end{figure*}
+
+The {\tt mnstatus} CSR holds a two-bit field, MNPP, which on entry to the trap
+handler holds the privilege mode of the interrupted context, encoded
+in the same manner as {\tt mstatus}.MPP.
+It also holds a one-bit field, MNPV, which on entry to the trap handler holds
+the virtualization mode of the interrupted context, encoded in the same
+manner as {\tt mstatus}.MPV.
+
+{\tt mnstatus} also holds the NMIE bit.
+When NMIE=1, nonmaskable interrupts are enabled.
+When NMIE=0, {\em all} interrupts are disabled.
+
+When NMIE=0, the hart behaves as though {\tt mstatus}.MPRV were clear,
+regardless of the current setting of {\tt mstatus}.MPRV.
+
+Upon reset, NMIE contains the value 0.
+
+\begin{commentary}
+RNMIs are masked out of reset to give software the opportunity to initialize
+data structures and devices for subsequent RNMI handling.
+\end{commentary}
+
+Software can set NMIE to 1, but attempts to clear NMIE have no effect.
+
+\begin{commentary}
+Normally, only reset sequences will explicitly set the NMIE bit.
+\end{commentary}
+\begin{commentary}
+That the NMIE bit is settable does not suffice to support the nesting of
+RNMIs.
+To support this feature in a direct manner would have required allowing
+software to clear the NMIE bit---a design choice that would have contravened
+the concept of non-maskability.
+
+Software that wishes to minimize the latency until the next RNMI is taken can
+follow the top-half/bottom-half model, where the RNMI handler itself only
+enqueues a task to a task queue then returns.
+The bulk of the interrupt servicing is performed later, with RNMIs enabled.
+\end{commentary}
+
+For the purposes of the WFI instruction, NMIE is a global interrupt enable,
+meaning that the setting of NMIE does not affect the operation of the WFI
+instruction.
+
+The other
+bits in {\tt mnstatus} are {\em reserved}; software should write zeros and
+hardware implementations should return zeros.
+
+\section{MNRET Instruction}
+
+MNRET is an M-mode-only instruction that uses the values in {\tt mnepc} and
+{\tt mnstatus} to return to the program counter, privilege mode,
+and virtualization mode of the interrupted context.
+This instruction also sets {\tt mnstatus}.NMIE.
+
+\section{RNMI Operation}
+
+When an RNMI interrupt is detected, the interrupted PC is written to
+the {\tt mnepc} CSR, the type of RNMI to the {\tt mncause} CSR, and the
+privilege mode of the interrupted context to the {\tt mnstatus} CSR.
+The {\tt mnstatus}.NMIE bit is cleared, masking all interrupts.
+
+The hart then enters machine-mode and jumps to the RNMI trap handler
+address.
+
+The RNMI handler can resume original execution using the new MNRET
+instruction, which restores the PC from {\tt mnepc}, the privilege mode
+from {\tt mnstatus}, and also sets {\tt mnstatus}.NMIE, which
+re-enables interrupts.
+
+If the hart encounters an exception while the {\tt mnstatus}.NMIE bit is
+clear, the actions taken are the same as if the exception had occurred while
+{\tt mnstatus}.NMIE were set, except that the program counter is set to the
+RNMI exception trap handler address (rather than the address specified by
+{\tt mtvec}).
+
+\begin{commentary}
+The Smrnmi extension does not change the behavior of the MRET and SRET
+instructions.
+In particular, MRET and SRET are unaffected by the {\tt mnstatus}.NMIE bit,
+and their execution does not alter the {\tt mnstatus}.NMIE bit.
+\end{commentary}

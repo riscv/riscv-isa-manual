@@ -1,0 +1,2705 @@
+\chapter{Supervisor-Level ISA, Version 1.12}
+\label{supervisor}
+
+This chapter describes the RISC-V supervisor-level architecture, which
+contains a common core that is used with various supervisor-level
+address translation and protection schemes.
+
+\begin{commentary}
+Supervisor mode is deliberately restricted in terms of interactions
+with underlying physical hardware, such as physical memory and device
+interrupts, to support clean virtualization.
+In this spirit, certain supervisor-level facilities, including requests for
+timer and interprocessor interrupts, are provided by implementation-specific
+mechanisms.  In some systems, a supervisor execution environment (SEE)
+provides these facilities in a manner specified by a supervisor binary
+interface (SBI).  Other systems supply these facilities directly, through some
+other implementation-defined mechanism.
+\end{commentary}
+
+\section{Supervisor CSRs}
+
+A number of CSRs are provided for the supervisor.
+
+\begin{commentary}
+The supervisor should only view CSR state that should be visible to a
+supervisor-level operating system.  In particular, there is no
+information about the existence (or non-existence) of higher privilege
+levels (machine level or other) visible in the CSRs accessible by the
+supervisor.
+
+Many supervisor CSRs are a subset of the equivalent machine-mode CSR,
+and the machine-mode chapter should be read first to help understand
+the supervisor-level CSR descriptions.
+\end{commentary}
+
+\subsection{Supervisor Status Register (\tt sstatus)}
+\label{sstatus}
+
+
+The {\tt sstatus} register is an SXLEN-bit read/write register
+formatted as shown in Figure~\ref{sstatusreg-rv32} when SXLEN=32 and
+Figure~\ref{sstatusreg} when SXLEN=64.  The {\tt sstatus}
+register keeps track of the processor's current operating state.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{cEcccc}
+\\
+\instbit{31} &
+\instbitrange{30}{20} &
+\instbit{19} &
+\instbit{18} &
+\instbit{17} &
+ \\
+\hline
+\multicolumn{1}{|c|}{SD} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{MXR} &
+\multicolumn{1}{c|}{SUM} &
+\multicolumn{1}{c|}{\wpri} &
+ \\
+\hline
+1 & 11 & 1 & 1 & 1 & \\
+\end{tabular}
+\begin{tabular}{cWWWWccccWcc}
+\\
+&
+\instbitrange{16}{15} &
+\instbitrange{14}{13} &
+\instbitrange{12}{11} &
+\instbitrange{10}{9} &
+\instbit{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbitrange{4}{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+ &
+\multicolumn{1}{|c|}{XS[1:0]} &
+\multicolumn{1}{c|}{FS[1:0]} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{VS[1:0]} &
+\multicolumn{1}{c|}{SPP} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UBE} &
+\multicolumn{1}{c|}{SPIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{SIE} &
+\multicolumn{1}{c|}{\wpri} \\
+\hline
+ & 2 & 2 & 2 & 2 & 1 & 1 & 1 & 1 & 3 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor-mode status register ({\tt sstatus}) when SXLEN=32.}
+\label{sstatusreg-rv32}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{cMFScccc}
+\\
+\instbit{63} &
+\instbitrange{62}{34} &
+\instbitrange{33}{32} &
+\instbitrange{31}{20} &
+\instbit{19} &
+\instbit{18} &
+\instbit{17} &
+ \\
+\hline
+\multicolumn{1}{|c|}{SD} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UXL[1:0]} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{MXR} &
+\multicolumn{1}{c|}{SUM} &
+\multicolumn{1}{c|}{\wpri} &
+ \\
+\hline
+1 & 29 & 2 & 12 & 1 & 1 & 1 & \\
+\end{tabular}
+\begin{tabular}{cWWWWccccWcc}
+\\
+&
+\instbitrange{16}{15} &
+\instbitrange{14}{13} &
+\instbitrange{12}{11} &
+\instbitrange{10}{9} &
+\instbit{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbitrange{4}{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+ &
+\multicolumn{1}{|c|}{XS[1:0]} &
+\multicolumn{1}{c|}{FS[1:0]} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{VS[1:0]} &
+\multicolumn{1}{c|}{SPP} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{UBE} &
+\multicolumn{1}{c|}{SPIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{SIE} &
+\multicolumn{1}{c|}{\wpri} \\
+\hline
+ & 2 & 2 & 2 & 2 & 1 & 1 & 1 & 1 & 3 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor-mode status register ({\tt sstatus}) when SXLEN=64.}
+\label{sstatusreg}
+\end{figure*}
+
+The SPP bit indicates the privilege level at which a hart was executing before
+entering supervisor mode.  When a trap is taken, SPP is set to 0 if the trap
+originated from user mode, or 1 otherwise.  When an SRET instruction
+(see Section~\ref{otherpriv}) is executed to return from the trap handler, the
+privilege level is set to user mode if the SPP bit is 0, or supervisor mode if
+the SPP bit is 1; SPP is then set to 0.
+
+The SIE bit enables or disables all interrupts in supervisor mode.
+When SIE is clear, interrupts are not taken while in supervisor mode.
+When the hart is running in user-mode, the value in SIE is ignored, and
+supervisor-level interrupts are enabled.  The supervisor can disable
+individual interrupt sources using the {\tt sie} CSR.
+
+The SPIE bit indicates whether supervisor interrupts were enabled prior to
+trapping into supervisor mode.  When a trap is taken into supervisor
+mode, SPIE is set to SIE, and SIE is set to 0.  When an SRET instruction is
+executed, SIE is set to SPIE, then SPIE is set to 1.
+
+The {\tt sstatus} register is a subset of the {\tt mstatus} register.
+
+\begin{commentary}
+In a straightforward implementation, reading or writing any field in
+{\tt sstatus} is equivalent to reading or writing the homonymous field
+in {\tt mstatus}.
+\end{commentary}
+
+\subsubsection{Base ISA Control in {\tt sstatus} Register}
+
+The UXL field controls the value of XLEN for U-mode, termed {\em UXLEN},
+which may differ from the value of XLEN for S-mode, termed {\em SXLEN}.  The
+encoding of UXL is the same as that of the MXL field of {\tt misa}, shown in
+Table~\ref{misabase}.
+
+When SXLEN=32, the UXL field does not exist, and UXLEN=32.  When
+SXLEN=64, it is a \warl\ field that encodes the current value of UXLEN.
+In particular, an implementation may make UXL be a read-only field whose
+value always ensures that UXLEN=SXLEN.
+
+If UXLEN~$\ne$~SXLEN, instructions executed in the narrower mode must ignore
+source register operand bits above the configured XLEN, and must sign-extend
+results to fill the widest supported XLEN in the destination register.
+
+If UXLEN~$<$~SXLEN, user-mode instruction-fetch addresses and load and store
+effective addresses are taken modulo $2^{\text{UXLEN}}$.  For example, when UXLEN=32
+and SXLEN=64, user-mode memory accesses reference the lowest \wunits{4}{GiB}
+of the address space.
+
+\subsubsection{Memory Privilege in {\tt sstatus} Register}
+\label{sec:sum}
+
+The MXR (Make eXecutable Readable) bit modifies the privilege with which loads
+access virtual memory.  When MXR=0, only loads from pages marked readable (R=1
+in Figure~\ref{sv32pte}) will succeed.  When MXR=1, loads from pages marked
+either readable or executable (R=1 or X=1) will succeed.  MXR has no effect
+when page-based virtual memory is not in effect.
+
+The SUM (permit Supervisor User Memory access) bit modifies the privilege with
+which S-mode loads and stores access virtual memory.
+When SUM=0, S-mode memory accesses to pages that are accessible by U-mode (U=1
+in Figure~\ref{sv32pte}) will fault.  When SUM=1, these accesses are permitted.
+SUM has no effect when page-based virtual memory is not in effect, nor when
+executing in U-mode.  Note that S-mode can never execute instructions from user
+pages, regardless of the state of SUM.
+
+SUM is read-only 0 if {\tt satp}.MODE is read-only~0.
+
+\begin{commentary}
+The SUM mechanism prevents supervisor software from inadvertently accessing
+user memory.  Operating systems can execute the majority of code with SUM clear;
+the few code segments that should access user memory can temporarily set
+SUM.
+
+The SUM mechanism does not avail S-mode software of permission to execute
+instructions in user code pages.  Legitimate uses cases for execution from
+user memory in supervisor context are rare in general and nonexistent in POSIX
+environments.  However, bugs in supervisors that lead to arbitrary code
+execution are much easier to exploit if the supervisor exploit code can be
+stored in a user buffer at a virtual address chosen by an attacker.
+
+Some non-POSIX single address space operating systems do allow certain
+privileged software to partially execute in supervisor mode, while most
+programs run in user mode, all in a shared address space.  This use case can
+be realized by mapping the physical code pages at multiple virtual addresses
+with different permissions, possibly with the assistance of the
+instruction page-fault handler to direct supervisor software to use the
+alternate mapping.
+\end{commentary}
+
+\subsubsection{Endianness Control in {\tt sstatus} Register}
+
+The UBE bit is a \warl\ field that controls the endianness of explicit
+memory accesses made from U-mode, which may differ from the endianness of
+memory accesses in S-mode.
+An implementation may make UBE be a read-only field that always specifies
+the same endianness as for S-mode.
+
+UBE controls whether explicit
+load and store memory accesses made from U-mode are little-endian (UBE=0)
+or big-endian (UBE=1).
+
+UBE has no effect on instruction fetches, which are {\em implicit} memory
+accesses that are always little-endian.
+
+For {\em implicit} accesses to supervisor-level memory management data
+structures, such as page tables, S-mode endianness always applies and UBE
+is ignored.
+
+\begin{commentary}
+Standard RISC-V ABIs are expected to be purely little-endian-only or
+big-endian-only, with no accommodation for mixing endianness.
+Nevertheless, endianness control has been defined so as to permit an
+OS of one endianness to execute user-mode programs of the opposite
+endianness.
+\end{commentary}
+
+\subsection{Supervisor Trap Vector Base Address Register ({\tt stvec})}
+
+The {\tt stvec} register is an SXLEN-bit read/write register that holds
+trap vector configuration, consisting of a vector base address (BASE) and a
+vector mode (MODE).
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{J@{}R}
+\instbitrange{SXLEN-1}{2} &
+\instbitrange{1}{0} \\
+\hline
+\multicolumn{1}{|c|}{BASE[SXLEN-1:2] (\warl)} &
+\multicolumn{1}{c|}{MODE (\warl)} \\
+\hline
+SXLEN-2 & 2 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor trap vector base address register ({\tt stvec}).}
+\label{stvecreg}
+\end{figure*}
+
+The BASE field in {\tt stvec} is a \warl\ field that can hold any valid
+virtual or physical address, subject to the following alignment constraints:
+the address must be 4-byte aligned, and MODE settings other than Direct might
+impose additional alignment constraints on the value in the BASE field.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|r|c|l|}
+\hline
+Value & Name & Description \\
+\hline
+0      & Direct   & All exceptions set {\tt pc} to BASE. \\
+1      & Vectored & Asynchronous interrupts set {\tt pc} to BASE+4$\times$cause. \\
+$\ge$2 & --- & {\em Reserved} \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encoding of {\tt stvec} MODE field.}
+\label{stvec-mode}
+\end{table*}
+
+The encoding of the MODE field is shown in Table~\ref{stvec-mode}.  When
+MODE=Direct, all traps into supervisor mode cause the {\tt pc} to be set to the
+address in the BASE field.  When MODE=Vectored, all synchronous exceptions
+into supervisor mode cause the {\tt pc} to be set to the address in the BASE
+field, whereas interrupts cause the {\tt pc} to be set to the address in
+the BASE field plus four times the interrupt cause number.  For example,
+a supervisor-mode timer interrupt (see Table~\ref{scauses}) causes the {\tt pc}
+to be set to BASE+{\tt 0x14}.
+Setting MODE=Vectored may impose a stricter alignment constraint on BASE.
+
+\subsection{Supervisor Interrupt Registers ({\tt sip} and {\tt sie})}
+
+The {\tt sip} register is an SXLEN-bit read/write register containing
+information on pending interrupts, while {\tt sie} is the corresponding
+SXLEN-bit read/write register containing interrupt enable bits.
+Interrupt cause number \textit{i} (as reported in CSR {\tt scause},
+Section~\ref{sec:scause}) corresponds with bit~\textit{i} in both
+{\tt sip} and {\tt sie}.
+Bits 15:0 are allocated to standard interrupt causes only, while bits 16
+and above are designated for platform or custom use.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{SXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
+\hline
+SXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor interrupt-pending register ({\tt sip}).}
+\label{sipreg}
+\end{figure}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{SXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{Interrupts (\warl)} \\
+\hline
+SXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor interrupt-enable register ({\tt sie}).}
+\label{siereg}
+\end{figure}
+
+An interrupt~\textit{i} will trap to S-mode if both of the
+following are true:
+(a)~either the current privilege mode is S and the SIE bit in the
+{\tt sstatus} register is set, or the current privilege mode has less
+privilege than S-mode; and
+(b)~bit~\textit{i} is set in both {\tt sip} and {\tt sie}.
+
+These conditions for an interrupt trap to occur must be evaluated in a bounded
+amount of time from when an interrupt becomes, or ceases to be,
+pending in {\tt sip}, and must
+also be evaluated immediately following the execution of an SRET instruction
+or an explicit write to a CSR on which these interrupt trap conditions
+expressly depend (including {\tt sip}, {\tt sie} and {\tt sstatus}).
+
+Interrupts to S-mode take priority over any interrupts to lower privilege
+modes.
+
+Each individual bit in register {\tt sip} may be writable or may be
+read-only.
+When bit~\textit{i} in {\tt sip} is writable, a pending interrupt
+\textit{i} can be cleared by writing 0 to this bit.
+If interrupt \textit{i} can become pending but bit~\textit{i} in
+{\tt sip} is read-only, the implementation must provide some other
+mechanism for clearing the pending interrupt (which may involve a call to
+the execution environment).
+
+A bit in {\tt sie} must be writable if the corresponding interrupt can
+ever become pending.
+Bits of {\tt sie} that are not writable are read-only zero.
+
+The standard portions (bits 15:0) of registers {\tt sip} and {\tt sie}
+are formatted as shown in Figures \ref{sipreg-standard} and
+\ref{siereg-standard} respectively.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ScFcFcc}
+\instbitrange{15}{10} &
+\instbit{9} &
+\instbitrange{8}{6} &
+\instbit{5} &
+\instbitrange{4}{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SEIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{STIP} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{SSIP} &
+\multicolumn{1}{c|}{0} \\
+\hline
+6 & 1 & 3 & 1 & 3 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt sip}.}
+\label{sipreg-standard}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ScFcFcc}
+\instbitrange{15}{10} &
+\instbit{9} &
+\instbitrange{8}{6} &
+\instbit{5} &
+\instbitrange{4}{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{0} &
+\multicolumn{1}{c|}{SEIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{STIE} &
+\multicolumn{1}{c|}{0} &
+\multicolumn{1}{c|}{SSIE} &
+\multicolumn{1}{c|}{0} \\
+\hline
+6 & 1 & 3 & 1 & 3 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Standard portion (bits 15:0) of {\tt sie}.}
+\label{siereg-standard}
+\end{figure*}
+
+Bits {\tt sip}.SEIP and {\tt sie}.SEIE are the interrupt-pending and
+interrupt-enable bits for supervisor-level external interrupts.
+If implemented, SEIP is read-only in {\tt sip}, and is set and cleared by
+the execution environment, typically through a platform-specific
+interrupt controller.
+
+Bits {\tt sip}.STIP and {\tt sie}.STIE are the interrupt-pending and
+interrupt-enable bits for supervisor-level timer interrupts.
+If implemented, STIP is read-only in {\tt sip}, and is set and cleared by
+the execution environment.
+
+Bits {\tt sip}.SSIP and {\tt sie}.SSIE are the interrupt-pending and
+interrupt-enable bits for supervisor-level software interrupts.
+If implemented, SSIP is writable in {\tt sip} and may also be set
+to 1 by a platform-specific interrupt controller.
+
+\begin{commentary}
+Interprocessor interrupts are sent to other harts by implementation-specific
+means, which will ultimately cause the SSIP bit to be set in the recipient
+hart's {\tt sip} register.
+\end{commentary}
+
+Each standard interrupt type (SEI, STI, or SSI) may not be implemented,
+in which case the corresponding interrupt-pending and interrupt-enable
+bits are read-only zeros.
+All bits in {\tt sip} and {\tt sie} are \warl\ fields.
+The implemented interrupts may be found by writing one to every bit
+location in {\tt sie}, then reading back to see which bit positions hold
+a one.
+
+\begin{commentary}
+The {\tt sip} and {\tt sie} registers are subsets of the {\tt mip} and {\tt
+mie} registers.  Reading any implemented field,
+or writing any writable field, of {\tt sip}/{\tt sie}
+effects a read or write of the homonymous field of {\tt mip}/{\tt mie}.
+
+Bits 3, 7, and 11 of {\tt sip} and {\tt sie} correspond to the machine-mode
+software, timer, and external interrupts, respectively.  Since most platforms
+will choose not to make these interrupts delegatable from M-mode to S-mode,
+they are shown as 0 in Figures~\ref{sipreg-standard} and
+\ref{siereg-standard}.
+\end{commentary}
+
+Multiple simultaneous
+interrupts destined for supervisor mode are handled in the following
+decreasing priority order: SEI, SSI, STI.
+
+\subsection{Supervisor Timers and Performance Counters}
+
+Supervisor software uses the same hardware performance monitoring facility
+as user-mode software, including the {\tt time}, {\tt cycle}, and {\tt instret}
+CSRs.  The implementation should provide a mechanism to modify the
+counter values.
+
+The implementation must provide a facility for scheduling timer interrupts in
+terms of the real-time counter, {\tt time}.
+
+\subsection{Counter-Enable Register ({\tt scounteren})}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{cccMcccccc}
+\instbit{31} &
+\instbit{30} &
+\instbit{29} &
+\instbitrange{28}{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{HPM31} &
+\multicolumn{1}{c|}{HPM30} &
+\multicolumn{1}{c|}{HPM29} &
+\multicolumn{1}{c|}{...} &
+\multicolumn{1}{c|}{HPM5} &
+\multicolumn{1}{c|}{HPM4} &
+\multicolumn{1}{c|}{HPM3} &
+\multicolumn{1}{c|}{IR} &
+\multicolumn{1}{c|}{TM} &
+\multicolumn{1}{c|}{CY} \\
+\hline
+1 & 1 & 1 & 23 & 1 & 1 & 1 & 1 & 1 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Counter-enable register ({\tt scounteren}).}
+\label{scounteren}
+\end{figure*}
+
+The counter-enable register {\tt scounteren} is a 32-bit register that
+controls the availability of the hardware performance monitoring counters to
+U-mode.
+
+When the CY, TM, IR, or HPM{\em n} bit in the {\tt scounteren} register is
+clear, attempts to read the {\tt cycle}, {\tt time}, {\tt instret}, or
+{\tt hpmcounter{\em n}} register while executing in U-mode
+will cause an illegal instruction exception.  When one of these bits is set,
+access to the corresponding register is permitted.
+
+{\tt scounteren} must be implemented.  However, any of the bits may be
+read-only zero, indicating reads to the corresponding counter will
+cause an exception when executing in U-mode.
+Hence, they are effectively \warl\ fields.
+
+\begin{commentary}
+The setting of a bit in {\tt mcounteren} does not affect whether the
+corresponding bit in {\tt scounteren} is writable.
+However, U-mode may only access a counter if the corresponding bits in {\tt
+scounteren} and {\tt mcounteren} are both set.
+\end{commentary}
+
+\subsection{Supervisor Scratch Register ({\tt sscratch})}
+
+The {\tt sscratch} register is an SXLEN-bit read/write register,
+dedicated for use by the supervisor.  Typically, {\tt sscratch} is
+used to hold a pointer to the hart-local supervisor context while the
+hart is executing user code.  At the beginning of a trap handler, {\tt
+  sscratch} is swapped with a user register to provide an initial
+working register.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{SXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt sscratch} \\
+\hline
+SXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor Scratch Register.}
+\label{kregs}
+\end{figure}
+
+\subsection{Supervisor Exception Program Counter ({\tt sepc})}
+
+{\tt sepc} is an SXLEN-bit read/write register formatted as shown in
+Figure~\ref{epcreg}.  The low bit of {\tt sepc} ({\tt sepc[0]}) is
+always zero.  On implementations that support only IALIGN=32, the two low bits
+({\tt sepc[1:0]}) are always zero.
+
+If an implementation allows IALIGN to be either 16 or 32 (by
+changing CSR {\tt misa}, for example), then, whenever IALIGN=32, bit
+{\tt sepc[1]} is masked on reads so that it appears to be 0.  This
+masking occurs also for the implicit read by the SRET instruction.
+Though masked, {\tt sepc[1]} remains writable when IALIGN=32.
+
+{\tt sepc} is a \warl\ register that must be able to hold all valid
+virtual addresses.  It need not be capable of holding all possible invalid
+addresses.
+Prior to writing {\tt sepc}, implementations may convert an invalid address
+into some other invalid address that {\tt sepc} is capable of holding.
+
+When a trap is taken into S-mode, {\tt sepc} is written with the
+virtual address of the instruction that was interrupted or that
+encountered the exception.  Otherwise, {\tt sepc} is never written by
+the implementation, though it may be explicitly written by software.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{SXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt sepc} \\
+\hline
+SXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor exception program counter register.}
+\label{epcreg}
+\end{figure}
+
+\subsection{Supervisor Cause Register ({\tt scause})}
+\label{sec:scause}
+
+The {\tt scause} register is an SXLEN-bit read-write register formatted as
+shown in Figure~\ref{scausereg}.  When a trap is taken into S-mode, {\tt
+scause} is written with a code indicating the event that caused the trap.
+Otherwise, {\tt scause} is never written by the implementation, though it may be
+explicitly written by software.
+
+The Interrupt bit in the {\tt scause} register is set if the
+trap was caused by an interrupt. The Exception Code field
+contains a code identifying the last exception or interrupt.  Table~\ref{scauses}
+lists the possible exception codes for the current supervisor ISAs.
+The Exception Code is a \wlrl\ field.  It is required to hold
+the values 0--31 (i.e., bits 4--0 must be implemented), but otherwise
+it is only guaranteed to hold supported exception codes.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{c@{}U}
+\instbit{SXLEN-1} &
+\instbitrange{SXLEN-2}{0} \\
+\hline
+\multicolumn{1}{|c|}{Interrupt} &
+\multicolumn{1}{c|}{Exception Code (\wlrl)} \\
+\hline
+1 & SXLEN-1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor Cause register {\tt scause}.}
+\label{scausereg}
+\end{figure*}
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|r|r|l|l|}
+
+  \hline
+  Interrupt & Exception Code  & Description \\
+  \hline
+  1         & 0               & {\em Reserved} \\
+  1         & 1               & Supervisor software interrupt \\
+  1         & 2--4            & {\em Reserved} \\
+  1         & 5               & Supervisor timer interrupt \\
+  1         & 6--8            & {\em Reserved} \\
+  1         & 9               & Supervisor external interrupt \\
+  1         & 10--15          & {\em Reserved} \\
+  1         & $\ge$16         & {\em Designated for platform use} \\ \hline
+  0         & 0               & Instruction address misaligned \\
+  0         & 1               & Instruction access fault \\
+  0         & 2               & Illegal instruction \\
+  0         & 3               & Breakpoint \\
+  0         & 4               & Load address misaligned \\
+  0         & 5               & Load access fault \\
+  0         & 6               & Store/AMO address misaligned \\
+  0         & 7               & Store/AMO access fault \\
+  0         & 8               & Environment call from U-mode \\
+  0         & 9               & Environment call from S-mode \\
+  0         & 10--11          & {\em Reserved} \\
+  0         & 12              & Instruction page fault \\
+  0         & 13              & Load page fault \\
+  0         & 14              & {\em Reserved} \\
+  0         & 15              & Store/AMO page fault \\
+  0         & 16--23          & {\em Reserved} \\
+  0         & 24--31          & {\em Designated for custom use} \\
+  0         & 32--47          & {\em Reserved} \\
+  0         & 48--63          & {\em Designated for custom use} \\
+  0         & $\ge$64         & {\em Reserved} \\
+  \hline
+\end{tabular}
+\end{center}
+\caption{Supervisor cause register ({\tt scause}) values after trap.
+Synchronous exception priorities are given by Table~\ref{exception-priority}.}
+\label{scauses}
+\end{table*}
+
+\subsection{Supervisor Trap Value ({\tt stval}) Register}
+
+The {\tt stval} register is an SXLEN-bit read-write register formatted as shown
+in Figure~\ref{stvalreg}.  When a trap is taken into S-mode, {\tt stval} is
+written with exception-specific information to assist software in handling the
+trap.  Otherwise, {\tt stval} is never written by the implementation, though
+it may be explicitly written by software.  The hardware platform will specify
+which exceptions must set {\tt stval} informatively and which may
+unconditionally set it to zero.
+
+
+If {\tt stval} is written with a nonzero value when a breakpoint,
+address-misaligned, access-fault, or page-fault exception occurs on an
+instruction fetch, load, or store, then {\tt stval} will contain the faulting
+virtual address.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}J}
+\instbitrange{SXLEN-1}{0} \\
+\hline
+\multicolumn{1}{|c|}{\tt stval} \\
+\hline
+SXLEN \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor Trap Value register.}
+\label{stvalreg}
+\end{figure}
+
+If {\tt stval} is written with a nonzero value when a misaligned load or store
+causes an access-fault or page-fault exception, then {\tt stval} will contain
+the virtual address of the portion of the access that caused the fault.
+
+If {\tt stval} is written with a nonzero value when an instruction access-fault
+or page-fault exception occurs on a system with variable-length instructions,
+then {\tt stval} will contain the virtual address of the portion of the
+instruction that caused the fault, while {\tt sepc} will point to the beginning
+of the instruction.
+
+The {\tt stval} register can optionally also be used to return the faulting
+instruction bits on an illegal instruction exception ({\tt sepc} points to the
+faulting instruction in memory).
+If {\tt stval} is written with a nonzero value when an illegal-instruction
+exception occurs, then {\tt stval} will contain the shortest of:
+\begin{compactitem}
+\item the actual faulting instruction
+\item the first ILEN bits of the faulting instruction
+\item the first SXLEN bits of the faulting instruction
+\end{compactitem}
+The value loaded into {\tt stval} on an illegal-instruction exception is
+right-justified and all unused upper bits are cleared to zero.
+
+For other traps, {\tt stval} is set to zero, but a future standard may
+redefine {\tt stval}'s setting for other traps.
+
+{\tt stval} is a \warl\ register that must be able to hold all valid
+virtual addresses and the value 0.  It need not be capable of holding all
+possible invalid addresses.
+Prior to writing {\tt stval}, implementations may convert an invalid address
+into some other invalid address that {\tt stval} is capable of holding.
+If the feature to return the faulting instruction bits is implemented, {\tt
+stval} must also be able to hold all values less than $2^N$, where $N$ is the
+smaller of SXLEN and ILEN.
+
+\subsection{Supervisor Environment Configuration Register ({\tt senvcfg})}
+
+The {\tt senvcfg} CSR is an SXLEN-bit read/write register,
+formatted as shown in Figure~\ref{fig:senvcfg},
+that controls certain characteristics of the U-mode execution environment.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}Kcc@{}W@{}Wc}
+\instbitrange{SXLEN-1}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbitrange{5}{4} &
+\instbitrange{3}{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{\wpri} &
+\multicolumn{1}{c|}{CBZE} &
+\multicolumn{1}{c|}{CBCFE} &
+\multicolumn{1}{c|}{CBIE} &
+\multicolumn{1}{c|}{\wpri} &
+\multicolumn{1}{c|}{FIOM} \\
+\hline
+SXLEN-8 & 1 & 1 & 2 & 3 & 1 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Supervisor environment configuration register ({\tt senvcfg}).}
+\label{fig:senvcfg}
+\end{figure}
+
+If bit FIOM (Fence of I/O implies Memory) is set to one in {\tt senvcfg},
+FENCE instructions executed in U-mode are modified so
+the requirement to order accesses to device I/O implies also the requirement
+to order main memory accesses.
+Table~\ref{tab:senvcfg-FIOM} details the modified interpretation of
+FENCE instruction bits PI, PO, SI, and SO in U-mode when FIOM=1.
+
+Similarly, for U-mode when FIOM=1,
+if an atomic instruction that accesses a region ordered as device I/O
+has its {\em aq} and/or {\em rl} bit set, then that instruction is ordered
+as though it accesses both device I/O and memory.
+
+If {\tt satp}.MODE is read-only zero (always Bare), the implementation may make FIOM read-only zero.
+
+\begin{table}[h!]
+\begin{center}
+\begin{tabular}{|c|l|}
+\hline
+Instruction bit & Meaning when set \\
+\hline
+PI & Predecessor device input and memory reads   (PR implied) \\
+PO & Predecessor device output and memory writes (PW implied) \\
+\hline
+SI & Successor device input and memory reads     (SR implied) \\
+SO & Successor device output and memory writes   (SW implied) \\
+\hline
+\end{tabular}
+\end{center}
+\vspace{-0.1in}
+\caption{%
+Modified interpretation of FENCE predecessor and successor sets in U-mode when FIOM=1.}
+\label{tab:senvcfg-FIOM}
+\end{table}
+
+\begin{commentary}
+Bit FIOM exists for a specific circumstance when an I/O device is
+being emulated for U-mode and both of the following are true:
+(a)~the emulated device has a memory buffer that should be I/O space
+but is actually mapped to main memory via address translation, and
+(b)~multiple physical harts are involved in accessing this emulated
+device from U-mode.
+
+A hypervisor running in S-mode without the benefit of the hypervisor
+extension of Chapter~\ref{hypervisor} may need to emulate a device for
+U-mode if paravirtualization cannot be employed.
+If the same hypervisor provides a virtual machine (VM) with multiple
+virtual harts, mapped one-to-one to real harts, then multiple harts may
+concurrently access the emulated device, perhaps because:
+(a)~the guest OS within the VM assigns device interrupt handling to one
+hart while the device is also accessed by a different hart outside of
+an interrupt handler, or
+(b)~control of the device (or partial control) is being migrated
+from one hart to another, such as for interrupt load balancing within
+the VM.
+For such cases, guest software within the VM is expected to properly
+coordinate access to the (emulated) device across multiple harts using
+mutex locks and/or interprocessor interrupts as usual, which in part
+entails executing I/O fences.
+But those I/O fences may not be sufficient if some of the device
+``I/O'' is actually main memory, unknown to the guest.
+Setting FIOM=1 modifies those fences (and all other I/O fences executed
+in U-mode) to include main memory, too.
+
+Software can always avoid the need to set FIOM by never using main
+memory to emulate a device memory buffer that should be I/O space.
+However, this choice usually requires trapping all U-mode accesses
+to the emulated buffer, which might have a noticeable impact on
+performance.
+The alternative offered by FIOM is sufficiently inexpensive to implement that
+we consider it worth supporting even if only rarely enabled.
+\end{commentary}
+
+
+The definition of the CBZE field will be furnished by the
+forthcoming Zicboz extension.
+Its allocation within {\tt senvcfg} may change prior to the ratification
+of that extension.
+
+The definitions of the CBCFE and CBIE fields will be furnished by the
+forthcoming Zicbom extension.
+Their allocations within {\tt senvcfg} may change prior to the ratification
+of that extension.
+
+\subsection{Supervisor Address Translation and Protection ({\tt satp}) Register}
+\label{sec:satp}
+
+The {\tt satp} register is an SXLEN-bit read/write register, formatted as shown
+in Figure~\ref{rv32satp} for SXLEN=32 and Figure~\ref{rv64satp} for SXLEN=64, which
+controls supervisor-mode address translation and protection.
+This register holds the physical page number (PPN) of the root page
+table, i.e., its supervisor physical address divided by \wunits{4}{KiB};
+an address space identifier (ASID), which facilitates address-translation
+fences on a per-address-space basis; and the MODE field, which selects the
+current address-translation scheme. Further details on the access to this
+register are described in Section~\ref{virt-control}.
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{c@{}E@{}K}
+\instbit{31} &
+\instbitrange{30}{22} &
+\instbitrange{21}{0} \\
+\hline
+\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
+\multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
+\multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
+\hline
+1 & 9 & 22 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{%
+Supervisor address translation and protection register {\tt satp}
+when SXLEN=32.%
+}
+\label{rv32satp}
+\end{figure}
+
+\begin{commentary}
+Storing a PPN in {\tt satp}, rather than a physical address, supports
+a physical address space larger than \wunits{4}{GiB} for RV32.
+
+The {\tt satp}.PPN field might not be capable of holding all physical page
+numbers.
+Some platform standards might place constraints on the values {\tt satp}.PPN
+may assume, e.g., by requiring that all physical page numbers corresponding to
+main memory be representable.
+\end{commentary}
+
+\begin{figure}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}S@{}T@{}U}
+\instbitrange{63}{60} &
+\instbitrange{59}{44} &
+\instbitrange{43}{0} \\
+\hline
+\multicolumn{1}{|c|}{{\tt MODE} (\warl)} &
+\multicolumn{1}{|c|}{{\tt ASID} (\warl)} &
+\multicolumn{1}{|c|}{{\tt PPN}  (\warl)} \\
+\hline
+4 & 16 & 44 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{%
+Supervisor address translation and protection register {\tt satp}
+when SXLEN=64, for MODE values Bare, Sv39, Sv48, and Sv57.%
+}
+\label{rv64satp}
+\end{figure}
+
+\begin{commentary}
+We store the ASID and the page table base address in the same CSR to allow the
+pair to be changed atomically on a context switch.  Swapping them
+non-atomically could pollute the old virtual address space with new
+translations, or vice-versa.  This approach also slightly reduces the cost of
+a context switch.
+\end{commentary}
+
+Table~\ref{tab:satp-mode} shows the encodings of the MODE field when SXLEN=32 and
+SXLEN=64.  When MODE=Bare, supervisor virtual addresses are equal to
+supervisor physical addresses, and there is no additional memory protection
+beyond the physical memory protection scheme described in
+Section~\ref{sec:pmp}.
+To select MODE=Bare, software must write zero to the remaining fields of
+{\tt satp} (bits 30--0 when SXLEN=32, or bits 59--0 when SXLEN=64).
+Attempting to select MODE=Bare with a nonzero pattern in the remaining fields
+has an \unspecified\ effect on the value that the remaining fields assume
+and an \unspecified\ effect on address translation and protection behavior.
+
+When SXLEN=32, the {\tt satp} encodings corresponding to MODE=Bare and ASID[8:7]=3 are designated
+for custom use, whereas the encodings corresponding to MODE=Bare and ASID[8:7]$\ne$3 are
+reserved for future standard use.
+When SXLEN=64, all {\tt satp} encodings corresponding to MODE=Bare are reserved for future
+standard use.
+
+\begin{commentary}
+Version 1.11 of this standard stated that the remaining fields in {\tt satp}
+had no effect when MODE=Bare.
+Making these fields reserved facilitates future definition of
+additional translation and protection modes, particularly in RV32, for which
+all patterns of the existing MODE field have already been allocated.
+\end{commentary}
+
+When SXLEN=32, the only other valid setting for MODE is Sv32, a paged
+virtual-memory scheme described in Section~\ref{sec:sv32}.
+
+When SXLEN=64, three paged virtual-memory schemes are defined: Sv39, Sv48, and Sv57,
+described in Sections~\ref{sec:sv39}, \ref{sec:sv48}, and \ref{sec:sv57}, respectively.
+One additional scheme, Sv64, will be defined in a later version
+of this specification.  The remaining MODE settings are reserved
+for future use and may define different interpretations of the other fields in
+{\tt satp}.
+
+Implementations are not required to support all MODE settings,
+and if {\tt satp} is written with an unsupported MODE, the entire write has
+no effect; no fields in {\tt satp} are modified.
+
+\begin{table}[h]
+\begin{center}
+\begin{tabular}{|c|c|l|}
+\hline
+\multicolumn{3}{|c|}{SXLEN=32} \\
+\hline
+Value  & Name & Description \\
+\hline
+0       & Bare  & No translation or protection. \\
+1       & Sv32  & Page-based 32-bit virtual addressing (see Section~\ref{sec:sv32}). \\
+\hline \hline
+\multicolumn{3}{|c|}{SXLEN=64} \\
+\hline
+Value  & Name & Description \\
+\hline
+0       & Bare  & No translation or protection. \\
+1--7    & ---   & {\em Reserved for standard use} \\
+8       & Sv39  & Page-based 39-bit virtual addressing (see Section~\ref{sec:sv39}). \\
+9       & Sv48  & Page-based 48-bit virtual addressing (see Section~\ref{sec:sv48}). \\
+10      & Sv57  & Page-based 57-bit virtual addressing (see Section~\ref{sec:sv57}). \\
+11      & {\em Sv64} & {\em Reserved for page-based 64-bit virtual addressing.} \\
+12--13  & ---   & {\em Reserved for standard use} \\
+14--15  & ---   & {\em Designated for custom use} \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encoding of {\tt satp} MODE field.}
+\label{tab:satp-mode}
+\end{table}
+
+The number of ASID bits is \unspecified\ and may be zero.  The
+number of implemented ASID bits, termed {\mbox {\em ASIDLEN}}, may be
+determined by writing one to every bit position in the ASID field, then
+reading back the value in {\tt satp} to see which bit positions in the ASID
+field hold a one.  The least-significant bits of ASID are implemented first:
+that is, if ASIDLEN~$>$~0, ASID[ASIDLEN-1:0] is writable.  The maximal value
+of ASIDLEN, termed ASIDMAX, is 9 for Sv32 or 16 for Sv39, Sv48, and Sv57.
+
+\begin{commentary}
+For many applications, the choice of page size has a substantial
+performance impact.  A large page size increases TLB reach and loosens
+the associativity constraints on virtually indexed, physically tagged
+caches.  At the same time, large pages exacerbate internal
+fragmentation, wasting physical memory and possibly cache capacity.
+
+After much deliberation, we have settled on a conventional page size
+of 4 KiB for both RV32 and RV64.  We expect this decision to ease the
+porting of low-level runtime software and device drivers.  The TLB
+reach problem is ameliorated by transparent superpage support in
+modern operating systems~\cite{transparent-superpages}.  Additionally,
+multi-level TLB hierarchies are quite inexpensive relative to the
+multi-level cache hierarchies whose address space they map.
+\end{commentary}
+
+The {\tt satp} register is considered {\em active} when the effective
+privilege mode is S-mode or U-mode.
+Executions of the
+address-translation algorithm may only begin using a given value of {\tt satp}
+when {\tt satp} is active.
+
+\begin{commentary}
+Translations that began while {\tt satp} was active are not required to
+complete or terminate when {\tt satp} is no longer active, unless an
+SFENCE.VMA instruction matching the address and ASID is executed.  The
+SFENCE.VMA instruction must be used to ensure that updates to the
+address-translation data structures are observed by subsequent implicit reads
+to those structures by a hart.
+\end{commentary}
+
+Note that writing {\tt satp} does not imply any ordering constraints
+between page-table updates and subsequent address translations, nor does
+it imply any invalidation of address-translation caches.
+If the new address space's page tables have been modified, or if an
+ASID is reused, it may be necessary to execute an SFENCE.VMA instruction
+(see Section~\ref{sec:sfence.vma}) after, or in some cases before,
+writing {\tt satp}.
+
+\begin{commentary}
+Not imposing upon implementations to flush address-translation caches
+upon {\tt satp} writes reduces the cost of context switches, provided
+a sufficiently large ASID space.
+\end{commentary}
+
+\section{Supervisor Instructions}
+
+In addition to the SRET instruction defined in
+Section~\ref{otherpriv}, one new supervisor-level instruction is
+provided.
+
+\subsection{Supervisor Memory-Management Fence Instruction}
+\label{sec:sfence.vma}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+SFENCE.VMA & asid & vaddr & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+The supervisor memory-management fence instruction SFENCE.VMA is used to
+synchronize updates to in-memory memory-management data structures with
+current execution.  Instruction execution causes implicit reads and writes to
+these data structures; however, these implicit references are ordinarily not
+ordered with respect to explicit loads and stores.  Executing
+an SFENCE.VMA instruction guarantees that any previous stores already visible
+to the current RISC-V hart are ordered before certain implicit references by
+subsequent instructions in that hart to the memory-management data structures.
+The specific set of operations ordered by SFENCE.VMA is
+determined by {\em rs1} and {\em rs2}, as described below.
+SFENCE.VMA is also used to invalidate entries in the
+address-translation cache associated with a hart (see
+Section~\ref{sv32algorithm}).
+Further details on the behavior of this instruction are
+described in Section~\ref{virt-control} and Section~\ref{pmp-vmem}.
+
+\begin{commentary}
+The SFENCE.VMA is used to flush any local hardware caches related to
+address translation.  It is specified as a fence rather than a TLB
+flush to provide cleaner semantics with respect to which instructions
+are affected by the flush operation and to support a wider variety of
+dynamic caching structures and memory-management schemes.  SFENCE.VMA
+is also used by higher privilege levels to synchronize page table
+writes and the address translation hardware.
+\end{commentary}
+
+SFENCE.VMA orders only the local hart's implicit references to the
+memory-management data structures.
+
+\begin{commentary}
+Consequently, other harts must be notified separately when the
+memory-management data structures have been modified.
+One approach is to use 1)
+a local data fence to ensure local writes are visible globally, then
+2) an interprocessor interrupt to the other thread, then 3) a local
+SFENCE.VMA in the interrupt handler of the remote thread, and finally
+4) signal back to originating thread that operation is complete.  This
+is, of course, the RISC-V analog to a TLB shootdown.
+\end{commentary}
+
+For the common case that the translation data structures have only been
+modified for a single address mapping (i.e., one page or superpage), {\em rs1}
+can specify a virtual address within that mapping to effect a translation
+fence for that mapping only.  Furthermore, for the common case that the
+translation data structures have only been modified for a single address-space
+identifier, {\em rs2} can specify the address space.  The behavior of
+SFENCE.VMA depends on {\em rs1} and {\em rs2} as follows:
+
+\begin{itemize}
+\item If {\em rs1}={\tt x0} and {\em rs2}={\tt x0}, the fence orders all
+      reads and writes made to any level of the page tables, for all
+      address spaces.  The fence also invalidates all address-translation
+      cache entries, for all address spaces.
+\item If {\em rs1}={\tt x0} and {\em rs2}$\neq${\tt x0}, the fence orders
+      all reads and writes made to any level of the page tables, but only
+      for the address space identified by integer register {\em rs2}.
+      Accesses to {\em global} mappings (see Section~\ref{sec:translation})
+      are not ordered.  The fence also invalidates all address-translation
+      cache entries matching the address space identified by integer register
+      {\em rs2}, except for entries containing global mappings.
+\item If {\em rs1}$\neq${\tt x0} and {\em rs2}={\tt x0}, the fence orders
+      only reads and writes made to leaf page table entries corresponding
+      to the virtual address in {\em rs1}, for all address spaces.
+      The fence also invalidates all address-translation cache entries that
+      contain leaf page table entries corresponding to the virtual address
+      in {\em rs1}, for all address spaces.
+\item If {\em rs1}$\neq${\tt x0} and {\em rs2}$\neq${\tt x0}, the fence
+      orders only reads and writes made to leaf page table entries
+      corresponding to the virtual address in {\em rs1}, for the address
+      space identified by integer register {\em rs2}.
+      Accesses to global mappings are not ordered.  The fence also
+      invalidates all address-translation cache entries that contain leaf
+      page table entries corresponding to the virtual address in {\em rs1}
+      and that match the address space identified by integer register {\em
+      rs2}, except for entries containing global mappings.
+\end{itemize}
+
+If the value held in {\em rs1} is not a valid virtual address, then the
+SFENCE.VMA instruction has no effect.  No exception is raised in this case.
+
+When {\em rs2}$\neq${\tt x0}, bits SXLEN-1:ASIDMAX of the value held in {\em
+rs2} are reserved for future standard use.  Until their use is defined by a
+standard extension, they should be zeroed by software and ignored
+by current implementations.  Furthermore, if ASIDLEN~$<$~ASIDMAX, the
+implementation shall ignore bits ASIDMAX-1:ASIDLEN of the value held in {\em
+rs2}.
+
+\begin{commentary}
+It is always legal to over-fence, e.g., by fencing only based on a subset
+of the bits in {\em rs1} and/or {\em rs2}, and/or by simply treating all
+SFENCE.VMA instructions as having {\em rs1}={\tt x0} and/or
+{\em rs2}={\tt x0}.  For example, simpler implementations can ignore the
+virtual address in {\em rs1} and the ASID value in {\em rs2} and always perform
+a global fence.  The choice not to raise an exception when an invalid virtual
+address is held in {\em rs1} facilitates this type of simplification.
+\end{commentary}
+
+An implicit read of the memory-management data structures may return any
+translation for an address that was valid at
+any time since the most recent SFENCE.VMA that subsumes that address.  The
+ordering implied by SFENCE.VMA does not place implicit reads and writes to the
+memory-management data structures into the global memory order in a way that
+interacts cleanly with the standard RVWMO ordering rules.  In particular, even
+though an SFENCE.VMA orders prior explicit accesses before subsequent implicit
+accesses, and those implicit accesses are ordered before their associated
+explicit accesses, SFENCE.VMA does not necessarily place prior explicit
+accesses before subsequent explicit accesses in the global memory order.  These
+implicit loads also need not otherwise obey normal program order semantics with
+respect to prior loads or stores to the same address.
+
+\begin{commentary}
+A consequence of this specification is that an implementation may use any
+translation for an address that was valid at any time since the most recent
+SFENCE.VMA that subsumes that address.
+In particular, if a leaf PTE is modified but a subsuming SFENCE.VMA is not
+executed, either the old translation or the new translation will be used, but
+the choice is unpredictable.
+The behavior is otherwise well-defined.
+
+In a conventional TLB design, it is possible for multiple entries to match a
+single address if, for example, a page is upgraded to a superpage without first
+clearing the original non-leaf PTE's valid bit and executing an SFENCE.VMA with
+{\em rs1}={\tt x0}.
+In this case, a similar remark applies: it is unpredictable whether the old
+non-leaf PTE or the new leaf PTE is used, but the behavior is otherwise well
+defined.
+
+Another consequence of this specification is that it is generally unsafe to
+update a PTE using a set of stores of a width less than the width of the PTE,
+as it is legal for the implementation to read the PTE at any time, including
+when only some of the partial stores have taken effect.
+\end{commentary}
+
+\begin{commentary}
+This specification permits the caching of PTEs whose V (Valid) bit is clear.
+Operating systems must be written to cope with this possibility, but implementers
+are reminded that eagerly caching invalid PTEs will reduce performance by causing
+additional page faults.
+\end{commentary}
+
+Implementations must only perform implicit reads of the translation
+data structures pointed to by the current contents of the {\tt satp}
+register or a subsequent valid (V=1) translation data structure entry,
+and must only raise exceptions for implicit accesses that are
+generated as a result of instruction execution, not those that are
+performed speculatively.
+
+Changes to the {\tt sstatus} fields SUM and MXR take effect immediately,
+without the need to execute an SFENCE.VMA instruction.
+Changing {\tt satp}.MODE from Bare to other modes and vice versa also
+takes effect immediately, without the need to execute an SFENCE.VMA
+instruction.
+Likewise, changes to {\tt satp}.ASID take effect immediately.
+
+\begin{commentary}
+The following common situations typically require executing an
+SFENCE.VMA instruction:
+
+\vspace{-0.1in}
+\begin{itemize}
+
+\item When software recycles an ASID (i.e., reassociates it with a different
+page table), it should {\em first} change {\tt satp} to point to the new page
+table using the recycled ASID, {\em then} execute SFENCE.VMA with {\em
+rs1}={\tt x0} and {\em rs2} set to the recycled ASID.  Alternatively, software
+can execute the same SFENCE.VMA instruction while a different ASID is loaded
+into {\tt satp}, provided the next time {\tt satp} is loaded with the recycled
+ASID, it is simultaneously loaded with the new page table.
+
+\item If the implementation does not provide ASIDs, or software chooses to
+always use ASID 0, then after every {\tt satp} write, software should execute
+SFENCE.VMA with {\em rs1}={\tt x0}.  In the common case that no global
+translations have been modified, {\em rs2} should be set to a register other than
+{\tt x0} but which contains the value zero, so that global translations are
+not flushed.
+
+\item If software modifies a non-leaf PTE, it should execute SFENCE.VMA with
+{\em rs1}={\tt x0}.  If any PTE along the traversal path had its G bit set,
+{\em rs2} must be {\tt x0}; otherwise, {\em rs2} should be set to the ASID for
+which the translation is being modified.
+
+\item If software modifies a leaf PTE, it should execute SFENCE.VMA with {\em
+rs1} set to a virtual address within the page.  If any PTE along the traversal
+path had its G bit set, {\em rs2} must be {\tt x0}; otherwise, {\em rs2}
+should be set to the ASID for which the translation is being modified.
+
+\item For the special cases of increasing the permissions on a leaf PTE and
+changing an invalid PTE to a valid leaf, software may choose to execute
+the SFENCE.VMA lazily.  After modifying the PTE but before executing
+SFENCE.VMA, either the new or old permissions will be used.  In the latter
+case, a page-fault exception might occur, at which point software should
+execute SFENCE.VMA in accordance with the previous bullet point.
+
+\end{itemize}
+\end{commentary}
+
+If a hart employs an address-translation cache, that cache must appear to be
+private to that hart.
+In particular, the meaning of an ASID is local to a hart; software may choose
+to use the same ASID to refer to different address spaces on different harts.
+
+\begin{commentary}
+A future extension could redefine ASIDs to be global across the SEE, enabling
+such options as shared translation caches and hardware support for broadcast
+TLB shootdown.
+However, as OSes have evolved to significantly reduce the scope of TLB
+shootdowns using novel ASID-management techniques, we expect the local-ASID
+scheme to remain attractive for its simplicity and possibly better
+scalability.
+\end{commentary}
+
+For implementations that make {\tt satp}.MODE read-only zero (always Bare), attempts to
+execute an SFENCE.VMA instruction might raise an illegal instruction
+exception.
+
+\section{Sv32: Page-Based 32-bit Virtual-Memory Systems}
+\label{sec:sv32}
+
+When Sv32 is written to the MODE field in the {\tt satp} register (see
+Section~\ref{sec:satp}), the supervisor operates in a 32-bit paged
+virtual-memory system.  In this mode, supervisor and user virtual addresses
+are translated into supervisor physical addresses by traversing a radix-tree
+page table.  Sv32 is supported when SXLEN=32 and is designed to include
+mechanisms sufficient for supporting modern Unix-based operating systems.
+
+\begin{commentary}
+The initial RISC-V paged virtual-memory architectures have been
+designed as straightforward implementations to support existing
+operating systems.  We have architected page table layouts to support
+a hardware page-table walker.  Software TLB refills are a performance
+bottleneck on high-performance systems, and are especially troublesome
+with decoupled specialized coprocessors.  An implementation can choose
+to implement software TLB refills using a machine-mode trap handler as
+an extension to M-mode.
+\end{commentary}
+
+\begin{commentary}
+Some ISAs architecturally expose \emph{virtually indexed, physically tagged}
+caches, in that accesses to the same physical address via different virtual
+addresses might not be coherent unless the virtual addresses lie within the
+same cache set.
+Implicitly, this specification does not permit such behavior to be
+architecturally exposed.
+\end{commentary}
+
+\subsection{Addressing and Memory Protection}
+\label{sec:translation}
+
+Sv32 implementations support a 32-bit virtual address space, divided
+into \wunits{4}{KiB} pages.  An Sv32 virtual address is partitioned
+into a virtual page number (VPN) and page offset, as shown in
+Figure~\ref{sv32va}.  When Sv32 virtual memory mode is selected in the
+MODE field of the {\tt satp} register, supervisor virtual addresses
+are translated into supervisor physical addresses via a two-level page
+table.  The 20-bit VPN is translated into a 22-bit physical page
+number (PPN), while the 12-bit page offset is untranslated.  The
+resulting supervisor-level physical addresses are then checked using
+any physical memory protection structures (Sections~\ref{sec:pmp}),
+before being directly converted to machine-level physical addresses.
+If necessary, supervisor-level physical addresses are zero-extended
+to the number of physical address bits found in the implementation.
+
+\begin{commentary}
+For example, consider an RV32 system supporting 34 bits of physical
+address.  When the value of {\tt satp}.MODE is Sv32, a 34-bit physical
+address is produced directly, and therefore no zero-extension is needed.
+When the value of {\tt satp}.MODE is Bare, the 32-bit virtual address is
+translated (unmodified) into a 32-bit physical address, and then that
+physical address is zero-extended into a 34-bit machine-level physical
+address.
+\end{commentary}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}O@{}O@{}E}
+\instbitrange{31}{22} &
+\instbitrange{21}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+10 & 10 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv32 virtual address.}
+\label{sv32va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}E@{}O@{}E}
+\instbitrange{33}{22} &
+\instbitrange{21}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+12 & 10 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv32 physical address.}
+\label{rv32va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}E@{}O@{}Fcccccccc}
+\instbitrange{31}{20} &
+\instbitrange{19}{10} &
+\instbitrange{9}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{RSW} &
+\multicolumn{1}{c|}{D} &
+\multicolumn{1}{c|}{A} &
+\multicolumn{1}{c|}{G} &
+\multicolumn{1}{c|}{U} &
+\multicolumn{1}{c|}{X} &
+\multicolumn{1}{c|}{W} &
+\multicolumn{1}{c|}{R} &
+\multicolumn{1}{c|}{V} \\
+\hline
+12 & 10 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv32 page table entry.}
+\label{sv32pte}
+\end{figure*}
+
+Sv32 page tables consist of $2^{10}$ page-table entries (PTEs), each
+of four bytes.  A page table is exactly the size of a page and must
+always be aligned to a page boundary.  The physical page number of the
+root page table is stored in the {\tt satp} register.
+
+The PTE format for Sv32 is shown in Figures~\ref{sv32pte}.  The V bit
+indicates whether the PTE is valid; if it is 0, all other bits in the PTE are
+don't-cares and may be used freely by software.  The permission bits, R, W,
+and X, indicate whether the page is readable, writable, and executable,
+respectively.  When all three are zero, the PTE is a pointer to the next level
+of the page table; otherwise, it is a leaf PTE.  Writable pages must also be
+marked readable; the contrary combinations are reserved for future use.
+Table~\ref{pteperm} summarizes the encoding of the permission bits.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|c|c|c||l|}
+\hline
+X & W & R & Meaning \\
+\hline
+0 & 0 & 0 & Pointer to next level of page table. \\
+0 & 0 & 1 & Read-only page. \\
+0 & 1 & 0 & {\em Reserved for future use.} \\
+0 & 1 & 1 & Read-write page. \\
+1 & 0 & 0 & Execute-only page. \\
+1 & 0 & 1 & Read-execute page. \\
+1 & 1 & 0 & {\em Reserved for future use.} \\
+1 & 1 & 1 & Read-write-execute page. \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encoding of PTE R/W/X fields.}
+\label{pteperm}
+\end{table*}
+
+Attempting to fetch an instruction from a page that does not have execute
+permissions raises a fetch page-fault exception.  Attempting to execute
+a load or load-reserved instruction whose effective address lies within
+a page without read permissions raises a load page-fault exception.
+Attempting to execute a store, store-conditional,
+or AMO instruction whose effective address lies within a page without
+write permissions raises a store page-fault exception.
+\begin{commentary}
+AMOs never raise load page-fault exceptions.  Since any unreadable page is
+also unwritable, attempting to perform an AMO on an unreadable page always
+raises a store page-fault exception.
+\end{commentary}
+
+The U bit indicates whether the page is accessible to user mode.
+U-mode software may only access the page when U=1.  If the SUM bit
+in the {\tt sstatus} register is
+set, supervisor mode software may also access pages with U=1.
+However, supervisor code normally operates with the SUM bit clear, in
+which case, supervisor code will fault on accesses to user-mode pages.
+Irrespective of SUM, the supervisor may not execute code on pages with U=1.
+
+\begin{commentary}
+An alternative PTE format would support different permissions for supervisor
+and user.  We omitted this feature because it would be largely redundant with
+the SUM mechanism (see Section~\ref{sec:sum}) and would require more encoding
+space in the PTE.
+\end{commentary}
+
+The G bit designates a {\em global} mapping.  Global mappings are those that
+exist in all address spaces.  For non-leaf PTEs, the global setting implies
+that all mappings in the subsequent levels of the page table are global.  Note
+that failing to mark a global mapping as global merely reduces performance,
+whereas marking a non-global mapping as global is a software bug that,
+after switching to an address space with a different non-global mapping for
+that address range, can unpredictably result in either mapping being used.
+
+\begin{commentary}
+Global mappings need not be stored redundantly in address-translation caches
+for multiple ASIDs.  Additionally, they need not be flushed from local
+address-translation caches when an SFENCE.VMA instruction is executed with
+{\em rs2}$\neq${\tt x0}.
+\end{commentary}
+
+The RSW field is reserved for use by supervisor software; the implementation
+shall ignore this field.
+
+Each leaf PTE contains an accessed (A) and dirty (D) bit.  The A bit indicates
+the virtual page has been read, written, or fetched from since the last time
+the A bit was cleared.  The D bit indicates the virtual page has been written
+since the last time the D bit was cleared.
+
+Two schemes to manage the A and D bits are permitted:
+\begin{itemize}
+\item When a virtual page is accessed and the A bit is clear, or is
+      written and the D bit is clear, a page-fault exception is raised.
+
+\item When a virtual page is accessed and the A bit is clear, or is
+      written and the D bit is clear, the implementation sets the
+      corresponding bit(s) in the PTE.  The PTE update must be atomic with
+      respect to other accesses to the PTE, and must atomically check
+      that the PTE is valid and grants sufficient permissions.  Updates
+      of the A bit may be performed as a result of speculation, but updates
+      to the D bit must be exact (i.e., not speculative), and observed
+      in program order by the local hart.  Furthermore, the PTE update
+      must appear in the global memory order no later than the explicit
+      memory access, or any subsequent explicit memory access to that
+      virtual page by the local hart.  The ordering on loads and stores
+      provided by FENCE instructions and the acquire/release bits on atomic
+      instructions also orders the PTE updates associated with those loads
+      and stores as observed by remote harts.
+
+      The PTE update is not required to be atomic with respect to the explicit
+      memory access that caused the update, and the sequence is interruptible.
+      However, the hart must not perform the explicit memory access before the
+      PTE update is globally visible.
+\end{itemize}
+All harts in a system must employ the same PTE-update scheme as each other.
+
+\begin{commentary}
+Prior versions of this specification required PTE A bit updates to be exact,
+but allowing the A bit to be updated as a result of speculation simplifies
+the implementation of address translation prefetchers.  System software
+typically uses the A bit as a page replacement policy hint, but does not
+require exactness for functional correctness.  On the other hand, D bit updates
+are still required to be exact and performed in program order, as the D bit
+affects the functional correctness of page eviction.
+
+Implementations are of course still permitted to perform both A and D bit
+updates only in an exact manner.
+
+In both cases, requiring atomicity ensures that the PTE update will not be
+interrupted by other intervening writes to the page table, as such interruptions
+could lead to A/D bits being set on PTEs that have been reused for other
+purposes, on memory that has been reclaimed for other purposes, and so on.
+Simple implementations may instead generate page-fault exceptions.
+
+The A and D bits are never cleared by the implementation.  If the
+supervisor software does not rely on accessed and/or dirty bits,
+e.g. if it does not swap memory pages to secondary storage or if the
+pages are being used to map I/O space, it should always set them to 1
+in the PTE to improve performance.
+\end{commentary}
+
+Any level of PTE may be a leaf PTE, so in addition to 4 KiB pages, Sv32
+supports 4 MiB {\em megapages}.  A megapage must be virtually and
+physically aligned to a 4 MiB boundary; a page-fault exception is raised
+if the physical address is insufficiently aligned.
+
+For non-leaf PTEs, the D, A, and U bits are reserved for future standard
+use.  Until their use is defined by a standard extension, they
+must be cleared by software for forward compatibility.
+
+For implementations with both page-based virtual memory and the ``A'' standard
+extension, the LR/SC reservation set must lie completely within a single
+base physical page (i.e., a naturally aligned \wunits{4}{KiB}
+physical-memory region).
+
+\subsection{Virtual Address Translation Process}
+\label{sv32algorithm}
+
+A virtual address $va$ is translated into a physical address $pa$ as
+follows:
+
+\begin{enumerate}
+
+\item Let $a$ be ${\tt satp}.ppn \times \textrm{PAGESIZE}$, and let $i=\textrm{LEVELS} - 1$. (For Sv32, PAGESIZE=$2^{12}$ and LEVELS=2.)
+  The {\tt satp} register must be {\em active}, i.e., the effective privilege
+  mode must be S-mode or U-mode.
+
+\item Let $pte$ be the value of the PTE at address
+  $a+va.vpn[i]\times \textrm{PTESIZE}$. (For Sv32, PTESIZE=4.)
+  If accessing $pte$ violates a PMA or PMP check, raise an
+  access-fault exception corresponding to the original access type.
+
+\item If $pte.v=0$, or if $pte.r=0$ and $pte.w=1$, or if any bits or encodings
+  that are reserved for future standard use are set within $pte$, stop and
+  raise a page-fault exception corresponding to the original access type.
+
+\item Otherwise, the PTE is valid.
+  If $pte.r=1$ or $pte.x=1$, go to step 5.
+  Otherwise, this PTE is a pointer to the next level of the page table.  Let
+  $i=i-1$.  If $i<0$, stop and raise a page-fault exception
+  corresponding to the original access type.  Otherwise, let
+  $a=pte.ppn \times \textrm{PAGESIZE}$ and go to step 2.
+
+\item A leaf PTE has been found.  Determine if the requested memory access is
+  allowed by the $pte.r$, $pte.w$, $pte.x$, and $pte.u$ bits, given the
+  current privilege mode and the value of the SUM and MXR fields of
+  the {\tt mstatus} register.  If not, stop and raise a page-fault
+  exception corresponding to the original access type.
+
+\item If $i>0$ and $pte.ppn[i-1:0]\neq 0$, this is a misaligned superpage;
+  stop and raise a page-fault exception corresponding to the original access type.
+
+\item If $pte.a=0$, or if the original memory access is a store and $pte.d=0$, either
+  raise a page-fault exception corresponding to the original access type, or:
+  \begin{itemize}
+  \item If a store to $pte$ would violate a PMA or PMP check, raise an
+    access-fault exception corresponding to the original access type.
+  \item Perform the following steps atomically:
+    \begin{itemize}
+      \item Compare $pte$ to the value of the PTE at address $a+va.vpn[i]\times \textrm{PTESIZE}$.
+      \item If the values match, set $pte.a$ to 1 and, if the original memory
+        access is a store, also set $pte.d$ to 1.
+      \item If the comparison fails, return to step 2
+    \end{itemize}
+  \end{itemize}
+
+\item The translation is successful. The translated physical address is
+  given as follows:
+\begin{itemize}
+\item $\textit{pa.pgoff} = \textit{va.pgoff}$.
+\item If $i>0$, then this is a superpage translation and $pa.ppn[i-1:0]=va.vpn[i-1:0]$.
+\item $pa.ppn[\textrm{LEVELS} - 1:i] = pte.ppn[\textrm{LEVELS} - 1:i]$.
+\end{itemize}
+
+\end{enumerate}
+
+All implicit accesses to the address-translation data structures in this
+algorithm are performed using width PTESIZE.
+
+\begin{commentary}
+This implies, for example, that an Sv48 implementation may not use two separate
+4B reads to non-atomically access a single 8B PTE, and that A/D bit updates
+performed by the implementation are treated as atomically updating the entire
+PTE, rather than just the A and/or D bit alone (even though the PTE value does
+not otherwise change).
+\end{commentary}
+
+The results of implicit address-translation reads in step 2 may be held in a
+read-only, incoherent {\em address-translation cache} but not shared with other
+harts.  The address-translation cache may hold an arbitrary number of entries,
+including an arbitrary number of entries for the same address and ASID.
+Entries in the address-translation cache may then satisfy subsequent step 2
+reads if the ASID associated with the entry matches the ASID loaded in step 0
+or if the entry is associated with a {\em global} mapping.  To ensure that
+implicit reads observe writes to the same memory locations, an SFENCE.VMA
+instruction must be executed after the writes to flush the relevant cached
+translations.
+
+The address-translation cache cannot be used in step 7; accessed and
+dirty bits may only be updated in memory directly.
+
+\begin{commentary}
+  It is permitted for multiple address-translation cache entries to co-exist
+  for the same address.  This represents the fact that in a conventional TLB
+  hierarchy, it is possible for multiple entries to match a single address if, for
+  example, a page is upgraded to a superpage without first clearing the
+  original non-leaf PTE's valid bit and executing an SFENCE.VMA with {\em
+  rs1}={\tt x0}, or if multiple TLBs exist in parallel at a given level of the
+  hierarchy.  In this case, just as if an SFENCE.VMA is not executed between
+  a write to the memory-management tables and subsequent implicit read of the
+  same address: it is unpredictable whether the old non-leaf PTE or the new leaf
+  PTE is used, but the behavior is otherwise well defined.
+\end{commentary}
+
+Implementations may also execute the address-translation algorithm
+speculatively at any time, for any virtual address, as long as {\tt satp} is
+active (as defined in Section~\ref{sec:satp}).  Such speculative executions
+have the effect of pre-populating the address-translation cache.
+
+Speculative executions of the address-translation algorithm behave as
+non-speculative executions of the algorithm do, except that they must not set the
+dirty bit for a PTE, they must not trigger an exception, and they must not create
+address-translation cache entries if those entries would have been invalidated
+by any SFENCE.VMA instruction executed by the hart since the speculative
+execution of the algorithm began.
+
+\begin{commentary}
+  For instance, it is illegal for both non-speculative and speculative
+  executions of the translation algorithm to begin, read the level 2 page table,
+  pause while the hart executes an SFENCE.VMA with {\em rs1}={\em rs2}={\tt x0},
+  then resume using the now-stale level 2 PTE, as subsequent implicit reads
+  could populate the address-translation cache with stale PTEs.
+
+  In many implementations, an SFENCE.VMA instruction with {\em rs1}={\tt x0}
+  will therefore either terminate all previously-launched speculative
+  executions of the address-translation algorithm (for the specified ASID, if
+  applicable), or simply wait for them to complete (in which case any
+  address-translation cache entries created will be invalidated by the
+  SFENCE.VMA as appropriate).  Likewise, an SFENCE.VMA instruction with {\em
+  rs1}$\neq${\tt x0} generally must either ensure that previously-launched
+  speculative executions of the address-translation algorithm (for the specified
+  ASID, if applicable) are prevented from creating new address-translation cache
+  entries mapping leaf PTEs, or wait for them to complete.
+
+  A consequence of implementations being permitted to read the translation data
+  structures arbitrarily early and speculatively is that at any time, all
+  page table entries reachable by executing the algorithm may be loaded into
+  the address-translation cache.
+
+  Although it would be uncommon to place page tables in non-idempotent memory,
+  there is no explicit prohibition against doing so.  Since the algorithm may
+  only touch page tables reachable from the root page table indicated in {\tt
+  satp}, the range of addresses that an implementation's page table walker will
+  touch is fully under supervisor control.
+\end{commentary}
+
+\begin{commentary}
+The algorithm does not admit the possibility of ignoring high-order PPN bits
+for implementations with narrower physical addresses.
+\end{commentary}
+
+\section{Sv39: Page-Based 39-bit Virtual-Memory System}
+\label{sec:sv39}
+
+This section describes a simple paged virtual-memory system
+for SXLEN=64, which supports 39-bit virtual address spaces.  The
+design of Sv39 follows the overall scheme of Sv32, and this section
+details only the differences between the schemes.
+
+\begin{commentary}
+We specified multiple virtual memory systems for RV64 to relieve the tension
+between providing a large address space and minimizing address-translation
+cost.  For many systems, \wunits{512}{GiB} of virtual-address space is ample,
+and so Sv39 suffices.  Sv48 increases the virtual address space to
+\wunits{256}{TiB}, but increases the physical memory
+capacity dedicated to page tables, the latency of page-table traversals, and
+the size of hardware structures that store virtual addresses.  Sv57 increases
+the virtual address space, page table capacity requirement, and translation
+latency even further.
+\end{commentary}
+
+\subsection{Addressing and Memory Protection}
+
+Sv39 implementations support a 39-bit virtual address space, divided
+into \wunits{4}{KiB} pages.  An Sv39 address is partitioned as
+shown in Figure~\ref{sv39va}.
+Instruction fetch addresses and load and store effective addresses,
+which are 64 bits, must have bits 63--39 all equal to bit 38, or else
+a page-fault exception will occur.  The 27-bit VPN is translated into a
+44-bit PPN via a three-level page table, while the 12-bit page offset
+is untranslated.
+
+\begin{commentary}
+When mapping between narrower and wider addresses, RISC-V
+zero-extends a narrower physical address to a wider size.  The mapping
+between 64-bit virtual addresses and the 39-bit usable address
+space of Sv39 is not based on zero-extension but instead follows an
+entrenched convention that allows an OS to use one or a few of the
+most-significant bits of a full-size (64-bit) virtual address to
+quickly distinguish user and supervisor address regions.
+\end{commentary}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}O@{}O@{}O@{}O}
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv39 virtual address.}
+\label{sv39va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}T@{}O@{}O@{}O}
+\instbitrange{55}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+26 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv39 physical address.}
+\label{sv39pa}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{cF@{}Y@{}Y@{}Y@{}Y@{}Fcccccccc}
+\instbit{63} &
+\instbitrange{62}{61} &
+\instbitrange{60}{54} &
+\instbitrange{53}{28} &
+\instbitrange{27}{19} &
+\instbitrange{18}{10} &
+\instbitrange{9}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{N} &
+\multicolumn{1}{c|}{PBMT} &
+\multicolumn{1}{c|}{\it Reserved} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{RSW} &
+\multicolumn{1}{c|}{D} &
+\multicolumn{1}{c|}{A} &
+\multicolumn{1}{c|}{G} &
+\multicolumn{1}{c|}{U} &
+\multicolumn{1}{c|}{X} &
+\multicolumn{1}{c|}{W} &
+\multicolumn{1}{c|}{R} &
+\multicolumn{1}{c|}{V} \\
+\hline
+1 & 2 & 7 & 26 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv39 page table entry.}
+\label{sv39pte}
+\end{figure*}
+
+Sv39 page tables contain $2^9$ page table entries (PTEs), eight
+bytes each.  A page table is exactly the size of a page and must
+always be aligned to a page boundary.  The physical page number of the
+root page table is stored in the {\tt satp} register's PPN field.
+
+The PTE format for Sv39 is shown in Figure~\ref{sv39pte}.  Bits 9--0
+have the same meaning as for Sv32.
+Bit 63 is reserved for use by the Svnapot extension in
+Chapter~\ref{svnapot}.  If Svnapot is not implemented, bit 63 remains
+reserved and must be zeroed by software for forward compatibility,
+or else a page-fault exception is raised.
+Bits 62--61 are reserved for use by the Svpbmt extension in
+Chapter~\ref{svpbmt}.  If Svpbmt is not implemented, bits 62--61 remain
+reserved and must be zeroed by software for forward compatibility,
+or else a page-fault exception is raised.
+Bits 60--54 are reserved
+for future standard use and, until their use is defined by some standard
+extension, must be zeroed by software for forward compatibility.
+If any of these bits are set, a page-fault exception is raised.
+
+\begin{commentary}
+We reserved several PTE bits for a possible extension that improves
+support for sparse address spaces by allowing page-table levels to be
+skipped, reducing memory usage and TLB refill latency.  These reserved
+bits may also be used to facilitate research experimentation.  The
+cost is reducing the physical address space, but \wunits{64}{PiB} is
+presently ample.  When it no longer suffices, the reserved
+bits that remain unallocated could be used to expand the physical
+address space.
+\end{commentary}
+
+Any level of PTE may be a leaf PTE, so in addition to \wunits{4}{KiB}
+pages, Sv39 supports \wunits{2}{MiB} {\em megapages} and
+\wunits{1}{GiB} {\em gigapages}, each of which must be virtually and
+physically aligned to a boundary equal to its size.
+A page-fault exception is raised if the physical address is insufficiently
+aligned.
+
+The algorithm for virtual-to-physical address translation is the same as in
+Section~\ref{sv32algorithm}, except LEVELS equals 3 and PTESIZE equals 8.
+
+\section{Sv48: Page-Based 48-bit Virtual-Memory System}
+\label{sec:sv48}
+
+This section describes a simple paged virtual-memory system
+for SXLEN=64, which supports 48-bit virtual address spaces.  Sv48
+is intended for systems for which a 39-bit virtual address space is
+insufficient.  It closely follows the design of Sv39, simply adding an
+additional level of page table, and so this chapter only details the
+differences between the two schemes.
+
+Implementations that support Sv48 must also support Sv39.
+
+\begin{commentary}
+Systems that support Sv48 can also support Sv39 at essentially no cost, and so
+should do so to maintain compatibility with supervisor software that assumes
+Sv39.
+\end{commentary}
+
+\subsection{Addressing and Memory Protection}
+
+Sv48 implementations support a 48-bit virtual address space, divided
+into \wunits{4}{KiB} pages.  An Sv48 address is partitioned as
+shown in Figure~\ref{sv48va}.
+Instruction fetch addresses and load and store effective addresses,
+which are 64 bits, must have bits 63--48 all equal to bit 47, or else
+a page-fault exception will occur.  The 36-bit VPN is translated into a
+44-bit PPN via a four-level page table, while the 12-bit page offset
+is untranslated.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}O@{}O@{}O@{}O@{}O}
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[3]} &
+\multicolumn{1}{c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv48 virtual address.}
+\label{sv48va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}E@{}O@{}O@{}O@{}O}
+\instbitrange{55}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+17 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv48 physical address.}
+\label{sv48pa}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{cF@{}F@{}F@{}F@{}F@{}F@{}Fcccccccc}
+\instbit{63} &
+\instbitrange{62}{61} &
+\instbitrange{60}{54} &
+\instbitrange{53}{37} &
+\instbitrange{36}{28} &
+\instbitrange{27}{19} &
+\instbitrange{18}{10} &
+\instbitrange{9}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{N} &
+\multicolumn{1}{c|}{PBMT} &
+\multicolumn{1}{c|}{\it Reserved} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{RSW} &
+\multicolumn{1}{c|}{D} &
+\multicolumn{1}{c|}{A} &
+\multicolumn{1}{c|}{G} &
+\multicolumn{1}{c|}{U} &
+\multicolumn{1}{c|}{X} &
+\multicolumn{1}{c|}{W} &
+\multicolumn{1}{c|}{R} &
+\multicolumn{1}{c|}{V} \\
+\hline
+1 & 2 & 7 & 17 & 9 & 9 & 9 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv48 page table entry.}
+\label{sv48pte}
+\end{figure*}
+
+The PTE format for Sv48 is shown in Figure~\ref{sv48pte}.  Bits 63--54 and 9--0
+have the same meaning as for Sv39.  Any level of PTE may be a leaf
+PTE, so in addition to \wunits{4}{KiB} pages, Sv48 supports
+\wunits{2}{MiB} {\em megapages}, \wunits{1}{GiB} {\em gigapages}, and
+\wunits{512}{GiB} {\em terapages}, each of which must be virtually and
+physically aligned to a boundary equal to its size.
+A page-fault exception is raised if the physical address is insufficiently
+aligned.
+
+The algorithm for virtual-to-physical address translation is the same
+as in Section~\ref{sv32algorithm}, except LEVELS equals 4 and PTESIZE
+equals 8.
+
+\section{Sv57: Page-Based 57-bit Virtual-Memory System}
+\label{sec:sv57}
+
+This section describes a simple paged virtual-memory system designed
+for RV64 systems, which supports 57-bit virtual address spaces.  Sv57
+is intended for systems for which a 48-bit virtual address space is
+insufficient.  It closely follows the design of Sv48, simply adding an
+additional level of page table, and so this chapter only details the
+differences between the two schemes.
+
+Implementations that support Sv57 must also support Sv48.
+
+\begin{commentary}
+Systems that support Sv57 can also support Sv48 at essentially no cost, and so
+should do so to maintain compatibility with supervisor software that assumes
+Sv48.
+\end{commentary}
+
+\subsection{Addressing and Memory Protection}
+
+Sv57 implementations support a 57-bit virtual address space, divided
+into \wunits{4}{KiB} pages.  An Sv57 address is partitioned as
+shown in Figure~\ref{sv57va}.
+Instruction fetch addresses and load and store effective addresses,
+which are 64 bits, must have bits 63--57 all equal to bit 56, or else
+a page-fault exception will occur.  The 45-bit VPN is translated into a
+44-bit PPN via a five-level page table, while the 12-bit page offset
+is untranslated.
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}S@{}S@{}S@{}S@{}S@{}S}
+\instbitrange{56}{48} &
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{VPN[4]} &
+\multicolumn{1}{c|}{VPN[3]} &
+\multicolumn{1}{c|}{VPN[2]} &
+\multicolumn{1}{c|}{VPN[1]} &
+\multicolumn{1}{c|}{VPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+9 & 9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 virtual address.}
+\label{sv57va}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{@{}R@{}S@{}S@{}S@{}S@{}S}
+\instbitrange{55}{48} &
+\instbitrange{47}{39} &
+\instbitrange{38}{30} &
+\instbitrange{29}{21} &
+\instbitrange{20}{12} &
+\instbitrange{11}{0} \\
+\hline
+\multicolumn{1}{|c|}{PPN[4]} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} &
+\multicolumn{1}{c|}{page offset} \\
+\hline
+8 & 9 & 9 & 9 & 9 & 12 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 physical address.}
+\label{sv57pa}
+\end{figure*}
+
+\begin{figure*}[h!]
+{\footnotesize
+\begin{center}
+\begin{tabular}{c@{}F@{}Y@{}T@{}Wcccccccc}
+\instbit{63} &
+\instbitrange{62}{61} &
+\instbitrange{60}{54} &
+\instbitrange{53}{10} &
+\instbitrange{9}{8} &
+\instbit{7} &
+\instbit{6} &
+\instbit{5} &
+\instbit{4} &
+\instbit{3} &
+\instbit{2} &
+\instbit{1} &
+\instbit{0} \\
+\hline
+\multicolumn{1}{|c|}{N} &
+\multicolumn{1}{c|}{PBMT} &
+\multicolumn{1}{c|}{\it Reserved} &
+\multicolumn{1}{c|}{PPN} &
+\multicolumn{1}{c|}{RSW} &
+\multicolumn{1}{c|}{D} &
+\multicolumn{1}{c|}{A} &
+\multicolumn{1}{c|}{G} &
+\multicolumn{1}{c|}{U} &
+\multicolumn{1}{c|}{X} &
+\multicolumn{1}{c|}{W} &
+\multicolumn{1}{c|}{R} &
+\multicolumn{1}{c|}{V} \\
+\hline
+1 & 2 & 7 & 44 & 2 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1\\
+\end{tabular}
+
+\begin{tabular}{@{}F@{}F@{}F@{}F@{}F}
+\instbitrange{53}{46} &
+\instbitrange{45}{37} &
+\instbitrange{36}{28} &
+\instbitrange{27}{19} &
+\instbitrange{18}{10} \\
+\hline
+\multicolumn{1}{|c|}{PPN[4]} &
+\multicolumn{1}{c|}{PPN[3]} &
+\multicolumn{1}{c|}{PPN[2]} &
+\multicolumn{1}{c|}{PPN[1]} &
+\multicolumn{1}{c|}{PPN[0]} \\
+\hline
+8 & 9 & 9 & 9 & 9 \\
+\end{tabular}
+\end{center}
+}
+\vspace{-0.1in}
+\caption{Sv57 page table entry.}
+\label{sv57pte}
+\end{figure*}
+
+The PTE format for Sv57 is shown in Figure~\ref{sv57pte}.  Bits 63--54 and 9--0
+have the same meaning as for Sv39.  Any level of PTE may be a leaf
+PTE, so in addition to \wunits{4}{KiB} pages, Sv57 supports
+\wunits{2}{MiB} {\em megapages}, \wunits{1}{GiB} {\em gigapages},
+\wunits{512}{GiB} {\em terapages}, and \wunits{256}{TiB} {\em petapages},
+each of which must be virtually and physically aligned to a boundary equal
+to its size.  A page-fault exception is raised if the physical address is
+insufficiently aligned.
+
+The algorithm for virtual-to-physical address translation is the same
+as in Section~\ref{sv32algorithm}, except LEVELS equals 5 and PTESIZE
+equals 8.
+
+\chapter{``Svnapot'' Standard Extension for NAPOT Translation Contiguity, Version 1.0}
+\label{svnapot}
+
+In Sv39, Sv48, and Sv57, when a PTE has N=1, the PTE represents a
+translation that is part of a range of contiguous virtual-to-physical
+translations with the same values for PTE bits 5--0.  Such ranges must be of a
+naturally aligned power-of-2 (NAPOT) granularity larger than the base page
+size.
+
+The Svnapot extension depends on Sv39.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|c|c||l|c|}
+\hline
+i        & $pte.ppn[i]$      & Description              & $pte.napot\_bits$ \\
+\hline
+0        & {\tt x~xxxx~xxx1} & {\em Reserved}           & $-$ \\
+0        & {\tt x~xxxx~xx1x} & {\em Reserved}           & $-$ \\
+0        & {\tt x~xxxx~x1xx} & {\em Reserved}           & $-$ \\
+0        & {\tt x~xxxx~1000} & 64 KiB contiguous region & 4   \\
+0        & {\tt x~xxxx~0xxx} & {\em Reserved}           & $-$ \\
+$\geq 1$ & {\tt x~xxxx~xxxx} & {\em Reserved}           & $-$ \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Page table entry encodings when $pte$.N=1}
+\label{ptenapot}
+\end{table*}
+
+NAPOT PTEs behave identically to non-NAPOT PTEs within the address-translation
+algorithm in Section~\ref{sv32algorithm}, except that:
+\begin{itemize}
+  \item If the encoding in $pte$ is valid according to Table~\ref{ptenapot},
+    then instead of returning the original value of $pte$, implicit reads of a
+    NAPOT PTE return a copy of $pte$ in which $pte.ppn[i][pte.napot\_bits-1:0]$ is
+    replaced by $vpn[i][pte.napot\_bits-1:0]$.  If the encoding in $pte$ is
+    reserved according to Table~\ref{ptenapot}, then a page-fault exception
+    must be raised.
+  \item Implicit reads of NAPOT page table entries may create address-translation cache
+    entries mapping $a + j \times \textrm{PTESIZE}$ to a copy of $pte$
+    in which $pte.ppn[i][pte.napot\_bits-1:0]$ is replaced by
+    $vpn[i][pte.napot\_bits-1:0]$, for any or all $j$ such that
+    ${j >> napot\_bits}={vpn[i] >> napot\_bits}$, all for the address space identified
+    in {\em satp} as loaded by step 1.
+\end{itemize}
+
+\begin{commentary}
+  The motivation for a NAPOT PTE is that it can be cached in a TLB as one or
+  more entries representing the contiguous region as if it were a single
+  (large) page covered by a single translation.  This compaction can help
+  relieve TLB pressure in some scenarios.  The encoding is designed to fit
+  within the pre-existing Sv39, Sv48, and Sv57 PTE formats so as not to disrupt
+  existing implementations or designs that choose not to implement the scheme.
+  It is also designed so as not to complicate the definition of the
+  address-translation algorithm.
+
+  The address translation cache abstraction captures the behavior that would result from the creation
+  of a single TLB entry covering the entire NAPOT region.  It is also designed
+  to be consistent with implementations that support NAPOT PTEs by splitting
+  the NAPOT region into TLB entries covering any smaller power-of-two region
+  sizes.  For example, a 64~KiB NAPOT PTE might trigger the creation of 16
+  standard 4~KiB TLB entries, all with contents generated from the NAPOT PTE
+  (even if the PTEs for the other 4~KiB regions have different contents).
+
+  In typical usage scenarios, NAPOT PTEs in the same region will have the same
+  attributes, same PPNs, and same values for bits 5--0.  RSW remains reserved
+  for supervisor software control.  It is the responsibility of the OS and/or
+  hypervisor to configure the page tables in such a way that there are no
+  inconsistencies between NAPOT PTEs and other NAPOT or non-NAPOT PTEs that
+  overlap the same address range.  If an update needs to be made, the OS
+  generally should first mark all of the PTEs invalid, then issue SFENCE.VMA
+  instruction(s) covering all 4~KiB regions within the range (either via a
+  single SFENCE.VMA with {\em rs1}={\tt x0}, or with multiple SFENCE.VMA
+  instructions with {\em rs1}$\neq${\tt x0}), then update the PTE(s), as
+  described in Section~\ref{sec:sfence.vma}, unless any inconsistencies are
+  known to be benign.  If any inconsistencies do exist, then the effect is the
+  same as when SFENCE.VMA is used incorrectly: one of the translations will be
+  chosen, but the choice is unpredictable.
+
+  If an implementation chooses to use a NAPOT PTE (or cached version thereof),
+  it might not consult the PTE directly specified by the algorithm in
+  Section~\ref{sv32algorithm} at all.  Therefore, the D and A bits may not be
+  identical across all mappings of the same address range even in typical use
+  cases  The operating system must query all NAPOT aliases of a page to
+  determine whether that page has been accessed and/or is dirty.  If the OS
+  manually sets the A and/or D bits for a page, it is recommended that the OS
+  also set the A and/or D bits for other NAPOT aliases as appropriate in order
+  to avoid unnecessary traps.
+
+  Just as with normal PTEs, TLBs are permitted to cache NAPOT PTEs whose V
+  (Valid) bit is clear.
+
+  Depending on need, the NAPOT scheme may be extended to other intermediate
+  page sizes and/or to other levels of the page table in the future.  The
+  encoding is designed to accommodate other NAPOT sizes should that need
+  arise.  For example:
+
+  \begin{center}\em
+  \begin{tabular}{|c|c||l|c|}
+  \hline
+  i        & $pte.ppn[i]$      & Description                & $pte.napot\_bits$ \\
+  \hline
+  0        & {\tt x~xxxx~xxx1} & 8 KiB contiguous region    & 1 \\
+  0        & {\tt x~xxxx~xx10} & 16 KiB contiguous region   & 2 \\
+  0        & {\tt x~xxxx~x100} & 32 KiB contiguous region   & 3 \\
+  0        & {\tt x~xxxx~1000} & 64 KiB contiguous region   & 4 \\
+  0        & {\tt x~xxx1~0000} & 128 KiB contiguous region  & 5 \\
+  ...      & ...               & ...                        & ... \\
+  1        & {\tt x~xxxx~xxx1} & 4 MiB contiguous region    & 1 \\
+  1        & {\tt x~xxxx~xx10} & 8 MiB contiguous region    & 2 \\
+  ...      & ...               & ...                        & ... \\
+  \hline
+  \end{tabular}
+  \end{center}
+
+  In such a case, an implementation may or may not support all options.  The
+  discoverability mechanism for this extension would be extended to allow
+  system software to determine which sizes are supported.
+
+  Other sizes may remain deliberately excluded, so that PPN bits not being
+  used to indicate a valid NAPOT region size (e.g., the least-significant bit
+  of $pte.ppn[i]$) may be repurposed for other uses in the future.
+
+  However, in case finer-grained intermediate page size support proves not to
+  be useful, we have chosen to standardize only 64~KiB support as a first step.
+\end{commentary}
+
+\chapter{``Svpbmt'' Standard Extension for Page-Based Memory Types, Version 1.0}
+\label{svpbmt}
+
+In Sv39, Sv48, and Sv57, bits 62--61 of a leaf page table entry indicate the use
+of page-based memory types that override the PMA(s) for the associated memory
+pages.  The encoding for the PBMT bits is captured in Table~\ref{pbmt}.
+
+The Svpbmt extension depends on Sv39.
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|c|c|l|}
+\hline
+Mode & Value  & Requested Memory Attributes \\
+\hline
+PMA  & 0      & None \\
+NC   & 1      & Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory \\
+IO   & 2      & Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O \\
+$-$  & 3      & {\em Reserved for future standard use} \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Encodings for the PBMT field in Sv39, Sv48, and Sv57 PTEs.  Attributes
+not mentioned are inherited from the PMA associated with the physical address.}
+\label{pbmt}
+\end{table*}
+
+\begin{commentary}
+Future extensions may provide more and/or finer-grained control over which PMAs
+can be overridden.
+\end{commentary}
+
+For non-leaf PTEs, bits 62--61 are reserved for future standard use.  Until
+their use is defined by a standard extension, they must be cleared by software
+for forward compatibility, or else a page-fault exception is raised.
+
+For leaf PTEs, setting bits 62–-61 to the value 3 is reserved for future
+standard use.
+Until this value is defined by a standard extension, using this reserved value
+in a leaf PTE raises a page-fault exception.
+
+If the underlying physical memory attribute for a page is vacant, the PBMT settings do not override that.
+
+When PBMT settings override a main memory page into I/O or vice versa, memory
+accesses to such pages obey the memory ordering rules of the final effective
+attribute, as follows.
+
+If the underlying physical memory attribute for a page is I/O, and the page has
+PBMT=NC, then accesses to that page obey RVWMO.
+However, accesses to such pages are
+considered to be {\em both} I/O and main memory accesses for the purposes of FENCE,
+{\em.aq}, and {\em.rl}.
+
+If the underlying physical memory attribute for a page is main memory, and the
+page has PBMT=IO, then accesses to that page obey strong channel 0 I/O ordering
+rules with respect to other accesses to physical main memory and to other
+accesses to pages with PBMT=IO.
+However, accesses to such pages are
+considered to be {\em both} I/O and main memory accesses for the purposes of FENCE,
+{\em.aq}, and {\em.rl}.
+
+\begin{commentary}
+A device driver written to rely on I/O strong ordering rules will not
+operate correctly if the address range is mapped with PBMT=NC.
+As such, this configuration is discouraged.
+
+It will often still be useful to map physical I/O regions using PBMT=NC so that
+write combining and speculative accesses can be performed.  Such optimizations
+will likely improve performance when applied with adequate care.
+\end{commentary}
+
+When Svpbmt is used with non-zero PBMT encodings,
+it is possible for multiple virtual aliases of the same
+physical page to exist simultaneously with different memory attributes.  It is
+also possible for a U-mode or S-mode mapping through a PTE with Svpbmt enabled
+to observe different memory attributes for a given region of physical memory
+than a concurrent access to the same page performed by M-mode or when
+MODE=Bare.  In such cases, the behaviors dictated by the attributes (including
+coherence, which is otherwise unaffected) may be violated.
+
+Accessing the same location using different attributes that are both non-cacheable
+(e.g., NC and IO) does not cause loss of coherence, but might result in weaker
+memory ordering than the stricter attribute ordinarily guarantees.
+Executing a {\tt fence iorw, iorw} instruction between such accesses suffices
+to prevent loss of memory ordering.
+
+Accessing the same location using different cacheability attributes may cause loss
+of coherence.
+Executing the following sequence between such accesses prevents both loss of
+coherence and loss of memory ordering:
+{\tt fence iorw, iorw}, followed by {\tt cbo.flush} to an address of
+that location, followed by a {\tt fence iorw, iorw}.
+
+\begin{commentary}
+It follows that, if the same location might later be referenced using the
+original attributes, then this sequence must be repeated beforehand.
+\end{commentary}
+
+\begin{commentary}
+In certain cases, a weaker sequence might suffice to prevent loss of
+coherence.
+These situations will be detailed following the forthcoming formalization of
+the interaction of the RVWMO memory model with the instructions in the Zicbom
+extension.
+\end{commentary}
+
+When two-stage address translation is enabled within the H extension, the
+page-based memory types are also applied in two stages.  First, if
+{\tt hgatp}.MODE is not equal to zero, non-zero G-stage PTE PBMT bits override
+the attributes in the PMA to produce an intermediate set of attributes.
+Otherwise, the PMAs serve as the intermediate attributes.  Second, if
+{\tt vsatp}.MODE is not equal to zero, non-zero VS-stage PTE PBMT bits override
+the intermediate attributes to produce the final set of attributes used by
+accesses to the page in question.  Otherwise, the intermediate attributes are
+used as the final set of attributes.
+
+\chapter{``Svinval'' Standard Extension for Fine-Grained Address-Translation Cache Invalidation, Version 1.0}
+\label{svinval}
+
+The Svinval extension splits SFENCE.VMA, HFENCE.VVMA, and HFENCE.GVMA
+instructions into finer-grained invalidation and ordering operations that can
+be more efficiently batched or pipelined on certain classes of high-performance
+implementation.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+SINVAL.VMA & asid & vaddr & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+The SINVAL.VMA instruction invalidates any address-translation cache entries
+that an SFENCE.VMA instruction with the same values of {\em rs1} and {\em rs2}
+would invalidate.  However, unlike SFENCE.VMA, SINVAL.VMA instructions are only
+ordered with respect to SFENCE.VMA, SFENCE.W.INVAL, and SFENCE.INVAL.IR
+instructions as defined below.
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+SFENCE.W.INVAL & 0 & 0 & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+SFENCE.INVAL.IR & 1 & 0 & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+The SFENCE.W.INVAL instruction guarantees that any previous stores already
+visible to the current RISC-V hart are ordered before subsequent SINVAL.VMA
+instructions executed by the same hart.  The SFENCE.INVAL.IR instruction
+guarantees that any previous SINVAL.VMA instructions executed by the current hart
+are ordered before subsequent implicit references by that hart to the
+memory-management data structures.
+
+When executed in order (but not necessarily consecutively) by a single hart, the
+sequence SFENCE.W.INVAL, SINVAL.VMA, and SFENCE.INVAL.IR has the same effect as
+a hypothetical SFENCE.VMA instruction in which:
+\begin{itemize}
+  \item the values of {\em rs1} and {\em rs2} for the SFENCE.VMA are the same
+    as those used in the SINVAL.VMA,
+  \item reads and writes prior to the SFENCE.W.INVAL are considered to be those
+    prior to the SFENCE.VMA, and
+  \item reads and writes following the SFENCE.INVAL.IR are considered to be
+    those subsequent to the SFENCE.VMA.
+\end{itemize}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+HINVAL.VVMA & asid & vaddr & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+\vspace{-0.2in}
+\begin{center}
+\begin{tabular}{O@{}R@{}R@{}F@{}R@{}S}
+\\
+\instbitrange{31}{25} &
+\instbitrange{24}{20} &
+\instbitrange{19}{15} &
+\instbitrange{14}{12} &
+\instbitrange{11}{7} &
+\instbitrange{6}{0} \\
+\hline
+\multicolumn{1}{|c|}{funct7} &
+\multicolumn{1}{c|}{rs2} &
+\multicolumn{1}{c|}{rs1} &
+\multicolumn{1}{c|}{funct3} &
+\multicolumn{1}{c|}{rd} &
+\multicolumn{1}{c|}{opcode} \\
+\hline
+7 & 5 & 5 & 3 & 5 & 7 \\
+HINVAL.GVMA & vmid & gaddr & PRIV & 0 & SYSTEM \\
+\end{tabular}
+\end{center}
+
+If the hypervisor extension is implemented, the Svinval extension also provides two
+additional instructions: HINVAL.VVMA and HINVAL.GVMA.  These have the same
+semantics as SINVAL.VMA, except that they combine with SFENCE.W.INVAL and
+SFENCE.INVAL.IR to replace HFENCE.VVMA and HFENCE.GVMA, respectively, instead
+of SFENCE.VMA.  In addition, HINVAL.GVMA uses VMIDs instead of ASIDs.
+
+SINVAL.VMA, HINVAL.VVMA, and HINVAL.GVMA require the same permissions and raise
+the same exceptions as SFENCE.VMA, HFENCE.VVMA, and HFENCE.GVMA, respectively.
+In particular, an attempt to execute any of these instructions in
+U-mode always raises an illegal instruction exception, and an attempt
+to execute SINVAL.VMA or HINVAL.GVMA in S-mode or HS-mode when
+{\tt mstatus}.TVM=1 also raises an illegal instruction exception.
+An attempt to execute HINVAL.VVMA or HINVAL.GVMA in VS-mode or VU-mode,
+or to execute SINVAL.VMA in VU-mode, raises a virtual instruction
+exception.
+When {\tt hstatus}.VTVM=1, an attempt to execute SINVAL.VMA in VS-mode
+also raises a virtual instruction exception.
+
+\begin{commentary}
+  SFENCE.W.INVAL and SFENCE.INVAL.IR instructions do not need to be trapped when
+  {\tt mstatus}.TVM=1 or when {\tt hstatus}.VTVM=1, as they only have ordering
+  effects but no visible side effects.  Trapping of the SINVAL.VMA instruction
+  is sufficient to enable emulation of the intended overall TLB maintenance
+  functionality.
+
+  In typical usage, software will invalidate a range of virtual addresses in
+  the address-translation caches by executing an SFENCE.W.INVAL instruction,
+  executing a series of SINVAL.VMA, HINVAL.VVMA, or HINVAL.GVMA instructions to
+  the addresses (and optionally ASIDs or VMIDs) in question, and then executing
+  an SFENCE.INVAL.IR instruction.
+
+  High-performance implementations will be able to pipeline the
+  address-translation cache invalidation operations, and will defer any
+  pipeline stalls or other memory ordering enforcement until an SFENCE.W.INVAL,
+  SFENCE.INVAL.IR, SFENCE.VMA, HFENCE.GVMA, or HFENCE.VVMA instruction is
+  executed.
+
+  Simpler implementations may implement SINVAL.VMA, HINVAL.VVMA, and
+  HINVAL.GVMA identically to SFENCE.VMA, HFENCE.VVMA, and HFENCE.GVMA,
+  respectively, while implementing SFENCE.W.INVAL and SFENCE.INVAL.IR
+  instructions as no-ops.
+\end{commentary}

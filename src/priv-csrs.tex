@@ -1,0 +1,554 @@
+\chapter{Control and Status Registers (CSRs)}
+\label{chap:priv-csrs}
+
+The SYSTEM major opcode is used to encode all privileged instructions
+in the RISC-V ISA.
+These can be divided into two main classes: those that atomically
+read-modify-write control and status registers (CSRs), which are defined in
+the Zicsr extension, and all other privileged instructions.
+The privileged architecture requires the Zicsr extension; which other
+privileged instructions are required depends on the privileged-architecture
+feature set.
+
+In addition to the unprivileged
+state described in Volume I of this manual, an implementation may
+contain additional CSRs, accessible by some subset of the privilege
+levels using the CSR instructions described in Volume~I.
+In this chapter, we map out the CSR address space.  The following
+chapters describe the function of each of the CSRs according to
+privilege level, as well as the other privileged instructions which
+are generally closely associated with a particular privilege level.
+Note that although CSRs and instructions are associated with one
+privilege level, they are also accessible at all higher privilege
+levels.
+
+Standard CSRs do not have side effects on reads but may have side effects
+on writes.
+
+\section{CSR Address Mapping Conventions}
+
+The standard RISC-V ISA sets aside a 12-bit encoding space (csr[11:0])
+for up to 4,096 CSRs.  By convention, the upper 4 bits of the CSR
+address (csr[11:8]) are used to encode the read and write
+accessibility of the CSRs according to privilege level as shown in
+Table~\ref{csrrwpriv}.  The top two bits (csr[11:10]) indicate whether
+the register is read/write ({\tt 00}, {\tt 01}, or {\tt 10}) or
+read-only ({\tt 11}).  The next two bits (csr[9:8]) encode the lowest
+privilege level that can access the CSR.
+
+\begin{commentary}
+The CSR address convention uses the upper bits of the CSR address to
+encode default access privileges.  This simplifies error checking in
+the hardware and provides a larger CSR space, but does constrain the
+mapping of CSRs into the address space.
+
+Implementations might allow a more-privileged level to trap otherwise
+permitted CSR accesses by a less-privileged level to allow these
+accesses to be intercepted.  This change should be transparent to the
+less-privileged software.
+\end{commentary}
+
+\begin{table*}[h!]
+\begin{center}
+\begin{tabular}{|c|c|c|c|l|}
+\hline
+\multicolumn{3}{|c|}{CSR Address} & Hex & \multicolumn{1}{c|}{Use and Accessibility}\\ \cline{1-3}
+[11:10] & [9:8] & [7:4]                  &  & \\
+\hline
+\multicolumn{5}{|c|}{Unprivileged and User-Level CSRs}  \\
+\hline
+\tt   00   &\tt   00  &\tt   XXXX   & \tt 0x000-0x0FF & Standard read/write \\
+\tt   01   &\tt   00  &\tt   XXXX   & \tt 0x400-0x4FF & Standard read/write \\
+\tt   10   &\tt   00  &\tt   XXXX   & \tt 0x800-0x8FF & Custom read/write \\
+\tt   11   &\tt   00  &\tt   0XXX   & \tt 0xC00-0xC7F & Standard read-only \\
+\tt   11   &\tt   00  &\tt   10XX   & \tt 0xC80-0xCBF & Standard read-only \\
+\tt   11   &\tt   00  &\tt   11XX   & \tt 0xCC0-0xCFF & Custom read-only \\
+\hline
+\multicolumn{5}{|c|}{Supervisor-Level CSRs}  \\
+\hline
+\tt   00   &\tt   01  &\tt   XXXX   & \tt 0x100-0x1FF & Standard read/write \\
+\tt   01   &\tt   01  &\tt   0XXX   & \tt 0x500-0x57F & Standard read/write \\
+\tt   01   &\tt   01  &\tt   10XX   & \tt 0x580-0x5BF & Standard read/write \\
+\tt   01   &\tt   01  &\tt   11XX   & \tt 0x5C0-0x5FF & Custom read/write \\
+\tt   10   &\tt   01  &\tt   0XXX   & \tt 0x900-0x97F & Standard read/write \\
+\tt   10   &\tt   01  &\tt   10XX   & \tt 0x980-0x9BF & Standard read/write \\
+\tt   10   &\tt   01  &\tt   11XX   & \tt 0x9C0-0x9FF & Custom read/write \\
+\tt   11   &\tt   01  &\tt   0XXX   & \tt 0xD00-0xD7F & Standard read-only \\
+\tt   11   &\tt   01  &\tt   10XX   & \tt 0xD80-0xDBF & Standard read-only \\
+\tt   11   &\tt   01  &\tt   11XX   & \tt 0xDC0-0xDFF & Custom read-only \\
+\hline
+\multicolumn{5}{|c|}{Hypervisor and VS CSRs} \\
+\hline
+\tt   00   &\tt   10  &\tt   XXXX   & \tt 0x200-0x2FF & Standard read/write \\
+\tt   01   &\tt   10  &\tt   0XXX   & \tt 0x600-0x67F & Standard read/write \\
+\tt   01   &\tt   10  &\tt   10XX   & \tt 0x680-0x6BF & Standard read/write \\
+\tt   01   &\tt   10  &\tt   11XX   & \tt 0x6C0-0x6FF & Custom read/write \\
+\tt   10   &\tt   10  &\tt   0XXX   & \tt 0xA00-0xA7F & Standard read/write \\
+\tt   10   &\tt   10  &\tt   10XX   & \tt 0xA80-0xABF & Standard read/write \\
+\tt   10   &\tt   10  &\tt   11XX   & \tt 0xAC0-0xAFF & Custom read/write \\
+\tt   11   &\tt   10  &\tt   0XXX   & \tt 0xE00-0xE7F & Standard read-only \\
+\tt   11   &\tt   10  &\tt   10XX   & \tt 0xE80-0xEBF & Standard read-only \\
+\tt   11   &\tt   10  &\tt   11XX   & \tt 0xEC0-0xEFF & Custom read-only \\
+\hline
+\multicolumn{5}{|c|}{Machine-Level CSRs}  \\
+\hline
+\tt   00   &\tt   11  &\tt   XXXX   & \tt 0x300-0x3FF & Standard read/write \\
+\tt   01   &\tt   11  &\tt   0XXX   & \tt 0x700-0x77F & Standard read/write \\
+\tt   01   &\tt   11  &\tt   100X   & \tt 0x780-0x79F & Standard read/write \\
+\tt   01   &\tt   11  &\tt   1010   & \tt 0x7A0-0x7AF & Standard read/write debug CSRs  \\
+\tt   01   &\tt   11  &\tt   1011   & \tt 0x7B0-0x7BF & Debug-mode-only CSRs \\
+\tt   01   &\tt   11  &\tt   11XX   & \tt 0x7C0-0x7FF & Custom read/write \\
+\tt   10   &\tt   11  &\tt   0XXX   & \tt 0xB00-0xB7F & Standard read/write \\
+\tt   10   &\tt   11  &\tt   10XX   & \tt 0xB80-0xBBF & Standard read/write \\
+\tt   10   &\tt   11  &\tt   11XX   & \tt 0xBC0-0xBFF & Custom read/write \\
+\tt   11   &\tt   11  &\tt   0XXX   & \tt 0xF00-0xF7F & Standard read-only \\
+\tt   11   &\tt   11  &\tt   10XX   & \tt 0xF80-0xFBF & Standard read-only \\
+\tt   11   &\tt   11  &\tt   11XX   & \tt 0xFC0-0xFFF & Custom read-only \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Allocation of RISC-V CSR address ranges.}
+\label{csrrwpriv}
+\end{table*}
+
+Attempts to access a non-existent CSR raise an illegal instruction
+exception.  Attempts to access a CSR without appropriate privilege
+level or to write a read-only register also raise illegal instruction
+exceptions.  A read/write register might also contain some bits that
+are read-only, in which case writes to the read-only bits are ignored.
+
+Table~\ref{csrrwpriv} also indicates the convention to allocate CSR
+addresses between standard and custom uses.  The CSR addresses
+designated for custom uses will not be redefined by future
+standard extensions.
+
+Machine-mode standard read-write CSRs {\tt 0x7A0}--{\tt 0x7BF} are reserved
+for use by the debug system.  Of these CSRs, {\tt 0x7A0}--{\tt 0x7AF} are
+accessible to machine mode, whereas {\tt 0x7B0}--{\tt 0x7BF} are only visible
+to debug mode.  Implementations should raise illegal instruction exceptions on
+machine-mode access to the latter set of registers.
+
+\begin{commentary}
+Effective virtualization requires that as many instructions run natively as
+possible inside a virtualized environment, while any privileged accesses trap
+to the virtual machine monitor~\cite{goldbergvm}.  CSRs that are read-only at
+some lower privilege level are shadowed into separate CSR addresses if they
+are made read-write at a higher privilege level.  This avoids trapping
+permitted lower-privilege accesses while still causing traps on illegal
+accesses.  Currently, the counters are the only shadowed CSRs.
+\end{commentary}
+
+\section{CSR Listing}
+
+Tables~\ref{ucsrnames}--\ref{mcsrnames1} list the CSRs that have
+currently been allocated CSR addresses.  The timers, counters, and
+floating-point CSRs are standard unprivileged CSRs.
+The other
+registers are used by privileged code, as described in the following
+chapters.  Note that not all registers are required on all
+implementations.
+
+\begin{table}[htb!]
+\begin{center}
+\begin{tabular}{|l|l|l|l|}
+\hline
+Number    & Privilege & Name & Description \\
+\hline
+\multicolumn{4}{|c|}{Unprivileged Floating-Point CSRs} \\
+\hline
+\tt 0x001 & URW  &\tt fflags     & Floating-Point Accrued Exceptions. \\
+\tt 0x002 & URW  &\tt frm        & Floating-Point Dynamic Rounding Mode. \\
+\tt 0x003 & URW  &\tt fcsr       & Floating-Point Control and Status
+Register ({\tt frm} + {\tt fflags}). \\
+\hline
+\multicolumn{4}{|c|}{Unprivileged Counter/Timers} \\
+\hline
+\tt 0xC00 & URO  &\tt cycle         & Cycle counter for RDCYCLE instruction. \\
+\tt 0xC01 & URO  &\tt time          & Timer for RDTIME instruction. \\
+\tt 0xC02 & URO  &\tt instret       & Instructions-retired counter for RDINSTRET instruction. \\
+\tt 0xC03 & URO  &\tt hpmcounter3   & Performance-monitoring counter. \\
+\tt 0xC04 & URO  &\tt hpmcounter4   & Performance-monitoring counter. \\
+& & \multicolumn{1}{c|}{\vdots} & \ \\
+\tt 0xC1F & URO  &\tt hpmcounter31  & Performance-monitoring counter. \\
+\tt 0xC80 & URO  &\tt cycleh        & Upper 32 bits of {\tt cycle}, RV32 only. \\
+\tt 0xC81 & URO  &\tt timeh         & Upper 32 bits of {\tt time}, RV32 only. \\
+\tt 0xC82 & URO  &\tt instreth      & Upper 32 bits of {\tt instret}, RV32 only. \\
+\tt 0xC83 & URO  &\tt hpmcounter3h  & Upper 32 bits of {\tt hpmcounter3}, RV32 only. \\
+\tt 0xC84 & URO  &\tt hpmcounter4h  & Upper 32 bits of {\tt hpmcounter4}, RV32 only. \\
+& & \multicolumn{1}{c|}{\vdots} & \ \\
+\tt 0xC9F & URO  &\tt hpmcounter31h & Upper 32 bits of {\tt hpmcounter31}, RV32 only. \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Currently allocated RISC-V unprivileged CSR addresses.}
+\label{ucsrnames}
+\end{table}
+
+\begin{table}[htb!]
+\begin{center}
+\begin{tabular}{|l|l|l|l|}
+\hline
+Number    & Privilege & Name & Description \\
+\hline
+\multicolumn{4}{|c|}{Supervisor Trap Setup} \\
+\hline
+\tt 0x100 & SRW  &\tt sstatus    & Supervisor status register. \\
+\tt 0x104 & SRW  &\tt sie        & Supervisor interrupt-enable register. \\
+\tt 0x105 & SRW  &\tt stvec      & Supervisor trap handler base address. \\
+\tt 0x106 & SRW  &\tt scounteren & Supervisor counter enable. \\
+\hline
+\multicolumn{4}{|c|}{Supervisor Configuration} \\
+\hline
+\tt 0x10A & SRW  &\tt senvcfg    & Supervisor environment configuration register. \\
+\hline
+\multicolumn{4}{|c|}{Supervisor Trap Handling} \\
+\hline
+\tt 0x140 & SRW  &\tt sscratch   & Scratch register for supervisor trap handlers. \\
+\tt 0x141 & SRW  &\tt sepc       & Supervisor exception program counter. \\
+\tt 0x142 & SRW  &\tt scause     & Supervisor trap cause. \\
+\tt 0x143 & SRW  &\tt stval      & Supervisor bad address or instruction. \\
+\tt 0x144 & SRW  &\tt sip        & Supervisor interrupt pending. \\
+\hline
+\multicolumn{4}{|c|}{Supervisor Protection and Translation} \\
+\hline
+\tt 0x180 & SRW  &\tt satp       & Supervisor address translation and protection. \\
+\hline
+\multicolumn{4}{|c|}{Debug/Trace Registers} \\
+\hline
+\tt 0x5A8 & SRW &\tt scontext & Supervisor-mode context register. \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Currently allocated RISC-V supervisor-level CSR addresses.}
+\label{scsrnames}
+\end{table}
+
+\begin{table}[htb!]
+\begin{center}
+\begin{tabular}{|l|l|l|l|}
+\hline
+Number    & Privilege & Name & Description \\
+\hline
+\multicolumn{4}{|c|}{Hypervisor Trap Setup} \\
+\hline
+\hline
+\tt 0x600 & HRW  &\tt hstatus    & Hypervisor status register. \\
+\tt 0x602 & HRW  &\tt hedeleg    & Hypervisor exception delegation register. \\
+\tt 0x603 & HRW  &\tt hideleg    & Hypervisor interrupt delegation register. \\
+\tt 0x604 & HRW  &\tt hie        & Hypervisor interrupt-enable register. \\
+\tt 0x606 & HRW  &\tt hcounteren & Hypervisor counter enable. \\
+\tt 0x607 & HRW  &\tt hgeie      & Hypervisor guest external interrupt-enable register. \\
+\hline
+\multicolumn{4}{|c|}{Hypervisor Trap Handling} \\
+\hline
+\tt 0x643 & HRW  &\tt htval      & Hypervisor bad guest physical address. \\
+\tt 0x644 & HRW  &\tt hip        & Hypervisor interrupt pending. \\
+\tt 0x645 & HRW  &\tt hvip       & Hypervisor virtual interrupt pending. \\
+\tt 0x64A & HRW  &\tt htinst     & Hypervisor trap instruction (transformed). \\
+\tt 0xE12 & HRO  &\tt hgeip      & Hypervisor guest external interrupt pending. \\
+\hline
+\multicolumn{4}{|c|}{Hypervisor Configuration} \\
+\hline
+\tt 0x60A & HRW  &\tt henvcfg    & Hypervisor environment configuration register. \\
+\tt 0x61A & HRW  &\tt henvcfgh   & Additional hypervisor env. conf. register, RV32 only. \\
+\hline
+\multicolumn{4}{|c|}{Hypervisor Protection and Translation} \\
+\hline
+\tt 0x680 & HRW  &\tt hgatp      & Hypervisor guest address translation and protection. \\
+\hline
+\multicolumn{4}{|c|}{Debug/Trace Registers} \\
+\hline
+\tt 0x6A8 & HRW &\tt hcontext & Hypervisor-mode context register. \\
+\hline
+\multicolumn{4}{|c|}{Hypervisor Counter/Timer Virtualization Registers} \\
+\hline
+\tt 0x605 & HRW  &\tt htimedelta   & Delta for VS/VU-mode timer. \\
+\tt 0x615 & HRW  &\tt htimedeltah  & Upper 32 bits of {\tt htimedelta}, HSXLEN=32 only. \\
+\hline
+\multicolumn{4}{|c|}{Virtual Supervisor Registers} \\
+\hline
+\tt 0x200 & HRW  &\tt vsstatus   & Virtual supervisor status register. \\
+\tt 0x204 & HRW  &\tt vsie       & Virtual supervisor interrupt-enable register. \\
+\tt 0x205 & HRW  &\tt vstvec     & Virtual supervisor trap handler base address. \\
+\tt 0x240 & HRW  &\tt vsscratch  & Virtual supervisor scratch register. \\
+\tt 0x241 & HRW  &\tt vsepc      & Virtual supervisor exception program counter. \\
+\tt 0x242 & HRW  &\tt vscause    & Virtual supervisor trap cause. \\
+\tt 0x243 & HRW  &\tt vstval     & Virtual supervisor bad address or instruction. \\
+\tt 0x244 & HRW  &\tt vsip       & Virtual supervisor interrupt pending. \\
+\tt 0x280 & HRW  &\tt vsatp      & Virtual supervisor address translation and protection. \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Currently allocated RISC-V hypervisor and VS CSR addresses.}
+\label{hcsrnames}
+\end{table}
+
+
+\begin{table}[htb!]
+\begin{center}
+\begin{tabular}{|l|l|l|l|}
+\hline
+Number    & Privilege & Name & Description \\
+\hline
+\multicolumn{4}{|c|}{Machine Information Registers} \\
+\hline
+\tt 0xF11 & MRO &\tt mvendorid   & Vendor ID. \\
+\tt 0xF12 & MRO &\tt marchid     & Architecture ID. \\
+\tt 0xF13 & MRO &\tt mimpid      & Implementation ID. \\
+\tt 0xF14 & MRO &\tt mhartid     & Hardware thread ID. \\
+\tt 0xF15 & MRO &\tt mconfigptr  & Pointer to configuration data structure. \\
+\hline
+\multicolumn{4}{|c|}{Machine Trap Setup} \\
+\hline
+\tt 0x300 & MRW  &\tt mstatus    & Machine status register. \\
+\tt 0x301 & MRW  &\tt misa       & ISA and extensions \\
+\tt 0x302 & MRW  &\tt medeleg    & Machine exception delegation register. \\
+\tt 0x303 & MRW  &\tt mideleg    & Machine interrupt delegation register. \\
+\tt 0x304 & MRW  &\tt mie        & Machine interrupt-enable register. \\
+\tt 0x305 & MRW  &\tt mtvec      & Machine trap-handler base address. \\
+\tt 0x306 & MRW  &\tt mcounteren & Machine counter enable. \\
+\tt 0x310 & MRW  &\tt mstatush   & Additional machine status register, RV32 only. \\
+\hline
+\multicolumn{4}{|c|}{Machine Trap Handling} \\
+\hline
+\tt 0x340 & MRW  &\tt mscratch   & Scratch register for machine trap handlers. \\
+\tt 0x341 & MRW  &\tt mepc       & Machine exception program counter. \\
+\tt 0x342 & MRW  &\tt mcause     & Machine trap cause. \\
+\tt 0x343 & MRW  &\tt mtval      & Machine bad address or instruction. \\
+\tt 0x344 & MRW  &\tt mip        & Machine interrupt pending. \\
+\tt 0x34A & MRW  &\tt mtinst     & Machine trap instruction (transformed). \\
+\tt 0x34B & MRW  &\tt mtval2     & Machine bad guest physical address. \\
+\hline
+\multicolumn{4}{|c|}{Machine Configuration} \\
+\hline
+\tt 0x30A & MRW  &\tt menvcfg    & Machine environment configuration register. \\
+\tt 0x31A & MRW  &\tt menvcfgh   & Additional machine env. conf. register, RV32 only. \\
+\tt 0x747 & MRW  &\tt mseccfg    & Machine security configuration register. \\
+\tt 0x757 & MRW  &\tt mseccfgh   & Additional machine security conf. register, RV32 only. \\
+\hline
+\multicolumn{4}{|c|}{Machine Memory Protection} \\
+\hline
+%\tt 0x380 & MRW  &\tt mbase      & Base register. \\
+%\tt 0x381 & MRW  &\tt mbound     & Bound register. \\
+%\tt 0x382 & MRW  &\tt mibase     & Instruction base register. \\
+%\tt 0x383 & MRW  &\tt mibound    & Instruction bound register. \\
+%\tt 0x384 & MRW  &\tt mdbase     & Data base register. \\
+%\tt 0x385 & MRW  &\tt mdbound    & Data bound register. \\
+\tt 0x3A0 & MRW  &\tt pmpcfg0    & Physical memory protection configuration. \\
+\tt 0x3A1 & MRW  &\tt pmpcfg1    & Physical memory protection configuration, RV32 only. \\
+\tt 0x3A2 & MRW  &\tt pmpcfg2    & Physical memory protection configuration. \\
+\tt 0x3A3 & MRW  &\tt pmpcfg3    & Physical memory protection configuration, RV32 only. \\
+& & \multicolumn{1}{c|}{\vdots} & \ \\
+\tt 0x3AE & MRW  &\tt pmpcfg14   & Physical memory protection configuration. \\
+\tt 0x3AF & MRW  &\tt pmpcfg15   & Physical memory protection configuration, RV32 only. \\
+\tt 0x3B0 & MRW  &\tt pmpaddr0   & Physical memory protection address register. \\
+\tt 0x3B1 & MRW  &\tt pmpaddr1   & Physical memory protection address register. \\
+& & \multicolumn{1}{c|}{\vdots} & \ \\
+\tt 0x3EF & MRW  &\tt pmpaddr63  & Physical memory protection address register. \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Currently allocated RISC-V machine-level CSR addresses.}
+\label{mcsrnames0}
+\end{table}
+
+\begin{table}[htb!]
+\begin{center}
+\begin{tabular}{|l|l|l|l|}
+\hline
+Number    & Privilege & Name & Description \\
+\hline
+\multicolumn{4}{|c|}{Machine Non-Maskable Interrupt Handling} \\
+\hline
+\tt 0x740 & MRW  &\tt mnscratch  & Resumable NMI scratch register. \\
+\tt 0x741 & MRW  &\tt mnepc      & Resumable NMI program counter. \\
+\tt 0x742 & MRW  &\tt mncause    & Resumable NMI cause. \\
+\tt 0x744 & MRW  &\tt mnstatus   & Resumable NMI status. \\
+\hline
+\multicolumn{4}{|c|}{Machine Counter/Timers} \\
+\hline
+\tt 0xB00 & MRW  &\tt mcycle         & Machine cycle counter. \\
+\tt 0xB02 & MRW  &\tt minstret       & Machine instructions-retired counter. \\
+\tt 0xB03 & MRW  &\tt mhpmcounter3   & Machine performance-monitoring counter. \\
+\tt 0xB04 & MRW  &\tt mhpmcounter4   & Machine performance-monitoring counter. \\
+& & \multicolumn{1}{c|}{\vdots} & \ \\
+\tt 0xB1F & MRW  &\tt mhpmcounter31  & Machine performance-monitoring counter. \\
+\tt 0xB80 & MRW  &\tt mcycleh        & Upper 32 bits of {\tt mcycle}, RV32 only. \\
+\tt 0xB82 & MRW  &\tt minstreth      & Upper 32 bits of {\tt minstret}, RV32 only. \\
+\tt 0xB83 & MRW  &\tt mhpmcounter3h  & Upper 32 bits of {\tt mhpmcounter3}, RV32 only. \\
+\tt 0xB84 & MRW  &\tt mhpmcounter4h  & Upper 32 bits of {\tt mhpmcounter4}, RV32 only. \\
+& & \multicolumn{1}{c|}{\vdots} & \ \\
+\tt 0xB9F & MRW  &\tt mhpmcounter31h & Upper 32 bits of {\tt mhpmcounter31}, RV32 only. \\
+\hline
+\multicolumn{4}{|c|}{Machine Counter Setup} \\
+\hline
+\tt 0x320 & MRW  &\tt mcountinhibit  & Machine counter-inhibit register. \\
+\tt 0x323 & MRW  &\tt mhpmevent3     & Machine performance-monitoring event selector. \\
+\tt 0x324 & MRW  &\tt mhpmevent4     & Machine performance-monitoring event selector. \\
+& & \multicolumn{1}{c|}{\vdots} & \ \\
+\tt 0x33F & MRW  &\tt mhpmevent31    & Machine performance-monitoring event selector. \\
+\hline
+\multicolumn{4}{|c|}{Debug/Trace Registers (shared with Debug Mode)} \\
+\hline
+\tt 0x7A0 & MRW &\tt tselect & Debug/Trace trigger register select. \\
+\tt 0x7A1 & MRW &\tt tdata1 & First Debug/Trace trigger data register. \\
+\tt 0x7A2 & MRW &\tt tdata2 & Second Debug/Trace trigger data register. \\
+\tt 0x7A3 & MRW &\tt tdata3 & Third Debug/Trace trigger data register. \\
+\tt 0x7A8 & MRW &\tt mcontext & Machine-mode context register. \\
+\hline
+\multicolumn{4}{|c|}{Debug Mode Registers } \\
+\hline
+\tt 0x7B0 & DRW &\tt dcsr & Debug control and status register. \\
+\tt 0x7B1 & DRW &\tt dpc & Debug program counter. \\
+\tt 0x7B2 & DRW &\tt dscratch0 & Debug scratch register 0. \\
+\tt 0x7B3 & DRW &\tt dscratch1 & Debug scratch register 1. \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Currently allocated RISC-V machine-level CSR addresses.}
+\label{mcsrnames1}
+\end{table}
+
+\clearpage
+
+\section{CSR Field Specifications}
+
+
+The following definitions and abbreviations are used in specifying the
+behavior of fields within the CSRs.
+
+\subsection*{Reserved Writes Preserve Values, Reads Ignore Values (WPRI)}
+
+Some whole read/write fields are reserved for future use.  Software
+should ignore the values read from these fields, and should preserve
+the values held in these fields when writing values to other fields of
+the same register.
+For forward compatibility, implementations that do not furnish these fields
+must make them read-only zero.
+These fields are labeled \wpri\ in the register descriptions.
+
+\begin{commentary}
+To simplify the software model, any backward-compatible future
+definition of previously reserved fields within a CSR must cope with
+the possibility that a non-atomic read/modify/write sequence is used
+to update other fields in the CSR.  Alternatively, the original CSR
+definition must specify that subfields can only be updated atomically,
+which may require a two-instruction clear bit/set bit sequence in
+general that can be problematic if intermediate values are not legal.
+\end{commentary}
+
+\subsection*{Write/Read Only Legal Values (WLRL)}
+
+Some read/write CSR fields specify behavior for only a subset of
+possible bit encodings, with other bit encodings reserved.  Software
+should not write anything other than legal values to such a field, and
+should not assume a read will return a legal value unless the last
+write was of a legal value, or the register has not been written since
+another operation (e.g., reset) set the register to a legal value.
+These fields are labeled \wlrl\ in the register descriptions.
+
+\begin{commentary}
+Hardware implementations need only implement enough state bits to
+differentiate between the supported values, but must always return the
+complete specified bit-encoding of any supported value when read.
+\end{commentary}
+
+Implementations are permitted but not required to raise an illegal
+instruction exception if an instruction attempts to write a
+non-supported value to a \wlrl\ field.  Implementations can
+return arbitrary bit patterns on the read of a \wlrl\ field when the last
+write was of an illegal value, but the value returned should
+deterministically depend on the illegal written value and
+the value of the field prior to the write.
+
+\subsection*{Write Any Values, Reads Legal Values (WARL)}
+
+Some read/write CSR fields are only defined for a subset of bit
+encodings, but allow any value to be written while guaranteeing to
+return a legal value whenever read.  Assuming that writing the CSR has
+no other side effects, the range of supported values can be determined
+by attempting to write a desired setting then reading to see if the
+value was retained.  These fields are labeled \warl\ in the register
+descriptions.
+
+Implementations will not raise an exception on writes of unsupported
+values to a \warl\ field.  Implementations can
+return any legal value on the read of a \warl\ field when the last
+write was of an illegal value, but the legal value returned should
+deterministically depend on the illegal written value and
+the architectural state of the hart.
+
+\section{CSR Field Modulation}
+
+If a write to one CSR changes the set of legal values allowed for a
+field of a second CSR, then unless specified otherwise, the second
+CSR's field immediately gets an \unspecified\ value from among its new
+legal values.
+This is true even if the field's value before the write remains legal
+after the write;
+the value of the field may be changed in consequence of the write to
+the controlling CSR.
+
+\begin{commentary}
+As a special case of this rule, the value written to one CSR may
+control whether a field of a second CSR is writable (with multiple
+legal values) or is read-only.
+When a write to the controlling CSR causes the second CSR's field
+to change from previously read-only to now writable, that field
+immediately gets an \unspecified\ but legal value, unless specified
+otherwise.
+\end{commentary}
+
+\begin{commentary}
+Some CSR fields are, when writable, defined as aliases of other CSR
+fields.
+Let $x$ be such a CSR field, and let $y$ be the CSR field it aliases
+when writable.
+If a write to a controlling CSR causes field $x$ to change from
+previously read-only to now writable, the new value of $x$ is not
+\unspecified\ but instead immediately reflects the existing value of its
+alias~$y$, as required.
+\end{commentary}
+
+A change to the value of a CSR for this reason is not a write to the
+affected CSR and thus does not trigger any side effects specified for
+that CSR.
+
+\section{Implicit Reads of CSRs}
+
+Implementations sometimes perform {\em implicit} reads of CSRs.
+(For example, all S-mode instruction fetches implicitly read the {\tt satp}
+CSR.)
+Unless otherwise specified, the value returned by an implicit read of a CSR
+is the same value that would have been returned by an explicit read of the
+CSR, using a CSR-access instruction in a sufficient privilege mode.
+
+\section{CSR Width Modulation}
+\label{sec:csrwidthmodulation}
+
+If the width of a CSR is changed (for example, by changing MXLEN or UXLEN, as
+described in Section~\ref{xlen-control}), the values of the {\em writable}
+fields and bits of the new-width CSR are, unless specified otherwise,
+determined from the previous-width CSR as though by this algorithm:
+
+\begin{enumerate}
+
+\item The value of the previous-width CSR is copied to a temporary register of
+the same width.
+
+\item For the read-only bits of the previous-width CSR, the bits at the same
+positions in the temporary register are set to zeros.
+
+\item The width of the temporary register is changed to the new width. If the
+new width $W$ is narrower than the previous width, the least-significant $W$
+bits of the temporary register are retained and the more-significant bits are
+discarded. If the new width is wider than the previous width, the temporary
+register is zero-extended to the wider width.
+
+\item Each writable field of the new-width CSR takes the value of the bits at
+the same positions in the temporary register.
+
+\end{enumerate}
+
+Changing the width of a CSR is not a read or write of the CSR and thus
+does not trigger any side effects.
