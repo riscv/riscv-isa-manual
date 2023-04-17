@@ -27,4 +27,4 @@ To contribute to this documentation, please see the Documentation Developer's Gu
 
 The recommended PDF Build method is to use the Docker Image as described here:  https://github.com/riscv/riscv-docs-base-container-image
 
-Alternative Build methods such as local builds and GitHub Action builds are also available as described in the Documentation Developer's Guid.
+Alternative Build methods such as local builds and GitHub Action builds are also available as described in the Documentation Developer's Guide.
