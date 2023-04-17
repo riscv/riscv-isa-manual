@@ -43,7 +43,7 @@ PDFLATEX := TEXINPUTS=$(SRCDIR)/latex: pdflatex -interaction=nonstopmode -halt-o
 BIBTEX := BIBINPUTS=$(SRCDIR)/latex: bibtex
 
 # Temporary files to clean up for LaTeX build
-JUNK := *.pdf *.aux *.log *.bbl *.blg *.toc *.out
+JUNK := *.pdf *.aux *.log *.bbl *.blg *.toc *.out *.fdb_latexmk *.fls *.synctex.gz
 
 # Privileged ISA build
 priv: priv-isa-asciidoc.pdf
@@ -104,7 +104,8 @@ clean:
 		rm -f unpriv-isa-asciidoc.html; \
 	fi
 	@echo "Cleaning up files from LaTeX build"
-	@for file in $(JUNK); do \
+	@cd $(SRCDIR)/latex; \
+	for file in $(JUNK); do \
 		if [ -f "$$file" ]; then \
 			echo "Removing $$file"; \
 			rm -f "$$file"; \
