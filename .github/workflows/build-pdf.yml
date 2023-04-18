@@ -1,75 +1,83 @@
-# This workflow installs dependencies for PDF generation, generates the PDF,
-# and uploads the PDF as an artifact.
-
-name: Build Document PDF
+name: Build RISC-V Privileged Spec PDF
 
 on:
   workflow_dispatch:
-  workflow_call:
-    outputs:
-      name:
-        description: "The base name of the pdf file (without .pdf extensions)"
-        value: ${{ jobs.build.outputs.name }}
-      pdf-name:
-        description: "The name of the pdf file (with .pdf extensions)"
-        value: ${{ jobs.build.outputs.pdf-name }}
+    inputs:
+      create_release:
+        description: 'Create a release if set to true'
+        required: false
+        default: 'false'
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      NAME: unpriv-isa-asciidoc
-      APT_PACKAGES_FILE: ${{ github.workspace }}/dependencies/apt_packages.txt
-      BUNDLE_GEMFILE: ${{ github.workspace }}/dependencies/Gemfile
-      BUNDLE_BIN: ${{ github.workspace }}/bin
-      NPM_PACKAGE_FOLDER: ${{ github.workspace }}/dependencies
-    outputs:
-      name: ${{ steps.step1.outputs.name }}
-      pdf-name: ${{ steps.step2.outputs.pdf-name }}
-    if: contains(github.ref, 'riscv-isa-asciidoc')
+    permissions:
+      contents: write
+
     steps:
-    - name: Set outputs.name
-      id: step1
-      run: echo "name=$NAME" >> $GITHUB_OUTPUT
-    - name: Set outputs.pdf-name
-      id: step2
-      run: echo "pdf-name=$NAME.pdf" >> $GITHUB_OUTPUT
+    # Checkout the repository
     - name: Checkout repository
       uses: actions/checkout@v3
-      with:
-        submodules: 'true'
-    - name: Install Ubuntu packages
+
+    # Pull the latest RISC-V Docs container image
+    - name: Pull Container
       run: |
-        sudo apt-get update
-        grep -vE '^#' ${APT_PACKAGES_FILE} | xargs sudo apt-get install --yes --no-install-recommends
-    # Ruby for asciidoctor
-    - name: Setup Ruby and Gemfile content
-      uses: ruby/setup-ruby@v1
-      with:
-        ruby-version: "3.2.0"
-        bundler-cache: true
-    # Node.js for wavedrom
-    - uses: actions/cache@v3
-      with:
-        path: ~/.npm
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '16'
-    - name: Install Node.js dependencies
-      run: npm install ${NPM_PACKAGE_FOLDER}
-    - name: Generate PDF
-      working-directory: ./build
+        docker pull riscvintl/riscv-docs-base-container-image:latest
+
+    # Build PDF file using the container
+    - name: Build Files
+      id: build_files
       run: |
-        PATH=${PATH}:${BUNDLE_BIN}:$(npm bin) \
-        make
-    - name: Archive PDF result
+        docker run --rm -v ${{ github.workspace }}:/build riscvintl/riscv-docs-base-container-image:latest \
+        /bin/sh -c 'cd ./build && make'
+
+    # Set the short SHA for use in artifact names
+    - name: Set short SHA
+      run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+
+    # Upload the riscv-privileged.pdf PDF file
+    - name: Upload riscv-privileged.pdf
+      if: steps.build_files.outcome == 'success'
       uses: actions/upload-artifact@v3
       with:
-        name: ${{ env.NAME }}.pdf
-        path: ./build/${{ env.NAME }}.pdf
+        name: riscv-privileged-${{ env.SHORT_SHA }}.pdf
+        path: ${{ github.workspace }}/build/riscv-privileged.pdf
         retention-days: 7
+
+    # Upload the riscv-spec.pdf PDF file
+    - name: Upload riscv-spec.pdf
+      if: steps.build_files.outcome == 'success'
+      uses: actions/upload-artifact@v3
+      with:
+        name: riscv-spec-${{ env.SHORT_SHA }}.pdf
+        path: ${{ github.workspace }}/build/riscv-spec.pdf
+        retention-days: 7
+
+    # Create and push a tag
+    - name: Create and push tag
+      if: steps.build_files.outcome == 'success' && github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+        git tag -a "isa-${{ env.SHORT_SHA }}" -m "Release for riscv-privileged-${{ env.SHORT_SHA }}.pdf and riscv-spec-${{ env.SHORT_SHA }}.pdf"
+        git push origin "isa-${{ env.SHORT_SHA }}"
+
+    # Create a manual release
+    - name: Create Release
+      if: steps.build_files.outcome == 'success' && github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        draft: false
+        name: Release for riscv-privileged-${{ env.SHORT_SHA }}.pdf and riscv-spec-${{ env.SHORT_SHA }}.pdf
+        tag_name: isa-${{ env.SHORT_SHA }}
+        files: |
+          ${{ github.workspace }}/build/*.pdf
+      env:
+        GITHUB_TOKEN: ${{ secrets.GHTOKEN }}
