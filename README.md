@@ -21,7 +21,7 @@ https://github.com/riscv/riscv-isa-manual/releases/tag/archive
 The canonical list of **open-source RISC-V implementations' marchid CSR values**
 is available at https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
 
-Contributing
+**Contributing
 
 To contribute to this documentation, please see the Documentation Developer's Guide here: https://github.com/riscv/docs-dev-guide
 
