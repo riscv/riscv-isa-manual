@@ -19,30 +19,7 @@ jobs:
     # Checkout the repository
     - name: Checkout repository
       uses: actions/checkout@v3
-
-    # Pull the latest RISC-V Docs container image
-    # https://github.com/riscv/riscv-docs-base-container-image
-    # https://hub.docker.com/r/riscvintl/riscv-docs-base-container-image
-    - name: Pull Container
-      id: pull_container
-      run: |
-        docker pull riscvintl/riscv-docs-base-container-image:latest
-
-    # Build PDF and HTML files using the container
-    - name: Build Files
-      id: build_files
-      if: steps.pull_container.outcome == 'success'
-      run: |
-        docker run --rm -v ${{ github.workspace }}:/build riscvintl/riscv-docs-base-container-image:latest \
-        /bin/sh -c 'cd ./build && make'
-        mv ${{ github.workspace }}/build/priv-isa-asciidoc.pdf ${{ github.workspace }}/build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
-        mv ${{ github.workspace }}/build/priv-isa-asciidoc.html ${{ github.workspace }}/build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
-        mv ${{ github.workspace }}/build/unpriv-isa-asciidoc.pdf ${{ github.workspace }}/build/unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
-        mv ${{ github.workspace }}/build/unpriv-isa-asciidoc.html ${{ github.workspace }}/build/unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.html
-        mv ${{ github.workspace }}/build/riscv-privileged.pdf ${{ github.workspace }}/build/riscv-privileged-latex-${{ env.SHORT_SHA }}.pdf
-        pwd
-        ls -la
-
+      
     # Set the short SHA for use in artifact names
     - name: Set short SHA
       run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
@@ -51,13 +28,40 @@ jobs:
     - name: Get current date
       run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
+    # Pull the latest RISC-V Docs container image
+    # https://github.com/riscv/riscv-docs-base-container-image
+    # https://hub.docker.com/r/riscvintl/riscv-docs-base-container-image
+    - name: Pull Container
+      id: pull_container_image
+      run: |
+        docker pull riscvintl/riscv-docs-base-container-image:latest
+
+    # Build PDF and HTML files using the container
+    - name: Build Files
+      id: build_files
+      if: steps.pull_container_image.outcome == 'success'
+      run: |
+        docker run --rm -v ${{ github.workspace }}:/build riscvintl/riscv-docs-base-container-image:latest \
+        /bin/sh -c 'cd ./build && make'
+        
+    # Rename the generated files
+    - name: Rename Files
+      id: rename_files
+      if: steps.build_files.outcome == 'success'
+      run: |
+        mv ${{ github.workspace }}/build/priv-isa-asciidoc.pdf ${{ github.workspace }}/build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
+        mv ${{ github.workspace }}/build/priv-isa-asciidoc.html ${{ github.workspace }}/build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
+        mv ${{ github.workspace }}/build/unpriv-isa-asciidoc.pdf ${{ github.workspace }}/build/unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
+        mv ${{ github.workspace }}/build/unpriv-isa-asciidoc.html ${{ github.workspace }}/build/unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.html
+        mv ${{ github.workspace }}/build/riscv-privileged.pdf ${{ github.workspace }}/build/riscv-privileged-${{ env.SHORT_SHA }}.pdf
+
     # Upload the priv-isa-asciidoc PDF file
     - name: Upload priv-isa-asciidoc.pdf
       if: steps.build_files.outcome == 'success'
       uses: actions/upload-artifact@v3
       with:
         name: priv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
-        path: /build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
+        path: ${{ github.workspace }}/build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
         retention-days: 7
 
     # Upload the priv-isa-asciidoc HTML file
@@ -66,7 +70,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
-        path: ${{ github.workspace }}/priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
+        path: ${{ github.workspace }}/build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
         retention-days: 7
 
     # Upload the unpriv-isa-asciidoc PDF file
@@ -87,15 +91,15 @@ jobs:
         path: ${{ github.workspace }}/build/unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.html
         retention-days: 7
 
-    # Upload the riscv-privileged.pdf PDF file
+    # Upload the priv-isa-latex PDF file
     - name: Upload riscv-privileged.pdf
       if: steps.build_files.outcome == 'success'
       uses: actions/upload-artifact@v3
       with:
         name: riscv-privileged-latex-${{ env.SHORT_SHA }}.pdf
-        path: ${{ github.workspace }}/build/riscv-privileged-latex-${{ env.SHORT_SHA }}.pdf
+        path: ${{ github.workspace }}/build/riscv-privileged-${{ env.SHORT_SHA }}.pdf
         retention-days: 7
-    
+        
     # Create a draft release with generated files
     - name: Create Draft Release
       if: steps.build_files.outcome == 'success'
@@ -112,7 +116,6 @@ jobs:
           ${{ github.workspace }}/build/priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
           ${{ github.workspace }}/build/unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
           ${{ github.workspace }}/build/unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.html
-          ${{ github.workspace }}/build/riscv-privileged-latex-${{ env.SHORT_SHA }}.pdf
-          ${{ github.workspace }}/build/riscv-spec-latex-${{ env.SHORT_SHA }}.pdf
+          ${{ github.workspace }}/build/riscv-privileged-${{ env.SHORT_SHA }}.pdf
       env:
         GITHUB_TOKEN: ${{ secrets.GHTOKEN }}
