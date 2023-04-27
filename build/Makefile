@@ -14,7 +14,7 @@
 # for generating documentation in various formats (PDF, HTML).
 
 # Build Targets
-TARGETS := priv unpriv priv-html unpriv-html priv-latex unpriv-latex
+TARGETS := priv unpriv priv-html unpriv-html priv-latex
 
 # Declare phony targets
 .PHONY: all $(TARGETS) clean
@@ -81,15 +81,6 @@ unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-unprivileged.adoc
 priv-latex: riscv-privileged.pdf
 
 riscv-privileged.pdf: $(SRCDIR)/latex/riscv-privileged.tex $(SRCS) $(FIGS) $(BIBS)
-	$(PDFLATEX) riscv-privileged
-	$(BIBTEX) riscv-privileged
-	$(PDFLATEX) riscv-privileged
-	$(PDFLATEX) riscv-privileged
-	
-# LaTeX build for Unprivileged ISA
-unpriv-latex: riscv-spec.pdf
-
-riscv-spec.pdf: $(SRCDIR)/latex/riscv-spec.tex $(SRCS) $(FIGS) $(BIBS)
 	$(PDFLATEX) riscv-privileged
 	$(BIBTEX) riscv-privileged
 	$(PDFLATEX) riscv-privileged
