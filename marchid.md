@@ -51,3 +51,4 @@ RISu064       | Wenting Zhang                   | [Wenting Zhang](mailto:zephray
 AIRISC        | Fraunhofer IMS                  | [AIRISC Support](mailto:airisc@ims.fraunhofer.de)           | 31               | https://github.com/Fraunhofer-IMS/airisc_core_complex
 Proteus       | imec-DistriNet, KU Leuven       | [Marton Bognar](mailto:marton.bognar@kuleuven.be)           | 32               | https://github.com/proteus-core/proteus
 VexRiscv      | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 33               | https://github.com/SpinalHDL/VexRiscv
+Shuttle       | UC Berkeley                     | [Jerry Zhao](mailto:jerryz123@berkeley.edu)                 | 34               | https://github.com/ucb-bar/shuttle
