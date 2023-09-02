@@ -1,7 +1,7 @@
 Open-Source RISC-V Architecture IDs
 ========================================
 
-Every RISC-V hart provides an marchid CSR that encodes its base
+Every RISC-V hart provides a marchid CSR that encodes its base
 microarchitecture.  Any hart may report an architecture ID of 0, indicating
 unspecified origin.  Commercial implementations (those with nonzero mvendorid)
 may encode any value in marchid with the most-significant bit set, with the
