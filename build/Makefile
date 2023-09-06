@@ -22,6 +22,11 @@ TARGETS := priv unpriv priv-html unpriv-html priv-latex
 # Default target builds all
 all: $(TARGETS)
 
+# Build with preinstalled docker container; first install it with:
+#   docker pull riscvintl/riscv-docs-base-container-image:latest
+docker:
+	cd .. && docker run -it -v .:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'cd ./build; make'
+
 # Asciidoctor options
 ASCIIDOCTOR_OPTS := --attribute=mathematical-format=svg \
                     --failure-level=ERROR \
