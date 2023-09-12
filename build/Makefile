@@ -28,7 +28,8 @@ docker:
 	cd .. && docker run -it -v .:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'cd ./build; make'
 
 # Asciidoctor options
-ASCIIDOCTOR_OPTS := --attribute=mathematical-format=svg \
+ASCIIDOCTOR_OPTS := -a compress \
+                    --attribute=mathematical-format=svg \
                     --failure-level=ERROR \
                     --require=asciidoctor-bibtex \
                     --require=asciidoctor-diagram \
