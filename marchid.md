@@ -54,3 +54,4 @@ VexRiscv      | SpinalHDL                       | [Charles Papon](mailto:charles
 Shuttle       | UC Berkeley                     | [Jerry Zhao](mailto:jerryz123@berkeley.edu)                 | 34               | https://github.com/ucb-bar/shuttle
 CV32E2        | OpenHW Group                    | [Davide Schiavone](mailto:davide@openhwgroup.org), OpenHW Group | 35                 | https://github.com/openhwgroup/cve2
 CVW        | OpenHW Group                       | [James Stine](mailto:james.stine@okstate.edu), OpenHW Group | 36             | https://github.com/openhwgroup/cvw
+Boa32         | Julian Scheffers                | [Julian Scheffers](mailto:julian@scheffers.net)             | 37               | https://github.com/robotman2412/boa-risc-v
