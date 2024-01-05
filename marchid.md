@@ -56,3 +56,4 @@ CV32E2        | OpenHW Group                    | [Davide Schiavone](mailto:davi
 CVW        | OpenHW Group                       | [James Stine](mailto:james.stine@okstate.edu), OpenHW Group | 36             | https://github.com/openhwgroup/cvw
 Boa32         | Julian Scheffers                | [Julian Scheffers](mailto:julian@scheffers.net)             | 37               | https://github.com/robotman2412/boa-risc-v
 WIV64         | Jesús Sanz del Rey              | [Jesús Sanz del Rey](mailto:jesussanz2003@gmail.com)        | 38               | https://github.com/StartForKiller/WivCPU
+RV6           | Nikola Lukić                    | [Nikola Lukić](mailto:lukicn@protonmail.com)                | 39               | https://github.com/kiclu/rv6
