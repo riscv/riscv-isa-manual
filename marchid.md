@@ -58,3 +58,4 @@ Boa32         | Julian Scheffers                | [Julian Scheffers](mailto:juli
 WIV64         | Jesús Sanz del Rey              | [Jesús Sanz del Rey](mailto:jesussanz2003@gmail.com)        | 38               | https://github.com/StartForKiller/WivCPU
 RV6           | Nikola Lukić                    | [Nikola Lukić](mailto:lukicn@protonmail.com)                | 39               | https://github.com/kiclu/rv6
 ApogeoRV      | Gabriele Tripi                  | [Gabriele Tripi](mailto:tripi.gabriele2002@gmail.com)       | 40               | https://github.com/GabbedT/ApogeoRV
+MicroRV32      | AGRA, Group of Computer Architecture, University of Bremen | [RISC-V @ AGRA](mailto:riscv@informatik.uni-bremen.de)       | 41               | https://github.com/agra-uni-bremen/microrv32
