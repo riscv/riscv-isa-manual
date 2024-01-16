@@ -26,3 +26,7 @@ If you would like to contribute to this documentation, please refer to the [Docu
 The recommended method for building the PDF files is to use the Docker Image, as described in the [RISC-V Docs Base Container Image repository](https://github.com/riscv/riscv-docs-base-container-image).
 
 Alternative build methods, such as local builds and GitHub Action builds, are also available and described in the Documentation Developer's Guide.
+
+## Repo Activity
+
+![Alt](https://repobeats.axiom.co/api/embed/ccec87dc4502f2ed7c216b670b5ed8efc33a1d4c.svg "Repobeats analytics image")
