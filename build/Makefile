@@ -34,13 +34,13 @@ ASCIIDOCTOR_OPTS := --attribute=mathematical-format=svg \
 SRCDIR := ../src
 
 # LaTeX source and related files
-SRCS := $(wildcard $(SRCDIR)/latex/*.tex)
-FIGS := $(wildcard $(SRCDIR)/latex/figs/*)
-BIBS := $(SRCDIR)/latex/riscv-spec.bib
+#SRCS := $(wildcard $(SRCDIR)/latex/*.tex)
+#FIGS := $(wildcard $(SRCDIR)/latex/figs/*)
+#BIBS := $(SRCDIR)/latex/riscv-spec.bib
 
 # LaTeX build tools
-PDFLATEX := TEXINPUTS=$(SRCDIR)/latex: pdflatex -interaction=nonstopmode -halt-on-error
-BIBTEX := BIBINPUTS=$(SRCDIR)/latex: bibtex
+#PDFLATEX := TEXINPUTS=$(SRCDIR)/latex: pdflatex -interaction=nonstopmode -halt-on-error
+#BIBTEX := BIBINPUTS=$(SRCDIR)/latex: bibtex
 
 # Temporary files to clean up for LaTeX build
 JUNK := *.pdf *.aux *.log *.bbl *.blg *.toc *.out *.fdb_latexmk *.fls *.synctex.gz
@@ -78,13 +78,13 @@ unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-unprivileged.adoc
 	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
 # LaTeX build for Privileged ISA
-priv-latex: riscv-privileged.pdf
+#priv-latex: riscv-privileged.pdf
 
-riscv-privileged.pdf: $(SRCDIR)/latex/riscv-privileged.tex $(SRCS) $(FIGS) $(BIBS)
-	$(PDFLATEX) riscv-privileged
-	$(BIBTEX) riscv-privileged
-	$(PDFLATEX) riscv-privileged
-	$(PDFLATEX) riscv-privileged
+#riscv-privileged.pdf: $(SRCDIR)/latex/riscv-privileged.tex $(SRCS) $(FIGS) $(BIBS)
+#	$(PDFLATEX) riscv-privileged
+#	$(BIBTEX) riscv-privileged
+#	$(PDFLATEX) riscv-privileged
+#	$(PDFLATEX) riscv-privileged
 
 clean:
 	@if [ -f priv-isa-asciidoc.pdf ]; then \
@@ -103,11 +103,11 @@ clean:
 		echo "Removing unpriv-isa-asciidoc.html"; \
 		rm -f unpriv-isa-asciidoc.html; \
 	fi
-	@echo "Cleaning up files from LaTeX build"
-	@cd $(SRCDIR)/latex; \
-	for file in $(JUNK); do \
-		if [ -f "$$file" ]; then \
-			echo "Removing $$file"; \
-			rm -f "$$file"; \
-		fi; \
-	done
+#	@echo "Cleaning up files from LaTeX build"
+#	@cd $(SRCDIR)/latex; \
+#	for file in $(JUNK); do \
+#		if [ -f "$$file" ]; then \
+#			echo "Removing $$file"; \
+#			rm -f "$$file"; \
+#		fi; \
+#	done
