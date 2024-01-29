@@ -23,12 +23,11 @@ The `misa` CSR is a *WARL* read-write register reporting the ISA supported by th
 .Machine ISA register (misa)
 include::images/bytefield/misareg.edn[]
 
-The MXL (Machine XLEN) field encodes the native base integer ISA width
-as shown in <<misabase>>. The MXL field may be
-writable in implementations that support multiple base ISAs. The
-effective XLEN in M-mode, _MXLEN_, is given by the setting of MXL, or
-has a fixed value if `misa` is zero. The MXL field is always set to the
-widest supported ISA variant at reset.
+The MXL (Machine XLEN) field encodes the native base integer ISA width as
+shown in <<misabase>>. The MXL field is read-only.  If `misa` is nonzero, the
+MXL field indicates the effective XLEN in M-mode, a constant termed _MXLEN_.
+XLEN is never greater than MXLEN, but XLEN might be smaller than MXLEN in
+less-privileged modes.
 
 [[misabase]]
 .Encoding of MXL field in `misa`
@@ -43,18 +42,15 @@ widest supported ISA variant at reset.
 128
 |===
 
-The `misa` CSR is MXLEN bits wide. If the value read from `misa` is
-nonzero, field MXL of that value always denotes the current MXLEN. If a
-write to `misa` causes MXLEN to change, the position of MXL moves to the
-most-significant two bits of `misa` at the new width.
+The `misa` CSR is MXLEN bits wide.
 
 [NOTE]
 ====
 The base width can be quickly ascertained using branches on the sign of
 the returned `misa` value, and possibly a shift left by one and a second
 branch on the sign. These checks can be written in assembly code without
-knowing the register width (XLEN) of the machine. The base width is
-given by __XLEN=2^MXL+4^__.
+knowing the register width (MXLEN) of the machine. The base width is
+given by __MXLEN=2^MXL+4^__.
 
 The base width can also be found if `misa` is zero, by placing the
 immediate 4 in a register then shifting the register left by 31 bits at
@@ -495,11 +491,6 @@ next-higher privilege mode. In practice, such settings would almost
 always be a software bug, but machine operation is well-defined even in
 this case.
 ====
-
-If MXLEN is changed from 32 to a wider width, each of `mstatus` fields
-SXL and UXL, if not restricted to a single value, gets the value
-corresponding to the widest supported width not wider than the new
-MXLEN.
 
 ===== Memory Privilege in `mstatus` Register
 
@@ -1942,8 +1933,8 @@ and their configuration.
 include::images/bytefield/mconfigptrreg.adoc[]
 
 
-The pointer alignment in bits must be no smaller than the greatest
-supported MXLEN: i.e., if the greatest supported MXLEN is
+The pointer alignment in bits must be no smaller than MXLEN:
+i.e., if MXLEN is
 latexmath:[$8\times n$], then `mconfigptr`[latexmath:[$\log_2n$]-1:0]
 must be zero.
 
@@ -2323,8 +2314,8 @@ include::images/bytefield/cust-sys-instr.adoc[]
 Upon reset, a hart’s privilege mode is set to M. The `mstatus` fields
 MIE and MPRV are reset to 0. If little-endian memory accesses are
 supported, the `mstatus`/`mstatush` field MBE is reset to 0. The `misa`
-register is reset to enable the maximal set of supported extensions and
-widest MXLEN, as described in <<misa>>.  For
+register is reset to enable the maximal set of supported extensions,
+as described in <<misa>>.  For
 implementations with the "A" standard extension, there is no valid
 load reservation. The `pc` is set to an implementation-defined reset
 vector. The `mcause` register is set to a value indicating the cause of
@@ -2917,13 +2908,6 @@ load access-fault exception. Attempting to execute a store,
 store-conditional, or AMO instruction which accesses a physical address
 within a PMP region without write permissions raises a store
 access-fault exception.
-
-If MXLEN is changed, the contents of the `pmpxcfg` fields are preserved,
-but appear in the `pmpcfgy` CSR prescribed by the new setting of MXLEN.
-For example, when MXLEN is changed from 64 to 32, `pmp4cfg` moves from
-`pmpcfg0`[39:32] to `pmpcfg1`[7:0]. The `pmpaddr` CSRs follow the usual
-CSR width modulation rules described in
-<<csrwidthmodulation>>.
 
 ===== Address Matching
 
