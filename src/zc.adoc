@@ -1,0 +1,393 @@
+:sectnums:
+:version-label: v1.0.4-2
+:lifecycle-state: ratified
+
+[#Zc]
+== Zc* {version-label}
+
+=== Change history since v0.70.1 (tagged release)
+
+.Change history
+[width="100%",options=header]
+|====================================================================================
+|Version  | change
+|v1.0.4-3    | Added misa.C clarification
+|v1.0.4-2    | Added rule that C implies Zca, Zcf, Zcd - discussed in https://github.com/riscv/riscv-isa-manual/issues/1132
+|v1.0.4-1    | Added rule that Zcf implies F and Zcd implies D - discussed in https://github.com/riscv/riscv-code-size-reduction/issues/221
+
+|v1.0.4      | Resolve https://github.com/riscv/riscv-code-size-reduction/issues/221 - Zcf doesn't exist on RV64 as it contains no instructions
+|v1.0.3-1    | Replace statement about non-idempotent memory handler completing the sequence (non-normative)
+|v1.0.3      | Add definition of Zce
+|v1.0.2      | Fix Architecture Review Committee feedback on instruction formats
+|v1.0.1      | Post public review fixes: Add instruction formats (issue 192). Clarify that Zcmt/Zcmp are for embedded CPUs (issue 190). Fix some typos.
+|v1.0.0-RC5.7| Add Zcb description and fix some typos. PUBLIC REVIEW REVISION.
+|v1.0.0-RC5.6| Remove Zcmpe which is _not_ frozen and is causing confusion
+|v1.0.0-RC5.5| Following ARC review Adjust the split so we have 224 cm.jalt and 32 cm.jt
+|v1.0.0-RC5.4| Change wording for dependencies to match arch manual "Zxxx requires Zyyy" changed to "Zxxx depends on Zyyy"
+|v1.0.0-RC5.3| Add dependency on Zicsr for Zcmt
+|v1.0.0-RC5.2| Adjust the split so we have 240 cm.jalt and 16 cm.jt
+|v1.0.0-RC5.1| Make cm.jt/cm.jalt only valid if JVT.mode=0, and allow different behaviour in the future if JVT.mode>0
+|v1.0.0-RC5| Revert to cm.jt and cm.jalt encodings, to avoid toolchain and trace problems
+|v1.0.0-RC4.1| Resolve typographical issues with the document only, no actual changes
+|v1.0.0-RC4| Release candidate
+|         | Remove Zcmb as benefit is low. Remove cm.jalt, read LSB of jump table entry to determine whether to link
+|v0.70.5  | Resolve https://github.com/riscv/riscv-code-size-reduction/issues/163 - jvt.base is WARL and fewer bits than the max can be implemented
+|v0.70.4  | Clarified https://github.com/riscv/riscv-code-size-reduction/issues/159 - Need Zbb and Zba for RV64 and M/ZMmul to get _all_ of Zcb
+|         | Resolved https://github.com/riscv/riscv-code-size-reduction/issues/161
+|         | Resolved https://github.com/riscv/riscv-code-size-reduction/issues/160 - Allocated Smstateen bit 2 and added the relevant text
+|v0.70.3  | Added rule that Zcf and Zcmt imply Zca (this text was missing, this is not a spec change: https://github.com/riscv/riscv-code-size-reduction/pull/151)
+|         | Added that Zcf is illegal for RV64, as it contains no instructions (clarification: https://github.com/riscv/riscv-code-size-reduction/issues/149)
+|         | Added push/pop examples in the push/pop section
+|v0.70.2  | Stylistic changes only, removing redundant text. 
+|         | Corrected field names on JVT CSR diagram, and fixed synopsis for cm.mvsa01
+|====================================================================================
+
+=== Zc* Overview
+
+This document is in the ratified state. No changes are allowed. Any desired or needed changes can be the subject of a follow-on new extension. Ratified extensions are never revised.
+
+Zc* is a group of extensions which define subsets of the existing C extension (Zca, Zcd, Zcf) and new extensions which only contain 16-bit encodings.
+
+Zcm* all reuse the encodings for _c.fld_, _c.fsd_, _c.fldsp_, _c.fsdsp_.
+
+.Zc* extension overview
+[width="100%",options=header,cols="3,1,1,1,1,1,1"]
+|====================================================================================
+|Instruction    |Zca     |Zcf     |Zcd     |Zcb     |Zcmp    |Zcmt
+7+|*The Zca extension is added as way to refer to instructions in the C extension that do not include the floating-point loads and stores*
+|C excl. c.f*   |yes     |        |        |        |        |         
+7+|*The Zcf extension is added as a way to refer to compressed single-precision floating-point load/stores*
+|c.flw          |        |rv32    |        |        |        |
+|c.flwsp        |        |rv32    |        |        |        |
+|c.fsw          |        |rv32    |        |        |        |
+|c.fswsp        |        |rv32    |        |        |        |
+7+|*The Zcd extension is added as a way to refer to compressed double-precision floating-point load/stores*
+|c.fld          |        |        |yes     |        |        |       
+|c.fldsp        |        |        |yes     |        |        |       
+|c.fsd          |        |        |yes     |        |        |       
+|c.fsdsp        |        |        |yes     |        |        |       
+7+|*Simple operations for use on all architectures*
+|c.lbu          |        |        |        |yes     |        |    
+|c.lh           |        |        |        |yes     |        |    
+|c.lhu          |        |        |        |yes     |        |    
+|c.sb           |        |        |        |yes     |        |    
+|c.sh           |        |        |        |yes     |        |    
+|c.zext.b       |        |        |        |yes     |        |    
+|c.sext.b       |        |        |        |yes     |        |    
+|c.zext.h       |        |        |        |yes     |        |    
+|c.sext.h       |        |        |        |yes     |        |    
+|c.zext.w       |        |        |        |yes     |        |    
+|c.mul          |        |        |        |yes     |        |    
+|c.not          |        |        |        |yes     |        |    
+7+|*PUSH/POP and double move which overlap with _c.fsdsp_. Complex operations intended for embedded CPUs*
+|cm.push        |        |        |        |        |yes     |
+|cm.pop         |        |        |        |        |yes     |
+|cm.popret      |        |        |        |        |yes     |
+|cm.popretz     |        |        |        |        |yes     |
+|cm.mva01s      |        |        |        |        |yes     |
+|cm.mvsa01      |        |        |        |        |yes     |
+7+|*Table jump which overlaps with _c.fsdsp_. Complex operations intended for embedded CPUs*
+|cm.jt          |        |        |        |        |        |yes     
+|cm.jalt        |        |        |        |        |        |yes     
+|====================================================================================
+
+[#C]
+=== C
+
+The C extension is the superset of the following extensions:
+
+* Zca
+* Zcf if F is specified (RV32 only)
+* Zcd if D is specified
+
+As C defines the same instructions as Zca, Zcf and Zcd, the rule is that:
+
+* C always implies Zca
+* C+F implies Zcf (RV32 only)
+* C+D implies Zcd
+
+[#Zce]
+=== Zce
+
+The Zce extension is intended to be used for microcontrollers, and includes all relevant Zc extensions.
+
+* Specifying Zce on RV32 without F includes Zca, Zcb, Zcmp, Zcmt
+* Specifying Zce on RV32 with F includes Zca, Zcb, Zcmp, Zcmt _and_ Zcf
+* Specifying Zce on RV64 always includes Zca, Zcb, Zcmp, Zcmt
+** Zcf doesn't exist for RV64
+
+Therefore common ISA strings can be updated as follows to include the relevant Zc extensions, for example:
+
+* RV32IMC becomes RV32IM_Zce
+* RV32IMCF becomes RV32IMF_Zce
+
+[#misaC]
+=== MISA.C
+
+MISA.C is set if the following extensions are selected:
+
+* Zca and not F
+* Zca, Zcf and F is specified (RV32 only)
+* Zca, Zcf and Zcd if D is specified (RV32 only)
+** this configuration excludes Zcmp, Zcmt
+* Zca, Zcd if D is specified (RV64 only)
+** this configuration excludes Zcmp, Zcmt
+
+[#Zca]
+=== Zca
+
+The Zca extension is added as way to refer to instructions in the C extension that do not include the floating-point loads and stores.
+
+Therefore it _excluded_ all 16-bit floating point loads and stores: _c.flw_, _c.flwsp_, _c.fsw_, _c.fswsp_, _c.fld_, _c.fldsp_, _c.fsd_, _c.fsdsp_.
+
+NOTE: the C extension only includes F/D instructions when D and F are also specified
+
+[#Zcf]
+=== Zcf (RV32 only)
+
+Zcf is the existing set of compressed single precision floating point loads and stores: _c.flw_, _c.flwsp_, _c.fsw_, _c.fswsp_.
+
+Zcf is only relevant to RV32, it cannot be specified for RV64.
+
+The Zcf extension depends on the <<Zca>> and F extensions.
+
+[#Zcd]
+=== Zcd 
+
+Zcd is the existing set of compressed double precision floating point loads and stores: _c.fld_, _c.fldsp_, _c.fsd_, _c.fsdsp_.
+
+The Zcd extension depends on the <<Zca>> and D extensions.
+
+[#Zcb]
+=== Zcb
+
+Zcb has simple code-size saving instructions which are easy to implement on all CPUs.
+
+All proposed encodings are currently reserved for all architectures, and have no conflicts with any existing extensions.
+
+NOTE: Zcb can be implemented on _any_ CPU as the instructions are 16-bit versions of existing 32-bit instructions from the application class profile.
+
+The Zcb extension depends on the <<Zca>> extension.
+
+As shown on the individual instruction pages, many of the instructions in Zcb depend upon another extension being implemented. For example, _c.mul_ is only implemented if M or Zmmul is implemented, and _c.sext.b_ is only implemented if Zbb is implemented.
+
+The _c.mul_ encoding uses the CA register format along with other instructions such as _c.sub_, _c.xor_ etc. 
+
+[NOTE]
+
+  _c.sext.w_ is a pseudo-instruction for _c.addiw rd, 0_ (RV64)
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|yes     
+|yes     
+|c.lbu _rd'_, uimm(_rs1'_)
+|<<#insns-c_lbu>>
+
+|yes     
+|yes     
+|c.lhu _rd'_, uimm(_rs1'_)
+|<<#insns-c_lhu>>
+
+|yes     
+|yes     
+|c.lh _rd'_, uimm(_rs1'_)
+|<<#insns-c_lh>>
+
+|yes     
+|yes     
+|c.sb _rs2'_, uimm(_rs1'_)
+|<<#insns-c_sb>>
+
+|yes     
+|yes     
+|c.sh _rs2'_, uimm(_rs1'_)
+|<<#insns-c_sh>>
+
+|yes     
+|yes     
+|c.zext.b _rsd'_
+|<<#insns-c_zext_b>> 
+
+|yes     
+|yes     
+|c.sext.b _rsd'_
+|<<#insns-c_sext_b>> 
+
+|yes     
+|yes     
+|c.zext.h _rsd'_
+|<<#insns-c_zext_h>> 
+
+|yes     
+|yes     
+|c.sext.h _rsd'_
+|<<#insns-c_sext_h>> 
+
+|
+|yes     
+|c.zext.w _rsd'_
+|<<#insns-c_zext_w>> 
+
+|yes     
+|yes     
+|c.not _rsd'_
+|<<#insns-c_not>> 
+
+|yes     
+|yes     
+|c.mul _rsd'_, _rs2'_
+|<<#insns-c_mul>> 
+
+|===
+
+<<< 
+
+[#Zcmp]
+=== Zcmp
+
+The Zcmp extension is a set of instructions which may be executed as a series of existing 32-bit RISC-V instructions.
+
+This extension reuses some encodings from _c.fsdsp_.  Therefore it is _incompatible_ with <<Zcd>>,
+ which is included when C and D extensions are both present. 
+
+NOTE: Zcmp is primarily targeted at embedded class CPUs due to implementation complexity. Additionally, it is not compatible with architecture class profiles.
+
+The Zcmp extension depends on the <<Zca>> extension.
+
+The PUSH/POP assembly syntax uses several variables, the meaning of which are:
+
+* _reg_list_ is a list containing 1 to 13 registers (ra and 0 to 12 s registers)
+** valid values: {ra}, {ra, s0}, {ra, s0-s1}, {ra, s0-s2}, ..., {ra, s0-s8}, {ra, s0-s9}, {ra, s0-s11}
+** note that {ra, s0-s10} is _not_ valid, giving 12 lists not 13 for better encoding
+* _stack_adj_ is the total size of the stack frame. 
+** valid values vary with register list length and the specific encoding, see the instruction pages for details.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|yes     
+|yes     
+|cm.push _{reg_list}, -stack_adj_
+|<<#insns-cm_push>> 
+
+|yes     
+|yes     
+|cm.pop _{reg_list}, stack_adj_
+|<<#insns-cm_pop>> 
+
+|yes     
+|yes     
+|cm.popret _{reg_list}, stack_adj_
+|<<#insns-cm_popret>> 
+
+|yes     
+|yes     
+|cm.popretz _{reg_list}, stack_adj_
+|<<#insns-cm_popretz>> 
+
+|yes     
+|yes     
+|cm.mva01s _rs1', rs2'_
+|<<#insns-cm_mva01s>> 
+
+|yes     
+|yes     
+|cm.mvsa01 _r1s', r2s'_
+|<<#insns-cm_mvsa01>> 
+
+|===
+
+<<<
+
+[#Zcmt]
+=== Zcmt
+
+Zcmt adds the table jump instructions and also adds the JVT CSR. The JVT CSR requires a 
+state enable if Smstateen is implemented. See <<csrs-jvt>> for details.
+
+This extension reuses some encodings from _c.fsdsp_.  Therefore it is _incompatible_ with <<Zcd>>,
+ which is included when C and D extensions are both present. 
+
+NOTE: Zcmt is primarily targeted at embedded class CPUs due to implementation complexity. Additionally, it is not compatible with architecture class profiles.
+
+The Zcmt extension depends on the <<Zca>> and Zicsr extensions.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|yes     
+|yes     
+|cm.jt _index_
+|<<#insns-cm_jt>> 
+
+|yes     
+|yes     
+|cm.jalt _index_
+|<<#insns-cm_jalt>> 
+
+|===
+
+[#Zc_formats]
+=== Zc instruction formats
+
+Several instructions in this specification use the following new instruction formats.
+
+[%header,cols="2,3,2,1,1,1,1,1,1,1,1,1,1"]
+|=====================================================================
+| Format | instructions       | 15:10  | 9  | 8 | 7   | 6 | 5 | 4   | 3 | 2  | 1 | 0
+| CLB    | c.lbu              | funct6 3+| rs1'    2+| uimm    3+| rd'    2+| op
+| CSB    | c.sb               | funct6 3+| rs1'    2+| uimm    3+| rs2'   2+| op
+| CLH    | c.lhu, c.lh        | funct6 3+| rs1'    | funct1 | uimm 3+| rd'  2+| op
+| CSH    | c.sh               | funct6 3+| rs1'    | funct1 | uimm 3+| rs2' 2+| op
+| CU     | c.[sz]ext.*, c.not | funct6 3+| rd'/rs1' 5+| funct5            2+| op
+| CMMV   | cm.mvsa01 cm.mva01s| funct6 3+| r1s'     2+| funct2 3+| r2s'   2+| op
+| CMJT   | cm.jt cm.jalt      | funct6 8+| index                          2+| op
+| CMPP   | cm.push*, cm.pop*  | funct6 2+| funct2 4+| urlist   2+| spimm  2+| op
+|=====================================================================
+
+NOTE: c.mul uses the existing CA format
+
+[#Zcb_instructions]
+== Zcb instructions
+
+include::c_lbu.adoc[]
+include::c_lhu.adoc[]
+include::c_lh.adoc[]
+include::c_sb.adoc[]
+include::c_sh.adoc[]
+
+include::c_zext_b.adoc[]
+include::c_sext_b.adoc[]
+include::c_zext_h.adoc[]
+include::c_sext_h.adoc[]
+include::c_zext_w.adoc[]
+include::c_not.adoc[]
+include::c_mul.adoc[]
+
+include::pushpop.adoc[]
+include::cm_push.adoc[]
+include::cm_pop.adoc[]
+include::cm_popretz.adoc[]
+include::cm_popret.adoc[]
+include::cm_mvsa01.adoc[]
+include::cm_mva01s.adoc[]
+
+include::tablejump.adoc[]
+include::jvt_csr.adoc[]
+include::cm_jt.adoc[]
+include::cm_jalt.adoc[]
+
