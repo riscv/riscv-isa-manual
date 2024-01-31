@@ -1,0 +1,349 @@
+<<<
+
+[#insns-pushpop,reftext="PUSH/POP Register Instructions"]
+== PUSH/POP register instructions
+
+These instructions are collectively referred to as PUSH/POP: 
+
+* <<#insns-cm_push>> 
+* <<#insns-cm_pop>> 
+* <<#insns-cm_popret>> 
+* <<#insns-cm_popretz>> 
+
+The term PUSH refers to _cm.push_.
+
+The term POP refers to _cm.pop_.
+
+The term POPRET refers to _cm.popret and cm.popretz_.
+
+Common details for these instructions are in this section.
+
+=== PUSH/POP functional overview
+
+PUSH, POP, POPRET are used to reduce the size of function prologues and epilogues.
+
+. The PUSH instruction
+** adjusts the stack pointer to create the stack frame
+** pushes (stores) the registers specified in the register list to the stack frame
+
+. The POP instruction
+** pops (loads) the registers in the register list from the stack frame
+** adjusts the stack pointer to destroy the stack frame
+
+. The POPRET instructions
+** pop (load) the registers in the register list from the stack frame
+** _cm.popretz_ also moves zero into _a0_ as the return value
+** adjust the stack pointer  to destroy the stack frame
+** execute a _ret_ instruction to return from the function
+
+<<<
+=== Example usage
+
+This example gives an illustration of the use of PUSH and POPRET.
+
+The function _processMarkers_ in the EMBench benchmark picojpeg in the following file on github: https://github.com/embench/embench-iot/blob/master/src/picojpeg/libpicojpeg.c[libpicojpeg.c]
+
+The prologue and epilogue compile with GCC10 to:
+
+[source,SAIL]
+----
+
+   0001098a <processMarkers>:
+   1098a:       711d                    addi    sp,sp,-96 ;#cm.push(1)
+   1098c:       c8ca                    sw      s2,80(sp) ;#cm.push(2)
+   1098e:       c6ce                    sw      s3,76(sp) ;#cm.push(3)
+   10990:       c4d2                    sw      s4,72(sp) ;#cm.push(4)
+   10992:       ce86                    sw      ra,92(sp) ;#cm.push(5)
+   10994:       cca2                    sw      s0,88(sp) ;#cm.push(6)
+   10996:       caa6                    sw      s1,84(sp) ;#cm.push(7)
+   10998:       c2d6                    sw      s5,68(sp) ;#cm.push(8)
+   1099a:       c0da                    sw      s6,64(sp) ;#cm.push(9)
+   1099c:       de5e                    sw      s7,60(sp) ;#cm.push(10)
+   1099e:       dc62                    sw      s8,56(sp) ;#cm.push(11)
+   109a0:       da66                    sw      s9,52(sp) ;#cm.push(12)
+   109a2:       d86a                    sw      s10,48(sp);#cm.push(13)
+   109a4:       d66e                    sw      s11,44(sp);#cm.push(14)
+...
+   109f4:       4501                    li      a0,0      ;#cm.popretz(1)
+   109f6:       40f6                    lw      ra,92(sp) ;#cm.popretz(2)
+   109f8:       4466                    lw      s0,88(sp) ;#cm.popretz(3)
+   109fa:       44d6                    lw      s1,84(sp) ;#cm.popretz(4)
+   109fc:       4946                    lw      s2,80(sp) ;#cm.popretz(5)
+   109fe:       49b6                    lw      s3,76(sp) ;#cm.popretz(6)
+   10a00:       4a26                    lw      s4,72(sp) ;#cm.popretz(7)
+   10a02:       4a96                    lw      s5,68(sp) ;#cm.popretz(8)
+   10a04:       4b06                    lw      s6,64(sp) ;#cm.popretz(9)
+   10a06:       5bf2                    lw      s7,60(sp) ;#cm.popretz(10)
+   10a08:       5c62                    lw      s8,56(sp) ;#cm.popretz(11)
+   10a0a:       5cd2                    lw      s9,52(sp) ;#cm.popretz(12)
+   10a0c:       5d42                    lw      s10,48(sp);#cm.popretz(13)
+   10a0e:       5db2                    lw      s11,44(sp);#cm.popretz(14)
+   10a10:       6125                    addi    sp,sp,96  ;#cm.popretz(15)
+   10a12:       8082                    ret               ;#cm.popretz(16)
+----
+
+<<<
+
+with the GCC option _-msave-restore_ the output is the following:
+
+[source,SAIL]
+----
+0001080e <processMarkers>:
+   1080e:       73a012ef                jal     t0,11f48 <__riscv_save_12>
+   10812:       1101                    addi    sp,sp,-32
+...
+   10862:       4501                    li      a0,0
+   10864:       6105                    addi    sp,sp,32
+   10866:       71e0106f                j       11f84 <__riscv_restore_12>
+----
+
+with PUSH/POPRET this reduces to
+
+[source,SAIL]
+----
+0001080e <processMarkers>:
+   1080e:       b8fa                    cm.push    {ra,s0-s11},-96
+...
+   10866:       bcfa                    cm.popretz {ra,s0-s11}, 96
+----
+
+The prologue / epilogue reduce from 60-bytes in the original code, to 14-bytes with _-msave-restore_, 
+and to 4-bytes with PUSH and POPRET. 
+As well as reducing the code-size PUSH and POPRET eliminate the branches from 
+calling the millicode _save/restore_ routines and so may also perform better. 
+  
+[NOTE]
+
+  The calls to _<riscv_save_0>/<riscv_restore_0>_ become 64-bit when the target functions are out of the ±1MB range, increasing the prologue/epilogue size to 22-bytes.
+
+[NOTE]
+
+  POP is typically used in tail-calling sequences where _ret_ is not used to return to _ra_ after destroying the stack frame.
+
+[#pushpop-areg-list]
+
+==== Stack pointer adjustment handling
+
+The instructions all automatically adjust the stack pointer by enough to cover the memory required for the registers being saved or restored. 
+Additionally the _spimm_ field in the encoding allows the stack pointer to be adjusted in additional increments of 16-bytes. There is only a small restricted
+range available in the encoding; if the range is insufficient then a separate _c.addi16sp_ can be used to increase the range.
+
+==== Register list handling
+
+There is no support for the _{ra, s0-s10}_ register list without also adding _s11_. Therefore the _{ra, s0-s11}_ register list must be used in this case.
+
+[#pushpop-idempotent-memory]
+=== PUSH/POP Fault handling
+
+Correct execution requires that _sp_ refers to idempotent memory (also see <<pushpop_non-idem-mem>>), because the core must be able to 
+handle traps detected during the sequence. 
+The entire PUSH/POP sequence is re-executed after returning from the trap handler, and multiple traps are possible during the sequence.
+
+If a trap occurs during the sequence then _xEPC_ is updated with the PC of the instruction, _xTVAL_ (if not read-only-zero) updated with the bad address if it was an access fault and _xCAUSE_ updated with the type of trap.
+
+NOTE: It is implementation defined whether interrupts can also be taken during the sequence execution.
+
+[#pushpop-software-view]
+=== Software view of execution
+
+==== Software view of the PUSH sequence
+
+From a software perspective the PUSH sequence appears as:
+
+* A sequence of stores writing the bytes required by the pseudo-code
+** The bytes may be written in any order.
+** The bytes may be grouped into larger accesses.
+** Any of the bytes may be written multiple times.
+* A stack pointer adjustment
+
+NOTE: If an implementation allows interrupts during the sequence, and the interrupt handler uses _sp_ to allocate stack memory, then any stores which were executed before the interrupt may be overwritten by the handler. This is safe because the memory is idempotent and the stores will be re-executed when execution resumes.
+
+The stack pointer adjustment must only be committed only when it is certain that the entire PUSH instruction will commit.
+
+Stores may also return imprecise faults from the bus. 
+It is platform defined whether the core implementation waits for the bus responses before continuing to the final stage of the sequence, 
+or handles errors responses after completing the PUSH instruction.
+
+<<<
+
+For example:
+
+[source,sail]
+--
+cm.push  {ra, s0-s5}, -64
+--
+
+Appears to software as:
+
+[source,sail]
+--
+# any bytes from sp-1 to sp-28 may be written multiple times before 
+# the instruction completes therefore these updates may be visible in 
+# the interrupt/exception handler below the stack pointer
+sw  s5, -4(sp)   
+sw  s4, -8(sp)   
+sw  s3,-12(sp)   
+sw  s2,-16(sp)  
+sw  s1,-20(sp)   
+sw  s0,-24(sp)   
+sw  ra,-28(sp)   
+
+# this must only execute once, and will only execute after all stores
+# completed without any precise faults, therefore this update is only 
+# visible in the interrupt/exception handler if cm.push has completed
+addi sp, sp, -64
+--
+
+==== Software view of the POP/POPRET sequence
+
+From a software perspective the POP/POPRET sequence appears as:
+
+* A sequence of loads reading the bytes required by the pseudo-code.
+** The bytes may be loaded in any order.
+** The bytes may be grouped into larger accesses.
+** Any of the bytes may be loaded multiple times.
+* A stack pointer adjustment
+* An optional `li a0, 0`
+* An optional `ret`
+
+If a trap occurs during the sequence, then any loads which were executed before the trap may update architectural state. 
+The loads will be re-executed once the trap handler completes, so the values will be overwritten. 
+Therefore it is permitted for an implementation to update some of the destination registers before taking a fault.
+
+The optional `li a0, 0`, stack pointer adjustment and optional `ret` must only be committed only when it is certain that the entire POP/POPRET instruction will commit.
+
+For POPRET once the stack pointer adjustment has been committed the `ret` must execute.
+
+<<<
+For example:
+
+[source,sail]
+--
+cm.popretz {ra, s0-s3}, 32;
+--
+
+Appears to software as:
+
+[source,sail]
+--
+# any or all of these load instructions may execute multiple times
+# therefore these updates may be visible in the interrupt/exception handler
+lw   s3, 28(sp)
+lw   s2, 24(sp)
+lw   s1, 20(sp)
+lw   s0, 16(sp)
+lw   ra, 12(sp)
+
+# these must only execute once, will only execute after all loads 
+# complete successfully all instructions must execute atomically
+# therefore these updates are not visible in the interrupt/exception handler
+li a0, 0
+addi sp, sp, 32
+ret
+--
+
+[[pushpop_non-idem-mem]]
+=== Non-idempotent memory handling
+
+An implementation may have a requirement to issue a PUSH/POP instruction to non-idempotent memory. 
+
+If the core implementation does not support PUSH/POP to non-idempotent memories, the core may use an idempotency PMA to detect it and take a 
+load (POP/POPRET) or store (PUSH) access fault exception in order to avoid unpredictable results.
+
+Software should only use these instructions on non-idempotent memory regions when software can tolerate the required memory accesses
+being issued repeatedly in the case that they cause exceptions.
+
+<<<
+
+=== Example RV32I PUSH/POP sequences
+
+The examples are included show the load/store series expansion and the stack adjustment. 
+Examples of _cm.popret_ and _cm.popretz_ are not included, as the difference in the expanded sequence from _cm.pop_ is trivial in all cases.
+
+==== cm.push  {ra, s0-s2}, -64
+
+Encoding: _rlist_=7, _spimm_=3
+
+expands to:
+
+[source,sail]
+--
+sw  s2,  -4(sp);
+sw  s1,  -8(sp);
+sw  s0, -12(sp);
+sw  ra, -16(sp);
+addi sp, sp, -64;
+--
+
+==== cm.push {ra, s0-s11}, -112
+
+Encoding: _rlist_=15, _spimm_=3
+
+expands to:
+
+[source,sail]
+--
+sw  s11,  -4(sp);
+sw  s10,  -8(sp);
+sw  s9,  -12(sp);
+sw  s8,  -16(sp);
+sw  s7,  -20(sp);
+sw  s6,  -24(sp);
+sw  s5,  -28(sp);
+sw  s4,  -32(sp);
+sw  s3,  -36(sp);
+sw  s2,  -40(sp);
+sw  s1,  -44(sp);
+sw  s0,  -48(sp);
+sw  ra,  -52(sp);
+addi sp, sp, -112;
+--
+
+<<<
+
+==== cm.pop   {ra}, 16
+
+Encoding: _rlist_=4, _spimm_=0
+
+expands to:
+
+[source,sail]
+--
+lw   ra, 12(sp);
+addi sp, sp, 16;
+--
+
+==== cm.pop {ra, s0-s3}, 48
+
+Encoding: _rlist_=8, _spimm_=1
+
+expands to:
+
+[source,sail]
+--
+lw   s3, 44(sp);
+lw   s2, 40(sp);
+lw   s1, 36(sp);
+lw   s0, 32(sp);
+lw   ra, 28(sp);
+addi sp, sp, 48;
+--
+
+==== cm.pop {ra, s0-s4}, 64
+
+Encoding: _rlist_=9, _spimm_=2
+
+expands to: 
+
+[source,sail]
+--
+lw   s4, 60(sp);
+lw   s3, 56(sp);
+lw   s2, 52(sp);
+lw   s1, 48(sp);
+lw   s0, 44(sp);
+lw   ra, 40(sp);
+addi sp, sp, 64;
+--
+
+include::Zcmp_footer.adoc[]

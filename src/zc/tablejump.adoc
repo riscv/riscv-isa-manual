@@ -1,0 +1,49 @@
+<<<
+
+[#insns-tablejump,reftext="Table Jump Overview"]
+== Table Jump Overview
+
+_cm.jt_ (<<#insns-cm_jt>>) and _cm.jalt_ (<<#insns-cm_jalt>>) are referred to as table jump.
+
+Table jump uses a 256-entry XLEN wide table in instruction memory to contain function addresses.
+The table must be a minimum of 64-byte aligned.
+
+Table entries follow the current data endianness. This is different from normal instruction fetch which is always little-endian.
+
+_cm.jt_ and _cm.jalt_ encodings index the table, giving access to functions within the full XLEN wide address space.
+
+This is used as a form of dictionary compression to reduce the code size of _jal_ / _auipc+jalr_ / _jr_ / _auipc+jr_ instructions.
+
+Table jump allows the linker to replace the following instruction sequences with a _cm.jt_ or _cm.jalt_ encoding, and an entry in the table:
+
+* 32-bit _j_ calls 
+* 32-bit _jal_ ra calls 
+* 64-bit _auipc+jr_ calls to fixed locations 
+* 64-bit _auipc+jalr ra_ calls to fixed locations 
+** The _auipc+jr/jalr_ sequence is used because the offset from the PC is out of the ±1MB range.
+
+If a return address stack is implemented, then as _cm.jalt_ is equivalent to _jal ra_, it pushes to the stack.
+
+=== JVT
+
+The base of the table is in the JVT CSR (see <<csrs-jvt>>), each table entry is XLEN bits.
+
+If the same function is called with and without linking then it must have two entries in the table. 
+This is typically caused by the same function being called with and without tail calling.
+
+[#tablejump-fault-handling]
+=== Table Jump Fault handling
+
+For a table jump instruction, the table entry that the instruction selects is considered an extension of the instruction itself.
+Hence, the execution of a table jump instruction involves two instruction fetches, the first to read the instruction (_cm.jt_/_cm.jalt_) 
+and the second to read from the jump vector table (JVT). Both instruction fetches are _implicit_ reads, and both require
+execute permission; read permission is irrelevant. It is recommended that the second fetch be ignored for hardware triggers and breakpoints.
+
+Memory writes to the jump vector table require an instruction barrier (_fence.i_) to guarantee that they are visible to the instruction fetch.
+
+Multiple contexts may have different jump vector tables. JVT may be switched between them without an instruction barrier 
+if the tables have not been updated in memory since the last _fence.i_.
+
+If an exception occurs on either instruction fetch, xEPC is set to the PC of the table jump instruction,  xCAUSE is set as expected for the type of fault and xTVAL (if not set to zero) contains the fetch address which caused the fault.
+
+include::Zcmt_footer.adoc[]
