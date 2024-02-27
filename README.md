@@ -1,4 +1,4 @@
-# RISC-V Instruction Set Manual
+# RISC-V Instruction Set Manual Test
 
 [![RISC-V ISA Build](https://github.com/riscv/riscv-isa-manual/actions/workflows/isa-build.yml/badge.svg)](https://github.com/riscv/riscv-isa-manual/actions/workflows/isa-build.yml)
 
