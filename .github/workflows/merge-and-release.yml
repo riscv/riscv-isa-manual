@@ -1,0 +1,96 @@
+name: Release New ISA When Merging a PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+jobs:
+  if_merged:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - run: |
+        echo The PR was successfully merged.
+
+    - name: Set short SHA
+      run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+
+    - name: Get current date
+      run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+    - name: Pull Container
+      id: pull_container_image
+      run: |
+          docker pull riscvintl/riscv-docs-base-container-image:latest
+
+    - name: Build Files
+      id: build_files
+      if: steps.pull_container_image.outcome == 'success'
+      run: |
+          docker run --rm -v ${{ github.workspace }}:/build riscvintl/riscv-docs-base-container-image:latest \
+          /bin/sh -c 'cd ./build && make'
+
+    # Upload the priv-isa-asciidoc PDF file
+    - name: Upload priv-isa-asciidoc.pdf
+      if: steps.build_files.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: priv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
+        path: ${{ github.workspace }}/build/priv-isa-asciidoc.pdf
+
+    # Upload the priv-isa-asciidoc HTML file
+    - name: Upload priv-isa-asciidoc.html
+      if: steps.build_files.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
+        path: ${{ github.workspace }}/build/priv-isa-asciidoc.html
+
+    # Upload the unpriv-isa-asciidoc PDF file
+    - name: Upload unpriv-isa-asciidoc.pdf
+      if: steps.build_files.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
+        path: ${{ github.workspace }}/build/unpriv-isa-asciidoc.pdf
+
+    # Upload the unpriv-isa-asciidoc HTML file
+    - name: Upload unpriv-isa-asciidoc.html
+      if: steps.build_files.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.html
+        path: ${{ github.workspace }}/build/unpriv-isa-asciidoc.html
+
+    # Upload the priv-isa-latex PDF file
+    - name: Upload riscv-privileged.pdf
+      if: steps.build_files.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: riscv-privileged-latex-${{ env.SHORT_SHA }}.pdf
+        path: ${{ github.workspace }}/build/riscv-privileged.pdf
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GHTOKEN }}
+      with:
+        tag_name: riscv-isa-release-${{ env.SHORT_SHA }}-${{ env.CURRENT_DATE }}
+        release_name: Release riscv-isa-release-${{ env.SHORT_SHA }}-${{ env.CURRENT_DATE }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        body: |
+              This release was created by: ${{ github.event.sender.login }}
+              RISC-V ISA released generated based on commit ${{ env.SHORT_SHA }}
+        files: |
+          ${{ github.workspace }}/build/priv-isa-asciidoc.pdf
+          ${{ github.workspace }}/build/priv-isa-asciidoc.html
+          ${{ github.workspace }}/build/unpriv-isa-asciidoc.pdf
+          ${{ github.workspace }}/build/unpriv-isa-asciidoc.html
+          ${{ github.workspace }}/build/riscv-privileged.pdf
