@@ -1,9 +1,9 @@
 [[machine]]
-== Machine-Level ISA, Version 1.12
+== Machine-Level ISA, Version 1.13
 
 This chapter describes the machine-level operations available in
 machine-mode (M-mode), which is the highest privilege mode in a RISC-V
-system. M-mode is used for low-level access to a hardware platform and
+hart. M-mode is used for low-level access to a hardware platform and
 is the first mode entered at reset. M-mode can also be used to implement
 features that are too difficult or expensive to implement in hardware
 directly. The RISC-V machine-level ISA contains a common core that is
@@ -49,13 +49,13 @@ The `misa` CSR is MXLEN bits wide.
 The base width can be quickly ascertained using branches on the sign of
 the returned `misa` value, and possibly a shift left by one and a second
 branch on the sign. These checks can be written in assembly code without
-knowing the register width (MXLEN) of the machine. The base width is
+knowing the register width (MXLEN) of the hart. The base width is
 given by __MXLEN=2^MXL+4^__.
 
 The base width can also be found if `misa` is zero, by placing the
 immediate 4 in a register then shifting the register left by 31 bits at
-a time. If zero after one shift, then the machine is RV32. If zero after
-two shifts, then the machine is RV64, else RV128.
+a time. If zero after one shift, then the hart is RV32. If zero after
+two shifts, then the hart is RV64, else RV128.
 ====
 
 The Extensions field encodes the presence of the standard extensions,
@@ -176,7 +176,7 @@ _Reserved_ +
 Supervisor mode implemented +
 _Reserved_ +
 User mode implemented +
-"V" Vector extension implemented +
+Vector extension +
 _Reserved_ +
 Non-standard extensions present +
 _Reserved_ +
@@ -227,6 +227,13 @@ write to `misa` is suppressed, leaving `misa` unchanged.
 
 When software enables an extension that was previously disabled, then
 all state uniquely associated with that extension is UNSPECIFIED, unless otherwise specified by that extension.
+
+NOTE: Although one of the bits 25--0 in `misa` being set to 1 implies that
+the corresponding feature is implemented, the inverse is not necessarily
+true: one of these bits being clear does not necessarily imply that the
+corresponding feature is not implemented.  This follows from the fact that,
+when a feature is not implemented, the corresponding opcodes and CSRs become
+reserved, not necessarily illegal.
 
 ==== Machine Vendor ID Register `mvendorid`
 
@@ -464,7 +471,7 @@ storage bit is required to represent either 00 or 11 in MPP.
 [[xlen-control]]
 ===== Base ISA Control in `mstatus` Register
 
-For RV64 systems, the SXL and UXL fields are *WARL* fields that control the
+For RV64 harts, the SXL and UXL fields are *WARL* fields that control the
 value of XLEN for S-mode and U-mode, respectively. The encoding of these
 fields is the same as the MXL field of `misa`, shown in
 <<misabase>>. The effective XLEN in S-mode and
@@ -778,7 +785,7 @@ If neither the `v` registers nor S-mode is implemented, then VS is
 read-only zero. If S-mode is implemented but the `v` registers are not,
 VS may optionally be read-only zero.
 
-In systems without additional user extensions requiring new state, the
+In harts without additional user extensions requiring new state, the
 XS field is read-only zero. Every additional extension with state
 provides a CSR field that encodes the equivalent of the XS states. The
 XS field represents a summary of all extensions' status as shown in
@@ -1134,16 +1141,16 @@ delegation register (`medeleg`) is a 64-bit read/write register.
 The machine interrupt delegation register (`mideleg`) is an MXLEN-bit
 read/write register.
 
-In systems with S-mode, the `medeleg` and `mideleg` registers must
+In harts with S-mode, the `medeleg` and `mideleg` registers must
 exist, and setting a bit in `medeleg` or `mideleg` will delegate the
 corresponding trap, when occurring in S-mode or U-mode, to the S-mode
-trap handler. In systems without S-mode, the `medeleg` and `mideleg`
+trap handler. In harts without S-mode, the `medeleg` and `mideleg`
 registers should not exist.
 
 [NOTE]
 ====
 In versions 1.9.1 and earlier , these registers existed but were
-hardwired to zero in M-mode only, or M/U without N systems. There is no
+hardwired to zero in M-mode only, or M/U without N harts. There is no
 reason to require they return zero in those cases, as the `misa`
 register indicates whether they exist.
 ====
@@ -1350,8 +1357,17 @@ the interrupt-pending and interrupt-enable bits for supervisor-level
 software interrupts. SSIP is writable in `mip` and may also be set to 1
 by a platform-specific interrupt controller.
 
+If the Sscofpmf extension is implemented, bits `mip`.LCOFIP and `mie`.LCOFIE
+are the interrupt-pending and interrupt-enable bits for local counter-overflow
+interrupts.
+LCOFIP is read-write in `mip` and reflects the occurrence of a local
+counter-overflow overflow interrupt request resulting from any of the
+`mhpmevent__n__`.OF bits being set.
+If the Sscofpmf extension is not implemented, `mip`.LCOFIP and `mie`.LCOFIE are
+read-only zeros.
+
 Multiple simultaneous interrupts destined for M-mode are handled in the
-following decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI.
+following decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI, LCOFI.
 
 [NOTE]
 ====
@@ -1393,7 +1409,7 @@ M-mode includes a basic hardware performance-monitoring facility. The
 `mcycle` CSR counts the number of clock cycles executed by the processor
 core on which the hart is running. The `minstret` CSR counts the number
 of instructions the hart has retired. The `mcycle` and `minstret`
-registers have 64-bit precision on all RV32 and RV64 systems.
+registers have 64-bit precision on all RV32 and RV64 harts.
 
 The counter registers have an arbitrary value after the hart is reset,
 and can be written with a given value. Any CSR write takes effect after
@@ -1457,9 +1473,9 @@ privilege mode (S-mode if implemented, otherwise U-mode).
 [NOTE]
 ====
 The counter-enable bits support two common use cases with minimal
-hardware. For systems that do not need high-performance timers and
+hardware. For harts that do not need high-performance timers and
 counters, machine-mode software can trap accesses and implement all
-features in software. For systems that need high-performance timers and
+features in software. For harts that need high-performance timers and
 counters but are not concerned with obfuscating the underlying hardware
 counters, the counters can be directly exposed to lower privilege modes.
 ====
@@ -1480,10 +1496,10 @@ loads to the memory-mapped `mtime` register, or emulate this
 functionality on behalf of less-privileged modes in M-mode software.
 ====
 
-In systems with U-mode, the `mcounteren` must be implemented, but all
+In harts with U-mode, the `mcounteren` must be implemented, but all
 fields are *WARL* and may be read-only zero, indicating reads to the
 corresponding counter will cause an illegal-instruction exception when
-executing in a less-privileged mode. In systems without U-mode, the
+executing in a less-privileged mode. In harts without U-mode, the
 `mcounteren` register should not exist.
 
 ==== Machine Counter-Inhibit CSR (`mcountinhibit`)
@@ -1681,7 +1697,7 @@ Machine external interrupt
 14-15 +
 &#8805;16
 |_Reserved_ +
-_Reserved for counter-overflow interrupt_ +
+Counter-overflow interrupt +
 _Reserved_ +
 _Designated for platform use_ 
 |0 +
@@ -1840,7 +1856,10 @@ this context, "data" encompasses all types of information used within a RISC-V
 hart. Upon a hardware error exception, the `__x__epc` register is set to the
 address of the instruction that attempted to access corrupted data, while the
 `__x__tval` register is set either to 0 or to the virtual address of an
-instruction fetch, load, or store that attempted to access corrupted data.
+instruction fetch, load, or store that attempted to access corrupted data. The
+priority of Hardware Error exception is implementation-defined, but any given
+occurrence is generally expected to be recognized at the point in the overall
+priority order at which the hardware error is discovered.
 ====
 
 ==== Machine Trap Value Register (`mtval`)
@@ -1878,7 +1897,7 @@ contain the virtual address of the portion of the access that caused the
 fault.
 
 If `mtval` is written with a nonzero value when an instruction
-access-fault or page-fault exception occurs on a system with
+access-fault or page-fault exception occurs on a hart with
 variable-length instructions, then `mtval` will contain the virtual
 address of the portion of the instruction that caused the fault, while
 `mepc` will point to the beginning of the instruction.
@@ -2612,7 +2631,7 @@ progress is detected.
 The misaligned atomicity granule PMA provides constrained support for
 misaligned AMOs.
 This PMA, if present, specifies the size of a _misaligned atomicity granule_,
-a power-of-two number of bytes.
+a naturally aligned power-of-two number of bytes.
 Specific supported values for this PMA are represented by MAG__NN__, e.g.,
 MAG16 indicates the misaligned atomicity granule is at least 16 bytes.
 
@@ -2878,7 +2897,7 @@ illegal.
 
 [NOTE]
 ====
-RV64 systems use `pmpcfg2`, rather than `pmpcfg1`, to hold
+RV64 harts use `pmpcfg2`, rather than `pmpcfg1`, to hold
 configurations for PMP entries 8-15. This design reduces the cost of
 supporting multiple MXLEN values, since the configurations for PMP
 entries 8-11 appear in `pmpcfg2`[31:0] for both RV32 and RV64.
