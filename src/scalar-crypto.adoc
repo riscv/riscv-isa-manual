@@ -1,0 +1,1253 @@
+== Cryptography Extensions: Scalar & Entropy Source Instructions, Version 1.0.1
+
+=== Changelog
+
+[cols="1,5"]
+|===
+| Version | Changes
+
+| `v1.0.1` 
+| Fix typos to show that 
+  `c.srli`, `c.srai`, and `c.slli` are Zkt instructions in RV64.
+
+| `v1.0.0` 
+| Initial Release
+|===
+
+[[crypto_scalar_introduction]]
+=== Introduction
+
+This document describes the _scalar_ cryptography
+extension for RISC-V.
+All instructions described herein use the general-purpose `X`
+registers, and obey the 2-read-1-write register access constraint.
+These instructions are designed to be lightweight and suitable
+for `32` and `64` bit base architectures; from embedded IoT class
+cores to large, application class cores which do not implement a
+vector unit.
+
+This document also describes the architectural interface to an
+Entropy Source, which can be used to generate cryptographic secrets.
+This is found in <<crypto_scalar_es>>.
+
+It also contains a mechanism allowing core implementers to provide
+_"Constant Time Execution"_ guarantees in <<crypto_scalar_zkt>>.
+
+A companion document _Volume II: Vector Instructions_, describes
+instruction proposals which build on the RISC-V Vector Extension.
+The Vector Cryptography extension is currently a work in progress
+waiting for the base Vector extension to stabilise.
+We expect to pick up this work in earnest in Q4-2021 or Q1-2022.
+
+[[crypto_scalar_audience]]
+==== Intended Audience
+
+Cryptography is a specialised subject, requiring people with many different
+backgrounds to cooperate in its secure and efficient implementation.
+Where possible, we have written this specification to be understandable by
+all, though we recognise that the motivations and references to
+algorithms or other specifications and standards may be unfamiliar to those
+who are not domain experts.
+
+This specification anticipates being read and acted on by various people
+with different backgrounds.
+We have tried to capture these backgrounds
+here, with a brief explanation of what we expect them to know, and how
+it relates to the specification.
+We hope this aids people's understanding of which aspects of the specification
+are particularly relevant to them, and which they may (safely!) ignore or
+pass to a colleague.
+
+Cryptographers and cryptographic software developers::
+These are the people we expect to write code using the instructions
+in this specification.
+They should understand fairly obviously the motivations for the
+instructions we include, and be familiar with most of the algorithms
+and outside standards to which we refer.
+We expect the sections on constant time execution
+(<<crypto_scalar_zkt>>)
+and the entropy source
+(<<crypto_scalar_es>>)
+to be chiefly understood with their help.
+
+Computer architects::
+We do not expect architects to have a cryptography background.
+We nonetheless expect architects to be able to examine our instructions
+for implementation issues, understand how the instructions will be used
+in context, and advise on how best to fit the functionality the
+cryptographers want to the ISA interface.
+
+Digital design engineers & micro-architects::
+These are the people who will implement the specification inside a
+core. Again, no cryptography expertise is assumed, but we expect them to
+interpret the specification and anticipate any hardware implementation
+issues, e.g., where high-frequency design considerations apply, or where
+latency/area tradeoffs exist etc.
+In particular, they should be aware of the literature around efficiently
+implementing AES and SM4 SBoxes in hardware.
+
+Verification engineers::
+Responsible for ensuring the correct implementation of the extension
+in hardware.
+No cryptography background is assumed.
+We expect them to identify interesting test cases from the
+specification. An understanding of their real-world usage will help with this.
+We do not expect verification engineers in this sense to be experts
+in entropy source design or certification, since this is a very
+specialised area.
+We do expect them however to identify all of the _architectural_
+test cases around the entropy source interface.
+
+These are by no means the only people concerned with the specification,
+but they are the ones we considered most while writing it.
+
+[[crypto_scalar_sail_specifications]]
+==== Sail Specifications
+
+RISC-V maintains a 
+link:https://github.com/riscv/sail-riscv[formal model]
+of the ISA specification,
+implemented in the Sail ISA specification language
+cite:[sail].
+Note that _Sail_ refers to the specification language itself,
+and that there is a _model of RISC-V_, written using Sail.
+It is not correct to refer to "the Sail model".
+This is ambiguous, given there are many models of different ISAs implemented
+using Sail. We refer to the Sail implementation of RISC-V as
+"the RISC-V Sail model".
+
+The Cryptography extension uses inline Sail code snippets from the
+actual model to give canonical descriptions of instruction
+functionality.
+Each instruction is accompanied by its expression in Sail, and includes
+calls to supporting functions which are too verbose to include directly
+in the specification.
+This supporting code is listed in
+<<crypto_scalar_appx_sail>>.
+The 
+link:https://github.com/rems-project/sail/blob/sail2/manual.pdf[Sail Manual]
+is recommended reading in order to best understand the code snippets.
+
+Note that this document contains only a subset of the formal model: refer to
+the formal model Github
+link:https://github.com/riscv/sail-riscv[repository]
+for the complete model.
+
+[[crypto_scalar_policies]]
+==== Policies
+
+In creating this proposal, we tried to adhere to the following
+policies:
+
+* Where there is a choice between:
+  . supporting diverse implementation strategies for an algorithm
+  or
+  . supporting a single implementation style which is more performant /
+     less expensive;
+  the crypto extension will pick the more constrained but performant
+  option.
+  This fits a common pattern in other parts of the RISC-V specification,
+  where recommended (but not required) instruction sequences for performing
+  particular tasks are given as an example, such that both hardware and
+  software implementers can optimise for only a single use-case.
+  
+* The extension will be designed to support _existing_ standardised
+  cryptographic constructs well.
+  It will not try to support proposed standards, or cryptographic
+  constructs which exist only in academia.
+  Cryptographic standards which are settled upon concurrently with or after
+  the RISC-V cryptographic extension standardisation will be dealt with
+  by future additions to, or versions of, the RISC-V cryptographic
+  standard extension. It is anticipated that the NIST Lightweight
+  Cryptography contest and the NIST Post-Quantum Cryptography contest
+  may be dealt with this way, depending on timescales.
+  
+* Historically, there has been some discussion
+  cite:[LSYRR:04]
+  on how newly supported operations in general-purpose computing might
+  enable new bases for cryptographic algorithms.
+  The standard will not try to anticipate new useful low-level
+  operations which _may_ be useful as building blocks for
+  future cryptographic constructs.
+  
+* Regarding side-channel countermeasures:
+  Where relevant, proposed instructions must aim to remove the
+  possibility of any timing side-channels.
+  For side-channels based on power or electro-magnetic (EM) measurements,
+  the extension will not aim to support countermeasures which are
+  implemented above the ISA abstraction layer.
+  Recommendations will be given where relevant on how micro-architectures
+  can implement instructions in a power/EM side-channel resistant way.
+
+[[crypto_scalar_extensions]]
+=== Extensions Overview
+
+The group of extensions introduced by the Scalar Cryptography Instruction Set
+Extension is listed here.
+
+Detection of individual cryptography extensions uses the
+unified software-based RISC-V discovery method.
+
+[NOTE]
+====
+At the time of writing, these discovery mechanisms are still a work in
+progress.
+====
+
+.A note on extension rationale
+[NOTE, caption="SH"]
+====
+Specialist encryption and decryption instructions are separated into different
+functional groups because some use cases (e.g., Galois/Counter
+Mode in TLS 1.3) do not require decryption functionality.
+
+The NIST and ShangMi algorithms suites are separated because their
+usefulness is heavily dependent on the countries a device is expected to
+operate in. NIST ciphers are a part of most standardised internet
+protocols, while ShangMi ciphers are required for use in China.
+====
+
+[[zbkb,Zbkb]]
+==== `Zbkb` - Bitmanip instructions for Cryptography
+
+These are a subset of the Bitmanipulation Extension `Zbb` which are
+particularly useful for Cryptography.
+
+NOTE: Some of these instructions are defined in the first Bitmanip
+ratification package, and some are not (
+<<insns-pack,pack>>,
+<<insns-packh,packh>>,
+<<insns-packw,packw>>,
+<<insns-brev8,brev8>>,
+<<insns-zip,zip>>,
+<<insns-unzip,unzip>>).
+All of the instructions in <<zbkb>> have their complete specification included
+in this document, including those _not_ present in the initial
+Bitmanip ratification package.
+This is to make the present specification complete as a standalone document.
+Inevitably there might be small divergences between the Bitmanip and
+Scalar Cryptography specification documents as they move at different
+paces.
+When this happens, assume that the Bitmanip specification has the
+most up-to-date version of Bitmanip instructions.
+This is an unfortunate but necessary stop-gap while Scalar Cryptography
+and Bitmanip are being rapidly iterated on prior to public review.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; | &#10003; |  ror         | <<insns-ror>>
+| &#10003; | &#10003; |  rol         | <<insns-rol>>
+| &#10003; | &#10003; |  rori        | <<insns-rori>>
+|          | &#10003; |  rorw        | <<insns-rorw>>
+|          | &#10003; |  rolw        | <<insns-rolw>>
+|          | &#10003; |  roriw       | <<insns-roriw>>
+| &#10003; | &#10003; |  andn        | <<insns-andn>>
+| &#10003; | &#10003; |  orn         | <<insns-orn>>
+| &#10003; | &#10003; |  xnor        | <<insns-xnor>>
+| &#10003; | &#10003; |  pack        | <<insns-pack>>
+| &#10003; | &#10003; |  packh       | <<insns-packh>>
+|          | &#10003; |  packw       | <<insns-packw>>
+| &#10003; | &#10003; |  brev8       | <<insns-brev8>>
+| &#10003; | &#10003; |  rev8        | <<insns-rev8>>
+| &#10003; |          |  zip         | <<insns-zip>>
+| &#10003; |          |  unzip       | <<insns-unzip>>
+|===
+
+[[zbkc,Zbkc]]
+==== `Zbkc` - Carry-less multiply instructions
+
+Constant time carry-less multiply for Galois/Counter Mode.
+These are separated from the <<zbkb>> because they
+have a considerable implementation overhead which cannot be amortised
+across other instructions.
+
+NOTE: These instructions are defined in the first Bitmanip
+ratification package for the `Zbc` extension.
+All of the instructions in <<zbkc>> have their complete specification included
+in this document, including those _not_ present in the initial
+Bitmanip ratification package.
+This is to make the present specification complete as a standalone document.
+Inevitably there might be small divergences between the Bitmanip and
+Scalar Cryptography specification documents as they move at different
+paces.
+When this happens, assume that the Bitmanip specification has the
+most up-to-date version of Bitmanip instructions.
+This is an unfortunate but necessary stop-gap while Scalar Cryptography
+and Bitmanip are being rapidly iterated on prior to public review.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; | &#10003; |  clmul       | <<insns-clmul>>
+| &#10003; | &#10003; |  clmulh      | <<insns-clmulh>>
+|===
+
+[[zbkx,Zbkx]]
+==== `Zbkx` - Crossbar permutation instructions
+
+These instructions are useful for implementing SBoxes in constant time, and
+potentially with DPA protections.
+These are separated from the <<zbkb>> because they
+have an implementation overhead which cannot be amortised
+across other instructions.
+
+NOTE: All of these instructions are missing from the first Bitmanip
+ratification package.
+Hence,  all of the instructions in <<zbkx>> have their complete specification
+included in this document.
+This is to make the present specification complete as a standalone document.
+Inevitably there might be small divergences between the Bitmanip and
+Scalar Cryptography specification documents as they move at different
+paces.
+When this happens, assume that the Bitmanip specification has the
+most up-to-date version of Bitmanip instructions.
+This is an unfortunate but necessary stop-gap while Scalar Cryptography
+and Bitmanip are being rapidly iterated on prior to public review.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; | &#10003; |  xperm8      | <<insns-xperm8>>
+| &#10003; | &#10003; |  xperm4      | <<insns-xperm4>>
+|===
+
+[[zknd,Zknd]]
+==== `Zknd` - NIST Suite: AES Decryption
+
+Instructions for accelerating the decryption and key-schedule functions of
+the AES block cipher.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; |          | aes32dsi     | <<insns-aes32dsi>>
+| &#10003; |          | aes32dsmi    | <<insns-aes32dsmi>>
+|          | &#10003; | aes64ds      | <<insns-aes64ds>>
+|          | &#10003; | aes64dsm     | <<insns-aes64dsm>>
+|          | &#10003; | aes64im      | <<insns-aes64im>>
+|          | &#10003; | aes64ks1i    | <<insns-aes64ks1i>>
+|          | &#10003; | aes64ks2     | <<insns-aes64ks2>>
+|===
+
+NOTE: The <<insns-aes64ks1i>> and <<insns-aes64ks2>> instructions are
+present in both the <<zknd>> and <<zkne>> extensions.
+
+[[zkne,Zkne]]
+==== `Zkne` - NIST Suite: AES Encryption
+
+Instructions for accelerating the encryption and key-schedule functions of
+the AES block cipher.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; |          | aes32esi     | <<insns-aes32esi>>
+| &#10003; |          | aes32esmi    | <<insns-aes32esmi>>
+|          | &#10003; | aes64es      | <<insns-aes64es>>
+|          | &#10003; | aes64esm     | <<insns-aes64esm>>
+|          | &#10003; | aes64ks1i    | <<insns-aes64ks1i>>
+|          | &#10003; | aes64ks2     | <<insns-aes64ks2>>
+|===
+
+NOTE: The
+<<insns-aes64ks1i,`aes64ks1i`>>
+and
+<<insns-aes64ks2,`aes64ks2`>>
+instructions are present in both the <<zknd>> and <<zkne>> extensions.
+
+[[zknh,Zknh]]
+==== `Zknh` - NIST Suite: Hash Function Instructions
+
+Instructions for accelerating the SHA2 family of cryptographic hash functions,
+as specified in cite:[nist:fips:180:4].
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; | &#10003; | sha256sig0   | <<insns-sha256sig0>>
+| &#10003; | &#10003; | sha256sig1   | <<insns-sha256sig1>>
+| &#10003; | &#10003; | sha256sum0   | <<insns-sha256sum0>>
+| &#10003; | &#10003; | sha256sum1   | <<insns-sha256sum1>>
+| &#10003; |          | sha512sig0h  | <<insns-sha512sig0h>>
+| &#10003; |          | sha512sig0l  | <<insns-sha512sig0l>>
+| &#10003; |          | sha512sig1h  | <<insns-sha512sig1h>>
+| &#10003; |          | sha512sig1l  | <<insns-sha512sig1l>>
+| &#10003; |          | sha512sum0r  | <<insns-sha512sum0r>>
+| &#10003; |          | sha512sum1r  | <<insns-sha512sum1r>>
+|          | &#10003; | sha512sig0   | <<insns-sha512sig0>>
+|          | &#10003; | sha512sig1   | <<insns-sha512sig1>>
+|          | &#10003; | sha512sum0   | <<insns-sha512sum0>>
+|          | &#10003; | sha512sum1   | <<insns-sha512sum1>>
+|===
+
+[[zksed,Zksed]]
+==== `Zksed` - ShangMi Suite: SM4 Block Cipher Instructions
+
+Instructions for accelerating the SM4 Block Cipher.
+Note that unlike AES, this cipher uses the same core operation for
+encryption and decryption, hence there is only one
+extension for it.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; | &#10003; | sm4ed        | <<insns-sm4ed>>
+| &#10003; | &#10003; | sm4ks        | <<insns-sm4ks>>
+|===
+
+[[zksh,Zksh]]
+==== `Zksh` - ShangMi Suite: SM3 Hash Function Instructions
+
+Instructions for accelerating the SM3 hash function.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| &#10003; | &#10003; | sm3p0        | <<insns-sm3p0>>
+| &#10003; | &#10003; | sm3p1        | <<insns-sm3p1>>
+|===
+
+[[zkr,Zkr]]
+==== `Zkr` - Entropy Source Extension
+
+The entropy source extension defines the `seed` CSR at address `0x015`. 
+This CSR provides up to 16 physical `entropy` bits that can be used to
+seed cryptographic random bit generators. 
+
+See <<crypto_scalar_es>> for the normative specification and access control
+notes. <<crypto_scalar_appx_es>> contains design rationale and further
+recommendations to implementers.
+
+[[zkn,Zkn]]
+==== `Zkn` - NIST Algorithm Suite
+
+This extension is shorthand for the following set of other extensions:
+
+[%header,cols="^1,4"]
+|===
+|Included Extension
+|Description
+
+| <<zbkb>>  | Bitmanipulation instructions for cryptography.
+| <<zbkc>>  | Carry-less multiply instructions.
+| <<zbkx>>  | Cross-bar Permutation instructions.
+| <<zkne>>  | AES encryption instructions.
+| <<zknd>>  | AES decryption instructions.
+| <<zknh>>  | SHA2 hash function instructions.
+|===
+
+A core which implements `Zkn` must implement all of the above extensions.
+
+[[zks,Zks]]
+==== `Zks` - ShangMi Algorithm Suite
+
+This extension is shorthand for the following set of other extensions:
+
+[%header,cols="^1,4"]
+|===
+|Included Extension
+|Description
+
+| <<zbkb>>  | Bitmanipulation instructions for cryptography.
+| <<zbkc>>  | Carry-less multiply instructions.
+| <<zbkx>>  | Cross-bar Permutation instructions.
+| <<zksed>> | SM4 block cipher instructions.
+| <<zksh>>  | SM3 hash function instructions.
+|===
+
+A core which implements `Zks` must implement all of the above extensions.
+
+[[zk,Zk]]
+==== `Zk` - Standard scalar cryptography extension
+
+This extension is shorthand for the following set of other extensions:
+
+[%header,cols="^1,4"]
+|===
+|Included Extension
+|Description
+
+| <<zkn>>  | NIST Algorithm suite extension.
+| <<zkr>>  | Entropy Source extension.
+| <<crypto_scalar_zkt,Zkt>>  | Data independent execution latency extension.
+|===
+
+A core which implements `Zk` must implement all of the above extensions.
+
+==== `Zkt` - Data Independent Execution Latency
+
+This extension allows CPU implementers to indicate to
+cryptographic software developers that a subset of RISC-V instructions
+are guaranteed to be implemented such that their execution latency
+is independent of the data values they operate on.
+A complete description of this extension is found in
+<<crypto_scalar_zkt>>.
+
+// ------------------------------------------------------------
+
+[[crypto_scalar_insns, reftext="Scalar Cryptography Instructions"]]
+=== Instructions
+
+[#insns-aes32dsi, reftext="AES final round decrypt (RV32)"]
+==== aes32dsi
+
+Synopsis::
+AES final round decryption instruction for RV32.
+
+Mnemonic::
+aes32dsi rd, rs1, rs2, bs
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x15},
+{bits: 2, name: 'bs'},
+]}
+....
+
+Description:: 
+This instruction sources a single byte from `rs2` according to `bs`.
+To this it applies the inverse AES SBox operation, and XOR's the result with
+`rs1`.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+Operation::
+[source,sail]
+--
+function clause execute (AES32DSI (bs,rs2,rs1,rd)) = {
+  let shamt   : bits( 5) = bs @ 0b000; /* shamt = bs*8 */
+  let si      : bits( 8) = (X(rs2)[31..0] >> shamt)[7..0]; /* SBox Input */
+  let so      : bits(32) = 0x000000 @ aes_sbox_inv(si);
+  let result  : bits(32) = X(rs1)[31..0] ^ rol32(so, unsigned(shamt));
+  X(rd) = EXTS(result); RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zknd>> (RV32)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV32)
+| v1.0.0
+| Frozen
+| <<zk>> (RV32)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes32dsmi, reftext="AES middle round decrypt (RV32)"]
+==== aes32dsmi
+
+Synopsis::
+AES middle round decryption instruction for RV32.
+
+Mnemonic::
+aes32dsmi rd, rs1, rs2, bs
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x17},
+{bits: 2, name: 'bs'},
+]}
+....
+
+Description:: 
+This instruction sources a single byte from `rs2` according to `bs`.
+To this it applies the inverse AES SBox operation, and a partial inverse
+MixColumn, before XOR'ing the result with `rs1`.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+Operation::
+[source,sail]
+--
+function clause execute (AES32DSMI (bs,rs2,rs1,rd)) = {
+  let shamt   : bits( 5) = bs @ 0b000; /* shamt = bs*8 */
+  let si      : bits( 8) = (X(rs2)[31..0] >> shamt)[7..0]; /* SBox Input */
+  let so      : bits( 8) = aes_sbox_inv(si);
+  let mixed   : bits(32) = aes_mixcolumn_byte_inv(so);
+  let result  : bits(32) = X(rs1)[31..0] ^ rol32(mixed, unsigned(shamt));
+  X(rd) = EXTS(result); RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zknd>> (RV32)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV32)
+| v1.0.0
+| Frozen
+| <<zk>> (RV32)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes32esi, reftext="AES final round encrypt (RV32)"]
+==== aes32esi
+
+Synopsis::
+AES final round encryption instruction for RV32.
+
+Mnemonic::
+aes32esi rd, rs1, rs2, bs
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x11},
+{bits: 2, name: 'bs'},
+]}
+....
+
+Description:: 
+This instruction sources a single byte from `rs2` according to `bs`.
+To this it applies the forward AES SBox operation,
+before XOR'ing the result with `rs1`.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+Operation::
+[source,sail]
+--
+function clause execute (AES32ESI (bs,rs2,rs1,rd)) = {
+  let shamt   : bits( 5) = bs @ 0b000; /* shamt = bs*8 */
+  let si      : bits( 8) = (X(rs2)[31..0] >> shamt)[7..0]; /* SBox Input */
+  let so      : bits(32) = 0x000000 @ aes_sbox_fwd(si);
+  let result  : bits(32) = X(rs1)[31..0] ^ rol32(so, unsigned(shamt));
+  X(rd) = EXTS(result); RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zkne>> (RV32)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV32)
+| v1.0.0
+| Frozen
+| <<zk>> (RV32)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes32esmi, reftext="AES middle round encrypt (RV32)"]
+==== aes32esmi
+
+Synopsis::
+AES middle round encryption instruction for RV32.
+
+Mnemonic::
+aes32esmi rd, rs1, rs2, bs
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x13},
+{bits: 2, name: 'bs'},
+]}
+....
+
+Description:: 
+This instruction sources a single byte from `rs2` according to `bs`.
+To this it applies the forward AES SBox operation, and a partial forward
+MixColumn, before XOR'ing the result with `rs1`.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+Operation::
+[source,sail]
+--
+function clause execute (AES32ESMI (bs,rs2,rs1,rd)) = {
+  let shamt   : bits( 5) = bs @ 0b000; /* shamt = bs*8 */
+  let si      : bits( 8) = (X(rs2)[31..0] >> shamt)[7..0]; /* SBox Input */
+  let so      : bits( 8) = aes_sbox_fwd(si);
+  let mixed   : bits(32) = aes_mixcolumn_byte_fwd(so);
+  let result  : bits(32) = X(rs1)[31..0] ^ rol32(mixed, unsigned(shamt));
+  X(rd) = EXTS(result); RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zkne>> (RV32)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV32)
+| v1.0.0
+| Frozen
+| <<zk>> (RV32)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes64ds, reftext="AES decrypt final round (RV64)"]
+==== aes64ds
+
+Synopsis::
+AES final round decryption instruction for RV64.
+
+Mnemonic::
+aes64ds rd, rs1, rs2
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x1d},
+{bits: 2, name: 0x0},
+]}
+....
+
+Description:: 
+Uses the two 64-bit source registers to represent the entire AES state,
+and produces _half_ of the next round output, applying the Inverse ShiftRows
+and SubBytes steps.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+.Note To Software Developers
+[NOTE,caption="SH"]
+====
+The following code snippet shows the final round of the AES block decryption.
+`t0` and `t1` hold the current round state.
+`t2` and `t3` hold the next round state.
+
+  aes64ds t2, t0, t1
+  aes64ds t3, t1, t0
+
+Note the reversed register order of the second instruction.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (AES64DS(rs2, rs1, rd)) = {
+  let sr : bits(64) = aes_rv64_shiftrows_inv(X(rs2)[63..0], X(rs1)[63..0]);
+  let wd : bits(64) = sr[63..0];
+  X(rd) = aes_apply_inv_sbox_to_each_byte(wd);
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zknd>> (RV64)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV64)
+| v1.0.0
+| Frozen
+| <<zk>> (RV64)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes64dsm, reftext="AES decrypt middle round (RV64)"]
+==== aes64dsm
+
+Synopsis::
+AES middle round decryption instruction for RV64.
+
+Mnemonic::
+aes64dsm rd, rs1, rs2
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x1f},
+{bits: 2, name: 0x0},
+]}
+....
+
+Description:: 
+Uses the two 64-bit source registers to represent the entire AES state,
+and produces _half_ of the next round output, applying the Inverse ShiftRows,
+SubBytes and MixColumns steps.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+.Note To Software Developers
+[NOTE,caption="SH"]
+====
+The following code snippet shows one middle round of the AES block decryption.
+`t0` and `t1` hold the current round state.
+`t2` and `t3` hold the next round state.
+
+  aes64dsm t2, t0, t1
+  aes64dsm t3, t1, t0
+
+Note the reversed register order of the second instruction.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (AES64DSM(rs2, rs1, rd)) = {
+  let sr : bits(64) = aes_rv64_shiftrows_inv(X(rs2)[63..0], X(rs1)[63..0]);
+  let wd : bits(64) = sr[63..0];
+  let sb : bits(64) = aes_apply_inv_sbox_to_each_byte(wd);
+  X(rd)  = aes_mixcolumn_inv(sb[63..32]) @ aes_mixcolumn_inv(sb[31..0]);
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zknd>> (RV64)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV64)
+| v1.0.0
+| Frozen
+| <<zk>> (RV64)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes64es, reftext="AES encrypt final round instruction (RV64)"]
+==== aes64es
+
+Synopsis::
+AES final round encryption instruction for RV64.
+
+Mnemonic::
+aes64es rd, rs1, rs2
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x19},
+{bits: 2, name: 0x0},
+]}
+....
+
+Description:: 
+Uses the two 64-bit source registers to represent the entire AES state,
+and produces _half_ of the next round output, applying the ShiftRows and
+SubBytes steps.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+.Note To Software Developers
+[NOTE,caption="SH"]
+====
+The following code snippet shows the final round of the AES block encryption.
+`t0` and `t1` hold the current round state.
+`t2` and `t3` hold the next round state.
+
+  aes64es t2, t0, t1
+  aes64es t3, t1, t0
+
+Note the reversed register order of the second instruction.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (AES64ES(rs2, rs1, rd)) = {
+  let sr : bits(64) = aes_rv64_shiftrows_fwd(X(rs2)[63..0], X(rs1)[63..0]);
+  let wd : bits(64) = sr[63..0];
+  X(rd) = aes_apply_fwd_sbox_to_each_byte(wd);
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zkne>> (RV64)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV64)
+| v1.0.0
+| Frozen
+| <<zk>> (RV64)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes64esm, reftext="AES encrypt middle round instruction (RV64)"]
+==== aes64esm
+
+Synopsis::
+AES middle round encryption instruction for RV64.
+
+Mnemonic::
+aes64esm rd, rs1, rs2
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x1b},
+{bits: 2, name: 0x0},
+]}
+....
+
+Description:: 
+Uses the two 64-bit source registers to represent the entire AES state,
+and produces _half_ of the next round output, applying the ShiftRows,
+SubBytes and MixColumns steps.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+.Note To Software Developers
+[NOTE,caption="SH"]
+====
+The following code snippet shows one middle round of the AES block encryption.
+`t0` and `t1` hold the current round state.
+`t2` and `t3` hold the next round state.
+
+  aes64esm t2, t0, t1
+  aes64esm t3, t1, t0
+
+Note the reversed register order of the second instruction.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (AES64ESM(rs2, rs1, rd)) = {
+  let sr : bits(64) = aes_rv64_shiftrows_fwd(X(rs2)[63..0], X(rs1)[63..0]);
+  let wd : bits(64) = sr[63..0];
+  let sb : bits(64) = aes_apply_fwd_sbox_to_each_byte(wd);
+  X(rd)  =  aes_mixcolumn_fwd(sb[63..32]) @ aes_mixcolumn_fwd(sb[31..0]);
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zkne>> (RV64)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV64)
+| v1.0.0
+| Frozen
+| <<zk>> (RV64)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes64im, reftext="AES Decrypt KeySchedule MixColumns (RV64)"]
+==== aes64im
+
+Synopsis::
+This instruction accelerates the inverse MixColumns step of the AES
+Block Cipher, and is used to aid creation of the decryption KeySchedule.
+
+Mnemonic::
+aes64im rd, rs1
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x13},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x1},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 0x0},
+{bits: 5, name: 0x18},
+{bits: 2, name: 0x0},
+]}
+....
+
+Description:: 
+The instruction applies the inverse MixColumns
+transformation to two columns of the state array, packed into a single
+64-bit register.
+It is used to create the inverse cipher KeySchedule, according to
+the equivalent inverse cipher construction in
+cite:[nist:fips:197] (Page 23, Section 5.3.5).
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+Operation::
+[source,sail]
+--
+function clause execute (AES64IM(rs1, rd)) = {
+  let w0 : bits(32) = aes_mixcolumn_inv(X(rs1)[31.. 0]);
+  let w1 : bits(32) = aes_mixcolumn_inv(X(rs1)[63..32]);
+  X(rd)  = w1 @ w0;
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zknd>> (RV64)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV64)
+| v1.0.0
+| Frozen
+| <<zk>> (RV64)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes64ks1i, reftext="AES Key Schedule Instruction 1 (RV64)"]
+==== aes64ks1i
+
+Synopsis::
+This instruction implements part of the KeySchedule operation for the
+AES Block cipher involving the SBox operation.
+
+Mnemonic::
+aes64ks1i rd, rs1, rnum
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x13},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x1},
+{bits: 5, name: 'rs1'},
+{bits: 4, name: 'rnum'},
+{bits: 1, name: 0x1},
+{bits: 5, name: 0x18},
+{bits: 2, name: 0},
+]}
+....
+
+Description:: 
+This instruction implements the rotation, SubBytes and Round Constant
+addition steps of the AES block cipher Key Schedule.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+Note that `rnum` must be in the range `0x0..0xA`.
+The values `0xB..0xF` are reserved.
+
+Operation::
+[source,sail]
+--
+function clause execute (AES64KS1I(rnum, rs1, rd)) = {
+  if(unsigned(rnum) > 10) then {
+    handle_illegal();  RETIRE_SUCCESS
+  } else {
+    let tmp1 : bits(32) = X(rs1)[63..32];
+    let rc   : bits(32) = aes_decode_rcon(rnum); /* round number -> round constant */
+    let tmp2 : bits(32) = if (rnum ==0xA) then tmp1 else ror32(tmp1, 8);
+    let tmp3 : bits(32) = aes_subword_fwd(tmp2);
+    let result : bits(64) = (tmp3 ^ rc) @ (tmp3 ^ rc);
+    X(rd) = EXTZ(result);
+    RETIRE_SUCCESS
+  }
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zkne>> (RV64)
+| v1.0.0
+| Frozen
+| <<zknd>> (RV64)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV64)
+| v1.0.0
+| Frozen
+| <<zk>> (RV64)
+| v1.0.0
+| Frozen
+|===
+
+[#insns-aes64ks2, reftext="AES Key Schedule Instruction 2 (RV64)"]
+==== aes64ks2
+
+Synopsis::
+This instruction implements part of the KeySchedule operation for the
+AES Block cipher.
+
+Mnemonic::
+aes64ks2 rd, rs1, rs2
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x33},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x0},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 5, name: 0x1f},
+{bits: 2, name: 0x1},
+]}
+....
+
+Description:: 
+This instruction implements the additional XOR'ing of key words as
+part of the AES block cipher Key Schedule.
+This instruction must _always_ be implemented such that its execution
+latency does not depend on the data being operated on.
+
+Operation::
+[source,sail]
+--
+function clause execute (AES64KS2(rs2, rs1, rd)) = {
+  let w0 : bits(32) = X(rs1)[63..32] ^ X(rs2)[31..0];
+  let w1 : bits(32) = X(rs1)[63..32] ^ X(rs2)[31..0] ^ X(rs2)[63..32];
+  X(rd)  = w1 @ w0;
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+| <<zkne>> (RV64)
+| v1.0.0
+| Frozen
+| <<zknd>> (RV64)
+| v1.0.0
+| Frozen
+| <<zkn>> (RV64)
+| v1.0.0
+| Frozen
+| <<zk>> (RV64)
+| v1.0.0
+| Frozen
+|===
+
+
