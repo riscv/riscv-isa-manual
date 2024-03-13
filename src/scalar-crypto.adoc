@@ -4116,4 +4116,277 @@ specific instances of `grevi`, `shfli` and `unshfli` respectively.
 | &#10003; |          |  unzip       | <<insns-unzip>>
 |===
 
+[[crypto_scalar_appx_rationale]]
+=== Instruction Rationale
+
+This section contains various rationale, design notes and usage
+recommendations for the instructions in the scalar cryptography
+extension. It also tries to record how the designs of instructions were
+derived, or where they were contributed from.
+
+==== AES Instructions
+
+The 32-bit instructions were derived from work in cite:[MJS:LWAES:20] and
+contributed to the RISC-V cryptography extension.
+The 64-bit instructions were developed collaboratively by task group
+members on our mailing list.
+
+Supporting material, including rationale and a design space exploration
+for all of the AES instructions in the specification can be found in the paper
+_"link:https://doi.org/10.46586/tches.v2021.i1.109-136[The design of scalar AES Instruction Set Extensions for RISC-V]"_ cite:[MNPSW:20].
+
+
+==== SHA2 Instructions
+
+These instructions were developed based on academic
+work at the University of Bristol as part of the XCrypto project
+cite:[MPP:19], and contributed to the RISC-V cryptography extension.
+
+The RV32 SHA2-512 instructions were based on this work, and developed
+in cite:[MJS:LWSHA:20], before being contributed in the same way.
+
+==== SM3 and SM4 Instructions
+
+The SM4 instructions were derived from work in cite:[MJS:LWAES:20], and
+are hence very similar to the RV32 AES instructions.
+
+The SM3 instructions were inspired by the SHA2 instructions, and
+based on development work done in cite:[MJS:LWSHA:20], before being
+contributed to the RISC-V cryptography extension.
+
+[[crypto_scalar_zkb]]
+==== Bitmanip Instructions for Cryptography
+
+Many of the primitive operations used in symmetric key cryptography
+and cryptographic hash functions are well supported by the
+RISC-V Bitmanip cite:[riscv:bitmanip:repo] extensions.
+
+NOTE: This section repeats much of the information in
+<<zbkb>>,
+<<zbkc>>
+and
+<<zbkx>>,
+but includes more rationale.
+
+We proposed that the scalar cryptographic extension _reuse_ a
+subset of the instructions from the Bitmanip extensions `Zb[abc]` directly.
+Specifically, this would mean that
+a core implementing
+_either_
+the scalar cryptographic extensions,
+_or_
+the `Zb[abc]`,
+_or_
+both,
+would be required to implement these instructions.
+
+===== Rotations
+
+----
+RV32, RV64:                         RV64 only:
+    ror    rd, rs1, rs2                 rorw   rd, rs1, rs2
+    rol    rd, rs1, rs2                 rolw   rd, rs1, rs2
+    rori   rd, rs1, imm                 roriw  rd, rs1, imm
+----
+
+See cite:[riscv:bitmanip:draft] (Section 3.1.1) for details of
+these instructions.
+
+.Notes to software developers
+[NOTE,caption="SH"]
+====
+Standard bitwise rotation is a primitive operation in many block ciphers
+and hash functions; it features particularly in the ARX (Add, Rotate, Xor)
+class of block ciphers and stream ciphers.
+
+* Algorithms making use of 32-bit rotations:
+  SHA256, AES (Shift Rows), ChaCha20, SM3.
+* Algorithms making use of 64-bit rotations:
+  SHA512, SHA3.
+====
+
+===== Bit & Byte Permutations
+
+----
+RV32:
+    brev8   rd, rs1 // grevi rd, rs1,  7 - Reverse bits in bytes
+    rev8    rd, rs1 // grevi rd, rs1, 24 - Reverse bytes in 32-bit word
+
+RV64:
+    brev8   rd, rs1 // grevi rd, rs1,  7 - Reverse bits in bytes
+    rev8    rd, rs1 // grevi rd, rs1, 56 - Reverse bytes in 64-bit word
+----
+
+The scalar cryptography extension provides the following instructions for
+manipulating the bit and byte endianness of data.
+They are all parameterisations of the Generalised Reverse with Immediate
+(`grevi` instruction.
+The scalar cryptography extension requires _only_ the above instances
+of `grevi` be implemented, which can be invoked via their pseudo-ops.
+
+The full specification of the `grevi` instruction is available in
+cite:[riscv:bitmanip:draft] (Section 2.2.2).
+
+.Notes to software developers
+[NOTE,caption="SH"]
+====
+Reversing bytes in words is very common in cryptography when setting a
+standard endianness for input and output data.
+Bit reversal within bytes is used for implementing the GHASH component
+of Galois/Counter Mode (GCM) cite:[nist:gcm].
+====
+
+----
+RV32:
+    zip     rd, rs1 // shfli   rd, rs1, 15 - Bit interleave
+    unzip   rd, rs1 // unshfli rd, rs1, 15 - Bit de-interleave
+----
+
+The `zip` and `unzip` pseudo-ops are specific instances of
+the more general `shfli` and `unshfli` instructions.
+The scalar cryptography extension requires _only_ the above instances
+of `[un]shfli` be implemented, which can be invoked via their
+pseudo-ops.
+Only RV32 implementations require these instructions.
+
+The full specification of the `shfli` instruction is available in
+cite:[riscv:bitmanip:draft] (Section 2.2.3).
+
+.Notes to software developers
+[NOTE,caption="SH"]
+====
+These instructions perform a bit-interleave (or de-interleave) operation, and
+are useful for implementing the 64-bit rotations in the
+SHA3 cite:[nist:fips:202] algorithm on
+a 32-bit architecture.
+On RV64, the relevant operations in SHA3 can be done natively using
+rotation instructions, so `zip` and `unzip` are not required.
+====
+
+===== Carry-less Multiply
+
+----
+RV32, RV64:
+    clmul  rd, rs1, rs2
+    clmulh rd, rs1, rs2
+----
+
+See cite:[riscv:bitmanip:draft] (Section 2.6) for details of
+this instruction.
+See <<crypto_scalar_zkt>> for additional implementation
+requirements for these instructions, related to data independent
+execution latency.
+
+.Notes to software developers
+[NOTE,caption="SH"]
+====
+As is mentioned there, obvious cryptographic use-cases for carry-less
+multiply are for Galois Counter Mode (GCM) block cipher operations.
+GCM is recommended by NIST as a block cipher mode of operation
+cite:[nist:gcm], and is the only _required_ mode for the TLS 1.3
+protocol.
+====
+
+===== Logic With Negate
+
+----
+RV32, RV64:
+    andn rd, rs1, rs2
+     orn rd, rs1, rs2
+    xnor rd, rs1, rs2
+----
+
+See cite:[riscv:bitmanip:draft] (Section 2.1.3) for details of
+these instructions.
+These instructions are useful inside hash functions, block ciphers and
+for implementing software based side-channel countermeasures like masking.
+The `andn` instruction is also useful for constant time word-select
+in systems without the ternary Bitmanip `cmov` instruction.
+
+.Notes to software developers
+[NOTE,caption="SH"]
+====
+In the context of Cryptography, these instructions are useful for:
+SHA3/Keccak Chi step,
+Bit-sliced function implementations,
+Software based power/EM side-channel countermeasures based on masking.
+====
+
+===== Packing
+
+----
+RV32, RV64:                         RV64: 
+    pack   rd, rs1, rs2                 packw  rd, rs1, rs2
+    packh  rd, rs1, rs2
+----
+
+See cite:[riscv:bitmanip:draft] (Section 2.1.4) for details of
+these instructions.
+
+.Notes to software developers
+[NOTE,caption="SH"]
+====
+The `pack*` instructions are
+useful for re-arranging halfwords within words, and
+generally getting data into the right shape prior to applying transforms.
+This is particularly useful for cryptographic algorithms which pass inputs
+around as (potentially un-aligned) byte strings, but can operate on words
+made out of those byte strings.
+This occurs (for example) in AES when loading blocks and keys (which may not
+be word aligned) into registers to perform the round functions.
+====
+
+===== Crossbar Permutation Instructions
+
+----
+RV32, RV64:
+    xperm4 rd, rs1, rs2
+    xperm8 rd, rs1, rs2
+----
+
+See cite:[riscv:bitmanip:draft] (Section 2.2.4) for a complete
+description of this instruction.
+
+The `xperm4` instruction operates on nibbles.
+`GPR[rs1]` contains a vector of `XLEN/4` 4-bit elements.
+`GPR[rs2]` contains a vector of `XLEN/4` 4-bit indexes.
+The result is each element in `GPR[rs2]` replaced by the indexed element
+in `GPR[rs1]`, or zero if the index into `GPR[rs2]` is out of bounds.
+
+The `xperm8` instruction operates on bytes.
+`GPR[rs1]` contains a vector of `XLEN/8` 8-bit elements.
+`GPR[rs2]` contains a vector of `XLEN/8` 8-bit indexes.
+The result is each element in `GPR[rs2]` replaced by the indexed element
+in `GPR[rs1]`, or zero if the index into `GPR[rs2]` is out of bounds.
+
+.Notes to software developers
+[NOTE,caption="SH"]
+====
+The instruction can be used to implement arbitrary bit
+permutations.
+For cryptography, they can accelerate bit-sliced implementations,
+permutation layers of block ciphers, masking based countermeasures
+and SBox operations.
+
+Lightweight block ciphers using 4-bit SBoxes include:
+PRESENT cite:[block:present],
+Rectangle cite:[block:rectangle],
+GIFT cite:[block:gift],
+Twine cite:[block:twine],
+Skinny, MANTIS cite:[block:skinny],
+Midori cite:[block:midori].
+
+National ciphers using 8-bit SBoxes include:
+Camellia cite:[block:camellia] (Japan), 
+Aria cite:[block:aria] (Korea),
+AES cite:[nist:fips:197] (USA, Belgium),
+SM4 cite:[gbt:sm4] (China)
+Kuznyechik (Russia).
+
+All of these SBoxes can be implemented efficiently, in constant
+time, using the `xperm8` instruction
+footnote:l[link:http://svn.clairexen.net/handicraft/2020/lut4perm/demo02.cc[]].
+Note that this technique is also suitable for masking based
+side-channel countermeasures.
+====
 
