@@ -4390,3 +4390,1214 @@ Note that this technique is also suitable for masking based
 side-channel countermeasures.
 ====
 
+[[crypto_scalar_appx_es]]
+
+=== Entropy Source Rationale and Recommendations
+
+This *non-normative* appendix focuses on the rationale, security,
+self-certification, and implementation aspects of entropy sources. Hence we
+also discuss non-ISA system features that may be needed for cryptographic
+standards compliance and security testing.
+
+====	Checklists for Design and Self-Certification 
+
+The security of cryptographic systems is based on secret bits and keys.
+These bits need to be random and originate from cryptographically secure
+Random Bit Generators (RBGs). An Entropy Source (ES) is required to
+construct secure RBGs.
+
+While entropy source implementations do not have to be certified
+designs, RISC-V expects that they behave in a compatible manner and do not
+create unnecessary security risks to users. Self-evaluation and testing
+following appropriate security standards is usually needed to achieve this.
+
+*	*ISA Architectural Tests.* Verify, to the extent possible, that RISC-V ISA
+	requirements in this specification are correctly implemented. This includes
+	the state transitions (<<crypto_scalar_es>> and 
+	<<crypto_scalar_es_getnoise>>), access control 
+	(<<crypto_scalar_es_access>>), and that `seed` ES16 `entropy` words
+	can only be read destructively.
+	The scope of RISC-V ISA architectural tests are those behaviors that 
+	are independent of the physical entropy source details. A smoke test ES
+	module may be helpful in design phase.
+*	*Technical justification for entropy.* This may take the form of a
+	stochastic model or a heuristic argument that explains why the noise
+	source output is from a random, rather than pseudorandom (deterministic)
+	process, and is not easily predictable or externally observable.
+	A complete physical model is not necessary; research literature can be
+	cited. For example, one can show that a good ring oscillator noise derives
+	an amount of physical entropy from local, spontaneously occurring
+	Johnson-Nyquist thermal noise cite:[Sa21], and is therefore not merely
+	"random-looking".
+*	*Entropy Source Design Review.* An entropy source is more than a noise
+	source, and must have features such as health tests
+	(<<crypto_scalar_es_security_controls>>),
+	a conditioner (<<crypto_scalar_appx_es_intro-cond>>), and a security
+	boundary with clearly defined interfaces. One may tabulate the SHALL
+	statements of SP 800-90B cite:[TuBaKe:18], FIPS 140-3 Implementation
+	Guidance cite:[NICC21], AIS-31 cite:[KiSc11] or other standards being
+	used. Official and non-official checklist tables are available:
+	https://github.com/usnistgov/90B-Shall-Statements
+*	*Experimental Tests.* The raw noise source is subjected to entropy
+	estimation as defined in NIST 800-90B, Section 3 cite:[TuBaKe:18].
+    The interface described in <<crypto_scalar_es_getnoise>> can used be to
+    record datasets for this purpose. One also needs to show experimentally
+    that the conditioner and health test components work appropriately to
+    meet the ES16 output entropy requirements of <<crypto_scalar_es_req>>.
+	For SP 800-90B, NIST has made a min-entropy estimation
+	package freely available:
+	https://github.com/usnistgov/SP800-90B_EntropyAssessment
+*	**Resilience.** Above physical engineering steps should consider the
+	operational environment of the device, which may be unexpected or
+	hostile (actively attempting to exploit vulnerabilities in the design).
+
+See <<crypto_scalar_appx_es_implementation>> for a discussion of various 
+implementation options.
+
+NOTE: It is one of the goals of the RISC-V Entropy Source specification
+that a standard 90B Entropy Source Module or AIS-31 RNG IP may be licensed
+from a third party and integrated with a RISC-V processor design. Compared
+to older (FIPS 140-2) RNG and DRBG modules, an entropy source module may
+have a relatively small area (just a few thousand NAND2 gate equivalent).
+CMVP is introducing an "Entropy Source Validation Scope" which potentially
+allows 90B validations to be re-used for different (FIPS 140-3) modules.
+
+==== Standards and Terminology
+
+As a fundamental security function, the generation of random numbers is
+governed by numerous standards and technical evaluation methods, the main
+ones being FIPS 140-3 cite:[NI19,NICC21] required for U.S. Federal use,
+and Common Criteria Methodology cite:[Cr17] used in high-security evaluations
+internationally.
+
+Note that FIPS 140-3 is a significantly updated standard compared
+to its predecessor FIPS 140-2 and is only coming into use in the 2020s.
+
+These standards set many of the technical requirements for the RISC-V
+entropy source design, and we use their terminology if possible.
+
+
+[[crypto_scalar_es_fig_rng,reftext="TRNG Components"]]
+====
+image::es_dataflow.svg[align="center",scaledwidth=50%]
+The `seed` CSR provides an Entropy Source (ES) interface, not a stateful
+random number generator. As a result, it can support arbitrary
+security levels. Cryptographic (AES, SHA-2/3) ISA Extensions
+can be used to construct high-speed DRBGs that are seeded from the
+entropy source.
+====
+
+[[crypto_scalar_appx_es_intro-es]]
+===== Entropy Source (ES)
+
+Entropy sources are built by sampling and processing data from a noise
+source (<<crypto_scalar_appx_es_noise_sources>>). 
+We will only consider physical sources of true randomness in this work.
+Since these are directly based on natural phenomena and are subject to
+environmental conditions (which may be adversarial), they require features 
+that monitor the "health" and quality of those sources. 
+
+The requirements for physical entropy sources are specified in
+NIST SP 800-90B cite:[TuBaKe:18] (<<crypto_scalar_es_req_90b>>)
+for U.S. Federal FIPS 140-3 cite:[NI19] evaluations and
+in BSI AIS-31 cite:[KiSc01,KiSc11] (<<crypto_scalar_es_req_ptg2>>)
+for high-security Common Criteria evaluations.
+There is some divergence in the types of health tests and entropy metrics 
+mandated in these standards, and RISC-V enables support for both alternatives.
+
+[[crypto_scalar_appx_es_intro-cond]]
+===== Conditioning: Cryptographic and Non-Cryptographic
+
+Raw physical randomness (noise) sources are rarely statistically
+perfect, and some generate very large amounts of bits, which need to be
+"debiased" and reduced to a smaller number of bits. This process is
+called conditioning. A secure hash function is an example of a
+cryptographic conditioner. It is important to note that even though
+hashing may make any data look random, it does not increase its
+entropy content.
+
+Non-cryptographic conditioners and extractors such as von Neumann's
+"debiased coin tossing" cite:[Ne51] are easier to implement
+efficiently but may reduce entropy content (in individual bits removed)
+more than cryptographic hashes, which mix the input entropy very
+efficiently. However, they do not require cryptanalytic or computational
+hardness assumptions and are therefore inherently more future-proof.
+See <<crypto_scalar_appx_es_noncrypto>> for a more detailed
+discussion.
+
+[[crypto_scalar_appx_es_intro-prng]]
+===== Pseudorandom Number Generator (PRNG)
+
+Pseudorandom Number Generators (PRNGs) use deterministic mathematical
+formulas to create abundant random numbers from a smaller amount of
+"seed" randomness. PRNGs are also divided into cryptographic and
+non-cryptographic ones.
+
+Non-cryptographic PRNGs, such as LFSRs and the linear-congruential
+generators found in many programming libraries, may generate statistically
+satisfactory random numbers but must never be used for cryptographic
+keying. This is because they are not designed to resist
+_cryptanalysis_; it is usually possible to take some output and
+mathematically derive the "seed" or the internal state of the PRNG
+from it. This is a security problem since knowledge of the state
+allows the attacker to compute future or past outputs.
+
+[[crypto_scalar_appx_es_intro-drbg]]
+===== Deterministic Random Bit Generator (DRBG)
+
+Cryptographic PRNGs are also known as Deterministic Random Bit
+Generators (DRBGs), a term used by SP 800-90A cite:[BaKe15]. A strong
+cryptographic algorithm such as AES cite:[nist:fips:197] or SHA-2/3
+cite:[nist:fips:202,nist:fips:180:4]
+is used to produce random bits from a seed. The secret
+seed material is like a cryptographic key; determining the seed
+from the DRBG output is as hard as breaking AES or a strong hash function.
+This also illustrates that the seed/key needs to be long enough and
+come from a trusted Entropy Source. The DRBG should still be frequently
+refreshed (reseeded) for forward and backward security.
+
+==== Specific Rationale and Considerations
+
+===== (<<crypto_scalar_seed_csr>>) The `seed` CSR 
+
+The interface was designed to be simple so that a vendor- and
+device-independent driver component (e.g., in Linux kernel,
+embedded firmware, or a cryptographic  library) may use `seed` to
+generate truly random bits.
+
+An entropy source does not require a high-bandwidth interface;
+a single DRBG source initialization only requires 512 bits
+(256 bits of entropy), and DRBG output can be shared by any number of
+callers. Once initiated, a DRBG requires new entropy only to mitigate
+the risk of state compromise.
+
+From a security perspective, it is essential that the side effect of
+flushing the secret entropy bits occurs upon reading. Hence we mandate
+a write operation on this particular CSR.
+
+A blocking instruction may have been easier to use, but most users should
+be querying a (D)RBG instead of an entropy source.
+Without a polling-style mechanism, the entropy source could hang for
+thousands of cycles under some circumstances. A `wfi` ot `pause`
+mechanism (at least potentially) allows energy-saving sleep on MCUs
+and context switching on higher-end CPUs.
+
+The reason for the particular `OPST = seed[31:0]` two-bit mechanism is to
+provide redundancy. The "fault" bit combinations `11` (`DEAD`) and `00` 
+(`BIST`) are more likely for electrical reasons if feature discovery fails
+and the entropy source is actually not available.
+
+The 16-bit bandwidth was a compromise motivated by the desire to
+provide redundancy in the return value, some protection against
+potential Power/EM leakage (further alleviated by the 2:1 cryptographic
+conditioning discussed in <<crypto_scalar_appx_es_crypto-cond>>),
+and the desire to have all of the bits "in the same place" on
+both RV32 and RV64 architectures for programming convenience.
+
+===== (<<crypto_scalar_es_req_90b>>) NIST SP 800-90B
+
+SP 800-90C cite:[BaKeRo:21] states that each conditioned block of n bits
+is required to have n+64 bits of input entropy to attain full entropy.
+Hence NIST SP 800-90B cite:[TuBaKe:18] min-entropy assessment must
+guarantee at least 128 + 64 = 192 bits input entropy per 256-bit block
+( cite:[BaKeRo:21], Sections 4.1. and 4.3.2 ).
+Only then a hashing of 16 * 16 = 256 bits from the entropy source
+will produce the desired 128 bits of full entropy. This follows from
+the specific requirements, threat model, and distinguishability proof
+contained in SP 800-90C  cite:[BaKeRo:21], Appendix A.
+The implied min-entropy rate is 192/256=12/16=0.75. The expected
+Shannon entropy is much larger.
+
+In FIPS 140-3 / SP 800-90 classification, an RBG2(P) construction is a
+cryptographically secure RBG with continuous access to a physical entropy
+source (`seed`) and output generated by a fully seeded, secure DRBG.
+The entropy source can also be used to build RBG3
+full entropy sources cite:[BaKeRo:21]. The concatenation of output words
+corresponds to the `Get_ES_Bitstring` function.
+
+The 128-bit output block size was selected because that is the output
+size of the CBC-MAC conditioner specified in Appendix F of cite:[TuBaKe:18]
+and also the smallest key size we expect to see in applications.
+
+If NIST SP 800-90B certification is chosen, the entropy source
+should implement at least the health tests defined in
+Section 4.4 of cite:[TuBaKe:18]: the repetition count test and adaptive
+proportion test, or show that the same flaws will be detected
+by vendor-defined tests.
+
+===== (<<crypto_scalar_es_req_ptg2>>) BSI AIS-31
+
+PTG.2 is one of the security and functionality classes defined in
+BSI AIS 20/31 cite:[KiSc11]. The PTG.2 source requirements work as a
+building block for other types of BSI generators (e.g., DRBGs, or
+PTG.3 TRNG with appropriate software post-processing).
+
+For validation purposes, the PTG.2 requirements may be mapped to
+security controls T1-3 (<<crypto_scalar_es_security_controls>>) and the
+interface as follows:
+
+* P1 *[PTG.2.1]* Start-up tests map to T1 and reset-triggered (on-demand)
+`BIST` tests.
+* P2 *[PTG.2.2]* Continuous testing total failure maps to T2 and the
+`DEAD` state.
+* P3 *[PTG.2.3]* Online tests are continuous tests of T2 – entropy output
+is prevented in the `BIST` state.
+* P4 *[PTG.2.4]* Is related to the design of effective entropy source
+health tests, which we encourage.
+* P5 *[PTG.2.5]* Raw random sequence may be checked via the GetNoise
+interface (<<crypto_scalar_es_getnoise>>).
+* P6 *[PTG.2.6]* Test Procedure A cite:[KiSc11] (Sect 2.4.4.1) is a
+part of the evaluation process, and we suggest self-evaluation using these
+tests even if AIS-31 certification is not sought.
+* P7 *[PTG.2.7]* Average Shannon entropy of "internal random bits"
+exceeds 0.997.
+
+Note how P7 concerns Shannon entropy, not min-entropy as with NIST
+sources. Hence the min-entropy requirement needs to be also stated.
+PTG.2 modules built and certified to the AIS-31 standard can also meet the
+"full entropy" condition after 2:1 cryptographic conditioning, but not
+necessarily so. The technical validation process is somewhat different.
+
+===== (<<crypto_scalar_es_req_virt>>) Virtual Sources
+
+All sources that are not direct physical sources (meeting the SP 800-90B
+or the AIS-31 PTG.2 requirements) need to meet the security requirements
+of virtual entropy sources. It is assumed that a virtual entropy source
+is not a limiting, shared bandwidth resource (but a software DRBG).
+
+DRBGs can be used to feed other (virtual) DRBGs, but that does not
+increase the absolute amount of entropy in the system.
+The entropy source must be able to support current and future security
+standards and applications. The 256-bit requirement maps to
+"Category 5" of NIST Post-Quantum Cryptography (4.A.5
+"Security Strength Categories" in cite:[NI16]) and TOP SECRET schemes
+in Suite B and the newer U.S. Government CNSA Suite cite:[NS15].
+
+[[crypto_scalar_appx_es_access]]
+===== (<<crypto_scalar_es_access>>) Security Considerations for Direct Hardware Access
+
+The ISA implementation and system design must try to ensure that the
+hardware-software interface minimizes avenues for adversarial
+information flow even if not explicitly forbidden in the specification.
+
+For security, virtualization requires both conditioning and DRBG processing
+of physical entropy output. It is recommended if a single physical entropy
+source is shared between multiple different virtual machnies or if the 
+guest OS is untrusted. A virtual entropy source is significantly more
+resistant to depletion attacks and also lessens the risk from covert channels.
+
+The direct `mseccfg.[s,u]seed` option allows one to draw a security boundary
+around a component in relation to Sensitive Security Parameter (SSP) flows,
+even if that component is not in M mode. This is
+helpful when implementing trusted enclaves. Such modules can enforce the
+entire key lifecycle from birth (in the entropy source) to death
+(zeroization) to occur without the key being passed across the boundary
+to external code.
+
+*Depletion.*
+Active polling may deny the entropy source to another simultaneously
+running consumer. This can (for example) delay the instantiation of that
+virtual machine if it requires entropy to initialize fully.
+
+*Covert Channels.*
+Direct access to a component such as the entropy source can be used to
+establish communication channels across security boundaries. Active
+polling from one consumer makes the resource unavailable WAIT instead of
+ES16 to another (which is polling infrequently). Such interactions can
+be used to establish low-bandwidth channels.
+
+*Hardware Fingerprinting.*
+An entropy source (and its noise source circuits) may have a uniquely
+identifiable hardware "signature." This can be harmless or even useful
+in some applications (as random sources may exhibit Physically Un-clonable
+Function (PUF) -like features)
+but highly undesirable in others (anonymized virtualized environments
+and enclaves). A DRBG masks such statistical features.
+
+*Side Channels.*
+Some of the most devastating practical attacks against real-life
+cryptosystems have used inconsequential-looking additional
+information, such as padding error messages cite:[BaFoKa:12]
+or timing information cite:[MoSuEi:20].
+
+We urge implementers against creating unnecessary information flows
+via status or custom bits or to allow any other mechanism to disable or
+affect the entropy source output. All information flows and interaction
+mechanisms must be considered from an adversarial viewpoint:
+the fewer the better.
+
+As an example of side-channel analysis, we note that the entropy
+polling interface is typically not "constant time." One needs to
+analyze what kind of information is revealed via the timing oracle;
+one way of doing it is to model `seed` as a rejection
+sampler. Such a timing oracle can reveal information about the noise
+source type and entropy source usage, but not about the random output
+`entropy` bits themselves. If it does, additional countermeasures are
+necessary.
+
+[[crypto_scalar_es_security_controls]]
+==== Security Controls and Health Tests
+
+The primary purpose of a cryptographic entropy source is to produce
+secret keying material. In almost all cases, a hardware entropy source
+must implement appropriate _security controls_ to guarantee
+unpredictability, prevent leakage, detect attacks, and deny adversarial
+control over the entropy output or ts generation mechanism. Explicit
+security controls are required for security testing and certification.
+
+Many of the security controls built into the device are called "health
+checks." Health checks can take the form of integrity checks, start-up
+tests, and on-demand tests. These tests can be implemented in hardware
+or firmware, typically both. Several are mandated by standards such as
+NIST SP 800-90B cite:[NI19].
+The choice of appropriate health tests depends on the
+certification target, system architecture, threat model, entropy
+source type, and other factors.
+
+Health checks are not intended for hardware diagnostics but for detecting
+security issues. Hence the default action in case of a failure should be
+aimed at damage control: Limiting further output and preventing weak
+crypto keys from being generated.
+
+We discuss three specific testing requirements T1-T3. The testing requirement
+follows from the definition of an Entropy Source; without it, the module is
+simply a noise source and can't be trusted to safely generate keying material.
+
+===== T1: On-demand testing
+
+A sequence of simple tests is invoked via resetting, rebooting, or
+powering up the hardware (not an ISA signal). The implementation will
+simply return `BIST` during the initial start-up self-test period;
+in any case, the driver must wait for them to finish before starting
+cryptographic operations. Upon failure, the entropy source will enter
+a no-output `DEAD` state.
+
+*Rationale.*
+Interaction with hardware self-test mechanisms
+from the software side should be minimal; the term "on-demand" does not
+mean that the end-user or application program should be able to invoke
+them in the field (the term is a throwback to an age of discrete,
+non-autonomous crypto devices with human operators).
+
+===== T2: Continuous checks
+
+If an error is detected in continuous tests or
+environmental sensors, the entropy source will enter a no-output state.
+We define that a non-critical alarm is signaled if the entropy source
+returns to `BIST` state from live (`WAIT` or `ES16`) states. Critical
+failures will result in `DEAD` state immediately. A hardware-based
+continuous testing mechanism must not make statistical information
+externally available, and it must be zeroized periodically or upon
+demand via reset, power-up, or similar signal.
+
+*Rationale.*
+Physical attacks can occur while the device is running. The design
+should avoid guiding such active attacks by revealing detailed
+status information. Upon detection of an attack, the default action
+should be aimed at damage control -- to prevent weak crypto keys from
+being generated.
+
+The statistical nature of some tests makes "type-1" false
+positives a possibility. There may also be requirements for signaling
+of non-fatal alarms; AIS 31 specifies "noise alarms" that can go off
+with non-negligible probability even if the device is functioning
+correctly; these can be signaled with `BIST`.
+There rarely is anything that can or should be done about a non-fatal
+alarm condition in an operator-free, autonomous system.
+
+The state of statistical runtime health checks (such as counters)
+is potentially correlated with some secret keying material, hence
+the zeroization requirement.
+
+===== T3: Fatal error states
+
+Since the security of most cryptographic operations depends on the
+entropy source, a system-wide "default deny" security policy approach
+is appropriate for most entropy source failures. A hardware test failure
+should at least result in the `DEAD` state and possibly reset/halt.
+It’s a show stopper: The entropy source (or its cryptographic client
+application) _must not_ be allowed to run if its secure operation
+can’t be guaranteed.
+
+*Rationale.*
+These tests can complement other integrity and tamper resistance
+mechanisms (See Chapter 18 of cite:[An20] for examples).
+
+Some hardware random generators are, by their physical construction,
+exposed to relatively non-adversarial environmental and manufacturing
+issues. However, even such  "innocent" failure modes may indicate
+a  _fault attack_ cite:[KaScVe13] and therefore should be addressed
+as a system integrity failure rather than as a diagnostic issue.
+
+Security architects will understand to use
+permanent or hard-to-recover "security-fuse" lockdowns only if the
+threshold of a test is such that the probability of false-positive is
+negligible over the entire device lifetime.
+
+===== Information Flows
+
+Some of the most devastating practical attacks
+against real-life cryptosystems have used inconsequential-looking
+additional information, such as padding error messages cite:[BaFoKa:12]
+or timing information cite:[MoSuEi:20]. In cryptography, such
+out-of-band information sources  are called "oracles."
+
+To guarantee that no sensitive data is read twice and that different
+callers don’t get correlated output, it is required that hardware
+implements _wipe-on-read_ on the randomness pathway during each read
+(successful poll). For the same reasons, only complete and fully
+processed random words shall be made available via `entropy` (ES16 status 
+of `seed`).
+
+This also applies to the raw noise source. The raw source interface has
+been delegated to an optional vendor-specific test interface.
+Importantly the test interface and the main interface should not be
+operational at the same time.
+
+[quote, NIST SP 800-90B, Noise Source Requirements]
+The noise source state shall be protected from adversarial
+knowledge or influence to the greatest extent possible. The methods
+used for this shall be documented, including a description of the
+(conceptual) security boundarys role in protecting the noise source
+from adversarial observation or influence.
+
+An entropy source is a singular resource, subject to depletion
+and also covert channels cite:[EvPo16]. Observation of the entropy
+can be the same as the observation of the noise source output, as
+cryptographic conditioning is mandatory only as a post-processing step.
+SP 800-90B and other security standards mandate protection of
+noise bits from observation and also influence.
+
+[[crypto_scalar_appx_es_implementation]]
+==== Implementation Strategies
+
+As a general rule, RISC-V specifies the ISA only. We provide some
+additional suggestions so that portable, vendor-independent middleware
+and kernel components can be created. The actual hardware implementation
+and certification are left to vendors and circuit designers;
+the discussion in this Section is purely informational.
+	
+When considering implementation options and trade-offs, one must look
+at the entire information flow.
+
+. *A Noise Source* generates private, unpredictable signals
+  from stable and well-understood physical random events.
+. *Sampling* digitizes the noise signal into a raw stream of
+  bits. This raw data also needs to be protected by the design.
+. *Continuous health tests* ensure that the noise source
+  and its environment meet their operational parameters.
+. *Non-cryptographic conditioners* remove much of the bias
+  and correlation in input noise.
+. *Cryptographic conditioners* produce full entropy
+  output, completely indistinguishable from ideal random.
+. *DRBG* takes in `>=256` bits of seed entropy as keying
+  material and uses a "one way" cryptographic process to rapidly
+  generate bits on demand (without revealing the seed/state).
+
+Steps 1-4 (possibly 5) are considered to be part of the Entropy
+Source (ES) and provided by the `seed` CSR.
+Adding the software-side cryptographic steps 5-6 and control logic
+complements it into a True Random Number Generator (TRNG).
+
+[[crypto_scalar_appx_es_noise_sources]]
+===== Ring Oscillators
+
+We will give some examples of common noise sources that can be
+implemented in the processor itself (using standard cells).
+
+The most common entropy source type in production use today is
+based on "free running" ring oscillators and their timing jitter.
+Here, an odd number of inverters is connected into a loop from which
+noise source bits are sampled in relation to a reference clock
+cite:[BaLuMi:11]. The sampled bit sequence may be expected to be
+relatively uncorrelated (close to IID) if the sample rate is suitably low
+cite:[KiSc11]. However, further processing is usually required.
+
+AMD cite:[AM17], ARM cite:[AR17], and IBM cite:[LiBaBo:13] are
+examples of ring oscillator TRNGs intended for high-security
+applications.
+
+There are related metastability-based generator designs such as
+Transition Effect Ring Oscillator (TERO) cite:[VaDr10].
+The differential/feedback Intel construction cite:[HaKoMa12] is slightly
+different but also falls into the same general metastable
+oscillator-based category.
+
+The main benefits of ring oscillators are: (1) They can be implemented
+with standard cell libraries without external components --
+and even on FPGAs cite:[VaFiAu:10], (2) there is an established theory
+for their behavior cite:[HaLe98,HaLiLe99,BaLuMi:11], and (3) ample
+precedent exists for testing and certifying them at the highest security
+levels.
+
+Ring oscillators also have well-known implementation pitfalls.
+Their output is sometimes highly dependent on temperature,
+which must be taken into account in testing and modeling.
+If the ring oscillator construction is parallelized, it is important
+that the number of stages and/or inverters in each chain is suitable to
+avoid entropy reduction due to harmonic "Huyghens synchronization"
+cite:[Ba86].
+Such harmonics can also be inserted maliciously in a frequency
+injection attack, which can have devastating results cite:[MaMo09].
+Countermeasures are related to circuit design; environmental sensors,
+electrical filters, and usage of a differential oscillator may help.
+
+===== Shot Noise
+
+A category of random sources consisting of discrete events
+and modeled as a Poisson process is called "shot noise."
+There's a long-established precedent of certifying them; the
+AIS 31 document cite:[KiSc11] itself offers reference designs based on
+noisy diodes. Shot noise sources are often more resistant to
+temperature changes than ring oscillators.
+Some of these generators can also be fully implemented with standard
+cells (The Rambus / Inside Secure generic TRNG IP cite:[Ra20] is
+described as a Shot Noise generator).
+
+===== Other types of noise
+
+It may be possible to certify more exotic noise sources and designs,
+although their stochastic model needs to be equally well understood,
+and their CPU interfaces must be secure.
+See <<crypto_scalar_appx_es_quantum>> for a discussion of Quantum
+entropy sources.
+
+[[crypto_scalar_appx_es_cont-tests]]
+===== Continuous Health Tests
+
+Health monitoring requires some state information related
+to the noise source to be maintained. The tests should be designed
+in a way that a specific number of samples guarantees a state
+flush (no hung states). We suggest flush size `W =< 1024` to
+match with the NIST SP 800-90B required tests (See Section 4.4 in
+cite:[TuBaKe:18]). The state is also fully zeroized in a system reset.
+
+The two mandatory tests can be built with minimal circuitry.
+Full histograms are not required, only simple counter registers:
+repetition count, window count, and sample count.
+Repetition count is reset every time the output sample value
+changes; if the count reaches a certain cutoff limit, a noise alarm
+(`BIST`) or failure (`DEAD`) is signaled. The window counter is
+used to save every W'th output (typically `W` in { 512, 1024 }).
+The frequency of this reference sample in the following window is
+counted; cutoff values are defined in the standard. We see that the
+structure of the mandatory tests is such that, if well implemented,
+no information is carried beyond a limit of `W` samples.
+
+Section 4.5 of cite:[TuBaKe:18] explicitly permits additional
+developer-defined tests, and several more were defined in early
+versions of FIPS 140-1 before being "crossed out." The choice
+of additional tests depends on the nature and implementation of the
+physical source.
+
+Especially if a non-cryptographic conditioner is used in hardware,
+it is possible that the AIS 31 cite:[KiSc11] online tests are
+implemented by driver software. They can also be implemented in hardware.
+For some security profiles, AIS 31 mandates that their tolerances are
+set in a way that the probability of an alarm is at least 10^-6^
+yearly under "normal usage." Such requirements are problematic
+in modern applications since their probability is too high for
+critical systems.
+
+There rarely is anything that can or should be done about a non-fatal
+alarm condition in an operator-free, autonomous system. However,
+AIS 31 allows the DRBG component to keep running despite a failure in
+its Entropy Source, so we suggest re-entering a temporary `BIST`
+state (<<crypto_scalar_es_security_controls>>) to signal a non-fatal
+statistical error if such (non-actionable) signaling is necessary.
+Drivers and applications can react to this appropriately (or simply
+log it), but it will not directly affect the availability of the TRNG.
+A permanent error condition should result in `DEAD` state.
+
+[[crypto_scalar_appx_es_noncrypto]]
+===== Non-cryptographic Conditioners
+
+As noted in <<crypto_scalar_appx_es_intro-cond>>, physical randomness
+sources generally require a post-processing step called _conditioning_ to
+meet the desired quality requirements, which  are outlined in
+<<crypto_scalar_es_req>>.
+
+The approach taken in this interface is to allow a combination of
+non-cryptographic and cryptographic filtering to take place. The
+first stage (hardware) merely needs to be able to distill the entropy
+comfortably above the necessary level.
+
+* One may take a set of bits from a noise source and XOR them
+  together to produce a less biased (and more independent) bit.
+  However, such an XOR may introduce "pseudorandomness" and
+  make the output difficult to analyze.
+* The von Neumann extractor cite:[Ne51] looks at consecutive
+  pairs of bits, rejects 00 and 11, and outputs 0 or 1 for
+  01 and 10, respectively. It will reduce the number of bits to
+  less than 25% of the original, but the output is provably unbiased
+  (assuming independence).
+* Blum's extractor cite:[Bl86] can be used on sources
+  whose behavior resembles N-state Markov chains. If its
+  assumptions hold, it also removes dependencies, creating an
+  independent and identically distributed (IID) source.
+* Other linear and non-linear correctors such as those
+  discussed by Dichtl and Lacharme cite:[La08].
+
+Note that the hardware may also implement a full cryptographic conditioner
+in the entropy source, even though the software driver still needs
+a cryptographic conditioner, too (<<crypto_scalar_es_req>>).
+
+*Rationale:*
+The main advantage of non-cryptographic extractors is in their
+energy efficiency, relative simplicity, and amenability to mathematical
+analysis. If well designed, they can be evaluated in
+conjunction with a stochastic model of the noise source itself.
+They do not require computational hardness assumptions.
+
+[[crypto_scalar_appx_es_crypto-cond]]
+===== Cryptographic Conditioners
+
+For secure use, cryptographic conditioners are always required on the
+software side of the ISA boundary. They may also be implemented on the
+hardware side if necessary. In any case, the `entropy` ES16 output must
+always be compressed 2:1 (or more) before being used as keying material
+or considered "full entropy."
+
+Examples of cryptographic conditioners include the random pool of the
+Linux operating system, secure hash functions (SHA-2/3, SHAKE
+cite:[nist:fips:202,nist:fips:180:4]), and the AES / CBC-MAC
+construction in Appendix F, SP 800-90B cite:[TuBaKe:18].
+
+In some constructions, such as the Linux RNG and SHA-3/SHAKE
+cite:[nist:fips:202] based generators, the cryptographic conditioning
+and output (DRBG) generation are provided by the same component.
+
+*Rationale:*
+For many low-power targets constructions the type of hardware AES CBC-MAC
+conditioner used by Intel cite:[Me18] and AMD cite:[AM17] would be too
+complex and energy-hungry to implement solely to serve the `seed` CSR.
+On the other hand, simpler non-cryptographic conditioners may be too
+wasteful on input entropy if high-quality random output is required --
+(ARM TrustZone TRBG cite:[AR17] outputs only 10Kbit/sec at 200 MHz.)
+Hence a resource-saving compromise is made between hardware and software
+generation.
+
+[[crypto_scalar_appx_es_drbgs]]
+===== The Final Random: DRBGs
+
+All random bits reaching end users and applications must come from a
+cryptographic DRBG. These are generally implemented by the driver
+component in software. The RISC-V AES and SHA instruction set extensions
+should be used if available since they offer additional
+security features such as timing attack resistance.
+
+Currently recommended DRBGs are defined in NIST SP 800-90A (Rev 1)
+cite:[BaKe15]: `CTR_DRBG`, `Hash_DRBG`, and `HMAC_DRBG`.
+Certification often requires known answer tests (KATs) for the symmetric
+components and the DRBG as a whole. These are significantly easier to
+implement in software than in hardware. In addition to the directly
+certifiable SP 800-90A DRBGs, a Linux-style random pool construction
+based on ChaCha20 cite:[Mu20] can be used, or an appropriate construction
+based on SHAKE256 cite:[nist:fips:202].
+
+These are just recommendations; programmers can adjust the usage of the
+CPU Entropy Source to meet future requirements.
+
+[[crypto_scalar_appx_es_quantum]]
+===== Quantum vs. Classical Random
+
+[quote,U.K. NCSC QRNG Guidance, March 2020]
+The NCSC believes that classical RNGs will continue to
+meet our needs for government and military applications for the
+foreseeable future.
+
+A Quantum Random Number Generator (QRNG) is a TRNG whose source of
+randomness can be unambiguously identified to be a specific
+quantum phenomenon such as quantum state superposition, quantum state
+entanglement, Heisenberg uncertainty, quantum tunneling, spontaneous
+emission, or radioactive decay cite:[IT19].
+
+Direct quantum entropy is theoretically the best possible kind of
+entropy. A typical TRNG based on electronic noise is also largely
+based on quantum phenomena and is equally unpredictable - the difference
+is that the relative amount of quantum and classical physics involved is
+difficult to quantify for a classical TRNG.
+
+QRNGs are designed in a way that allows the amount of quantum-origin
+entropy to be modeled and estimated. This distinction is important in
+the security model used by QKD (Quantum Key Distribution) security
+mechanisms which can be used to protect the physical layer (such as
+fiber optic cables) against interception by using quantum mechanical
+effects directly.
+
+This security model means that many of the available QRNG devices do
+not use cryptographic conditioning and may fail cryptographic statistical
+requirements cite:[HuHe20]. Many implementers may consider them to be
+entropy sources instead.
+
+Relatively little research has gone into QRNG implementation security,
+but many QRNG designs are arguably more susceptible to leakage than
+classical generators (such as ring oscillators) as they tend to employ
+external components and mixed materials. As an example, amplification of
+a photon detector signal may be observable in power analysis,
+which classical noise-based sources are designed to resist.
+
+===== Post-Quantum Cryptography
+
+PQC public-key cryptography standards cite:[NI16] do not require
+quantum-origin randomness, just sufficiently secure keying material.
+Recall that cryptography aims to protect the confidentiality and
+integrity of data itself and does not place any requirements on
+the physical communication channel (like QKD).
+
+Classical good-quality TRNGs are perfectly suitable
+for generating the secret keys for PQC protocols that are hard for
+quantum computers to break but implementable on classical computers.
+What matters in cryptography is that the secret keys have enough true
+randomness (entropy) and that they are generated and stored securely.
+
+Of course, one must avoid DRBGs that are based on problems that are
+easily solvable with quantum computers, such as factoring cite:[Sh94]
+in the case of the Blum-Blum-Shub generator cite:[BlBlSh86].
+Most symmetric algorithms are not affected as the best quantum
+attacks are still exponential to key size cite:[Gr96].
+
+As an example, the original Intel RNG cite:[Me18], whose output generation
+is based on AES-128, can be attacked using Grover's algorithm
+with approximately square-root effort cite:[JaNaRo:20].
+While even "64-bit" quantum security is extremely difficult to
+break, many applications specify a higher security requirement.
+NIST cite:[NI16] defines AES-128 to be "Category 1" equivalent
+post-quantum security, while AES-256 is "Category 5" (highest).
+We avoid this possible future issue by exposing direct access
+to the entropy source which can derive its security from
+information-theoretic assumptions only.
+
+[[crypto_scalar_es_getnoise]]
+==== Suggested GetNoise Test Interface
+
+Compliance testing, characterization, and configuration of entropy sources
+require access to raw, unconditioned noise samples. This conceptual test
+interface is named GetNoise in Section 2.3.2 of NIST SP 800-90B 
+cite:[TuBaKe:18].
+
+Since this type of interface is both necessary for security testing 
+and also constitutes a potential backdoor to the cryptographic key generation
+process, we define a safety behavior that compliant implementations can
+have for temporarily disabling the entropy source `seed` CSR interface during
+test.
+
+In order for shared RISC-V self-certification scripts (and drivers) to
+accommodate the test interface in a secure fashion, we suggest that it is
+implemented as a custom, M-mode only CSR, denoted here as `mnoise`. 
+
+This non-normative interface is not intended to be used as a source of
+randomness or for other production use. 
+We define the semantics for single bit for this interface, `mnoise[31]`,
+which is named `NOISE_TEST`, which will affect the behavior of `seed`
+if implemented.
+
+When `NOISE_TEST = 1` in `mnoise`, the `seed` CSR must not return
+anything via `ES16`; it should be in `BIST` state unless the source
+is `DEAD`. When `NOISE_TEST` is again disabled, the entropy source
+shall return from `BIST` via an appropriate zeroization and self-test
+mechanism.
+
+The behavior of other input and output bits is largely left to the vendor
+(as they depend on the technical details of the physical entropy source),
+as is the address of the custom `mnoise` CSR. Other contents and behavior of the
+CSR only can be interpreted in the context of `mvendorid`, `marchid`, and
+`mimpid` CSR identifiers.
+
+When not implemented (e.g., in virtual machines), `mnoise` can permanently
+read zero (`0x00000000`) and ignore writes.
+When available, but `NOISE_TEST = 0`, `mnoise` can return a
+nonzero constant (e.g. `0x00000001`) but no noise samples.
+
+[[crypto_scalar_es_noistest,reftext="Custom Entropy Test Mode Diagram"]]
+====
+image::es_noisetest.svg[title="Entropy source can't be read in test mode.", align="center",scaledwidth=66%]
+In `NOISE_TEST` mode, the WAIT and ES16 states are unreachable,
+and no entropy is output. Implementation of test interfaces that directly
+affect ES16 entropy output from the `seed` CSR interface is discouraged.
+Such vendor test interfaces have been exploited in attacks. For example,
+an ECDSA cite:[nist:fips:186:4] signature process without sufficient
+entropy will not only create an insecure signature but can also reveal
+the secret signing key, that can be used for authentication forgeries by
+attackers. Hence even a temporary lapse in `entropy` security may have serious
+security implications.
+====
+
+[[crypto_scalar_appx_materials]]
+=== Supplementary Materials 
+
+While this document contains the specifications for the RISC-V cryptography
+extensions, numerous supplementary materials and example codes have
+also been developed.
+All of the materials related to the RISC-V Cryptography
+extension live in a Github Repository, located at
+https://github.com/riscv/riscv-crypto
+
+* `doc/`
+  Contains the source code for this document.
+
+* `doc/supp/`
+  Contains supplementary information and recommendations for implementers of
+  software and hardware.
+
+* `benchmarks/`
+  Example software implementations.
+
+* `rtl/`
+  Example Verilog implementations of each instruction.
+
+* `sail/`
+  Formal model implementations in Sail.
+
+[[crypto_scalar_appx_sail]]
+=== Supporting Sail Code
+
+This section contains the supporting Sail code referenced by the
+instruction descriptions throughout the specification.
+The
+link:https://github.com/rems-project/sail/blob/sail2/manual.pdf[Sail Manual]
+is recommended reading in order to best understand the supporting code.
+
+[source,sail]
+----
+/* Auxiliary function for performing GF multiplicaiton */
+val xt2 : bits(8) -> bits(8)
+function xt2(x) = {
+  (x << 1) ^ (if bit_to_bool(x[7]) then 0x1b else 0x00)
+}
+
+val xt3 : bits(8) -> bits(8)
+function xt3(x) = x ^ xt2(x)
+
+/* Multiply 8-bit field element by 4-bit value for AES MixCols step */
+val gfmul : (bits(8), bits(4)) -> bits(8)
+function gfmul( x, y) = {
+  (if bit_to_bool(y[0]) then             x    else 0x00) ^
+  (if bit_to_bool(y[1]) then xt2(        x)   else 0x00) ^
+  (if bit_to_bool(y[2]) then xt2(xt2(    x))  else 0x00) ^
+  (if bit_to_bool(y[3]) then xt2(xt2(xt2(x))) else 0x00)
+}
+
+/* 8-bit to 32-bit partial AES Mix Colum - forwards */
+val aes_mixcolumn_byte_fwd : bits(8) -> bits(32)
+function aes_mixcolumn_byte_fwd(so) = {
+  gfmul(so, 0x3) @ so @ so @ gfmul(so, 0x2)
+}
+
+/* 8-bit to 32-bit partial AES Mix Colum - inverse*/
+val aes_mixcolumn_byte_inv : bits(8) -> bits(32)
+function aes_mixcolumn_byte_inv(so) = {
+  gfmul(so, 0xb) @ gfmul(so, 0xd) @ gfmul(so, 0x9) @ gfmul(so, 0xe)
+}
+
+/* 32-bit to 32-bit AES forward MixColumn */
+val aes_mixcolumn_fwd : bits(32) -> bits(32)
+function aes_mixcolumn_fwd(x) = {
+  let s0 : bits (8) = x[ 7.. 0];
+  let s1 : bits (8) = x[15.. 8];
+  let s2 : bits (8) = x[23..16];
+  let s3 : bits (8) = x[31..24];
+  let b0 : bits (8) = xt2(s0) ^ xt3(s1) ^    (s2) ^    (s3);
+  let b1 : bits (8) =    (s0) ^ xt2(s1) ^ xt3(s2) ^    (s3);
+  let b2 : bits (8) =    (s0) ^    (s1) ^ xt2(s2) ^ xt3(s3);
+  let b3 : bits (8) = xt3(s0) ^    (s1) ^    (s2) ^ xt2(s3);
+  b3 @ b2 @ b1 @ b0 /* Return value */
+}
+
+/* 32-bit to 32-bit AES inverse MixColumn */
+val aes_mixcolumn_inv : bits(32) -> bits(32)
+function aes_mixcolumn_inv(x) = {
+  let s0 : bits (8) = x[ 7.. 0];
+  let s1 : bits (8) = x[15.. 8];
+  let s2 : bits (8) = x[23..16];
+  let s3 : bits (8) = x[31..24];
+  let b0 : bits (8) = gfmul(s0, 0xE) ^ gfmul(s1, 0xB) ^ gfmul(s2, 0xD) ^ gfmul(s3, 0x9);
+  let b1 : bits (8) = gfmul(s0, 0x9) ^ gfmul(s1, 0xE) ^ gfmul(s2, 0xB) ^ gfmul(s3, 0xD);
+  let b2 : bits (8) = gfmul(s0, 0xD) ^ gfmul(s1, 0x9) ^ gfmul(s2, 0xE) ^ gfmul(s3, 0xB);
+  let b3 : bits (8) = gfmul(s0, 0xB) ^ gfmul(s1, 0xD) ^ gfmul(s2, 0x9) ^ gfmul(s3, 0xE);
+  b3 @ b2 @ b1 @ b0 /* Return value */
+}
+
+/* Turn a round number into a round constant for AES. Note that the
+   AES64KS1I instruction is defined such that the r argument is always
+   in the range 0x0..0xA. Values of rnum outside the range 0x0..0xA
+   do not decode to the AES64KS1I instruction. The 0xA case is used
+   specifically for the AES-256 KeySchedule, and this function is never
+   called in that case. */
+val aes_decode_rcon : bits(4) -> bits(32)
+function aes_decode_rcon(r) = {
+  assert(r <_u 0xA);
+  match r {
+    0x0 => 0x00000001,
+    0x1 => 0x00000002,
+    0x2 => 0x00000004,
+    0x3 => 0x00000008,
+    0x4 => 0x00000010,
+    0x5 => 0x00000020,
+    0x6 => 0x00000040,
+    0x7 => 0x00000080,
+    0x8 => 0x0000001b,
+    0x9 => 0x00000036,
+    _   => internal_error(__FILE__, __LINE__, "Unexpected AES r") /* unreachable -- required to silence Sail warning */
+  }
+}
+
+/* SM4 SBox - only one sbox for forwards and inverse */
+let sm4_sbox_table : vector(256, bits(8)) = [
+0xD6, 0x90, 0xE9, 0xFE, 0xCC, 0xE1, 0x3D, 0xB7, 0x16, 0xB6, 0x14, 0xC2, 0x28,
+0xFB, 0x2C, 0x05, 0x2B, 0x67, 0x9A, 0x76, 0x2A, 0xBE, 0x04, 0xC3, 0xAA, 0x44,
+0x13, 0x26, 0x49, 0x86, 0x06, 0x99, 0x9C, 0x42, 0x50, 0xF4, 0x91, 0xEF, 0x98,
+0x7A, 0x33, 0x54, 0x0B, 0x43, 0xED, 0xCF, 0xAC, 0x62, 0xE4, 0xB3, 0x1C, 0xA9,
+0xC9, 0x08, 0xE8, 0x95, 0x80, 0xDF, 0x94, 0xFA, 0x75, 0x8F, 0x3F, 0xA6, 0x47,
+0x07, 0xA7, 0xFC, 0xF3, 0x73, 0x17, 0xBA, 0x83, 0x59, 0x3C, 0x19, 0xE6, 0x85,
+0x4F, 0xA8, 0x68, 0x6B, 0x81, 0xB2, 0x71, 0x64, 0xDA, 0x8B, 0xF8, 0xEB, 0x0F,
+0x4B, 0x70, 0x56, 0x9D, 0x35, 0x1E, 0x24, 0x0E, 0x5E, 0x63, 0x58, 0xD1, 0xA2,
+0x25, 0x22, 0x7C, 0x3B, 0x01, 0x21, 0x78, 0x87, 0xD4, 0x00, 0x46, 0x57, 0x9F,
+0xD3, 0x27, 0x52, 0x4C, 0x36, 0x02, 0xE7, 0xA0, 0xC4, 0xC8, 0x9E, 0xEA, 0xBF,
+0x8A, 0xD2, 0x40, 0xC7, 0x38, 0xB5, 0xA3, 0xF7, 0xF2, 0xCE, 0xF9, 0x61, 0x15,
+0xA1, 0xE0, 0xAE, 0x5D, 0xA4, 0x9B, 0x34, 0x1A, 0x55, 0xAD, 0x93, 0x32, 0x30,
+0xF5, 0x8C, 0xB1, 0xE3, 0x1D, 0xF6, 0xE2, 0x2E, 0x82, 0x66, 0xCA, 0x60, 0xC0,
+0x29, 0x23, 0xAB, 0x0D, 0x53, 0x4E, 0x6F, 0xD5, 0xDB, 0x37, 0x45, 0xDE, 0xFD,
+0x8E, 0x2F, 0x03, 0xFF, 0x6A, 0x72, 0x6D, 0x6C, 0x5B, 0x51, 0x8D, 0x1B, 0xAF,
+0x92, 0xBB, 0xDD, 0xBC, 0x7F, 0x11, 0xD9, 0x5C, 0x41, 0x1F, 0x10, 0x5A, 0xD8,
+0x0A, 0xC1, 0x31, 0x88, 0xA5, 0xCD, 0x7B, 0xBD, 0x2D, 0x74, 0xD0, 0x12, 0xB8,
+0xE5, 0xB4, 0xB0, 0x89, 0x69, 0x97, 0x4A, 0x0C, 0x96, 0x77, 0x7E, 0x65, 0xB9,
+0xF1, 0x09, 0xC5, 0x6E, 0xC6, 0x84, 0x18, 0xF0, 0x7D, 0xEC, 0x3A, 0xDC, 0x4D,
+0x20, 0x79, 0xEE, 0x5F, 0x3E, 0xD7, 0xCB, 0x39, 0x48
+]
+
+let aes_sbox_fwd_table : vector(256, bits(8)) = [
+0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe,
+0xd7, 0xab, 0x76, 0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4,
+0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0, 0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7,
+0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15, 0x04, 0xc7, 0x23, 0xc3,
+0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75, 0x09,
+0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3,
+0x2f, 0x84, 0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe,
+0x39, 0x4a, 0x4c, 0x58, 0xcf, 0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85,
+0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8, 0x51, 0xa3, 0x40, 0x8f, 0x92,
+0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2, 0xcd, 0x0c,
+0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19,
+0x73, 0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14,
+0xde, 0x5e, 0x0b, 0xdb, 0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2,
+0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79, 0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5,
+0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08, 0xba, 0x78, 0x25,
+0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86,
+0xc1, 0x1d, 0x9e, 0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e,
+0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf, 0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42,
+0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
+]
+
+let aes_sbox_inv_table : vector(256, bits(8)) = [
+0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81,
+0xf3, 0xd7, 0xfb, 0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e,
+0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb, 0x54, 0x7b, 0x94, 0x32, 0xa6, 0xc2, 0x23,
+0x3d, 0xee, 0x4c, 0x95, 0x0b, 0x42, 0xfa, 0xc3, 0x4e, 0x08, 0x2e, 0xa1, 0x66,
+0x28, 0xd9, 0x24, 0xb2, 0x76, 0x5b, 0xa2, 0x49, 0x6d, 0x8b, 0xd1, 0x25, 0x72,
+0xf8, 0xf6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xd4, 0xa4, 0x5c, 0xcc, 0x5d, 0x65,
+0xb6, 0x92, 0x6c, 0x70, 0x48, 0x50, 0xfd, 0xed, 0xb9, 0xda, 0x5e, 0x15, 0x46,
+0x57, 0xa7, 0x8d, 0x9d, 0x84, 0x90, 0xd8, 0xab, 0x00, 0x8c, 0xbc, 0xd3, 0x0a,
+0xf7, 0xe4, 0x58, 0x05, 0xb8, 0xb3, 0x45, 0x06, 0xd0, 0x2c, 0x1e, 0x8f, 0xca,
+0x3f, 0x0f, 0x02, 0xc1, 0xaf, 0xbd, 0x03, 0x01, 0x13, 0x8a, 0x6b, 0x3a, 0x91,
+0x11, 0x41, 0x4f, 0x67, 0xdc, 0xea, 0x97, 0xf2, 0xcf, 0xce, 0xf0, 0xb4, 0xe6,
+0x73, 0x96, 0xac, 0x74, 0x22, 0xe7, 0xad, 0x35, 0x85, 0xe2, 0xf9, 0x37, 0xe8,
+0x1c, 0x75, 0xdf, 0x6e, 0x47, 0xf1, 0x1a, 0x71, 0x1d, 0x29, 0xc5, 0x89, 0x6f,
+0xb7, 0x62, 0x0e, 0xaa, 0x18, 0xbe, 0x1b, 0xfc, 0x56, 0x3e, 0x4b, 0xc6, 0xd2,
+0x79, 0x20, 0x9a, 0xdb, 0xc0, 0xfe, 0x78, 0xcd, 0x5a, 0xf4, 0x1f, 0xdd, 0xa8,
+0x33, 0x88, 0x07, 0xc7, 0x31, 0xb1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xec, 0x5f,
+0x60, 0x51, 0x7f, 0xa9, 0x19, 0xb5, 0x4a, 0x0d, 0x2d, 0xe5, 0x7a, 0x9f, 0x93,
+0xc9, 0x9c, 0xef, 0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb,
+0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61, 0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6,
+0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
+]
+
+/* Lookup function - takes an index and a table, and retrieves the
+ * x'th element of that table. Note that the Sail vector literals
+ * start at index 255, and go down to 0.
+ */
+val sbox_lookup : (bits(8), vector(256, bits(8))) -> bits(8)
+function sbox_lookup(x, table) = {
+  table[255 - unsigned(x)]
+}
+
+/* Easy function to perform a forward AES SBox operation on 1 byte. */
+val aes_sbox_fwd : bits(8) -> bits(8)
+function aes_sbox_fwd(x) = sbox_lookup(x, aes_sbox_fwd_table)
+
+/* Easy function to perform an inverse AES SBox operation on 1 byte. */
+val aes_sbox_inv : bits(8) -> bits(8)
+function aes_sbox_inv(x) = sbox_lookup(x, aes_sbox_inv_table)
+
+/* AES SubWord function used in the key expansion
+ * - Applies the forward sbox to each byte in the input word.
+ */
+val aes_subword_fwd : bits(32) -> bits(32)
+function aes_subword_fwd(x) = {
+  aes_sbox_fwd(x[31..24]) @
+  aes_sbox_fwd(x[23..16]) @
+  aes_sbox_fwd(x[15.. 8]) @
+  aes_sbox_fwd(x[ 7.. 0])
+}
+
+/* AES Inverse SubWord function.
+ * - Applies the inverse sbox to each byte in the input word.
+ */
+val aes_subword_inv : bits(32) -> bits(32)
+function aes_subword_inv(x) = {
+  aes_sbox_inv(x[31..24]) @
+  aes_sbox_inv(x[23..16]) @
+  aes_sbox_inv(x[15.. 8]) @
+  aes_sbox_inv(x[ 7.. 0])
+}
+
+/* Easy function to perform an SM4 SBox operation on 1 byte. */
+val sm4_sbox : bits(8) -> bits(8)
+function sm4_sbox(x) = sbox_lookup(x, sm4_sbox_table)
+
+val aes_get_column : (bits(128), nat) -> bits(32)
+function aes_get_column(state,c) = (state >> (to_bits(7, 32 * c)))[31..0]
+
+/* 64-bit to 64-bit function which applies the AES forward sbox to each byte
+ * in a 64-bit word.
+ */
+val aes_apply_fwd_sbox_to_each_byte : bits(64) -> bits(64)
+function aes_apply_fwd_sbox_to_each_byte(x) = {
+  aes_sbox_fwd(x[63..56]) @
+  aes_sbox_fwd(x[55..48]) @
+  aes_sbox_fwd(x[47..40]) @
+  aes_sbox_fwd(x[39..32]) @
+  aes_sbox_fwd(x[31..24]) @
+  aes_sbox_fwd(x[23..16]) @
+  aes_sbox_fwd(x[15.. 8]) @
+  aes_sbox_fwd(x[ 7.. 0])
+}
+
+/* 64-bit to 64-bit function which applies the AES inverse sbox to each byte
+ * in a 64-bit word.
+ */
+val aes_apply_inv_sbox_to_each_byte : bits(64) -> bits(64)
+function aes_apply_inv_sbox_to_each_byte(x) = {
+  aes_sbox_inv(x[63..56]) @
+  aes_sbox_inv(x[55..48]) @
+  aes_sbox_inv(x[47..40]) @
+  aes_sbox_inv(x[39..32]) @
+  aes_sbox_inv(x[31..24]) @
+  aes_sbox_inv(x[23..16]) @
+  aes_sbox_inv(x[15.. 8]) @
+  aes_sbox_inv(x[ 7.. 0])
+}
+
+/*
+ * AES full-round transformation functions.
+ */
+
+val getbyte : (bits(64), int) -> bits(8)
+function getbyte(x, i) = (x >> to_bits(6, i * 8))[7..0]
+
+val aes_rv64_shiftrows_fwd : (bits(64), bits(64)) -> bits(64)
+function aes_rv64_shiftrows_fwd(rs2, rs1) = {
+  getbyte(rs1, 3) @
+  getbyte(rs2, 6) @
+  getbyte(rs2, 1) @
+  getbyte(rs1, 4) @
+  getbyte(rs2, 7) @
+  getbyte(rs2, 2) @
+  getbyte(rs1, 5) @
+  getbyte(rs1, 0)
+}
+
+val aes_rv64_shiftrows_inv : (bits(64), bits(64)) -> bits(64)
+function aes_rv64_shiftrows_inv(rs2, rs1) = {
+  getbyte(rs2, 3) @
+  getbyte(rs2, 6) @
+  getbyte(rs1, 1) @
+  getbyte(rs1, 4) @
+  getbyte(rs1, 7) @
+  getbyte(rs2, 2) @
+  getbyte(rs2, 5) @
+  getbyte(rs1, 0)
+}
+
+/* 128-bit to 128-bit implementation of the forward AES ShiftRows transform.
+ * Byte 0 of state is input column 0, bits  7..0.
+ * Byte 5 of state is input column 1, bits 15..8.
+ */
+val aes_shift_rows_fwd : bits(128) -> bits(128)
+function aes_shift_rows_fwd(x) = {
+  let ic3 : bits(32) = aes_get_column(x, 3);
+  let ic2 : bits(32) = aes_get_column(x, 2);
+  let ic1 : bits(32) = aes_get_column(x, 1);
+  let ic0 : bits(32) = aes_get_column(x, 0);
+  let oc0 : bits(32) = ic0[31..24] @ ic1[23..16] @ ic2[15.. 8] @ ic3[ 7.. 0];
+  let oc1 : bits(32) = ic1[31..24] @ ic2[23..16] @ ic3[15.. 8] @ ic0[ 7.. 0];
+  let oc2 : bits(32) = ic2[31..24] @ ic3[23..16] @ ic0[15.. 8] @ ic1[ 7.. 0];
+  let oc3 : bits(32) = ic3[31..24] @ ic0[23..16] @ ic1[15.. 8] @ ic2[ 7.. 0];
+  (oc3 @ oc2 @ oc1 @ oc0) /* Return value */
+}
+
+/* 128-bit to 128-bit implementation of the inverse AES ShiftRows transform.
+ * Byte 0 of state is input column 0, bits  7..0.
+ * Byte 5 of state is input column 1, bits 15..8.
+ */
+val aes_shift_rows_inv : bits(128) -> bits(128)
+function aes_shift_rows_inv(x) = {
+  let ic3 : bits(32) = aes_get_column(x, 3); /* In column 3 */
+  let ic2 : bits(32) = aes_get_column(x, 2);
+  let ic1 : bits(32) = aes_get_column(x, 1);
+  let ic0 : bits(32) = aes_get_column(x, 0);
+  let oc0 : bits(32) = ic0[31..24] @ ic3[23..16] @ ic2[15.. 8] @ ic1[ 7.. 0];
+  let oc1 : bits(32) = ic1[31..24] @ ic0[23..16] @ ic3[15.. 8] @ ic2[ 7.. 0];
+  let oc2 : bits(32) = ic2[31..24] @ ic1[23..16] @ ic0[15.. 8] @ ic3[ 7.. 0];
+  let oc3 : bits(32) = ic3[31..24] @ ic2[23..16] @ ic1[15.. 8] @ ic0[ 7.. 0];
+  (oc3 @ oc2 @ oc1 @ oc0) /* Return value */
+}
+
+/* Applies the forward sub-bytes step of AES to a 128-bit vector
+ * representation of its state.
+ */
+val aes_subbytes_fwd : bits(128) -> bits(128)
+function aes_subbytes_fwd(x) = {
+  let oc0 : bits(32) = aes_subword_fwd(aes_get_column(x, 0));
+  let oc1 : bits(32) = aes_subword_fwd(aes_get_column(x, 1));
+  let oc2 : bits(32) = aes_subword_fwd(aes_get_column(x, 2));
+  let oc3 : bits(32) = aes_subword_fwd(aes_get_column(x, 3));
+  (oc3 @ oc2 @ oc1 @ oc0) /* Return value */
+}
+
+/* Applies the inverse sub-bytes step of AES to a 128-bit vector
+ * representation of its state.
+ */
+val aes_subbytes_inv : bits(128) -> bits(128)
+function aes_subbytes_inv(x) = {
+  let oc0 : bits(32) = aes_subword_inv(aes_get_column(x, 0));
+  let oc1 : bits(32) = aes_subword_inv(aes_get_column(x, 1));
+  let oc2 : bits(32) = aes_subword_inv(aes_get_column(x, 2));
+  let oc3 : bits(32) = aes_subword_inv(aes_get_column(x, 3));
+  (oc3 @ oc2 @ oc1 @ oc0) /* Return value */
+}
+
+/* Applies the forward MixColumns step of AES to a 128-bit vector
+ * representation of its state.
+ */
+val aes_mixcolumns_fwd : bits(128) -> bits(128)
+function aes_mixcolumns_fwd(x) = {
+  let oc0 : bits(32) = aes_mixcolumn_fwd(aes_get_column(x, 0));
+  let oc1 : bits(32) = aes_mixcolumn_fwd(aes_get_column(x, 1));
+  let oc2 : bits(32) = aes_mixcolumn_fwd(aes_get_column(x, 2));
+  let oc3 : bits(32) = aes_mixcolumn_fwd(aes_get_column(x, 3));
+  (oc3 @ oc2 @ oc1 @ oc0) /* Return value */
+}
+
+/* Applies the inverse MixColumns step of AES to a 128-bit vector
+ * representation of its state.
+ */
+val aes_mixcolumns_inv : bits(128) -> bits(128)
+function aes_mixcolumns_inv(x) = {
+  let oc0 : bits(32) = aes_mixcolumn_inv(aes_get_column(x, 0));
+  let oc1 : bits(32) = aes_mixcolumn_inv(aes_get_column(x, 1));
+  let oc2 : bits(32) = aes_mixcolumn_inv(aes_get_column(x, 2));
+  let oc3 : bits(32) = aes_mixcolumn_inv(aes_get_column(x, 3));
+  (oc3 @ oc2 @ oc1 @ oc0) /* Return value */
+}
+----
