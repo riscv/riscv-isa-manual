@@ -977,6 +977,10 @@ exceptions in machines without register renaming.
 
 Any instruction encoding that violates the overlap constraints is reserved.
 
+When source and destination registers overlap and have different EEW, the
+instruction is mask- and tail-agnostic, regardless of the setting of the
+`vta` and `vma` bits in `vtype`.
+
 The largest vector register group used by an instruction can not be
 greater than 8 vector registers (i.e., EMUL{le}8), and if a vector
 instruction would require greater than 8 vector registers in a group,
@@ -1236,8 +1240,9 @@ vector length in `vl` is used as the AVL, and the resulting value is
 written to `vl`, but not to a destination register.  This form can
 only be used when VLMAX and hence `vl` is not actually changed by the
 new SEW/LMUL ratio.  Use of the instruction with a new SEW/LMUL ratio
-that would result in a change of VLMAX is reserved.  Implementations
-may set `vill` in this case.
+that would result in a change of VLMAX is reserved.
+Use of the instruction is also reserved if `vill` was 1 beforehand.
+Implementations may set `vill` in either case.
 
 NOTE: This last form of the instructions allows the `vtype` register to
 be changed while maintaining the current `vl`, provided VLMAX is not
@@ -4529,13 +4534,13 @@ Destination elements _OFFSET_ through `vl`-1 are written if unmasked and
 if _OFFSET_ < `vl`.
 
 ----
-   vslideup behavior for destination elements
+   vslideup behavior for destination elements (`vstart` < `vl`)
 
    OFFSET is amount to slideup, either from x register or a 5-bit immediate
 
-                    0 <=  i < max(vstart, OFFSET)  Unchanged
-  max(vstart, OFFSET) <= i < vl                   vd[i] = vs2[i-OFFSET] if v0.mask[i] enabled
-                   vl <= i < VLMAX                Follow tail policy
+                    0 <= i < min(vl, max(vstart, OFFSET))  Unchanged
+  max(vstart, OFFSET) <= i < vl                            vd[i] = vs2[i-OFFSET] if v0.mask[i] enabled
+                   vl <= i < VLMAX                         Follow tail policy
 ----
 
 The destination vector register group for `vslideup` cannot overlap
@@ -4564,12 +4569,12 @@ using an unsigned integer in the `x` register specified by `rs1`, or a
 If XLEN > SEW, _OFFSET_ is _not_ truncated to SEW bits.
 
 ----
-  vslidedown behavior for source elements for element i in slide
+  vslidedown behavior for source elements for element i in slide (`vstart` < `vl`)
                    0 <= i+OFFSET < VLMAX   src[i] = vs2[i+OFFSET]
                VLMAX <= i+OFFSET           src[i] = 0
 
-  vslidedown behavior for destination element i in slide
-                   0 <=  i < vstart         Unchanged
+  vslidedown behavior for destination element i in slide (`vstart` < `vl`)
+                   0 <= i < vstart         Unchanged
               vstart <= i < vl             vd[i] = src[i] if v0.mask[i] enabled
                   vl <= i < VLMAX          Follow tail policy
 
