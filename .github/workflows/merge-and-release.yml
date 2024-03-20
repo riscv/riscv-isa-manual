@@ -1,58 +1,39 @@
-name: RISC-V ISA Build
+name: Release New ISA When Merging a PR
 
 on:
-  workflow_dispatch:
-    inputs:
-      create_release:
-        description: 'Create a new RISC-V ISA release if set to true'
-        required: false
-        default: 'false'
-      target_branch:
-        description: 'Target Branch'
-        required: true
-        default: 'main'
-      release_notes:
-        description: 'Release Notes'
-        required: false
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
+    types:
+      - closed
 
 jobs:
-  build:
+  if_merged:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-
     steps:
-    # Checkout the repository
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    # Set the short SHA for use in artifact names
+    - uses: actions/checkout@v4
+
+    - run: |
+        echo The PR was successfully merged.
+
     - name: Set short SHA
       run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
-      
-    # Get the current date
+
     - name: Get current date
       run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
-    # Pull the latest RISC-V Docs container image
-    # https://github.com/riscv/riscv-docs-base-container-image
-    # https://hub.docker.com/r/riscvintl/riscv-docs-base-container-image
     - name: Pull Container
       id: pull_container_image
       run: |
-        docker pull riscvintl/riscv-docs-base-container-image:latest
+          docker pull riscvintl/riscv-docs-base-container-image:latest
 
-    # Build PDF and HTML files using the container
     - name: Build Files
       id: build_files
       if: steps.pull_container_image.outcome == 'success'
       run: |
-        docker run --rm -v ${{ github.workspace }}:/build riscvintl/riscv-docs-base-container-image:latest \
-        /bin/sh -c 'cd ./build && make'
+          docker run --rm -v ${{ github.workspace }}:/build riscvintl/riscv-docs-base-container-image:latest \
+          /bin/sh -c 'cd ./build && make'
 
     # Upload the priv-isa-asciidoc PDF file
     - name: Upload priv-isa-asciidoc.pdf
@@ -61,7 +42,6 @@ jobs:
       with:
         name: priv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
         path: ${{ github.workspace }}/build/priv-isa-asciidoc.pdf
-        retention-days: 7
 
     # Upload the priv-isa-asciidoc HTML file
     - name: Upload priv-isa-asciidoc.html
@@ -70,7 +50,6 @@ jobs:
       with:
         name: priv-isa-asciidoc-${{ env.SHORT_SHA }}.html
         path: ${{ github.workspace }}/build/priv-isa-asciidoc.html
-        retention-days: 7
 
     # Upload the unpriv-isa-asciidoc PDF file
     - name: Upload unpriv-isa-asciidoc.pdf
@@ -79,7 +58,6 @@ jobs:
       with:
         name: unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.pdf
         path: ${{ github.workspace }}/build/unpriv-isa-asciidoc.pdf
-        retention-days: 7
 
     # Upload the unpriv-isa-asciidoc HTML file
     - name: Upload unpriv-isa-asciidoc.html
@@ -88,23 +66,23 @@ jobs:
       with:
         name: unpriv-isa-asciidoc-${{ env.SHORT_SHA }}.html
         path: ${{ github.workspace }}/build/unpriv-isa-asciidoc.html
-        retention-days: 7
 
     - name: Create Release
-      if: steps.build_files.outcome == 'success' && github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
       uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GHTOKEN }}
       with:
-        draft: false
         tag_name: riscv-isa-release-${{ env.SHORT_SHA }}-${{ env.CURRENT_DATE }}
-        name: ${{ env.CURRENT_DATE }}
+        name: Release riscv-isa-release-${{ env.SHORT_SHA }}-${{ env.CURRENT_DATE }}
+        draft: false
+        prerelease: false
+        make_latest: true
+        generate_release_notes: true
         body: |
-          This release was created by: ${{ github.event.sender.login }}
-          Release Notes: ${{ github.event.inputs.release_notes }}
+              This release was created by: ${{ github.event.sender.login }}
+              Release of RISC-V ISA, built from commit ${{ env.SHORT_SHA }}, is now available.
         files: |
           ${{ github.workspace }}/build/priv-isa-asciidoc.pdf
           ${{ github.workspace }}/build/priv-isa-asciidoc.html
           ${{ github.workspace }}/build/unpriv-isa-asciidoc.pdf
           ${{ github.workspace }}/build/unpriv-isa-asciidoc.html
-      env:
-        GITHUB_TOKEN: ${{ secrets.GHTOKEN }}
-  
