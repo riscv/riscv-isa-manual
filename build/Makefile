@@ -91,3 +91,4 @@ clean:
 		echo "Removing unpriv-isa-asciidoc.html"; \
 		rm -f unpriv-isa-asciidoc.html; \
 	fi
+

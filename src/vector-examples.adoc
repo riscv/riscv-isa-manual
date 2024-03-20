@@ -1,0 +1,125 @@
+[appendix]
+== Vector Assembly Code Examples
+
+The following are provided as non-normative text to help explain the vector ISA.
+
+=== Vector-vector add example
+
+----
+include::example/vvaddint32.s[lines=4..-1]
+----
+
+=== Example with mixed-width mask and compute.
+
+----
+# Code using one width for predicate and different width for masked
+# compute.
+#   int8_t a[]; int32_t b[], c[];
+#   for (i=0;  i<n; i++) { b[i] =  (a[i] < 5) ? c[i] : 1; }
+#
+# Mixed-width code that keeps SEW/LMUL=8
+  loop:
+    vsetvli a4, a0, e8, m1, ta, ma   # Byte vector for predicate calc
+    vle8.v v1, (a1)               # Load a[i]
+      add a1, a1, a4              # Bump pointer.
+    vmslt.vi v0, v1, 5            # a[i] < 5?
+
+    vsetvli x0, a0, e32, m4, ta, mu  # Vector of 32-bit values.
+      sub a0, a0, a4              # Decrement count
+    vmv.v.i v4, 1                 # Splat immediate to destination
+    vle32.v v4, (a3), v0.t        # Load requested elements of C, others undisturbed
+      sll t1, a4, 2
+      add a3, a3, t1              # Bump pointer.
+    vse32.v v4, (a2)              # Store b[i].
+      add a2, a2, t1              # Bump pointer.
+      bnez a0, loop               # Any more?
+----
+
+=== Memcpy example
+
+----
+include::example/memcpy.s[lines=4..-1]
+----
+
+=== Conditional example
+
+----
+# (int16) z[i] = ((int8) x[i] < 5) ? (int16) a[i] : (int16) b[i];
+#
+
+loop:
+    vsetvli t0, a0, e8, m1, ta, ma # Use 8b elements.
+    vle8.v v0, (a1)         # Get x[i]
+      sub a0, a0, t0        # Decrement element count
+      add a1, a1, t0        # x[i] Bump pointer
+    vmslt.vi v0, v0, 5      # Set mask in v0
+    vsetvli x0, x0, e16, m2, ta, mu  # Use 16b elements.
+      slli t0, t0, 1        # Multiply by 2 bytes
+    vle16.v v2, (a2), v0.t  # z[i] = a[i] case
+    vmnot.m v0, v0          # Invert v0
+      add a2, a2, t0        # a[i] bump pointer
+    vle16.v v2, (a3), v0.t  # z[i] = b[i] case
+      add a3, a3, t0        # b[i] bump pointer
+    vse16.v v2, (a4)        # Store z
+      add a4, a4, t0        # z[i] bump pointer
+      bnez a0, loop
+----
+=== SAXPY example
+
+----
+include::example/saxpy.s[lines=4..-1]
+----
+
+=== SGEMM example
+
+----
+include::example/sgemm.S[lines=4..-1]
+----
+
+=== Division approximation example
+
+----
+# v1 = v1 / v2 to almost 23 bits of precision.
+
+vfrec7.v v3, v2             # Estimate 1/v2
+  li t0, 0x40000000
+vmv.v.x v4, t0              # Splat 2.0
+vfnmsac.vv v4, v2, v3       # 2.0 - v2 * est(1/v2)
+vfmul.vv v3, v3, v4         # Better estimate of 1/v2
+vmv.v.x v4, t0              # Splat 2.0
+vfnmsac.vv v4, v2, v3       # 2.0 - v2 * est(1/v2)
+vfmul.vv v3, v3, v4         # Better estimate of 1/v2
+vfmul.vv v1, v1, v3         # Estimate of v1/v2
+----
+
+=== Square root approximation example
+
+----
+# v1 = sqrt(v1) to almost 23 bits of precision.
+
+  fmv.w.x ft0, x0           # Mask off zero inputs
+vmfne.vf v0, v1, ft0        #   to avoid div by zero
+vfrsqrt7.v v2, v1, v0.t     # Estimate 1/sqrt(x)
+vmfne.vf v0, v2, ft0, v0.t  # Additionally mask off +inf inputs
+  li t0, 0x40400000
+vmv.v.x v4, t0              # Splat 3.0
+vfmul.vv v3, v1, v2, v0.t   # x * est
+vfnmsub.vv v3, v2, v4, v0.t # - x * est * est + 3
+vfmul.vv v3, v3, v2, v0.t   # est * (-x * est * est + 3)
+  li t0, 0x3f000000
+  fmv.w.x ft0, t0           # 0.5
+vfmul.vf v2, v3, ft0, v0.t  # Estimate to 14 bits
+vfmul.vv v3, v1, v2, v0.t   # x * est
+vfnmsub.vv v3, v2, v4, v0.t # - x * est * est + 3
+vfmul.vv v3, v3, v2, v0.t   # est * (-x * est * est + 3)
+vfmul.vf v2, v3, ft0, v0.t  # Estimate to 23 bits
+vfmul.vv v1, v2, v1, v0.t   # x * 1/sqrt(x)
+----
+
+=== C standard library strcmp example
+
+----
+include::example/strcmp.s[lines=4..-1]
+----
+
+include::fraclmul.adoc[]
