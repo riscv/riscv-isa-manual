@@ -21,7 +21,7 @@ same SBI as an OS normally does from S-mode. An HS-mode hypervisor is
 expected to implement the SBI for its VS-mode guest.
 
 The hypervisor extension depends on an "I" base integer ISA with 32
-`x` registers (RV32I or RV64I), not RV32E, which has only 16 `x`
+`x` registers (RV32I or RV64I), not RV32E or RV64E, which have only 16 `x`
 registers. CSR `mtval` must not be read-only zero, and standard
 page-based address translation must be supported, either Sv32 for RV32,
 or a minimum of Sv39 for RV64.
@@ -62,14 +62,15 @@ possible privilege modes of a RISC-V hart with the hypervisor extension.
 
 [[HPrivModes]]
 .Privilege modes with the hypervisor extension.
-[float="center",align="center",cols="^,^,<,3,<"]
+[float="center",align="center",cols="~,~,~,~,~"]
 |===
-|Virtualization Mode (V) |Nominal Privilege |Abbreviation |Name |Two-Stage Translation
+^|Virtualization +
+Mode (V) ^|Nominal Privilege |Abbreviation |Name |Two-Stage Translation
 
-|0 +
+^|0 +
 0 +
 0
-| U +
+^| U +
 S +
 M
 |U-mode +
@@ -81,9 +82,9 @@ Machine mode
 |Off +
 Off +
 Off
-|1 +
+^|1 +
 1
-|U +
+^|U +
 S
 |VU-mode +
 VS-mode
@@ -126,8 +127,8 @@ taking over all functions of the usual supervisor CSRs except as
 specified otherwise. Instructions that normally read or modify a
 supervisor CSR shall instead access the corresponding VS CSR. When V=1,
 an attempt to read or write a VS CSR directly by its own separate CSR
-address causes a virtual instruction exception. (Attempts from U-mode
-cause an illegal instruction exception as usual.) The VS CSRs can be
+address causes a virtual-instruction exception. (Attempts from U-mode
+cause an illegal-instruction exception as usual.) The VS CSRs can be
 accessed as themselves only from M-mode or HS-mode.
 
 While V=1, the normal HS-level supervisor CSRs that are replaced by VS
@@ -188,17 +189,17 @@ widest supported width not wider than the new HSXLEN.
 
 The `hstatus` fields VTSR, VTW, and VTVM are defined analogously to the
 `mstatus` fields TSR, TW, and TVM, but affect execution only in VS-mode,
-and cause virtual instruction exceptions instead of illegal instruction
+and cause virtual-instruction exceptions instead of illegal-instruction
 exceptions. When VTSR=1, an attempt in VS-mode to execute SRET raises a
-virtual instruction exception. When VTW=1 (and assuming `mstatus`.TW=0),
-an attempt in VS-mode to execute WFI raises a virtual instruction
+virtual-instruction exception. When VTW=1 (and assuming `mstatus`.TW=0),
+an attempt in VS-mode to execute WFI raises a virtual-instruction
 exception if the WFI does not complete within an
 implementation-specific, bounded time limit. An implementation may have
-WFI always raise a virtual instruction exception in VS-mode when VTW=1
+WFI always raise a virtual-instruction exception in VS-mode when VTW=1
 (and `mstatus`.TW=0), even if there are pending globally-disabled
 interrupts when the instruction is executed. When VTVM=1, an attempt in
 VS-mode to execute SFENCE.VMA or SINVAL.VMA or to access CSR `satp`
-raises a virtual instruction exception.
+raises a virtual-instruction exception.
 
 The VGEIN (Virtual Guest External Interrupt Number) field selects a
 guest external interrupt source for VS-level external interrupts. VGEIN
@@ -213,8 +214,8 @@ further in <<hinterruptregs>>.
 Field HU (Hypervisor in U-mode) controls whether the virtual-machine
 load/store instructions, HLV, HLVX, and HSV, can be used also in U-mode.
 When HU=1, these instructions can be executed in U-mode the same as in
-HS-mode. When HU=0, all hypervisor instructions cause an illegal
-instruction trap in U-mode.
+HS-mode. When HU=0, all hypervisor instructions cause an
+illegal-instruction exception in U-mode.
 
 [NOTE]
 ====
@@ -271,9 +272,11 @@ same endianness as HS-mode.
 
 ==== Hypervisor Trap Delegation Registers (`hedeleg` and `hideleg`)
 
-Registers `hedeleg` and `hideleg` are HSXLEN-bit read/write registers,
-formatted as shown in <<hedelegreg>> and
-<<hidelegreg>> respectively. By default, all traps at
+Register `hedeleg` is a 64-bit read/write register, formatted as shown in
+<<hedelegreg>>.
+Register `hideleg` is an HSXLEN-bit read/write register, formatted as shown in
+<<hidelegreg>>.
+By default, all traps at
 any privilege level are handled in M-mode, though M-mode usually uses
 the `medeleg` and `mideleg` CSRs to delegate some traps to HS-mode. The
 `hedeleg` and `hideleg` CSRs allow these traps to be further delegated
@@ -302,6 +305,10 @@ Requiring that certain bits of `hedeleg` be writable reduces some of the
 burden on a hypervisor to handle variations of implementation.
 ====
 
+When XLEN=32, `hedelegh` is a 32-bit read/write register
+that aliases bits 63:32 of `hedeleg`.
+Register `hedelegh` does not exist when XLEN=64.
+
 An interrupt that has been delegated to HS-mode (using `mideleg`) is
 further delegated to VS-mode if the corresponding `hideleg` bit is set.
 Among bits 15:0 of `hideleg`, bits 10, 6, and 2 (corresponding to the
@@ -315,7 +322,7 @@ external interrupt (code 9) for VS-mode, including the value written to
 interrupt (6) is translated into a supervisor timer interrupt (5) for
 VS-mode, and a virtual supervisor software interrupt (2) is translated
 into a supervisor software interrupt (1) for VS-mode. Similar
-translations may or may not be done for platform or custom interrupt
+translations may or may not be done for platform interrupt
 causes (codes 16 and above).
 
 [[hedeleg-bits]]
@@ -338,6 +345,8 @@ causes (codes 16 and above).
 12 +
 13 +
 15 +
+18 +
+19 +
 20 +
 21 +
 22 +
@@ -354,6 +363,8 @@ Writable +
 Read-only 0 +
 Read-only 0 +
 Read-only 0 +
+Writable +
+Writable +
 Writable +
 Writable +
 Writable +
@@ -376,6 +387,8 @@ Environment call from M-mode +
 Instruction page fault +
 Load page fault +
 Store/AMO page fault +
+Software check +
+Hardware error +
 Instruction guest-page fault +
 Load guest-page fault +
 Virtual instruction +
@@ -557,6 +570,7 @@ cause a supervisor-level (HS-level) guest external interrupt. The enable
 bits in `hgeie` do not affect the VS-level external interrupt signal
 selected from `hgeip` by `hstatus`.VGEIN.
 
+[[sec:henvcfg]]
 ====  Hypervisor Environment Configuration Register (`henvcfg`)
 
 The `henvcfg` CSR is a 64-bit read/write register, formatted
@@ -600,6 +614,15 @@ VS-stage address translation. When PBMTE=0, the implementation behaves
 as though Svpbmt were not implemented for VS-stage address translation.
 If Svpbmt is not implemented, PBMTE is read-only zero.
 
+If the Svadu extension is implemented, the ADUE bit controls whether hardware
+updating of PTE A/D bits is enabled for VS-stage address translation.
+When ADUE=1, hardware updating of PTE A/D bits is enabled during VS-stage
+address translation, and the implementation behaves as though the Svade
+extension were not implemented for VS-mode address translation.
+When ADUE=0, the implementation behaves as though Svade were implemented for
+VS-stage address translation.
+If Svadu is not implemented, ADUE is read-only zero.
+
 The definition of the STCE field will be furnished by the forthcoming
 Sstc extension. Its allocation within `henvcfg` may change prior to the
 
@@ -610,6 +633,10 @@ the ratification of that extension.
 The definitions of the CBCFE and CBIE fields will be furnished by the
 forthcoming Zicbom extension. Their allocations within `henvcfg` may
 change prior to the ratification of that extension.
+
+The definition of the PMM field will be furnished by the forthcoming
+Ssnpm extension. Its allocation within `henvcfg` may change prior to the
+ratification of that extension.
 
 When XLEN=32, `henvcfgh` is a
 32-bit read/write register that aliases bits 63:32
@@ -627,7 +654,7 @@ include::images/bytefield/hcounterenreg.edn[]
 
 When the CY, TM, IR, or HPM_n_ bit in the `hcounteren` register is
 clear, attempts to read the `cycle`, `time`, `instret`, or
-`hpmcounter` _n_ register while V=1 will cause a virtual instruction
+`hpmcounter` _n_ register while V=1 will cause a virtual-instruction
 exception if the same bit in `mcounteren` is 1. When one of these bits
 is set, access to the corresponding register is permitted when V=1,
 unless prevented for some other reason. In VU-mode, a counter is not
@@ -749,7 +776,7 @@ page table; a virtual machine identifier (VMID), which facilitates
 address-translation fences on a per-virtual-machine basis; and the MODE
 field, which selects the address-translation scheme for guest physical
 addresses. When `mstatus`.TVM=1, attempts to read or write `hgatp` while
-executing in HS-mode will raise an illegal instruction exception.
+executing in HS-mode will raise an illegal-instruction exception.
 
 [[rv32hgatp]]
 .Hypervisor guest address translation and protection register `hgatp` when HSXLEN=32.
@@ -819,7 +846,7 @@ Implementations are not required to support all defined MODE settings
 when HSXLEN=64.
 
 A write to `hgatp` with an unsupported MODE value is not ignored as it
-is for `satp`. Instead, the fields of `hgatp` are in the normal way,
+is for `satp`. Instead, the fields of `hgatp` are *WARL* in the normal way,
 when so indicated.
 
 As explained in <<guest-addr-translation>>, for the
@@ -1133,9 +1160,9 @@ RV32, HLVX.WU can be considered a variant of HLV.W, as sign extension is
 irrelevant for 32-bit values.)
 
 Attempts to execute a virtual-machine load/store instruction (HLV, HLVX,
-or HSV) when V=1 cause a virtual instruction trap. Attempts to execute
+or HSV) when V=1 cause a virtual-instruction exception. Attempts to execute
 one of these same instructions from U-mode when `hstatus`.HU=0 cause an
-illegal instruction trap.
+illegal-instruction exception.
 
 [[hfence.vma]]
 ==== Hypervisor Memory-Management Fence Instructions
@@ -1244,10 +1271,10 @@ _rs1_=`x0` (and _rs2_ set to either `x0` or the VMID) must be executed
 to order subsequent guest translations with the MODE change—even if the
 old MODE or new MODE is Bare.
 
-Attempts to execute HFENCE.VVMA or HFENCE.GVMA when V=1 cause a virtual
-instruction trap, while attempts to do the same in U-mode cause an
-illegal instruction trap. Attempting to execute HFENCE.GVMA in HS-mode
-when `mstatus`.TVM=1 also causes an illegal instruction trap.
+Attempts to execute HFENCE.VVMA or HFENCE.GVMA when V=1 cause a
+virtual-instruction exception, while attempts to do the same in U-mode cause an
+illegal-instruction exception. Attempting to execute HFENCE.GVMA in HS-mode
+when `mstatus`.TVM=1 also causes an illegal-instruction exception.
 
 === Machine-Level CSRs
 
@@ -1410,7 +1437,7 @@ include::images/bytefield/mtval2reg.edn[]
 When a guest-page-fault trap is taken into M-mode, `mtval2` is written
 with either zero or the guest physical address that faulted, shifted
 right by 2 bits. For other traps, `mtval2` is set to zero, but a future
-standard or extension may redefine `mtval2`'s setting for other traps.
+standard or extension may redefine `mtval2's` setting for other traps.
 
 If a guest-page fault is due to an implicit memory access during
 first-stage (VS-stage) address translation, a guest physical address
@@ -1585,10 +1612,11 @@ considered to be user-level accesses, as though executed in U-mode.
 Access type permissions—readable, writable, or executable—are checked
 during G-stage translation the same as for VS-stage translation. For a
 memory access made to support VS-stage address translation (such as to
-read/write a VS-level page table), permissions are checked as though for
-a load or store, not for the original access type. However, any
-exception is always reported for the original access type (instruction,
-load, or store/AMO).
+read/write a VS-level page table), permissions and the need to set A
+and/or D bits at the G-stage level are checked as though for an implicit
+load or store, not for the original access type. However, any exception
+is always reported for the original access type (instruction, load, or
+store/AMO).
 
 The G bit in all G-stage PTEs is reserved for future standard use. Until
 its use is defined by a standard extension, it should be cleared by
@@ -1628,6 +1656,7 @@ VS-stage address translation, a nonzero guest physical address written
 to `mtval2`/`htval` shall correspond to the exact virtual address
 written to `mtval`/`stval`.
 
+[[hyp-mm-fences]]
 ==== Memory-Management Fences
 
 The behavior of the SFENCE.VMA instruction is affected by the current
@@ -1665,21 +1694,38 @@ address-translation cache entries that have cached PMP settings
 corresponding to the final translated supervisor physical address. An
 HFENCE.VVMA instruction is not required.
 
+Similarly, if the setting of the PBMTE bit in `menvcfg` is changed, an
+HFENCE.GVMA instruction with _rs1_=`x0` and _rs2_=`x0` suffices to synchronize
+with respect to the altered interpretation of G-stage and VS-stage PTEs' PBMT
+fields.
+
+By contrast, if the PBMTE bit in `henvcfg` is changed, executing an
+HFENCE.VVMA with _rs1_=`x0` and _rs2_=`x0` suffices to synchronize with
+respect to the altered interpretation of VS-stage PTEs' PBMT fields for the
+currently active VMID.
+
+NOTE: No mechanism is provided to atomically change `vsatp` and `hgatp`
+together.  Hence, to prevent speculative execution causing one guest's
+VS-stage translations to be cached under another guest's VMID, world-switch
+code should zero `vsatp`, then swap `hgatp`, then finally write the new
+`vstap` value.  Similarly, if `henvcfg`.PBMTE need be world-switched, it
+should be switched after zeroing `vsatp` but before writing the new `vsatp`
+value, obviating the need to execute an HFENCE.VVMA instruction.
+
 === Traps
 
+[[sec:hcauses]]
 ==== Trap Cause Codes
 
 The hypervisor extension augments the trap cause encoding.
 <<hcauses>> lists the possible M-mode and HS-mode
 trap cause codes when the hypervisor extension is implemented. Codes are
 added for VS-level interrupts (interrupts 2, 6, 10), for
-supervisor-level guest external interrupts (interrupt 12), for virtual
-instruction exceptions (exception 22), and for guest-page faults
+supervisor-level guest external interrupts (interrupt 12), for
+virtual-instruction exceptions (exception 22), and for guest-page faults
 (exceptions 20, 21, 23). Furthermore, environment calls from VS-mode are
 assigned cause 10, whereas those from HS-mode or S-mode use cause 9 as
 usual.
-
-<<<
 
 [[hcauses]]
 .Machine and supervisor cause register (`mcause` and `scause`) values when the hypervisor extension is implemented.
@@ -1724,13 +1770,16 @@ Virtual supervisor external interrupt +
 Machine external interrupt 
 |1 +
 1 +
+1 +
 1
 |12 +
-13-15 +
+13 +
+14-15 +
 &#8805;16
 |Supervisor guest external interrupt +
+_Reserved for counter-overflow interrupt_ +
 _Reserved_ +
-_Designated for platform or custom use_ 
+_Designated for platform use_
 |0 +
 0 +
 0 +
@@ -1811,8 +1860,8 @@ _Reserved_
 HS-mode and VS-mode ECALLs use different cause values so they can be
 delegated separately.
 
-When V=1, a virtual instruction exception (code 22) is normally raised
-instead of an illegal instruction exception if the attempted instruction
+When V=1, a virtual-instruction exception (code 22) is normally raised
+instead of an illegal-instruction exception if the attempted instruction
 is _HS-qualified_ but is prevented from executing when V=1 either due to
 insufficient privilege or because the instruction is expressly disabled
 by a supervisor or hypervisor CSR such as `scounteren` or `hcounteren`.
@@ -1823,18 +1872,18 @@ assuming fields TSR and TVM of CSR `mstatus` are both zero.
 A special rule applies for CSR instructions that access 32-bit high-half
 CSRs such as `cycleh` and `htimedeltah`. When V=1 and
 XLEN=32, an invalid attempt to access a high-half CSR
-raises a virtual instruction
-exception instead of an illegal instruction exception if the same CSR
+raises a virtual-instruction
+exception instead of an illegal-instruction exception if the same CSR
 instruction for the corresponding _low-half_ CSR (e.g.`cycle` or
 `htimedelta`) is HS-qualified.
 
 [NOTE]
 ====
 When XLEN>32, an attempt to access a high-half CSR
-always raises an illegal instruction exception.
+always raises an illegal-instruction exception.
 ====
 
-Specifically, a virtual instruction exception is raised for the
+Specifically, a virtual-instruction exception is raised for the
 following cases:
 
 * in VS-mode, attempts to access a non-high-half counter CSR when the
@@ -1874,25 +1923,25 @@ implementation-specific, bounded time;
 instruction or to access `satp`, when `hstatus`.VTVM=1.
 
 Other extensions to the RISC-V Privileged Architecture may add to the
-set of circumstances that cause a virtual instruction exception when
+set of circumstances that cause a virtual-instruction exception when
 V=1.
 
-On a virtual instruction trap, `mtval` or `stval` is written the same as
-for an illegal instruction trap.
+On a virtual-instruction trap, `mtval` or `stval` is written the same as
+for an illegal-instruction trap.
 
 [NOTE]
 ====
 It is not unusual that hypervisors must emulate the instructions that
-raise virtual instruction exceptions, to support nested hypervisors or
+raise virtual-instruction exceptions, to support nested hypervisors or
 for other reasons. Machine level is expected ordinarily to delegate
-virtual instruction traps directly to HS-level, whereas illegal
-instruction traps are likely to be processed first in M-mode before
+virtual-instruction traps directly to HS-level, whereas
+illegal-instruction traps are likely to be processed first in M-mode before
 being conditionally delegated (by software) to HS-level. Consequently,
-virtual instruction traps are expected typically to be handled faster
-than illegal instruction traps.
+virtual-instruction traps are expected typically to be handled faster
+than illegal-instruction traps.
 
 When not emulating the trapping instruction, a hypervisor should convert
-a virtual instruction trap into an illegal instruction exception for the
+a virtual-instruction trap into an illegal-instruction exception for the
 guest virtual machine.
 
 ***
@@ -2285,7 +2334,7 @@ nonzero value (the faulting guest physical address) is written to
 <<pseudoinsts>>; zero is not allowed.
 
 [[pseudoinsts]]
-.Special pseudoinstruction values for guest-page faults.  The RV32 values are used when VSXLEN=32, and the TV64 values when VSXLEN=64.
+.Special pseudoinstruction values for guest-page faults.  The RV32 values are used when VSXLEN=32, and the RV64 values when VSXLEN=64.
 [%autowidth,float="center",align="center",cols="<,<",options="header"]
 |===
 |Value |Meaning
