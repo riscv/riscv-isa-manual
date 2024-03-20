@@ -1,0 +1,122 @@
+[[zimop]]
+== "Zimop" May-Be-Operations Extension, Version 0.1
+
+[WARNING]
+====
+*Warning! This stable specification may change before being accepted as
+a standard by RISC-V International.*
+====
+
+This chapter defines the "Zimop" extension, which introduces the concept of
+instructions that _may be operations_ (MOPs).  MOPs are initially defined to
+simply write zero to `x[rd]`, but are designed to be redefined by later
+extensions to perform some other action.
+The Zimop extension defines an encoding space for 40 MOPs.
+
+[NOTE]
+====
+It is sometimes desirable to define instruction-set extensions whose
+instructions, rather than raising illegal-instruction exceptions when the extension is
+not implemented, take no useful action (beyond writing `x[rd]`).
+For example, programs with control-flow integrity checks can
+execute correctly on implementations without the corresponding extension,
+provided the checks are simply ignored.  Implementing these checks as MOPs
+allows the same programs to run on implementations with or without the
+corresponding extension.
+
+Although similar in some respects to HINTs, MOPs cannot be encoded as HINTs,
+because unlike HINTs, MOPs are allowed to alter architectural state.
+
+Because MOPs may be redefined by later extensions, standard software should
+not execute a MOP unless it is deliberately targeting an extension that has
+redefined that MOP.
+====
+
+The Zimop extension defines 32 MOP instructions named MOP.R.__n__, where
+__n__ is an integer between 0 and 31, inclusive.
+Unless redefined by another extension, these instructions simply write 0 to
+`x[rd]`.  Their encoding allows future extensions to define them to read `x[rs1]`,
+as well as write `x[rd]`.
+
+include::images/wavedrom/mop-r.adoc[]
+[[mop-r]]
+
+The Zimop extension additionally defines 8 MOP instructions named
+MOP.RR.__n__, where __n__ is an integer between 0 and 7, inclusive.
+Unless redefined by another extension, these instructions simply
+write 0 to `x[rd]`.  Their encoding allows future extensions to define them to
+read `x[rs1]` and `x[rs2]`, as well as write `x[rd]`.
+
+include::images/wavedrom/mop-rr.adoc[]
+[[mop-rr]]
+
+NOTE: The recommended assembly syntax for MOP.R.__n__ is MOP.R.__n__ rd, rs1,
+with any `x`-register specifier being valid for either argument.  Similarly for
+MOP.RR.__n__, the recommended syntax is MOP.RR.__n__ rd, rs1, rs2.
+The extension that redefines a MOP may define an alternate assembly mnemonic.
+
+NOTE: These MOPs are encoded in the SYSTEM major opcode in part because it is
+expected their behavior will be modulated by privileged CSR state.
+
+NOTE: These MOPs are defined to write zero to `x[rd]`, rather than performing
+no operation, to simplify instruction decoding and to allow testing the
+presence of features by branching on the zeroness of the result.
+
+The MOPs defined in the Zimop extension do not carry a syntactic dependency
+from `x[rs1]` or `x[rs2]` to `x[rd]`, though an extension that redefines the
+MOP may impose such a requirement.
+
+NOTE: Not carrying a syntactic dependency relieves straightforward
+implementations of reading `x[rs1]` and `x[rs2]`.
+
+=== "Zcmop" Compressed May-Be-Operations Extension, Version 0.2
+
+[WARNING]
+====
+*Warning! This stable specification may change before being accepted as
+a standard by RISC-V International.*
+====
+
+This section defines the "Zcmop" extension, which defines eight 16-bit MOP
+instructions named C.MOP.__n__, where __n__ is an odd integer between 1 and
+15, inclusive.  C.MOP.__n__ is encoded in the reserved encoding space
+corresponding to C.LUI x__n__, 0, as shown in <<tab:c-mop>>.
+Unlike the MOPs defined in the Zimop extension, the C.MOP.__n__ instructions
+are defined to _not_ write any register.
+Their encoding allows future extensions to define them to read register
+`x[__n__]`.
+
+The Zcmop extension requires the Zca extension.
+
+include::images/wavedrom/c-mop.adoc[]
+[[c-mop]]
+
+NOTE: Very few suitable 16-bit encoding spaces exist.  This space was chosen
+because it already has unusual behavior with respect to the `rd`/`rs1`
+field--it encodes `c.addi16sp` when the field contains `x2`--and is
+therefore of lower value for most purposes.
+
+[[tab:c-mop]]
+.C.MOP.__n__ instruction encoding.
+
+|===
+|Mnemonic | Encoding           | Redefinable to read register
+
+|C.MOP.1  | `0110000010000001` | `x1`
+|C.MOP.3  | `0110000110000001` | `x3`
+|C.MOP.5  | `0110001010000001` | `x5`
+|C.MOP.7  | `0110001110000001` | `x7`
+|C.MOP.9  | `0110010010000001` | `x9`
+|C.MOP.11 | `0110010110000001` | `x11`
+|C.MOP.13 | `0110011010000001` | `x13`
+|C.MOP.15 | `0110011110000001` | `x15`
+|===
+
+NOTE: The recommended assembly syntax for C.MOP.__n__ is simply the nullary
+C.MOP.__n__.  The possibly accessed register is implicitly `x__n__`.
+
+NOTE: The expectation is that each Zcmop instruction is equivalent to some
+Zimop instruction, but the choice of expansion (if any) is left to the
+extension that redefines the MOP.
+Note, a Zcmop instruction that does not write a value can expand into a write
+to `x0`.
