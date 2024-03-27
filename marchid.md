@@ -62,3 +62,4 @@ MicroRV32      | AGRA, Group of Computer Architecture, University of Bremen | [R
 QEMU          | qemu.org                        | [QEMU Mailing List](mailto:qemu-riscv@nongnu.org)           | 42               | https://qemu.org
 KianV         | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 43               | https://github.com/splinedrive/kianRiscV
 Coreblocks    | Kuźnia Rdzeni, University of Wrocław | [Coreblocks Team](mailto:coreblocks@cs.uni.wroc.pl)    | 44               | https://github.com/kuznia-rdzeni/coreblocks
+rrv32         | Solra Bizna                     | [Solra Bizna](mailto:solra@bizna.name)                      | 45               | https://github.com/SolraBizna/rrv32
