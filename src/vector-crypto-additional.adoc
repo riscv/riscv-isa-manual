@@ -1,0 +1,658 @@
+
+== RISC-V Cryptography Extensions Volume III: Additional Vector Instructions
+
+This document describes additional Vector Cryptography extensions to the
+RISC-V Instruction Set Architecture.
+
+This document is _Discussion Document_.
+Assume everything can change.
+This document is not complete yet and was created only for the purpose of conversation outside of the document.
+For more information, see link:http://riscv.org/spec-state[here].
+
+
+[[additional_crypto_vector_extensions]]
+=== Extensions Overview
+
+The section introduces all of the extensions in the Additional Vector Cryptography 
+Instruction Set Extension Specification.
+
+
+All the Additional Vector Crypto Extensions can be built
+on _any_ embedded (Zve*) or application ("V") base Vector Extension.
+In particular `Zvbc32e` allows `Zve32*` implementations to support vector carry-less multiplication.
+
+
+As the instructions defined in this specification might be used to implement cryptographic primitives
+ they may be implemented with data-independent execution latencies as
+defined in the
+link:https://github.com/riscv/riscv-crypto/releases/tag/v1.0.1-scalar[RISC-V Scalar Cryptography Extensions specification]. 
+// FIX with proper link
+
+If `Zvkt` is implemented, all the instructions from `Zvbc32e` (`vclmul[h].[vv,vx]`) 
+shall be executed with data-independent execution latency.
+
+Whether `Zvkt` is implemented or not, all instructions from `Zvkgs` (`vgmul.vs`, `vghsh.vs`)
+shall be executed with data-independent execution latency.
+
+
+Detection of individual cryptography extensions uses the
+unified software-based RISC-V discovery method.
+
+[NOTE]
+====
+At the time of writing, these discovery mechanisms are still a work in
+progress.
+====
+
+[[zvbc32e,Zvbc32e]]
+==== `Zvbc32e` - Vector Carryless Multiplication
+
+General purpose carryless multiplication instructions which are commonly used in cryptography
+and hashing (e.g., Elliptic curve cryptography, GHASH, CRC).
+
+These instructions are only defined for `SEW`=32.
+Zvbc32e can be supported when `ELEN >=32`.
+
+
+Note:: The extension `Zvbc32e` is independent from `Zvbc` which defines the same instructions for `SEW=64`.
+       When `ELEN>=64` both extensions can be combined to have `vclmul.v[vx]` and `vclmulh.v[vx]` defined for both `SEW=32` and `SEW=64`.
+
+[%autowidth]
+[%header,cols="^2,4"]
+|===
+|Mnemonic
+|Instruction
+| `vclmul.[vv,vx]`     | <<insns-vclmul-32e>>
+| `vclmulh.[vv,vx]`    | <<insns-vclmulh-32e>>
+
+|===
+
+[[zvkgs,Zvkgs]]
+==== `Zvkgs` - Vector-Scalar GCM/GMAC
+
+Instructions to enable the efficient implementation of parallel versions of GHASH~H~ which is used in Galois/Counter Mode (GCM) and
+Galois Message Authentication Code (GMAC).
+
+`Zvkgs` depends on `Zvkg`. It extends the existing `vghsh.vv` and `vgmul.vv` instructions with new vector-scalar variants: `vghsh.vs` and `vgmul.vs`.
+
+The instructions inherit the constraints defined in `Zvkg`:
+
+- element group size (EGS) is 4
+- data independent execution timing
+- `vl`/`vstart` must be multiples of EGS=4
+
+All of these instructions work on 128-bit element groups comprised of four 32-bit elements, in element group parlance `EGS=4`, `EGW=128` and the instructions are only defined for `SEW=32`.
+
+To help avoid side-channel timing attacks, these instructions shall always be implemented with data-independent timing.
+
+The number of element groups to be processed is `vl`/`EGS`.
+`vl` must be set to the number of `SEW=32` elements to be processed and
+therefore must be a multiple of `EGS=4`. +
+Likewise, `vstart` must be a multiple of `EGS=4`.
+
+[%autowidth]
+[%header,cols="^2,4,4,4"]
+|===
+
+|SEW
+|EGW
+|Mnemonic
+|Instruction
+| 32 | 128 | `vghsh.vs` | <<insns-vghsh-vs>>
+| 32 | 128 | `vgmul.vs` | <<insns-vgmul-vs>>
+
+|===
+
+
+
+
+// ------------------------------------------------------------
+
+[[additional_crypto_vector_insns, reftext="Additional Vector Cryptography Instructions"]]
+=== Instructions
+
+
+[[insns-vclmul-32e, Vector Carry-less Multiply]]
+==== vclmul.[vv,vx]
+
+Synopsis::
+Vector Carry-less Multiply by vector or scalar - returning low half of product.
+
+Mnemonic::
+vclmul.vv vd, vs2, vs1, vm +
+vclmul.vx vd, vs2, rs1, vm
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001100'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001100'},
+]}
+....
+Reserved Encodings::
+* `SEW` is any value other than 32 (`Zvbc32e` only)
+* `SEW` is any value other than 64 (`Zvbc` only)
+* `SEW` is any value other than 32 or 64 (`Zvbc` and `Zvbc32e`)
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `vs1`/`rs1` | input  | multiplier
+| `vs2`       | input  | multiplicand
+| `vd`        | output | lower part of carry-less multiply 
+|===
+
+[NOTE]
+====
+`vclmul` instruction was initially defined in `Zvbc` with only `SEW=64-bit` support, this page describes how the specification is extended in `Zvbc32e` to support `SEW=32` bits.
+====
+
+Description::
+Produces the low half of `2*SEW`-bit carry-less product.
+
+Each SEW-bit element in the `vs2` vector register is carry-less multiplied by
+either each SEW-bit element in `vs1` (vector-vector), or the SEW-bit value
+from integer register `rs1` (vector-scalar). The result is the least
+significant SEW bits of the carry-less product.
+
+[NOTE]
+====
+The 32-bit carryless multiply instructions can be used for implementing GCM in the absence of the `zvkg` extension.
+In particular for implementation with `ELEN=32` where `Zvkg` cannot be implemented. 
+It can also be used to speed-up CRC evaluation.
+====
+
+Operation::
+[source,sail]
+--
+
+
+function clause execute (VCLMUL(vs2, vs1, vd, suffix)) = {
+
+  foreach (i from vstart to vl-1) {
+    let op1 : bits (SEW) = if suffix =="vv" then get_velem(vs1, i)
+                          else zext_or_truncate_to_sew(X(vs1));
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmul(op1, op2, SEW);
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+
+function clmul(x, y, width) = {
+  let result : bits(width) = zeros();
+  foreach (i from 0 to (width - 1)) {
+    if y[i] == 1 then result = result ^ (x << i);
+  }
+  result
+}
+--
+
+Included in::
+<<zvbc32e>>
+
+
+=== vclmulh.[vv,vx]
+
+Synopsis::
+Vector Carry-less Multiply by vector or scalar - returning high half of product.
+
+Mnemonic::
+vclmulh.vv vd, vs2, vs1, vm +
+vclmulh.vx vd, vs2, rs1, vm
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001101'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001101'},
+]}
+....
+Reserved Encodings::
+* `SEW` is any value other than 64 (`Zvbc` only)
+* `SEW` is any value other than 32 (`Zvbc32e` only)
+* `SEW` is any value other than 32 or 64 (`Zvbc32e` and `Zvbc`)
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `vs1`/`rs1` | input  | multiplier
+| `vs2`       | input  | multiplicand
+| `vd`        | output | upper part of carry-less multiply 
+|===
+
+[NOTE]
+====
+`vclmulh` instruction was initially defined in `Zvbc`, this page describes how the specification is extended in `Zvbc32e` to support `SEW=32` bits.
+====
+
+Description::
+Produces the high half of `2*SEW`-bit carry-less product.
+
+Each SEW-bit element in the `vs2` vector register is carry-less multiplied by
+either each SEW-bit element in `vs1` (vector-vector), or the SEW-bit value
+from integer register `rs1` (vector-scalar). The result is the most
+significant SEW bits of the carry-less product.
+
+// This instruction must always be implemented such that its execution latency does not depend
+// on the data being operated upon.
+
+Operation::
+[source,sail]
+--
+function clause execute (VCLMULH(vs2, vs1, vd, suffix)) = {
+
+  foreach (i from vstart to vl-1) {
+    let op1 : bits (SEW) = if suffix =="vv" then get_velem(vs1,i)
+                          else zext_or_truncate_to_sew(X(vs1));
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmulh(op1, op2, SEW);
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+
+function clmulh(x, y, width) = {
+  let result : bits(width) = 0;
+  foreach (i from 1 to (width - 1)) {
+    if y[i] == 1 then result = result ^ (x >> (width - i));
+  }
+  result
+}
+
+--
+
+Included in::
+<<zvbc32e>>, Zvbc
+
+
+[[insns-vghsh-vs, Vector-Scalar GHASH Add-Multiply]]
+=== vghsh.vs
+
+Synopsis::
+Vector-Scalar Add-Multiply over GHASH Galois-Field
+
+Mnemonic::
+vghsh.vs vd, vs2, vs1
+
+
+// This might be the first instruction with 3 operands and .vs
+// need to find an encoding
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-P'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: '1'},
+{bits: 6, name: '101100'},
+]}
+....
+
+Reserved Encodings::
+* `SEW` is any value other than 32
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2,2,2,2"]
+|===
+|Register
+|Direction
+|EGW
+|EGS
+|SEW
+|Definition
+
+| `vd`  | input  | 128  | 4 | 32 | Partial hash (Y~i~)
+| `vs1` | input  | 128  | 4 | 32 | Cipher text (X~i~)
+| `vs2` | input  | 128  | 4 | 32 | Hash Subkey (H)
+| `vd`  | output | 128  | 4 | 32 | Partial-hash (Y~i+1~)
+|===
+
+Description::
+A single "iteration" of the GHASH~H~ algorithm is performed.
+
+
+The previous partial hashes are read as 4-element groups from `vd`,
+the cipher texts are read as 4-element groups from `vs1`
+ and the hash subkeys are read from the scalar element group in `vs2`.
+The resulting partial hashes are writen as 4-element groups into `vd`.
+
+
+// The following is copied from vghsh.vv and could be omitted
+// (replaced with a link to the original specification)
+
+This instruction treats all of the input and output element groups as 128-bit polynomials and
+performs operations over GF[2].
+It produces the next partial hash (Y~i+1~) by adding the current partial
+hash (Y~i~) to the cipher text block (X~i~) and then multiplying (over GF(2^128^))
+this sum by the Hash Subkey (H).
+
+The multiplication over GF(2^128^) is a carryless multiply of two 128-bit polynomials
+modulo GHASH's irreducible polynomial (x^128^ + x^7^ + x^2^ + x + 1).
+
+The operation can be compactly defined as
+// Y~i+1~ = (Y~i~ &#183; H) ^ X~i~
+Y~i+1~ = ((Y~i~ ^ X~i~) &#183; H)
+
+The NIST specification (see <<zvkg>>) orders the coefficients from left to right x~0~x~1~x~2~...x~127~
+for a polynomial x~0~ + x~1~u +x~2~ u^2^ + ... + x~127~u^127^. This can be viewed as a collection of
+byte elements in memory with the byte containing the lowest coefficients (i.e., 0,1,2,3,4,5,6,7)
+residing at the lowest memory address. Since the bits in the bytes are reversed,
+This instruction internally performs bit swaps within bytes to put the bits in the standard ordering
+(e.g., 7,6,5,4,3,2,1,0).
+
+This instruction must always be implemented such that its execution latency does not depend
+on the data being operated upon.
+
+[NOTE]
+====
+We are bit-reversing the bytes of inputs and outputs so that the intermediate values are consistent
+with the NIST specification. These reversals are inexpensive to implement as they unconditionally
+swap bit positions and therefore do not require any logic.
+====
+
+
+Operation::
+[source,pseudocode]
+--
+function clause execute (VGHSHVS(vs2, vs1, vd)) = {
+  // operands are input with bits reversed in each byte
+  if(LMUL*VLEN < EGW)  then {
+    handle_illegal();  // illegal instruction exception
+    RETIRE_FAIL
+  } else {
+
+  eg_len = (vl/EGS)
+  eg_start = (vstart/EGS)
+
+  // H is common to all element groups
+  let helem = 0;
+  let H = brev8(get_velem(vs2, EGW=128, helem)); // Hash subkey
+
+  foreach (i from eg_start to eg_len-1) {
+    let Y = get_velem(vd,EGW=128,i);  // current partial-hash
+    let X = get_velem(vs1,EGW=128,i);  // block cipher output
+
+    let Z : bits(128) = 0;
+
+    let S = brev8(Y ^ X);
+
+    for (int bit = 0; bit < 128; bit++) {
+      if bit_to_bool(S[bit])
+        Z ^= H
+
+      bool reduce = bit_to_bool(H[127]);
+      H = H << 1; // left shift H by 1
+      if (reduce)
+        H ^= 0x87; // Reduce using x^7 + x^2 + x^1 + 1 polynomial
+    }
+
+    let result = brev8(Z); // bit reverse bytes to get back to GCM standard ordering
+    set_velem(vd, EGW=128, i, result);
+  }
+  RETIRE_SUCCESS
+ }
+}
+--
+
+Included in::
+<<zvkgs>>
+
+
+=== vgmul.vs
+
+Synopsis::
+Vector-Scalar Multiply over GHASH Galois-Field
+
+Mnemonic::
+vgmul.vs vd, vs2
+
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-P'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '10001'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: '1'},
+{bits: 6, name: '101001'},
+]}
+....
+
+Reserved Encodings::
+* `SEW` is any value other than 32
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2,2,2,2"]
+|===
+|Register
+|Direction
+|EGW
+|EGS
+|SEW
+|Definition
+
+| `vd`  | input  | 128  | 4 | 32 | Multiplier
+| `vs2` | input  | 128  | 4 | 32 | Multiplicand
+| `vd`  | output | 128  | 4 | 32 | Product
+|===
+
+Description::
+A GHASH~H~ multiply is performed.
+
+The multipliers are read as 4-element groups from `vd`,
+ the multiplicands subkeys are read from the scalar element group in `vs2`.
+The resulting products are written as 4-element groups into `vd`.
+
+This instruction treats all of the inputs and outputs as 128-bit polynomials and
+performs operations over GF[2].
+It produces the product over GF(2^128^) of the two 128-bit inputs.
+
+The multiplication over GF(2^128^) is a carryless multiply of two 128-bit polynomials
+modulo GHASH's irreducible polynomial (x^128^ + x^7^ + x^2^ + x + 1).
+
+The NIST specification (see <<zvkg>>) orders the coefficients from left to right x~0~x~1~x~2~...x~127~
+for a polynomial x~0~ + x~1~u +x~2~ u^2^ + ... + x~127~u^127^. This can be viewed as a collection of
+byte elements in memory with the byte containing the lowest coefficients (i.e., 0,1,2,3,4,5,6,7)
+residing at the lowest memory address. Since the bits in the bytes are reversed, 
+This instruction internally performs bit swaps within bytes to put the bits in the standard ordering
+(e.g., 7,6,5,4,3,2,1,0).
+
+This instruction must always be implemented such that its execution latency does not depend
+on the data being operated upon.
+
+[NOTE]
+====
+We are bit-reversing the bytes of inputs and outputs so that the intermediate values are consistent
+with the NIST specification. These reversals are inexpensive to implement as they unconditionally
+swap bit positions and therefore do not require any logic.
+====
+
+
+[NOTE]
+====
+Similarly to how the instruction `vgmul.vv` is identical to `vghsh.vv` with the value
+of vs1 register being 0, the instruction `vgmul.vs` is identical to `vghsh.vs` with the value of vs1 being 0.
+This instruction is often used in GHASH code. In some cases it is followed
+by an XOR to perform a multiply-add. Implementations may choose to fuse these
+two instructions to improve performance on GHASH code that
+doesn't use the add-multiply form of the `vghsh.vv` instruction.
+
+====
+
+
+Operation::
+[source,pseudocode]
+--
+function clause execute (VGMUL(vs2, vs1, vd, suffix)) = {
+  // operands are input with bits reversed in each byte
+  if(LMUL*VLEN < EGW)  then {
+    handle_illegal();  // illegal instruction exception
+    RETIRE_FAIL
+  } else {
+
+  eg_len = (vl/EGS)
+  eg_start = (vstart/EGS)
+  // H multiplicand is common for all loop iterations
+  let helem = 0;
+  let H = brev8(get_velem(vs2,EGW=128, helem)); // Multiplicand
+
+  foreach (i from eg_start to eg_len-1) {
+    let Y = brev8(get_velem(vd,EGW=128,i));  // Multiplier
+    let Z : bits(128) = 0;
+
+    for (int bit = 0; bit < 128; bit++) {
+      if bit_to_bool(Y[bit])
+        Z ^= H
+
+      bool reduce = bit_to_bool(H[127]);
+      H = H << 1; // left shift H by 1
+      if (reduce)
+        H ^= 0x87; // Reduce using x^7 + x^2 + x^1 + 1 polynomial
+    }
+
+
+    let result = brev8(Z);
+    set_velem(vd, EGW=128, i, result);
+  }
+  RETIRE_SUCCESS
+ }
+}
+--
+
+Included in::
+<<zvkgs>>
+
+
+[[bibliography]]
+== Bibliography
+
+bibliography::../riscv-crypto-spec.bib[ieee]
+
+[[Encodings]]
+=== Encodings
+[appendix]
+[[crypto_vector_instructions_Zvkgs]]
+==== Additional Vector Cryptographic Instructions
+
+OP-P (0x77)
+Vector Crypto instructions, including `Zvkgs`, except `Zvbb` and `Zvbc`.
+The new/modified encodings are in bold.
+
+[cols="4,1,1,1,1,4,1,1,1,4,1,1,1"]
+|===
+5+^|Integer 4+^|Integer 4+^| FP
+
+| funct3 | | | |            | funct3 | | |             | funct3 | | |
+| OPIVV  |V| | |            | OPMVV  |V| |             | OPFVV  |V| |
+| OPIVX  | |X| |            | OPMVX  | |X|             | OPFVF  | |F|
+| OPIVI  | | |I|            |        | | |             |        | | |
+|===
+
+// [cols="4,1,1,1,8,4,1,1,8,4,1,1,8"]
+[cols="6,1,1,1,1,6,1,1,6,6,1,1,1"]
+
+|===
+5+^| funct6                  4+^| funct6                 4+^| funct6
+
+|100000  | | | |            | 100000 |V| | vsm3me       | 100000 | | |
+| 100001 | | | |            | 100001 |V| | vsm4k.vi     | 100001 | | |
+| 100010 | | | |            | 100010 |V| | vaesfk1.vi   | 100010 | | |
+| 100011 | | | |            | 100011 |V| | __**vghsh.vs**__ | 100011 | | |
+| 100100 | | | |            | 100100 | | |              | 100100 | | |
+| 100101 | | | |            | 100101 | | |              | 100101 | | |
+| 100110 | | | |            | 100110 | | |              | 100110 | | |
+| 100111 | | | |            | 100111 | | |              | 100111 | | |
+|        | | | |            |        | | |              |        | | |
+| 101000 | | | |            | 101000 |V| | VAES.vv    | 101000 | | |
+| 101001 | | | |            | 101001 |V| | *VAES.vs*    | 101001 | | |
+| 101010 | | | |            | 101010 |V| | vaesfk2.vi   | 101010 | | |
+| 101011 | | | |            | 101011 |V| | vsm3c.vi     | 101011 | | |
+| 101100 | | | |            | 101100 |V| | vghsh        | 101100 | | |
+| 101101 | | | |            | 101101 |V| | vsha2ms      | 101101 | | |
+| 101110 | | | |            | 101110 |V| | vsha2ch      | 101110 | | |
+| 101111 | | | |            | 101111 |V| | vsha2cl      | 101111 | | |
+|===
+
+<<<
+
+.VAES.vv and VAES.vs encoding space
+[cols="2,14"]
+|===
+|vs1|
+
+| 00000 | vaesdm
+| 00001 | vaesdf
+| 00010 | vaesem
+| 00011 | vaesef
+| 00111 | vaesz
+| 10000 | vsm4r
+| 10001 | __**vgmul**__
+|===
+
+
+include::./riscv-crypto-vector-extra-inst-table.adoc[]
+
+
