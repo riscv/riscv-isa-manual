@@ -26,49 +26,29 @@ extensions, and 'cofpmf' for Count OverFlow and Privilege Mode Filtering).
 Note that the new count overflow interrupt will be treated as a standard local
 interrupt that is assigned to bit 13 in the mip/mie/sip/sie registers.
 
-=== Machine Level Additions
+=== Count Overflow Control
 
-==== Hardware Performance Monitor
+The following bits are added to `mhpmevent`:
 
-This extension expands the hardware performance monitor description and extends
-the mhpmevent registers to 64 bits (in RV32) as follows:
+[cols="^1,^1,^1,^1,^1,^1",stripes=even,options="header"]
+|====
+|63 |62 |61 |60 |59 |58
+|OF |MINH |SINH |UINH |VSINH |VUINH
+|====
 
-The hardware performance monitor includes 29 additional 64-bit event counters and 29 associated 64-bit event selector registers - the mhpmcounter3–mhpmcounter31 and mhpmevent3–mhpmevent31 CSRs.
+[cols="15%,85%",options="header"]
+|====
+| Field | Description
+| OF | Overflow status and interrupt disable bit that is set when counter overflows
+| MINH | If set, then counting of events in M-mode is inhibited
+| SINH | If set, then counting of events in S/HS-mode is inhibited
+| UINH | If set, then counting of events in U-mode is inhibited
+| VSINH | If set, then counting of events in VS-mode is inhibited
+| VUINH | If set, then counting of events in VU-mode is inhibited
+|====
 
-The mhpmcounters are WARL registers that support up to 64 bits of precision on
-RV32 and RV64.
-
-The mhpmevent__n__ registers are WARL registers that control which event causes
-the corresponding counter to increment and what happens when the corresponding
-count overflows. Currently just a few bits are defined here. Past this, the
-actual selection and meaning of events is defined by the platform, but
-(mhpmevent == 0) is defined to mean “no event" and that the corresponding
-counter will never be incremented. Typically the lower bits of mhpmevent will
-be used for event selection purposes.
-
-On RV32 only, accesses to the mcycle, minstret, mhpmcounter__n__, and
-mhpmevent__n__ CSRs access the low 32 bits, while accesses to the mcycleh,
-minstreth, mhpmcounter__n__h, and mhpmevent__n__h CSRs access bits 63–32 of the
-corresponding counter or event selector. The proposed CSR numbers for
-mhpmevent__n__h are 0x723 - 0x73F.
-
-The following bits are added to mhpmevent:
-
-bit [63] +++OF+++ - Overflow status and interrupt disable bit that is set when counter overflows
-
-bit [62] +++MINH+++ - If set, then counting of events in M-mode is inhibited
-
-bit [61] +++SINH+++ - If set, then counting of events in S/HS-mode is inhibited
-
-bit [60] +++UINH+++ - If set, then counting of events in U-mode is inhibited
-
-bit [59] +++VSINH+++ - If set, then counting of events in VS-mode is inhibited
-
-bit [58] +++VUINH+++ - If set, then counting of events in VU-mode is inhibited
-
-bit [57] 0 - Reserved for possible future modes
-
-bit [56] 0 - Reserved for possible future modes
+For each ``x``INH bit, if the associated privilege mode is not implemented,
+the bit is read-only zero.
 
 Each of the five ``x``INH bits, when set, inhibit counting of events while in
 privilege mode ``x``. All-zeroes for these bits results in counting of events in
@@ -123,58 +103,12 @@ maintaining a bit mask reflecting which counters are active and due to
 eventually overflow.
 ====
 
-==== Machine Interrupt Registers (mip and mie)
+=== Supervisor Count Overflow (scountovf) CSR
 
-This extension adds the description of the LCOFIP/LCOFIE bits in these
-registers (and modifies related text) as follows:
-
-LCOFIP is added to mip in <<mipreg-standard>> as bit 13. LCOFIE is added to mie in
-<<miereg-standard>> as bit 13.
-
-If the Sscofpmf extension is implemented, bits mip.LCOFIP and mie.LCOFIE are
-the interrupt-pending and interrupt-enable bits for local count overflow
-interrupts. LCOFIP is read-write in mip and reflects the occurrence of a local
-count overflow interrupt request resulting from any of the mhpmevent__n__.OF
-bits being set. If the Sscofpmf extension is not implemented, these LCOFIP and
-LCOFIE bits are hardwired to zeros.
-
-Multiple simultaneous interrupts destined for different privilege modes are
-handled in decreasing order of destined privilege mode. Multiple simultaneous
-interrupts destined for the same privilege mode are handled in the following
-decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI, LCOFI.
-
-=== Supervisor Level Additions
-
-==== Supervisor Interrupt Registers (sip and sie)
-
-This extension adds the description of the LCOFIP/LCOFIE bits in these
-registers (and modifies related text) as follows:
-
-LCOFIP is added to sip in <<sipreg-standard>> as bit 13. LCOFIE is added to sie in
-<<siereg-standard>> as bit 13.
-
-If the Sscofpmf extension is implemented, bits sip.LCOFIP and sie.LCOFIE are
-the interrupt-pending and interrupt-enable bits for local count overflow
-interrupts. LCOFIP is read-write in sip and reflects the occurrence of a local
-count overflow interrupt request resulting from any of the mhpmevent__n__.OF
-bits being set. If the Sscofpmf extension is not implemented, these LCOFIP and
-LCOFIE bits are hardwired to zeros.
-
-Each standard interrupt type (LCOFI, SEI, STI, or SSI) may not be implemented,
-in which case the corresponding interrupt-pending and interrupt-enable bits are
-hardwired to zeros. All bits in sip and sie are WARL fields.
-
-Multiple simultaneous interrupts destined for supervisor mode are handled in
-the following decreasing priority order: SEI, SSI, STI, LCOFI.
-
-==== Supervisor Count Overflow (scountovf)
-
-This extension adds this new CSR.
-
-The scountovf CSR is a 32-bit read-only register that contains shadow copies of
+This extension adds the `scountovf` CSR,
+a 32-bit read-only register that contains shadow copies of
 the OF bits in the 29 mhpmevent CSRs (mhpmevent__3__ - mhpmevent__31__) - where
-scountovf bit _X_ corresponds to mhpmevent__X__. The proposed CSR number is
-0xDA0.
+scountovf bit _X_ corresponds to mhpmevent__X__.
 
 This register enables supervisor-level overflow interrupt handler software to
 quickly and easily determine which counter(s) have overflowed (without needing
@@ -183,7 +117,7 @@ M-mode).
 
 Read access to bit _X_ is subject to the same mcounteren (or mcounteren and
 hcounteren) CSRs that mediate access to the hpmcounter CSRs by S-mode (or
-VS-mode). In M and S modes, scountovf bit _X_ is readable when mcounteren bit
+VS-mode). In M-mode, scountovf bit _X_ is always readable. In S/HS-mode, scountovf bit _X_ is readable when mcounteren bit
 _X_ is set, and otherwise reads as zero. Similarly, in VS mode, scountovf bit
 _X_ is readable when mcounteren bit _X_ and hcounteren bit _X_ are both set,
 and otherwise reads as zero.
