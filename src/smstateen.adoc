@@ -1,17 +1,15 @@
 [[smstateen]]
 == "Smstateen/Ssstateen" Extensions, Version 1.0.0
 
-=== Motivation
-
 The implementation of optional RISC-V extensions has the potential to open
 covert channels between separate user threads, or between separate guest OSes
 running under a hypervisor. The problem occurs when an extension adds processor
-state---usually explicit registers, but possibly other forms of state---that
+state -- usually explicit registers, but possibly other forms of state -- that
 the main OS or hypervisor is unaware of (and hence won't context-switch) but
 that can be modified/written by one user thread or guest OS and
 perceived/examined/read by another.
 
-For example, the proposed Advanced Interrupt Architecture (AIA) for RISC-V adds
+For example, the Advanced Interrupt Architecture (AIA) for RISC-V adds
 to a hart as many as ten supervisor-level CSRs (`siselect`, `sireg`, `stopi`,
 `sseteipnum`, `sclreipnum`, `sseteienum`, `sclreienum`, `sclaimei`, `sieh`, and `siph`) and
 provides also the option for hardware to be backward-compatible with older,
@@ -41,63 +39,67 @@ extensions. In any event, there is no need to strain `sstatus` (and add `sstatus
 for this purpose. The "enable" flags that are needed to plug covert channels
 are not generally expected to require swapping on context switches of user
 threads, making them a less-than-compelling candidate for inclusion in `sstatus`.
-Hence, a new place is proposed for them instead.
+Hence, a new place is provided for them instead.
 
-=== Proposal
+=== State Enable Extensions
 
-These extensions collectively specify machine-mode and supervisor-mode features. The Smstateen extension specification comprises the mstateen*, sstateen*, and hstateen* CSRs and their functionality. The Ssstateen extension specification comprises only the sstateen* and hstateen* CSRs and their functionality.
+The Smstateen and Ssstateen extensions collectively specify machine-mode and
+supervisor-mode features. The Smstateen extension specification comprises the
+mstateen*, sstateen*, and hstateen* CSRs and their functionality. The Ssstateen
+extension specification comprises only the sstateen* and hstateen* CSRs and their
+functionality.
 
 For RV64 harts, this extension adds four new 64-bit CSRs at machine level,
 listed with their CSR addresses:
 
-`0x30C mstateen0` (Machine State Enable 0)
+* `0x30C mstateen0` (Machine State Enable 0)
 
-`0x30D mstateen1`
+* `0x30D mstateen1`
 
-`0x30E mstateen2`
+* `0x30E mstateen2`
 
-`0x30F mstateen3`
+* `0x30F mstateen3`
 
 If supervisor mode is implemented, another four CSRs are defined at supervisor
 level:
 
-`0x10C sstateen0`
+* `0x10C sstateen0`
 
-`0x10D sstateen1`
+* `0x10D sstateen1`
 
-`0x10E sstateen2`
+* `0x10E sstateen2`
 
-`0x10F sstateen3`
+* `0x10F sstateen3`
 
 And if the hypervisor extension is implemented, another set of CSRs is added:
 
-`0x60C hstateen0`
+* `0x60C hstateen0`
 
-`0x60D hstateen1`
+* `0x60D hstateen1`
 
-`0x60E hstateen2`
+* `0x60E hstateen2`
 
-`0x60F hstateen3`
+* `0x60F hstateen3`
 
 For RV32, the registers listed above are 32-bit, and for the machine-level and
 hypervisor CSRs there is a corresponding set of high-half CSRs for the upper 32
 bits of each register:
 
-`0x31C mstateen0h`
+* `0x31C mstateen0h`
 
-`0x31D mstateen1h`
+* `0x31D mstateen1h`
 
-`0x31E mstateen2h`
+* `0x31E mstateen2h`
 
-`0x31F mstateen3h`
+* `0x31F mstateen3h`
 
-`0x61C hstateen0h`
+* `0x61C hstateen0h`
 
-`0x61D hstateen1h`
+* `0x61D hstateen1h`
 
-`0x61E hstateen2h`
+* `0x61E hstateen2h`
 
-`0x61F hstateen3h`
+* `0x61F hstateen3h`
 
 For the supervisor-level `sstateen` registers, high-half CSRs are not added at
 this time because it is expected the upper 32 bits of these registers will
@@ -185,18 +187,20 @@ the OS or hypervisor is prepared to swap on a context switch, or to manage in
 some other way.
 
 For each `mstateen` CSR, bit 63 is defined to control access to the
-matching `sstateen` and `hstateen` CSRs.
-That is, bit 63 of `mstateen0` controls access to `sstateen0` and `hstateen0`;
-bit 63 of `mstateen1` controls access to `sstateen1` and `hstateen1`; etc.
-Likewise, bit 63 of each `hstateen` correspondingly controls access to
-the matching `sstateen` CSR.
-A hypervisor may need this control over
-accesses to the `sstateen` CSRs if it ever must emulate for a virtual machine an
-extension that is supposed to be affected by a bit in an `sstateen` CSR. (Even if
-such emulation is uncommon, it should not be excluded.) Machine-level software
-needs identical control to be able to emulate the hypervisor extension. (That
-is, machine level needs control over accesses to the supervisor-level `sstateen`
-CSRs in order to emulate the `hstateen` CSRs, which have such control.)
+matching `sstateen` and `hstateen` CSRs. That is, bit 63 of `mstateen0` controls
+access to `sstateen0` and `hstateen0`; bit 63 of `mstateen1` controls access to
+`sstateen1` and `hstateen1`; etc. Likewise, bit 63 of each `hstateen`
+correspondingly controls access to the matching `sstateen` CSR.
+
+A hypervisor may need this control over accesses to the `sstateen` CSRs if it
+ever must emulate for a virtual machine an extension that is supposed to be
+affected by a bit in an `sstateen` CSR. Even if such emulation is uncommon,
+it should not be excluded.
+
+Machine-level software needs identical control to be able to emulate the
+hypervisor extension. That is, machine level needs control over accesses to the
+supervisor-level `sstateen` CSRs in order to emulate the `hstateen` CSRs, which
+have such control.
 
 Bit 63 of each `mstateen` CSR may be read-only zero only if the hypervisor
 extension is not implemented and the matching supervisor-level `sstateen` CSR is
@@ -205,50 +209,16 @@ attempts to access the affected `sstateen` CSR from S-mode, ignoring writes and
 returning zero for reads. Bit 63 of each `hstateen` CSR is always writable (not
 read-only).
 
+=== State Enable 0 Registers
+
+. Machine State Enable 0 Register (`mstateen0`)
 [wavedrom, ,svg]
 ....
 {reg: [
 {bits: 1, name: 'C'},
 {bits: 1, name: 'FCSR'},
 {bits: 1, name: 'JVT'},
-{bits: 61, name: 'WPRI'}
-], config:{bits: 64, lanes: 4, hspace:1024}}
-....
-
-The C bit controls access to any and all custom state.
-
-[NOTE]
-====
-Bit 0 of these registers is not custom state itself; it is a standard field of
-a standard CSR, either mstateen0, hstateen0, or sstateen0. The
-requirements that non-standard extensions must meet to be conforming are not
-relaxed due solely to changes in the value of this bit. In particular, if
-software sets this bit but does not execute any custom instructions or access
-any custom state, the software must continue to execute as specified by all
-relevant RISC-V standards, or the hardware is not standard-conforming.
-The FCSR bit controls access to fcsr for the case when floating-point
-instructions operate on x registers instead of f registers as specified by
-the Zfinx and related extensions (Zdinx, etc.). Whenever misa.F = 1, bit 1 of
-mstateen0 is read-only zero (and hence read-only zero in hstateen0 and
-sstateen0 too). For convenience, when the stateen CSRs are implemented and
-misa.F = 0, then if bit 1 of a controlling stateen0 CSR is zero, all
-floating-point instructions cause an illegal instruction trap (or virtual
-instruction trap, if relevant), as though they all access fcsr, regardless of
-whether they really do.
-====
-
-The JVT bit controls access to the JVT CSR provided by the Zcmt extension.
-
-=== Machine State Enable Register (mstateen0)
-
-[wavedrom, ,svg]
-....
-{reg: [
-{bits: 1, name: 'C'},
-{bits: 1, name: 'FCSR'},
-{bits: 1, name: 'JVT'},
-{bits: 52, name: 'WPRI'},
-{bits: 1, name: 'P1P14'},
+{bits: 53, name: 'WPRI'},
 {bits: 1, name: 'P1P13'},
 {bits: 1, name: 'CONTEXT'},
 {bits: 1, name: 'IMSIC'},
@@ -260,37 +230,7 @@ The JVT bit controls access to the JVT CSR provided by the Zcmt extension.
 ], config: {bits: 64, lanes: 4, hspace:1024}}
 ....
 
-The C bit controls access to any and all custom state. The FCSR and the JVT
-bits control access to the same state as controlled by the same bits in the
-sstateen0 CSR.
-
-The SE0 bit in mstateen0 controls access to the hstateen0, hstateen0h,
-and the sstateen0 CSRs.
-
-The ENVCFG bit in mstateen0 controls access to the henvcfg, henvcfgh,
-and the senvcfg CSRs.
-
-The CSRIND bit in mstateen0 controls access to the siselect, sireg*,
-vsiselect, and the vsireg* CSRs provided by the Sscsrind extensions.
-
-The IMSIC bit in mstateen0 controls access to the IMSIC state, including
-CSRs stopei and vstopei, provided by the Ssaia extension.
-
-The AIA bit in mstateen0 controls access to all state introduced by the
-Ssaia extension and is not controlled by either the CSRIND or the IMSIC
-bits.
-
-The CONTEXT bit in mstateen0 controls access to the scontext and
-hcontext CSRs provided by the Sdtrig ISA extension.
-
-The P1P13 bit in mstateen0 controls access to the hedelegh introduced by
-Privileged Specification Version 1.13.
-
-The P1P14 bit in mstateen0 controls access to the srmcfg CSR introduced by
-Privileged Specification Version 1.14.
-
-=== Hypervisor State Enable Register (hstateen0)
-
+. Hypervisor State Enable 0 Register (`hstateen0`)
 [wavedrom, ,svg]
 ....
 {reg: [
@@ -308,31 +248,86 @@ Privileged Specification Version 1.14.
 ], config: {bits: 64, lanes: 4, hspace:1024}}
 ....
 
-The C bit controls access to any and all custom state. The FCSR and the JVT
-bits control access to the same state as controlled by the same bits in the
-sstateen0 CSR.
+. Supervisor State Enable 0 Register (`sstateen0`)
+[wavedrom, ,svg]
+....
+{reg: [
+{bits: 1, name: 'C'},
+{bits: 1, name: 'FCSR'},
+{bits: 1, name: 'JVT'},
+{bits: 29, name: 'WPRI'}
+], config:{bits: 32, lanes: 2, hspace:1024}}
+....
 
-The SE0 bit in hstateen0 controls access to the sstateen0 CSR.
+The C bit controls access to any and all custom state. This bit is not custom
+state itself. The  C bit of these registers is not custom state itself; it is a
+standard field of a standard CSR, either `mstateen0`, `hstateen0`, or
+`sstateen0`.
 
-The ENVCFG bit in hstateen0 controls access to the senvcfg CSRs.
-The CSRIND bit in hstateen0 controls access to the siselect and the
-sireg*, (really vsiselect and vsireg*) CSRs provided by the
-Sscsrind extensions.
+[NOTE]
+====
+The requirements that non-standard extensions must meet to be conforming are not
+relaxed due solely to changes in the value of this bit. In particular, if
+software sets this bit but does not execute any custom instructions or access
+any custom state, the software must continue to execute as specified by all
+relevant RISC-V standards, or the hardware is not standard-conforming.
+====
 
-The IMSIC bit in hstateen0 controls access to the guest IMSIC state,
-including CSRs stopei (really vstopei), provided by the Ssaia extension.
+The FCSR bit controls access to `fcsr` for the case when floating-point
+instructions operate on `x` registers instead of `f` registers as specified by
+the Zfinx and related extensions (Zdinx, etc.). Whenever `misa.`F = 1, FCSR bit
+of `mstateen0` is read-only zero (and hence read-only zero in `hstateen0` and
+`sstateen0` too). For convenience, when the `stateen` CSRs are implemented and
+`misa.`F = 0, then if the FCSR bit of a controlling `stateen0` CSR is zero, all
+floating-point instructions cause an illegal instruction trap (or virtual
+instruction trap, if relevant), as though they all access `fcsr`, regardless of
+whether they really do.
+
+The JVT bit controls access to the `JVT` CSR provided by the Zcmt extension.
+
+The SE0 bit in `mstateen0` controls access to the `hstateen0`, `hstateen0h`,
+and the `sstateen0` CSRs. The SE0 bit in `hstateen0` controls access to the
+`sstateen0` CSR.
+
+The ENVCFG bit in `mstateen0` controls access to the `henvcfg`, `henvcfgh`,
+and the `senvcfg` CSRs. The ENVCFG bit in `hstateen0` controls access to the
+`senvcfg` CSRs.
+
+The CSRIND bit in `mstateen0` controls access to the `siselect`, `sireg*`,
+`vsiselect`, and the `vsireg*` CSRs provided by the Sscsrind extensions.
+The CSRIND bit in `hstateen0` controls access to the `siselect` and the
+`sireg*`, (really `vsiselect` and `vsireg*`) CSRs provided by the Sscsrind
+extensions.
+
+The IMSIC bit in `mstateen0` controls access to the IMSIC state, including
+CSRs `stopei` and `vstopei`, provided by the Ssaia extension. The IMSIC bit in
+`hstateen0` controls access to the guest IMSIC state, including CSRs `stopei`
+(really `vstopei`), provided by the Ssaia extension.
+
+The AIA bit in `mstateen0` controls access to all state introduced by the
+Ssaia extension and is not controlled by either the CSRIND or the IMSIC
+bits.
 
 [NOTE]
 ====
 Setting the IMSIC bit in hstateen0 to zero prevents a virtual machine from
-accessing the hart's IMSIC the same as setting hstatus.VGEIN = 0.
-The AIA bit in hstateen0 controls access to all state introduced by the
+accessing the hart's IMSIC the same as setting `hstatus.`VGEIN = 0.
+
+The AIA bit in `hstateen0` controls access to all state introduced by the
 Ssaia extension and is not controlled by either the CSRIND or the IMSIC
-bits of hstateen0.
+bits of `hstateen0`.
 ====
 
-The CONTEXT bit in hstateen0 controls access to the scontext CSR
-provided by the Sdtrig ISA extension.
+The CONTEXT bit in `mstateen0` controls access to the `scontext` and
+`hcontext` CSRs provided by the Sdtrig extension. The CONTEXT bit in
+`hstateen0` controls access to the `scontext` CSR provided by the Sdtrig
+extension.
+
+The P1P13 bit in `mstateen0` controls access to the `hedelegh` introduced by
+Privileged Specification Version 1.13.
+
+//The P1P14 bit in mstateen0 controls access to the srmcfg CSR introduced by
+//Privileged Specification Version 1.14.
 
 === Usage
 
