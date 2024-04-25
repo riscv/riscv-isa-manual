@@ -1,0 +1,68 @@
+== "Zabha" Extension for Byte and Halfword Atomic Memory Operations, Version 1.0.0
+
+The A-extension offers atomic memory operation (AMO) instructions for _words_,
+_doublewords_, and _quadwords_ (only for `AMOCAS`). The absence of atomic
+operations for subword data types necessitates emulation strategies. For bitwise
+operations, this emulation can be performed via word-sized bitwise AMO*
+instructions. For non-bitwise operations, emulation is achievable using
+word-sized `LR`/`SC` instructions.
+
+Several limitations arise from this emulation approach:
+
+. In systems with large-scale or Non-Uniform Memory Access (NUMA)
+  configurations, emulation based on `LR`/`SC` introduces issues related to
+  scalability and fairness, particularly under conditions of high contention.
+
+. Emulation of narrower AMOs through wider AMO* instructions on non-idempotent
+  IO memory regions may result in unintended side effects.
+
+. Utilizing wider AMO* instructions for emulating narrower AMOs risks activating
+  extraneous breakpoints or watchpoints.
+
+. In the absence of native support for subword atomics, compilers often resort
+  to inlining code sequences to provide the required emulation. This practice
+  contributes to an increase in code size, with consequent impacts on system
+  performance and memory utilization.
+
+The Zabha extension addresses these limitations by adding support for _byte_ and
+_halfword_ atomic memory operations to the RISC-V Unprivileged ISA. The Zabha
+extension depends upon the Zaamo standard extension.
+
+=== Byte and Halfword Atomic Memory Operation Instructions
+
+Zabha extension provides the `AMO[ADD|AND|OR|XOR|SWAP|MIN[U]|MAX[U]].[B|H]`
+instructions. If Zacas extension is also implemented, Zabha further provides the
+`AMOCAS.[B|H]` instructions.
+
+[wavedrom, zabha-ext-wavedrom-reg,svg]
+....
+{reg: [ 
+  {bits:  7, name: 'opcode', attr:['AMO','AMO','AMO','AMO','AMO','AMO','AMO','AMO']},
+  {bits:  5, name: 'rd', attr:['dest','dest','dest','dest','dest','dest','dest','dest']},
+  {bits:  3, name: 'funct3', attr:['width=0/1','width=0/1','width=0/1','width=0/1','width=0/1','width=0/1','width=0/1','width=0/1']},
+  {bits:  5, name: 'rs1', attr:['addr','addr','addr','addr','addr','addr','addr','addr']},
+  {bits:  5, name: 'rs2', attr:['src','src','src','src','src','src','src','src']},
+  {bits:  1, name: 'rl'},
+  {bits:  1, name: 'aq', attr:['ordering','ordering','ordering','ordering','ordering','ordering','ordering','ordering']},
+  {bits:  5, name: 'funct5', attr:['AMOSWAP.B/H','AMOADD.B/H','AMOAND.B/H','AMOOR.B/H','AMOXOR.B/H','AMOMAX[U].B/H','AMOMIN[U].B/H','AMOCAS.B/H']},
+], config:{lanes: 1, hspace:1024}} 
+.... 
+
+Byte and halfword AMOs always sign-extend the value placed in `rd`, and ignore
+the stem:[XLEN-1:2^{(width + 3)}] bits of the original value in `rs2`. The
+`AMOCAS.[B|H]` instructions similarly ignore the stem:[XLEN-1:2^{(width + 3)}]
+bits of the original value in `rd`.
+
+Similar to the AMOs specified in the A extension, the Zabha extension mandates
+that the address contained in the `rs1` register must be naturally aligned to
+the size of the operand. The same exception options as specified in the A
+extension are applicable in cases where the address is not naturally aligned.
+
+Similar to the AMOs specified in the A and Zacas extensions, the AMOs in the
+Zabha extension optionally provide release consistency semantics, using the `aq`
+and `rl` bits, to help implement multiprocessor synchronization.
+
+[NOTE]
+====
+Zabha omits _byte_ and _halfword_ support for `LR` and `SC` due to low utility.
+====
