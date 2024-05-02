@@ -43,17 +43,59 @@ shown in <<sstatusreg-rv32>> when SXLEN=32
 and <<sstatusreg>> when SXLEN=64. The `sstatus`
 register keeps track of the processor's current operating state.
 
-include::images/bytefield/sstatus32-1.edn[]
-
 [[sstatusreg-rv32]]
 .Supervisor-mode status (`sstatus`) register when SXLEN=32.
-include::images/bytefield/sstatus32-2.edn[]
-
-include::images/bytefield/sstatus64.edn[]
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SIE'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPIE'},
+  {bits:  1, name: 'UBE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SPP'},
+  {bits:  2, name: 'VS[1:0]'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  2, name: 'FS[1:0]'},
+  {bits:  2, name: 'XS[1:0]'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SUM'},
+  {bits:  1, name: 'MXR'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPELP'},
+  {bits:  7, name: 'WPRI'},
+  {bits:  1, name: 'SD'},
+], config:{lanes: 2, hspace:1024}}
+....
 
 [[sstatusreg]]
 .Supervisor-mode status (`sstatus`) register when SXLEN=64.
-include::images/bytefield/sstatus32-2.edn[]
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SIE'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPIE'},
+  {bits:  1, name: 'UBE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SPP'},
+  {bits:  2, name: 'VS[1:0]'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  2, name: 'FS[1:0]'},
+  {bits:  2, name: 'XS[1:0]'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SUM'},
+  {bits:  1, name: 'MXR'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPELP'},
+  {bits:  8, name: 'WPRI'},
+  {bits:  2, name: 'UXL[1:0]'},
+  {bits: 29, name: 'WPRI'},
+  {bits:  1, name: 'SD'},
+], config:{lanes: 4, hspace:1024}}
+....
 
 The SPP bit indicates the privilege level at which a hart was executing
 before entering supervisor mode. When a trap is taken, SPP is set to 0
@@ -175,6 +217,12 @@ Nevertheless, endianness control has been defined so as to permit an OS
 of one endianness to execute user-mode programs of the opposite
 endianness.
 ====
+
+===== Previous Expected Landing Pad (ELP) State in `sstatus` Register
+
+Access to the `SPELP` field, added by Zicfilp, accesses the homonymous
+fields of `mstatus` when `V=0`, and the homonymous fields of `vsstatus`
+when `V=1`.
 
 ==== Supervisor Trap Vector Base Address (`stvec`)  Register 
 
@@ -571,6 +619,13 @@ will contain the shortest of:
 The value loaded into `stval` on an illegal-instruction exception is
 right-justified and all unused upper bits are cleared to zero.
 
+On a trap caused by a software check exception, the `stval` register holds the
+cause for the exception. The following encodings are defined:
+
+* 0 - No information provided.
+* 2 - Landing Pad Fault. Defined by the Zicfilp extension (<<priv-forward>>).
+* 3 - Shadow Stack Fault. Defined by the Zicfiss extension (<<priv-backward>>).
+
 For other traps, `stval` is set to zero, but a future standard may
 redefine `stval`’s setting for other traps.
 
@@ -590,8 +645,37 @@ shown in <<senvcfg>>, that controls certain
 characteristics of the U-mode execution environment.
 
 [[senvcfg]]
-.Supervisor environment configuration register (`senvcfg`).
-include::images/bytefield/senvcfg.edn[]
+.Supervisor environment configuration register (`senvcfg`) for RV64.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'FIOM'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'LPE'},
+  {bits:  1, name: 'SSE'},
+  {bits:  2, name: 'CBIE'},
+  {bits:  1, name: 'CBCFE'},
+  {bits:  1, name: 'CBZE'},
+  {bits: 24, name: 'WPRI'},
+  {bits:  2, name: 'PMM'},
+  {bits: 30, name: 'WPRI'},
+], config:{lanes: 4, hspace:1024}}
+....
+
+.Supervisor environment configuration register (`senvcfg`) for RV32.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'FIOM'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'LPE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  2, name: 'CBIE'},
+  {bits:  1, name: 'CBCFE'},
+  {bits:  1, name: 'CBZE'},
+  {bits: 24, name: 'WPRI'},
+], config:{lanes: 2, hspace:1024}}
+....
 
 If bit FIOM (Fence of I/O implies Memory) is set to one in `senvcfg`,
 FENCE instructions executed in U-mode are modified so the requirement to
@@ -669,6 +753,24 @@ change prior to the ratification of that extension.
 The definition of the PMM field will be furnished by the forthcoming
 Ssnpm extension. Its allocation within `senvcfg` may change prior to the
 ratification of that extension.
+
+The Zicfilp extension adds the `LPE` field in `senvcfg`. When the `LPE` field is
+set to 1, the Zicfilp extension is enabled in VU/U-mode. When the `LPE` field is
+0, the Zicfilp extension is not enabled in VU/U-mode and the following rules
+apply to VU/U-mode:
+
+* The hart does not update the `ELP` state; it remains as `NO_LP_EXPECTED`.
+* The `LPAD` instruction operates as a no-op.
+
+The Zicfiss extension adds the `SSE` field in `senvcfg`. When the `SSE` field is
+set to 1, the Zicfiss extension is activated in VU/U-mode. When the `SSE` field
+is 0, the Zicfiss extension remains inactive in VU/U-mode, and the following
+rules apply:
+
+* 32-bit Zicfiss instructions will revert to their behavior as defined by Zimop.
+* 16-bit Zicfiss instructions will revert to their behavior as defined by Zcmop.
+* When `menvcfg.SSE` is one, `SSAMOSWAP.W/D` raises an illegal-instruction
+  exception in U-mode and a virtual instruction exception in VU-mode.
 
 [[satp]]
 ==== Supervisor Address Translation and Protection (`satp`) Register
