@@ -27,6 +27,14 @@ The recommended method for building the PDF files is to use the Docker Image, as
 
 Alternative build methods, such as local builds and GitHub Action builds, are also available and described in the Documentation Developer's Guide.
 
+## Images not rendered for EPUB files
+
+If the eBook reader does not support embedded images, uncomment `:data-uri:` lines in `src/riscv-privileged.adoc` and `src/riscv-unprivileged.adoc`.
+
+### Known devices that cannot handle embedded images
+
+- PocketBook InkPad 3
+
 ## Repo Activity
 
 ![Alt](https://repobeats.axiom.co/api/embed/ccec87dc4502f2ed7c216b670b5ed8efc33a1d4c.svg "Repobeats analytics image")
