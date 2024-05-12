@@ -14,7 +14,7 @@
 # for generating documentation in various formats (PDF, HTML).
 
 # Build Targets
-TARGETS := priv unpriv priv-html unpriv-html
+TARGETS := priv-pdf unpriv-pdf priv-html unpriv-html priv-epub unpriv-epub
 
 # Declare phony targets
 .PHONY: all $(TARGETS) clean
@@ -43,7 +43,7 @@ SRCDIR := ../src
 JUNK := *.pdf *.aux *.log *.bbl *.blg *.toc *.out *.fdb_latexmk *.fls *.synctex.gz
 
 # Privileged ISA build
-priv: priv-isa-asciidoc.pdf
+priv-pdf: priv-isa-asciidoc.pdf
 
 priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Privileged ISA"
@@ -52,7 +52,7 @@ priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
 	mv $@.tmp $@
 
 # Unprivileged ISA build
-unpriv: unpriv-isa-asciidoc.pdf
+unpriv-pdf: unpriv-isa-asciidoc.pdf
 
 unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Unprivileged ISA"
@@ -74,6 +74,18 @@ unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA HTML"
 	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
+priv-epub: priv-isa-asciidoc.epub
+
+priv-isa-asciidoc.epub: $(SRCDIR)/riscv-privileged.adoc
+	@echo "Building Privileged ISA EPUB"
+	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+
+unpriv-epub: unpriv-isa-asciidoc.epub
+
+unpriv-isa-asciidoc.epub: $(SRCDIR)/riscv-unprivileged.adoc
+	@echo "Building Unprivileged ISA EPUB"
+	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+
 clean:
 	@if [ -f priv-isa-asciidoc.pdf ]; then \
 		echo "Removing priv-isa-asciidoc.pdf"; \
@@ -91,4 +103,11 @@ clean:
 		echo "Removing unpriv-isa-asciidoc.html"; \
 		rm -f unpriv-isa-asciidoc.html; \
 	fi
-
+	@if [ -f priv-isa-asciidoc.epub ]; then \
+		echo "Removing priv-isa-asciidoc.epub"; \
+		rm -f priv-isa-asciidoc.epub; \
+	fi
+	@if [ -f unpriv-isa-asciidoc.epub ]; then \
+		echo "Removing unpriv-isa-asciidoc.epub"; \
+		rm -f unpriv-isa-asciidoc.epub; \
+	fi
