@@ -14,7 +14,10 @@
 # for generating documentation in various formats (PDF, HTML).
 
 # Build Targets
-TARGETS := priv-pdf unpriv-pdf priv-html unpriv-html priv-epub unpriv-epub
+TARGETS_PDF := priv-pdf unpriv-pdf
+TARGETS_HTML := priv-html unpriv-html
+TARGETS_EPUB := priv-epub unpriv-epub
+TARGETS := $(TARGETS_PDF) $(TARGETS_HTML) $(TARGETS_EPUB)
 
 # Declare phony targets
 .PHONY: all $(TARGETS) clean
@@ -25,7 +28,7 @@ all: $(TARGETS)
 # Build with preinstalled docker container; first install it with:
 #   docker pull riscvintl/riscv-docs-base-container-image:latest
 docker:
-	cd .. && docker run -it -v `pwd`:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'cd ./build; make -$(MAKEFLAGS)'
+	cd .. && docker run -it -v `pwd`:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'cd ./build; make -$(MAKEFLAGS) $(TARGETS_PDF) $(TARGETS_HTML)'
 
 # Asciidoctor options
 ASCIIDOCTOR_OPTS := -a compress \
