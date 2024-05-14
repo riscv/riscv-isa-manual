@@ -53,7 +53,7 @@ Proteus       | imec-DistriNet, KU Leuven       | [Marton Bognar](mailto:marton.
 VexRiscv      | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 33               | https://github.com/SpinalHDL/VexRiscv
 Shuttle       | UC Berkeley                     | [Jerry Zhao](mailto:jerryz123@berkeley.edu)                 | 34               | https://github.com/ucb-bar/shuttle
 CV32E2        | OpenHW Group                    | [Davide Schiavone](mailto:davide@openhwgroup.org), OpenHW Group | 35                 | https://github.com/openhwgroup/cve2
-CVW        | OpenHW Group                       | [James Stine](mailto:james.stine@okstate.edu), OpenHW Group | 36             | https://github.com/openhwgroup/cvw
+Wally        | OpenHW Group                       | [James Stine](mailto:james.stine@okstate.edu), OpenHW Group | 36             | https://github.com/openhwgroup/cvw
 Boa32         | Julian Scheffers                | [Julian Scheffers](mailto:julian@scheffers.net)             | 37               | https://github.com/robotman2412/boa-risc-v
 WIV64         | Jesús Sanz del Rey              | [Jesús Sanz del Rey](mailto:jesussanz2003@gmail.com)        | 38               | https://github.com/StartForKiller/WivCPU
 RV6           | Nikola Lukić                    | [Nikola Lukić](mailto:lukicn@protonmail.com)                | 39               | https://github.com/kiclu/rv6
