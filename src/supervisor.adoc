@@ -1,5 +1,5 @@
 [[supervisor]]
-== Supervisor-Level ISA, Version 1.12
+== Supervisor-Level ISA, Version 1.13
 
 This chapter describes the RISC-V supervisor-level architecture, which
 contains a common core that is used with various supervisor-level
@@ -36,24 +36,66 @@ supervisor-level CSR descriptions.
 ====
 
 [[sstatus]]
-==== Supervisor Status Register (`sstatus`)
+==== Supervisor Status (`sstatus`) Register 
 
 The `sstatus` register is an SXLEN-bit read/write register formatted as
 shown in <<sstatusreg-rv32>> when SXLEN=32
 and <<sstatusreg>> when SXLEN=64. The `sstatus`
 register keeps track of the processor's current operating state.
 
-include::images/bytefield/sstatus32-1.edn[]
-
 [[sstatusreg-rv32]]
-.Supervisor-mode status register (`sstatus`) when SXLEN=32.
-include::images/bytefield/sstatus32-2.edn[]
-
-include::images/bytefield/sstatus64.edn[]
+.Supervisor-mode status (`sstatus`) register when SXLEN=32.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SIE'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPIE'},
+  {bits:  1, name: 'UBE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SPP'},
+  {bits:  2, name: 'VS[1:0]'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  2, name: 'FS[1:0]'},
+  {bits:  2, name: 'XS[1:0]'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SUM'},
+  {bits:  1, name: 'MXR'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPELP'},
+  {bits:  7, name: 'WPRI'},
+  {bits:  1, name: 'SD'},
+], config:{lanes: 2, hspace:1024}}
+....
 
 [[sstatusreg]]
-.Supervisor-mode status register (`sstatus`) when SXLEN=64.
-include::images/bytefield/sstatus32-2.edn[]
+.Supervisor-mode status (`sstatus`) register when SXLEN=64.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SIE'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPIE'},
+  {bits:  1, name: 'UBE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SPP'},
+  {bits:  2, name: 'VS[1:0]'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  2, name: 'FS[1:0]'},
+  {bits:  2, name: 'XS[1:0]'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SUM'},
+  {bits:  1, name: 'MXR'},
+  {bits:  3, name: 'WPRI'},
+  {bits:  1, name: 'SPELP'},
+  {bits:  8, name: 'WPRI'},
+  {bits:  2, name: 'UXL[1:0]'},
+  {bits: 29, name: 'WPRI'},
+  {bits:  1, name: 'SD'},
+], config:{lanes: 4, hspace:1024}}
+....
 
 The SPP bit indicates the privilege level at which a hart was executing
 before entering supervisor mode. When a trap is taken, SPP is set to 0
@@ -103,7 +145,7 @@ destination register.
 If UXLEN latexmath:[$<$] SXLEN, user-mode instruction-fetch addresses
 and load and store effective addresses are taken modulo
 latexmath:[$2^{\text{UXLEN}}$]. For example, when UXLEN=32 and SXLEN=64,
-user-mode memory accesses reference the lowest of the address space.
+user-mode memory accesses reference the lowest 4 GiB of the address space.
 
 [[sum]]
 ===== Memory Privilege in `sstatus` Register
@@ -176,13 +218,19 @@ of one endianness to execute user-mode programs of the opposite
 endianness.
 ====
 
-==== Supervisor Trap Vector Base Address Register (`stvec`)
+===== Previous Expected Landing Pad (ELP) State in `sstatus` Register
+
+Access to the `SPELP` field, added by Zicfilp, accesses the homonymous
+fields of `mstatus` when `V=0`, and the homonymous fields of `vsstatus`
+when `V=1`.
+
+==== Supervisor Trap Vector Base Address (`stvec`)  Register 
 
 The `stvec` register is an SXLEN-bit read/write register that holds trap
 vector configuration, consisting of a vector base address (BASE) and a
 vector mode (MODE).
 
-.Supervisor trap vector base address register (`stvec`).
+.Supervisor trap vector base address (`stvec`) register.
 include::images/bytefield/stvec.edn[]
 
 The BASE field in `stvec` is a  field that can hold any valid virtual or
@@ -217,7 +265,7 @@ supervisor-mode timer interrupt (see <<scauses>>)
 causes the `pc` to be set to BASE+`0x14`. Setting MODE=Vectored may
 impose a stricter alignment constraint on BASE.
 
-==== Supervisor Interrupt Registers (`sip` and `sie`)
+==== Supervisor Interrupt (`sip` and `sie`) Registers 
 
 The `sip` register is an SXLEN-bit read/write register containing
 information on pending interrupts, while `sie` is the corresponding
@@ -287,6 +335,15 @@ interrupt-enable bits for supervisor-level software interrupts. If
 implemented, SSIP is writable in `sip` and may also be set to 1 by a
 platform-specific interrupt controller.
 
+If the Sscofpmf extension is implemented, bits `sip`.LCOFIP and `sie`.LCOFIE
+are the interrupt-pending and interrupt-enable bits for local counter-overflow
+interrupts.
+LCOFIP is read-write in `sip` and reflects the occurrence of a local
+counter-overflow overflow interrupt request resulting from any of the
+`mhpmevent__n__`.OF bits being set.
+If the Sscofpmf extension is not implemented, `sip`.LCOFIP and `sie`.LCOFIE are
+read-only zeros.
+
 [NOTE]
 ====
 Interprocessor interrupts are sent to other harts by
@@ -294,7 +351,7 @@ implementation-specific means, which will ultimately cause the SSIP bit
 to be set in the recipient hart’s `sip` register.
 ====
 
-Each standard interrupt type (SEI, STI, or SSI) may not be implemented,
+Each standard interrupt type (SEI, STI, SSI, or LCOFI) may not be implemented,
 in which case the corresponding interrupt-pending and interrupt-enable
 bits are read-only zeros. All bits in `sip` and `sie` are *WARL* fields. The
 implemented interrupts may be found by writing one to every bit location
@@ -315,7 +372,7 @@ M-mode to S-mode, they are shown as 0 in
 ====
 
 Multiple simultaneous interrupts destined for supervisor mode are
-handled in the following decreasing priority order: SEI, SSI, STI.
+handled in the following decreasing priority order: SEI, SSI, STI, LCOFI.
 
 ==== Supervisor Timers and Performance Counters
 
@@ -327,12 +384,12 @@ the counter values.
 The implementation must provide a facility for scheduling timer
 interrupts in terms of the real-time counter, `time`.
 
-==== Counter-Enable Register (`scounteren`)
+==== Counter-Enable (`scounteren`) Register 
 
-.Counter-enable register (`scounteren`)
+.Counter-enable (`scounteren`) register
 include::images/bytefield/scounteren.edn[]
 
-The counter-enable register `scounteren` is a 32-bit register that
+The counter-enable (`scounteren`) CSR is a 32-bit register that
 controls the availability of the hardware performance monitoring
 counters to U-mode.
 
@@ -355,9 +412,9 @@ access a counter if the corresponding bits in `scounteren` and
 `mcounteren` are both set.
 ====
 
-==== Supervisor Scratch Register (`sscratch`)
+==== Supervisor Scratch (`sscratch`) Register 
 
-The `sscratch` register is an SXLEN-bit read/write register, dedicated
+The `sscratch` CSR is an SXLEN-bit read/write register, dedicated
 for use by the supervisor. Typically, `sscratch` is used to hold a
 pointer to the hart-local supervisor context while the hart is executing
 user code. At the beginning of a trap handler, `sscratch` is swapped
@@ -366,9 +423,9 @@ with a user register to provide an initial working register.
 .Supervisor Scratch Register
 include::images/bytefield/sscratch.edn[]
 
-==== Supervisor Exception Program Counter (`sepc`)
+==== Supervisor Exception Program Counter (`sepc`) Register
 
-`sepc` is an SXLEN-bit read/write register formatted as shown in
+`sepc` is an SXLEN-bit read/write CSR formatted as shown in
 <<epcreg>>. The low bit of `sepc` (`sepc[0]`) is always zero. On implementations that support only IALIGN=32, the two low bits (`sepc[1:0]`) are always zero.
 
 If an implementation allows IALIGN to be either 16 or 32 (by changing
@@ -393,9 +450,9 @@ though it may be explicitly written by software.
 include::images/bytefield/epcreg.edn[]
 
 [[scause]]
-==== Supervisor Cause Register (`scause`)
+==== Supervisor Cause (`scause`) Register 
 
-The `scause` register is an SXLEN-bit read-write register formatted as
+The `scause` CSR is an SXLEN-bit read-write register formatted as
 shown in <<scausereg>>. When a trap is taken into
 S-mode, `scause` is written with a code indicating the event that
 caused the trap. Otherwise, `scause` is never written by the
@@ -410,11 +467,11 @@ Exception Code is a *WLRL* field. It is required to hold the values 0–31
 guaranteed to hold supported exception codes.
 
 [[scausereg]]
-.Supervisor Cause register `scause`.
+.Supervisor Cause (`scause`) register.
 include::images/bytefield/scausereg.edn[]
 
 [[scauses]]
-.Supervisor cause register (`scause`) values after trap. Synchronous exception priorities are given by <<exception-priority>>.
+.Supervisor cause (`scause`) register values after trap. Synchronous exception priorities are given by <<exception-priority>>.
 [%autowidth,float="center",align="center",cols=">,>,3",options="header"]
 |===
 |Interrupt |Exception Code |Description
@@ -445,7 +502,7 @@ Supervisor timer interrupt +
 _Reserved_ +
 Supervisor external interrupt +
 _Reserved_ +
-_Reserved for counter-overflow interrupt_ +
+Counter-overflow interrupt +
 _Reserved_ +
 _Designated for platform use_ 
 
@@ -519,7 +576,7 @@ _Reserved_
 
 ==== Supervisor Trap Value (`stval`) Register
 
-The `stval` register is an SXLEN-bit read-write register formatted as
+The `stval` CSR is an SXLEN-bit read-write register formatted as
 shown in <<stvalreg>>. When a trap is taken into
 S-mode, `stval` is written with exception-specific information to assist
 software in handling the trap. Otherwise, `stval` is never written by
@@ -562,6 +619,13 @@ will contain the shortest of:
 The value loaded into `stval` on an illegal-instruction exception is
 right-justified and all unused upper bits are cleared to zero.
 
+On a trap caused by a software check exception, the `stval` register holds the
+cause for the exception. The following encodings are defined:
+
+* 0 - No information provided.
+* 2 - Landing Pad Fault. Defined by the Zicfilp extension (<<priv-forward>>).
+* 3 - Shadow Stack Fault. Defined by the Zicfiss extension (<<priv-backward>>).
+
 For other traps, `stval` is set to zero, but a future standard may
 redefine `stval`’s setting for other traps.
 
@@ -574,15 +638,44 @@ instruction bits is implemented, `stval` must also be able to hold all
 values less than latexmath:[$2^N$], where latexmath:[$N$] is the smaller
 of SXLEN and ILEN.
 
-==== Supervisor Environment Configuration Register (`senvcfg`)
+==== Supervisor Environment Configuration (`senvcfg`) Register 
 
 The `senvcfg` CSR is an SXLEN-bit read/write register, formatted as
 shown in <<senvcfg>>, that controls certain
 characteristics of the U-mode execution environment.
 
 [[senvcfg]]
-.Supervisor environment configuration register (`senvcfg`).
-include::images/bytefield/senvcfg.edn[]
+.Supervisor environment configuration register (`senvcfg`) for RV64.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'FIOM'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'LPE'},
+  {bits:  1, name: 'SSE'},
+  {bits:  2, name: 'CBIE'},
+  {bits:  1, name: 'CBCFE'},
+  {bits:  1, name: 'CBZE'},
+  {bits: 24, name: 'WPRI'},
+  {bits:  2, name: 'PMM'},
+  {bits: 30, name: 'WPRI'},
+], config:{lanes: 4, hspace:1024}}
+....
+
+.Supervisor environment configuration register (`senvcfg`) for RV32.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'FIOM'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'LPE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  2, name: 'CBIE'},
+  {bits:  1, name: 'CBCFE'},
+  {bits:  1, name: 'CBZE'},
+  {bits: 24, name: 'WPRI'},
+], config:{lanes: 2, hspace:1024}}
+....
 
 If bit FIOM (Fence of I/O implies Memory) is set to one in `senvcfg`,
 FENCE instructions executed in U-mode are modified so the requirement to
@@ -657,22 +750,44 @@ The definitions of the CBCFE and CBIE fields will be furnished by the
 forthcoming Zicbom extension. Their allocations within `senvcfg` may
 change prior to the ratification of that extension.
 
+The definition of the PMM field will be furnished by the forthcoming
+Ssnpm extension. Its allocation within `senvcfg` may change prior to the
+ratification of that extension.
+
+The Zicfilp extension adds the `LPE` field in `senvcfg`. When the `LPE` field is
+set to 1, the Zicfilp extension is enabled in VU/U-mode. When the `LPE` field is
+0, the Zicfilp extension is not enabled in VU/U-mode and the following rules
+apply to VU/U-mode:
+
+* The hart does not update the `ELP` state; it remains as `NO_LP_EXPECTED`.
+* The `LPAD` instruction operates as a no-op.
+
+The Zicfiss extension adds the `SSE` field in `senvcfg`. When the `SSE` field is
+set to 1, the Zicfiss extension is activated in VU/U-mode. When the `SSE` field
+is 0, the Zicfiss extension remains inactive in VU/U-mode, and the following
+rules apply:
+
+* 32-bit Zicfiss instructions will revert to their behavior as defined by Zimop.
+* 16-bit Zicfiss instructions will revert to their behavior as defined by Zcmop.
+* When `menvcfg.SSE` is one, `SSAMOSWAP.W/D` raises an illegal-instruction
+  exception in U-mode and a virtual instruction exception in VU-mode.
+
 [[satp]]
 ==== Supervisor Address Translation and Protection (`satp`) Register
 
-The `satp` register is an SXLEN-bit read/write register, formatted as
+The `satp` CSR is an SXLEN-bit read/write register, formatted as
 shown in <<rv32satp>> for SXLEN=32 and
 <<rv64satp>> for SXLEN=64, which controls
 supervisor-mode address translation and protection. This register holds
 the physical page number (PPN) of the root page table, i.e., its
-supervisor physical address divided by ; an address space identifier
+supervisor physical address divided by 4 KiB; an address space identifier
 (ASID), which facilitates address-translation fences on a
 per-address-space basis; and the MODE field, which selects the current
 address-translation scheme. Further details on the access to this
 register are described in <<virt-control>>.
 
 [[rv32satp]]
-.Supervisor address translation and protection register `satp` when SXLEN=32.
+.Supervisor address translation and protection (`satp`) register when SXLEN=32.
 include::images/bytefield/rv32satp.edn[]
 
 [NOTE]
@@ -687,7 +802,7 @@ corresponding to main memory be representable.
 ====
 
 [[rv64satp]]
-.Supervisor address translation and protection register `satp` when SXLEN=64, for MODE values Bare, Sv39, Sv48, and Sv57.
+.Supervisor address translation and protection (`satp`) register when SXLEN=64, for MODE values Bare, Sv39, Sv48, and Sv57.
 include::images/bytefield/rv64satp.edn[]
 
 [NOTE]
@@ -807,7 +922,7 @@ inexpensive relative to the multi-level cache hierarchies whose address
 space they map.
 ====
 
-The `satp` register is considered _active_ when the effective privilege
+The `satp` CSR is considered _active_ when the effective privilege
 mode is S-mode or U-mode. Executions of the address-translation
 algorithm may only begin using a given value of `satp` when `satp` is
 active.
@@ -1100,7 +1215,7 @@ physical address bits found in the implementation.
 ====
 For example, consider an RV32 system supporting 34 bits of physical
 address. When the value of `satp`.MODE is Sv32, a 34-bit physical
-address is produced directly, and therefore no zero-extension is needed.
+address is produced directly, and therefore no zero extension is needed.
 When the value of `satp`.MODE is Bare, the 32-bit virtual address is
 translated (unmodified) into a 32-bit physical address, and then that
 physical address is zero-extended into a 34-bit machine-level physical
@@ -1227,34 +1342,68 @@ indicates the virtual page has been read, written, or fetched from since
 the last time the A bit was cleared. The D bit indicates the virtual
 page has been written since the last time the D bit was cleared.
 
-Two schemes to manage the A and D bits are permitted:
+Two schemes to manage the A and D bits are defined:
 
-* When a virtual page is accessed and the A bit is clear, or is written
-and the D bit is clear, a page-fault exception is raised.
-* When a virtual page is accessed and the A bit is clear, or is written
-and the D bit is clear, the implementation sets the corresponding bit(s)
-in the PTE. The PTE update must be atomic with respect to other accesses
-to the PTE, and must atomically check that the PTE is valid and grants
-sufficient permissions. Updates of the A bit may be performed as a
-result of speculation, but updates to the D bit must be exact (i.e., not
-speculative), and observed in program order by the local hart.
-Furthermore, the PTE update must appear in the global memory order no
-later than the explicit memory access, or any subsequent explicit memory
-access to that virtual page by the local hart. The ordering on loads and
-stores provided by FENCE instructions and the acquire/release bits on
-atomic instructions also orders the PTE updates associated with those
-loads and stores as observed by remote harts.
-+
-The PTE update is not required to be atomic with respect to the explicit
-memory access that caused the update, and the sequence is interruptible.
-However, the hart must not perform the explicit memory access before the
-PTE update is globally visible.
+* The _Svade_ extension: when a virtual page is accessed and the A bit is
+  clear, or is written and the D bit is clear, a page-fault exception is
+  raised.
+
+* When the Svade extension is not implemented, the following scheme applies. +
+                                                                             +
+  When a virtual page is accessed and the A bit is clear, the PTE is
+  updated to set the A bit.  When the virtual page is written and the D
+  bit is clear, the PTE is updated to set the D bit. When G-stage address
+  translation is in use and is not Bare, the G-stage virtual pages may be
+  accessed or written by implicit accesses to VS-level memory management
+  data structures, such as page tables.                                 +
+                                                                        +
+  When two-stage address translation is in use, an explicit access may
+  cause both VS-stage and G-stage PTEs to be updated. The following rules
+  apply to all PTE updates caused by an explicit or an implicit memory
+  accesses.                                                             +
+                                                                        +
+  The PTE update must be atomic with respect to other accesses to the
+  PTE, and must atomically perform all tablewalk checks for that leaf
+  PTE as part of, and before, conditionally updating the PTE value.
+  Updates of the A bit may be performed as a result of speculation, even
+  if the associated memory access ultimately is not performed
+  architecturally. However, updates to the D bit, resulting from an
+  explicit store, must be exact (i.e., non-speculative), and observed in
+  program order by the local hart. When two-stage address translation is
+  active, updates of the D bit in G-stage PTEs may be performed as a
+  result of speculative updates of the A bit in VS-stage PTEs.          +
+                                                                        +
+  The PTE update must appear in the global memory order before the
+  memory access that caused the PTE update and before any subsequent
+  explicit memory access to that virtual page by the local hart. The
+  ordering on loads and stores provided by FENCE instructions and the
+  acquire/release bits on atomic instructions also orders the PTE updates
+  associated with those loads and stores as observed by remote harts.   +
+                                                                        +
+  The PTE update is not required to be atomic with respect to the memory
+  access that caused the update and a trap may occur between the PTE
+  update and the memory access that caused the PTE update. If a trap
+  occurs then the A and/or D bit may be updated but the memory access
+  that caused the PTE update might not occur. The hart must not perform
+  the memory access that caused the PTE update before the PTE update is
+  globally visible.                                                     +
+                                                                        +
+  The page tables must be located in memory with hardware page-table
+  write access and _RsrvEventual_ PMA.
 
 All harts in a system must employ the same PTE-update scheme as each
 other.
 
 [NOTE]
 ====
+The PTE updates due to memory accesses ordered-after a FENCE are not
+themselves ordered by the FENCE.
+
+Simpler implementations may order the Page Table Entry (PTE) update
+to precede all subsequent explicit memory accesses, as opposed to
+ensuring that the PTE update is precisely sequenced before subsequent
+explicit memory accesses to the associated virtual page.
+
 Prior versions of this specification required PTE A bit updates to be
 exact, but allowing the A bit to be updated as a result of speculation
 simplifies the implementation of address translation prefetchers. System
@@ -1318,7 +1467,8 @@ __a__=__pte__.__ppn__×PAGESIZE and go to step 2.
 . A leaf PTE has been found. Determine if the requested memory access is
 allowed by the _pte_._r_, _pte_._w_, _pte_._x_, and _pte_._u_ bits, given the current privilege mode and the value of the SUM and MXR fields of the `mstatus` register. If not, stop and raise a page-fault exception corresponding to the original access type.
 . If _i>0_ and _pte_._ppn_[__i__-1:0] ≠ 0, this is a misaligned superpage; stop and raise a page-fault exception corresponding to the original access type.
-. If _pte_._a_=0, or if the original memory access is a store and _pte_._d_=0, either raise a page-fault exception corresponding to the original access type, or:
+. If _pte_._a_=0, or if the original memory access is a store and _pte_._d_=0:
+* If the Svade extension is implemented, stop and raise a page-fault exception corresponding to the original access type.
 * If a store to _pte_ would violate a PMA or PMP check,
 raise an access-fault exception corresponding to the original access
 type.
@@ -1461,7 +1611,7 @@ the 12-bit page offset is untranslated.
 When mapping between narrower and wider addresses, RISC-V zero-extends a
 narrower physical address to a wider size. The mapping between 64-bit
 virtual addresses and the 39-bit usable address space of Sv39 is not
-based on zero-extension but instead follows an entrenched convention
+based on zero extension but instead follows an entrenched convention
 that allows an OS to use one or a few of the most-significant bits of a
 full-size (64-bit) virtual address to quickly distinguish user and
 supervisor address regions.
@@ -1622,7 +1772,7 @@ in <<sv32algorithm>>, except LEVELS equals 5 and
 PTESIZE equals 8.
 
 [[svnapot]]
-== "Svnapot" Standard Extension for NAPOT Translation Contiguity, Version 1.0
+== "Svnapot" Extension for NAPOT Translation Contiguity, Version 1.0
 
 In Sv39, Sv48, and Sv57, when a PTE has N=1, the PTE represents a
 translation that is part of a range of contiguous virtual-to-physical
@@ -1788,7 +1938,7 @@ first step.
 ====
 
 [[svpbmt]]
-== "Svpbmt" Standard Extension for Page-Based Memory Types, Version 1.0
+== "Svpbmt" Extension for Page-Based Memory Types, Version 1.0
 
 In Sv39, Sv48, and Sv57, bits 62-61 of a leaf page table entry indicate
 the use of page-based memory types that override the PMA(s) for the
@@ -1798,7 +1948,7 @@ associated memory pages. The encoding for the PBMT bits is captured in
 The Svpbmt extension depends on Sv39.
 
 [[pbmt]]
-.Encodings for PBMT field in Sv39, Sv48, and Sv57 PTEs.  Attributes not mentioned are inherited from PMA associated with the physical address.
+.Encodings for PBMT field in Sv39, Sv48, and Sv57 PTEs.
 [%autowidth,float="center",align="center",cols="^,^,<",options="header"]
 |===
 |Mode |Value |Requested Memory Attributes
@@ -1815,6 +1965,13 @@ Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory +
 Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O +
 _Reserved for future standard use_
 |===
+
+Implementations may override additional PMAs not explicitly listed in
+<<pbmt>>.
+For example, to be consistent with the characteristics of a typical I/O region,
+a misaligned memory access to a page with PBMT=IO might raise an exception,
+even if the underlying region were main memory and the same access would have
+succeeded for PBMT=PMA.
 
 [NOTE]
 ====
@@ -1907,7 +2064,7 @@ attributes used by accesses to the page in question. Otherwise, the
 intermediate attributes are used as the final set of attributes.
 
 [[svinval]]
-== "Svinval" Standard Extension for Fine-Grained Address-Translation Cache Invalidation, Version 1.0
+== "Svinval" Extension for Fine-Grained Address-Translation Cache Invalidation, Version 1.0
 
 The Svinval extension splits SFENCE.VMA, HFENCE.VVMA, and HFENCE.GVMA
 instructions into finer-grained invalidation and ordering operations
@@ -1966,6 +2123,12 @@ or VU-mode, or to execute SINVAL.VMA in VU-mode, raises a
 virtual-instruction exception. When `hstatus`.VTVM=1, an attempt to execute
 SINVAL.VMA in VS-mode also raises a virtual instruction exception.
 
+Attempting to execute SFENCE.W.INVAL or SFENCE.INVAL.IR in U-mode
+raises an illegal-instruction exception.
+Doing so in VU-mode raises a virtual-instruction exception.
+SFENCE.W.INVAL and SFENCE.INVAL.IR are unaffected by the `mstatus`.TVM and
+`hstatus`.VTVM fields and hence are always permitted in S-mode and VS-mode.
+
 [NOTE]
 ====
 SFENCE.W.INVAL and SFENCE.INVAL.IR instructions do not need to be
@@ -1991,3 +2154,169 @@ HINVAL.GVMA identically to SFENCE.VMA, HFENCE.VVMA, and HFENCE.GVMA,
 respectively, while implementing SFENCE.W.INVAL and SFENCE.INVAL.IR
 instructions as no-ops.
 ====
+
+[[sec:svadu]]
+== "Svadu" Extension for Hardware Updating of A/D Bits, Version 1.0
+
+The Svadu extension adds support and CSR controls for hardware updating of PTE A/D bits.
+
+If the Svadu extension is implemented, the `menvcfg`.ADUE field is writable.
+If the hypervisor extension is additionally implemented, the `henvcfg`.ADUE
+field is also writable.
+See <<sec:menvcfg>> and <<sec:henvcfg>> for the definitions of those fields.
+
+<<translation>> defines the semantics of hardware updating of A/D bits.  When
+hardware updating of A/D bits is disabled, the Svade extension, which mandates
+exceptions when A/D bits need be set, instead takes effect.
+The Svade extension is also defined in <<translation>>.
+
+[[sec:svvptc]]
+== "Svvptc" Extension for Eliding Memory-Management Fences on Making PTEs Valid, Version 1.0
+
+When the Svvptc extension is implemented, explicit stores that update the Valid
+bit of leaf and/or non-leaf PTEs from 0 to 1 and are visible to a hart will
+eventually become visible within a bounded timeframe to subsequent implicit
+accesses by that hart to such PTEs.
+
+[NOTE]
+====
+Typically, PTEs are marked as Valid by the operating system following a
+page-fault exception or during system calls for memory mapping. In such cases,
+the trap handler commonly employs an `SRET` instruction to return from the trap.
+When Svvptc is implemented, the stores it executes to change the Valid bit
+of the PTEs from 0 to 1 then become visible to implicit references to those PTEs
+within a bounded timeframe. This visibility pertains to the instructions like
+the one causing the page fault or those accessing new memory regions. A
+memory-management fence can be used to force immediate visibility of these PTE
+updates to all implicit references associated with instructions following the
+memory-management fence. However, when Svvptc is implemented, visibility (in a
+bounded amount of time) is guaranteed and use of a memory-management fence is
+not required in these scenarios. While this approach might lead to an occasional
+gratuitous page-fault, the performance benefit of omitting the memory-management
+fence instructions outweighs the occasional cost of a gratuitous page fault.
+====
+
+////
+[[sec:ssqosid]]
+== "Ssqosid" Extension for Quality-of-Service (QoS) Identifiers, Version 1.0
+
+Quality of Service (QoS) is defined as the minimal end-to-end performance
+guaranteed in advance by a service level agreement (SLA) to a workload.
+Performance metrics might include measures such as instructions per cycle (IPC),
+latency of service, etc.
+
+When multiple workloads execute concurrently on modern processors—equipped with
+large core counts, multiple cache hierarchies, and multiple memory
+controllers—the performance of any given workload becomes less deterministic, or
+even non-deterministic, due to shared resource contention.
+
+To manage performance variability, system software needs resource allocation and
+monitoring capabilities. These capabilities allow for the reservation of
+resources like cache and bandwidth, thus meeting individual performance targets
+while minimizing interference. For resource management, hardware should provide
+monitoring features that allow system software to profile workload resource
+consumption and allocate resources accordingly.
+
+To facilitate this, the QoS Identifiers extension (Ssqosid) introduces the
+`srmcfg` register, which configures a hart with two identifiers: a Resource
+Control ID (`RCID`) and a Monitoring Counter ID (`MCID`). These identifiers
+accompany each request issued by the hart to shared resource controllers.
+
+Additional metadata, like the nature of the memory access and the ID of the
+originating supervisor domain, can accompany `RCID` and `MCID`. Resource
+controllers may use this metadata for differentiated service such as a different
+capacity allocation for code storage vs. data storage. Resource controllers can
+use this data for security policies such as not exposing statistics of one
+security domain to another.
+
+These identifiers are crucial for the RISC-V Capacity and Bandwidth Controller
+QoS Register Interface (CBQRI) specification, which provides methods for setting
+resource usage limits and monitoring resource consumption. The `RCID` controls
+resource allocations, while the `MCID` is used for tracking resource usage.
+
+NOTE: The Ssqosid extension does not require that S-mode mode be implemented.
+
+=== Supervisor Resource Management Configuration (`srmcfg`) register
+
+The `srmcfg` register is an SXLEN-bit read/write register used to configure a
+Resource Control ID (`RCID`) and a Monitoring Counter ID (`MCID`). Both `RCID`
+and `MCID` are WARL fields. The register is formatted as shown in <<SRMCFG64>>
+when SXLEN=64 and <<SRMCFG32>> when SXLEN=32.
+
+The `RCID` and `MCID` accompany each request made by the hart to shared resource
+controllers. The `RCID` is used to determine the resource allocations (e.g.,
+cache occupancy limits, memory bandwidth limits, etc.) to enforce. The `MCID` is
+used to identify a counter to monitor resource usage.
+
+[[SRMCFG64]]
+.Supervisor Resource Management Configuration (`srmcfg`) register for SXLEN=64
+
+[wavedrom, , ]
+....
+{reg: [
+  {bits: 12, name: 'RCID'},
+  {bits:  4, name: 'WPRI'},
+  {bits: 12, name: 'MCID'},
+  {bits: 36, name: 'WPRI'},
+], config:{lanes: 2, hspace:1024}}
+....
+
+[[SRMCFG32]]
+.Supervisor Resource Management Configuration (`srmcfg`) register for SXLEN=32
+
+[wavedrom, , ]
+....
+{reg: [
+  {bits: 12, name: 'RCID'},
+  {bits:  4, name: 'WPRI'},
+  {bits: 12, name: 'MCID'},
+  {bits:  4, name: 'WPRI'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+The `RCID` and `MCID` configured in the `srmcfg` CSR apply to all privilege
+modes of software execution on that hart by default, but this behavior may be
+overridden by future extensions.
+
+If extension Smstateen is implemented together with Ssqosid, then Ssqosid also
+requires the bit 55 in `mstateen0` introduced by Priv 1.14 to be implemented. If
+bit 55 of `mstateen0` is 0, attempts to access `srmcfg` in privilege modes less
+privileged than M-mode raise an illegal-instruction exception. If bit 55 of
+`mstateen0` is 1 or if extension Smstateen is not implemented, attempts to
+access `srmcfg` when `V=1` raise a virtual-instruction exception.
+
+[NOTE]
+====
+A reset value of 0 is suggested for the `RCID` field matching resource
+controllers' default behavior of associating all capacity with `RCID=0`. The
+`MCID` reset value does not affect functionality and may be
+implementation-defined.
+
+Typically, fewer bits are allocated for `RCID` (e.g., to support tens of RCIDs)
+than for `MCID` (e.g., to support hundreds of MCIDs). A common `RCID` is usually
+used to group apps or VMs, pooling resource allocations to meet collective SLAs.
+If an SLA breach occurs, unique MCIDs enable granular monitoring, aiding
+decisions on resource adjustment, associating a different `RCID` with a subset
+of members, or migrating members to other machines. The larger pool of MCIDs
+speeds up this analysis.
+
+The `RCID` and `MCID` in `srmcfg` apply across all privilege levels on the hart.
+Typically, higher-privilege modes don't modify `srmcfg`, as they often serve
+lower-privileged tasks. If differentiation is needed, higher privilege code can
+update `srmcfg` and restore it before returning to a lower privilege level.
+
+In VM environments, hypervisors usually manage resource allocations, keeping
+the Guest OS out of QoS flows. If needed, the hypervisor can virtualize
+`srmcfg` CSR for a VM using the virtual-instruction exceptions triggered upon
+Guest access. If the direct selection of `RCID` and `MCID` by the VM becomes
+common and emulation overhead is an issue, future extensions may allow VS-mode
+to use a selector for a hypervisor-configured set of CSRs holding `RCID` and
+`MCID` values designated for that Guest OS use.
+
+During context switches, the supervisor may choose to execute with the `srmcfg`
+of the outgoing context to attribute the execution to it. Prior to restoring
+the new context, it switches to the new VM's `srmcfg`. The supervisor can also
+use a separate configuration for execution not to be attributed to either
+contexts.
+====
+////

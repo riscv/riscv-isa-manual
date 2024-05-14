@@ -1,18 +1,3861 @@
 [[bits]]
-== "B" Standard Extension for Bit Manipulation, Version 0.0
+== "B" Extension for Bit Manipulation, Version 1.0.0
 
-This chapter is a placeholder for a future standard extension to provide
-bit manipulation instructions, including instructions to insert,
-extract, and test bit fields, and for rotations, funnel shifts, and bit
-and byte permutations.
-[NOTE]
-====
-Although bit manipulation instructions are very effective in some
-application domains, particularly when dealing with externally packed
-data structures, we excluded them from the base ISAs as they are not
-useful in all domains and can add additional complexity or instruction
-formats to supply all needed operands.
+The B standard extension comprises instructions provided by the Zba, Zbb, and
+Zbs extensions.
 
-We anticipate the B extension will be a brownfield encoding within the
-base 30-bit instruction space.
-====
+[[preface]]
+=== Bit-manipulation a, b, c and s extensions grouped for public review and ratification
+
+The bit-manipulation (bitmanip) extension collection is comprised of several component extensions to the base RISC-V architecture that are intended to provide some combination of code size reduction, performance improvement, and energy reduction.
+While the instructions are intended to have general use, some instructions are more useful in some domains than others.
+Hence, several smaller bitmanip extensions are provided, rather than one large extension.
+Each of these smaller extensions is grouped by common function and use case, and each has its own Zb*-extension name.
+
+Each bitmanip extension includes a group of several bitmanip instructions that have similar purposes and that can often share the same logic. Some instructions are available in only one extension while others are available in several.
+The instructions have mnemonics and encodings that are independent of the extensions in which they appear.
+Thus, when implementing extensions with overlapping instructions, there is no redundancy in logic or encoding.
+
+The bitmanip extensions are defined for RV32 and RV64.
+Most of the instructions are expected to be forward compatible with RV128.
+While the shift-immediate instructions are defined to have at most a 6-bit immediate field, a 7th bit is available in the encoding space should this be needed for RV128.
+
+=== Word Instructions
+
+The bitmanip extension follows the convention in RV64 that _w_-suffixed instructions (without a dot before the _w_) ignore the upper 32 bits of their inputs, operate on the least-significant 32-bits as signed values and produce a 32-bit signed result that is sign-extended to XLEN.
+
+Bitmanip instructions with the suffix _.uw_ have one operand that is an unsigned 32-bit value that is extracted from the least significant 32 bits of the specified register.  Other than that, these perform full XLEN operations.
+
+Bitmanip instructions with the suffix _.b_, _.h_ and _.w_ only look at the least significant 8-bits, 16-bits and 32-bits of the input (respectively) and produce an XLEN-wide result that is sign-extended or zero-extended, based on the specific instruction.
+
+=== Pseudocode for instruction semantics
+
+The semantics of each instruction in <<#insns>> is expressed in a SAIL-like syntax.
+
+=== Extensions
+
+The first group of bitmanip extensions to be released for Public Review are:
+
+* <<#zba>>
+* <<#zbb>>
+* <<#zbc>>
+* <<#zbs>>
+
+Below is a list of all of the instructions that are included in these extensions
+along with their specific mapping:
+
+[%header,cols="^3,^3,10,16,^2,^2,^2,^2"]
+|====
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+|Zba
+|Zbb
+|Zbc
+|Zbs
+
+|
+|&#10003;
+|add.uw _rd_, _rs1_, _rs2_
+|<<#insns-add_uw>>
+|&#10003;
+|
+|
+|
+
+|&#10003;
+|&#10003;
+|andn _rd_, _rs1_, _rs2_
+|<<#insns-andn>>
+|
+|&#10003;
+|
+|
+
+
+|&#10003;
+|&#10003;
+|clmul _rd_, _rs1_, _rs2_
+|<<#insns-clmul>>
+|
+|
+|&#10003;
+|
+
+|&#10003;
+|&#10003;
+|clmulh _rd_, _rs1_, _rs2_
+|<<#insns-clmulh>>
+|
+|
+|&#10003;
+|
+
+|&#10003;
+|&#10003;
+|clmulr _rd_, _rs1_, _rs2_
+|<<#insns-clmulr>>
+|
+|
+|&#10003;
+|
+
+|&#10003;
+|&#10003;
+|clz _rd_, _rs_
+|<<#insns-clz>>
+|
+|&#10003;
+|
+|
+
+|
+|&#10003;
+|clzw _rd_, _rs_
+|<<#insns-clzw>>
+|
+|&#10003;
+|
+|
+|&#10003;
+|&#10003;
+|cpop _rd_, _rs_
+|<<#insns-cpop>>
+|
+|&#10003;
+|
+|
+
+|
+|&#10003;
+|cpopw _rd_, _rs_
+|<<#insns-cpopw>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|ctz _rd_, _rs_
+|<<#insns-ctz>>
+|
+|&#10003;
+|
+|
+
+|
+|&#10003;
+|ctzw _rd_, _rs_
+|<<#insns-ctzw>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|max _rd_, _rs1_, _rs2_
+|<<#insns-max>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|maxu _rd_, _rs1_, _rs2_
+|<<#insns-maxu>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|min _rd_, _rs1_, _rs2_
+|<<#insns-min>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|minu _rd_, _rs1_, _rs2_
+|<<#insns-minu>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|orc.b _rd_, _rs1_, _rs2_
+|<<#insns-orc_b>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|orn _rd_, _rs1_, _rs2_
+|<<#insns-orn>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|rev8 _rd_, _rs_
+|<<#insns-rev8>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|rol _rd_, _rs1_, _rs2_
+|<<#insns-rol>>
+|
+|&#10003;
+|
+|
+
+|
+|&#10003;
+|rolw _rd_, _rs1_, _rs2_
+|<<#insns-rolw>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|ror _rd_, _rs1_, _rs2_
+|<<#insns-ror>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|rori _rd_, _rs1_, _shamt_
+|<<#insns-rori>>
+|
+|&#10003;
+|
+|
+
+|
+|&#10003;
+|roriw _rd_, _rs1_, _shamt_
+|<<#insns-roriw>>
+|
+|&#10003;
+|
+|
+
+|
+|&#10003;
+|rorw _rd_, _rs1_, _rs2_
+|<<#insns-rorw>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|bclr _rd_, _rs1_, _rs2_
+|<<#insns-bclr>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|bclri _rd_, _rs1_, _imm_
+|<<#insns-bclri>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|bext _rd_, _rs1_, _rs2_
+|<<#insns-bext>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|bexti _rd_, _rs1_, _imm_
+|<<#insns-bexti>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|binv _rd_, _rs1_, _rs2_
+|<<#insns-binv>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|binvi _rd_, _rs1_, _imm_
+|<<#insns-binvi>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|bset _rd_, _rs1_, _rs2_
+|<<#insns-bset>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|bseti _rd_, _rs1_, _imm_
+|<<#insns-bseti>>
+|
+|
+|
+|&#10003;
+
+|&#10003;
+|&#10003;
+|sext.b _rd_, _rs_
+|<<#insns-sext_b>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|sext.h _rd_, _rs_
+|<<#insns-sext_h>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|sh1add _rd_, _rs1_, _rs2_
+|<<#insns-sh1add>>
+|&#10003;
+|
+|
+|
+
+|
+|&#10003;
+|sh1add.uw _rd_, _rs1_, _rs2_
+|<<#insns-sh1add_uw>>
+|&#10003;
+|
+|
+|
+
+|&#10003;
+|&#10003;
+|sh2add _rd_, _rs1_, _rs2_
+|<<#insns-sh2add>>
+|&#10003;
+|
+|
+|
+
+|
+|&#10003;
+|sh2add.uw _rd_, _rs1_, _rs2_
+|<<#insns-sh2add_uw>>
+|&#10003;
+|
+|
+|
+
+|&#10003;
+|&#10003;
+|sh3add _rd_, _rs1_, _rs2_
+|<<#insns-sh3add>>
+|&#10003;
+|
+|
+|
+
+|
+|&#10003;
+|sh3add.uw _rd_, _rs1_, _rs2_
+|<<#insns-sh3add_uw>>
+|&#10003;
+|
+|
+|
+
+|
+|&#10003;
+|slli.uw _rd_, _rs1_, _imm_
+|<<#insns-slli_uw>>
+|&#10003;
+|
+|
+|
+
+|&#10003;
+|&#10003;
+|xnor _rd_, _rs1_, _rs2_
+|<<#insns-xnor>>
+|
+|&#10003;
+|
+|
+
+|&#10003;
+|&#10003;
+|zext.h _rd_, _rs_
+|<<#insns-zext_h>>
+|
+|&#10003;
+|
+|
+
+|====
+
+[#zba,reftext=Address generation instructions]
+==== Zba: Address generation
+
+The Zba instructions can be used to accelerate the generation of addresses that index into arrays of basic types (halfword, word, doubleword) using both unsigned word-sized and XLEN-sized indices: a shifted index is added to a base address.
+
+The shift and add instructions do a left shift of 1, 2, or 3 because these are commonly found in real-world code and because they can be implemented with a minimal amount of additional hardware beyond that of the simple adder. This avoids lengthening the critical path in implementations.
+
+While the shift and add instructions are limited to a maximum left shift of 3, the slli instruction (from the base ISA) can be used to perform similar shifts for indexing into arrays of wider elements. The slli.uw -- added in this extension -- can be used when the index is to be interpreted as an unsigned word.
+
+The following instructions (and pseudoinstructions) comprise the Zba extension:
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|
+|&#10003;
+|add.uw _rd_, _rs1_, _rs2_
+|<<#insns-add_uw>>
+
+|&#10003;
+|&#10003;
+|sh1add _rd_, _rs1_, _rs2_
+|<<#insns-sh1add>>
+
+|
+|&#10003;
+|sh1add.uw _rd_, _rs1_, _rs2_
+|<<#insns-sh1add_uw>>
+
+|&#10003;
+|&#10003;
+|sh2add _rd_, _rs1_, _rs2_
+|<<#insns-sh2add>>
+
+|
+|&#10003;
+|sh2add.uw _rd_, _rs1_, _rs2_
+|<<#insns-sh2add_uw>>
+
+|&#10003;
+|&#10003;
+|sh3add _rd_, _rs1_, _rs2_
+|<<#insns-sh3add>>
+
+|
+|&#10003;
+|sh3add.uw _rd_, _rs1_, _rs2_
+|<<#insns-sh3add_uw>>
+
+|
+|&#10003;
+|slli.uw _rd_, _rs1_, _imm_
+|<<#insns-slli_uw>>
+
+|
+|&#10003;
+|zext.w _rd_, _rs_
+|<<#insns-add_uw>>
+
+|===
+
+[#zbb,reftext="Basic bit-manipulation"]
+==== Zbb: Basic bit-manipulation
+
+===== Logical with negate
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|andn _rd_, _rs1_, _rs2_
+|<<#insns-andn>>
+
+|&#10003;
+|&#10003;
+|orn _rd_, _rs1_, _rs2_
+|<<#insns-orn>>
+
+|&#10003;
+|&#10003;
+|xnor _rd_, _rs1_, _rs2_
+|<<#insns-xnor>>
+|===
+
+.Implementation Hint
+[NOTE, caption="Imp" ]
+===============================================================
+The Logical with Negate instructions can be implemented by inverting the _rs2_ inputs to the base-required AND, OR, and XOR logic instructions.
+In some implementations, the inverter on rs2 used for subtraction can be reused for this purpose.
+===============================================================
+
+===== Count leading/trailing zero bits
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|clz _rd_, _rs_
+|<<#insns-clz>>
+
+|
+|&#10003;
+|clzw _rd_, _rs_
+|<<#insns-clzw>>
+
+|&#10003;
+|&#10003;
+|ctz _rd_, _rs_
+|<<#insns-ctz>>
+
+|
+|&#10003;
+|ctzw _rd_, _rs_
+|<<#insns-ctzw>>
+|===
+
+===== Count population
+
+These instructions count the number of set bits (1-bits). This is also
+commonly referred to as population count.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|cpop _rd_, _rs_
+|<<#insns-cpop>>
+
+|
+|&#10003;
+|cpopw _rd_, _rs_
+|<<#insns-cpopw>>
+|===
+
+===== Integer minimum/maximum
+
+The integer minimum/maximum instructions are arithmetic R-type
+instructions that return the smaller/larger of two operands.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|max _rd_, _rs1_, _rs2_
+|<<#insns-max>>
+
+|&#10003;
+|&#10003;
+|maxu _rd_, _rs1_, _rs2_
+|<<#insns-maxu>>
+
+|&#10003;
+|&#10003;
+|min _rd_, _rs1_, _rs2_
+|<<#insns-min>>
+
+|&#10003;
+|&#10003;
+|minu _rd_, _rs1_, _rs2_
+|<<#insns-minu>>
+|===
+
+===== Sign extension and zero extension
+
+These instructions perform the sign extension or zero extension of the least significant 8 bits or 16 bits of the source register.
+
+These instructions replace the generalized idioms `slli rD,rS,(XLEN-<size>) + srli` (for zero extension) or `slli + srai` (for sign extension) for the sign extension of 8-bit and 16-bit quantities, and for the zero extension of 16-bit quantities.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|sext.b _rd_, _rs_
+|<<#insns-sext_b>>
+
+|&#10003;
+|&#10003;
+|sext.h _rd_, _rs_
+|<<#insns-sext_h>>
+
+|&#10003;
+|&#10003;
+|zext.h _rd_, _rs_
+|<<#insns-zext_h>>
+|===
+
+===== Bitwise rotation
+
+Bitwise rotation instructions are similar to the shift-logical operations from the base spec. However, where the shift-logical 
+instructions shift in zeros, the rotate instructions shift in the bits that were shifted out of the other side of the value.
+Such operations are also referred to as ‘circular shifts’.
+
+
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|rol _rd_, _rs1_, _rs2_
+|<<#insns-rol>>
+
+|
+|&#10003;
+|rolw _rd_, _rs1_, _rs2_
+|<<#insns-rolw>>
+
+|&#10003;
+|&#10003;
+|ror _rd_, _rs1_, _rs2_
+|<<#insns-ror>>
+
+|&#10003;
+|&#10003;
+|rori _rd_, _rs1_, _shamt_
+|<<#insns-rori>>
+
+|
+|&#10003;
+|roriw _rd_, _rs1_, _shamt_
+|<<#insns-roriw>>
+
+|
+|&#10003;
+|rorw _rd_, _rs1_, _rs2_
+|<<#insns-rorw>>
+|===
+
+.Architecture Explanation
+[NOTE, caption="AE" ]
+===============================================================
+The rotate instructions were included to replace a common
+four-instruction sequence to achieve the same effect (neg; sll/srl; srl/sll; or)
+===============================================================
+
+===== OR Combine
+
+*orc.b* sets the bits of each byte in the result _rd_ to all zeros if no bit within the respective byte of _rs_ is set, or to all ones if any bit within the respective byte of _rs_ is set.
+
+One use-case is string-processing functions, such as *strlen* and *strcpy*, which can use *orc.b* to test for the terminating zero byte by counting the set bits in leading non-zero bytes in a word.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|orc.b _rd_, _rs_
+|<<#insns-orc_b>>
+|===
+
+===== Byte-reverse
+
+*rev8* reverses the byte-ordering of _rs_.
+
+[%header,cols="^1,^1,4,8"]
+|====
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|rev8 _rd_, _rs_
+|<<#insns-rev8>>
+
+|====
+
+[#zbc,reftext="Carry-less multiplication"]
+==== Zbc: Carry-less multiplication
+
+Carry-less multiplication is the multiplication in the polynomial ring over GF(2).
+
+*clmul* produces the lower half of the carry-less product and *clmulh* produces the upper half of the 2&#x2715;XLEN carry-less product.
+
+*clmulr* produces bits 2&#x2715;XLEN−2:XLEN-1 of the 2&#x2715;XLEN carry-less product.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|clmul _rd_, _rs1_, _rs2_
+|<<#insns-clmul>>
+
+|&#10003;
+|&#10003;
+|clmulh _rd_, _rs1_, _rs2_
+|<<#insns-clmulh>>
+
+|&#10003;
+|&#10003;
+|clmulr _rd_, _rs1_, _rs2_
+|<<#insns-clmulr>>
+
+|===
+
+[#zbs,reftext="Single-bit instructions"]
+==== Zbs: Single-bit instructions
+
+The single-bit instructions provide a mechanism to set, clear, invert, or extract
+a single bit in a register. The bit is specified by its index.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|bclr _rd_, _rs1_, _rs2_
+|<<#insns-bclr>>
+
+|&#10003;
+|&#10003;
+|bclri _rd_, _rs1_, _imm_
+|<<#insns-bclri>>
+
+|&#10003;
+|&#10003;
+|bext _rd_, _rs1_, _rs2_
+|<<#insns-bext>>
+
+|&#10003;
+|&#10003;
+|bexti _rd_, _rs1_, _imm_
+|<<#insns-bexti>>
+
+|&#10003;
+|&#10003;
+|binv _rd_, _rs1_, _rs2_
+|<<#insns-binv>>
+
+|&#10003;
+|&#10003;
+|binvi _rd_, _rs1_, _imm_
+|<<#insns-binvi>>
+
+|&#10003;
+|&#10003;
+|bset _rd_, _rs1_, _rs2_
+|<<#insns-bset>>
+
+|&#10003;
+|&#10003;
+|bseti _rd_, _rs1_, _imm_
+|<<#insns-bseti>>
+
+|===
+
+[#zbkb,reftext="Bit-manipulation for Cryptography"]
+==== Zbkb: Bit-manipulation for Cryptography
+
+This extension contains instructions essential for implementing
+common operations in cryptographic workloads.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+
+| &#10003; 
+| &#10003; 
+|  rol         
+| <<insns-rol>>
+
+|          
+| &#10003; 
+|  rolw        
+| <<insns-rolw>>
+
+| &#10003; 
+| &#10003; 
+|  ror         
+| <<insns-ror>>
+
+| &#10003; 
+| &#10003; 
+|  rori        
+| <<insns-rori>>
+
+|          
+| &#10003; 
+|  roriw       
+| <<insns-roriw>>
+
+|          
+| &#10003; 
+|  rorw        
+| <<insns-rorw>>
+
+| &#10003; 
+| &#10003; 
+|  andn        
+| <<insns-andn>>
+
+| &#10003; 
+| &#10003; 
+|  orn         
+| <<insns-orn>>
+
+| &#10003; 
+| &#10003; 
+|  xnor        
+| <<insns-xnor>>
+
+| &#10003; 
+| &#10003; 
+|  pack        
+| <<insns-pack>>
+
+| &#10003; 
+| &#10003; 
+|  packh       
+| <<insns-packh>>
+
+|          
+| &#10003; 
+|  packw       
+| <<insns-packw>>
+
+| &#10003; 
+| &#10003; 
+|  rev.b       
+| <<insns-revb>>
+
+| &#10003; 
+| &#10003; 
+|  rev8        
+| <<insns-rev8>>
+
+| &#10003; 
+|          
+|  zip         
+| <<insns-zip>>
+
+| &#10003; 
+|          
+|  unzip       
+| <<insns-unzip>>
+
+|===
+
+[#zbkc,reftext="Carry-less multiplication for Cryptography"]
+==== Zbkc: Carry-less multiplication for Cryptography
+
+Carry-less multiplication is the multiplication in the polynomial ring over
+GF(2). This is a critical operation in some cryptographic workloads,
+particularly the AES-GCM authenticated encryption scheme.
+This extension provides only the instructions needed to
+efficiently implement the GHASH operation, which is part of this workload.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|clmul _rd_, _rs1_, _rs2_
+|<<#insns-clmul>>
+
+|&#10003;
+|&#10003;
+|clmulh _rd_, _rs1_, _rs2_
+|<<#insns-clmulh>>
+
+|===
+
+[#zbkx,reftext="Crossbar permutations"]
+==== Zbkx: Crossbar permutations
+
+These instructions implement a "lookup table" for 4 and 8 bit elements
+inside the general purpose registers.
+_rs1_ is used as a vector of N-bit words, and _rs2_ as a vector of N-bit
+indices into _rs1_.
+Elements in _rs1_ are replaced by the indexed element in _rs2_, or zero
+if the index into _rs2_ is out of bounds.
+
+These instructions are useful for expressing N-bit to N-bit boolean
+operations, and implementing cryptographic code with secret
+dependent memory accesses (particularly SBoxes) such that the execution
+latency does not depend on the (secret) data being operated on.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|&#10003;
+|&#10003;
+|xperm.n _rd_, _rs1_, _rs2_
+|<<#insns-xpermn>>
+
+|&#10003;
+|&#10003;
+|xperm.b _rd_, _rs1_, _rs2_
+|<<#insns-xpermb>>
+
+|===
+
+<<<
+
+[#insns,reftext="Instructions (in alphabetical order)"]
+=== Instructions (in alphabetical order)
+
+[#insns-add_uw,reftext=Add unsigned word]
+==== add.uw
+
+Synopsis::
+Add unsigned word
+
+Mnemonic::
+add.uw _rd_, _rs1_, _rs2_
+
+
+Pseudoinstructions::
+zext.w _rd_, _rs1_ &#8594; add.uw _rd_, _rs1_, zero
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x3b, attr: ['OP-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x0, attr: ['ADD.UW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x04, attr: ['ADD.UW'] },
+]}
+....
+
+Description::
+This instruction performs an XLEN-wide addition between _rs2_ and the zero-extended least-significant word of _rs1_.
+
+Operation::
+[source,sail]
+--
+let base = X(rs2);
+let index = EXTZ(X(rs1)[31..0]);
+
+X(rd) = base + index;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<zba>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-andn,reftext="AND with inverted operand"]
+==== andn
+
+Synopsis::
+AND with inverted operand
+
+Mnemonic::
+andn _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x7, attr: ['ANDN']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x20, attr: ['ANDN'] },
+]}
+....
+
+Description:: 
+This instruction performs the bitwise logical AND operation between _rs1_ and the bitwise inversion of _rs2_.
+
+Operation::
+[source,sail]
+--
+X(rd) = X(rs1) & ~X(rs2);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-bclr,reftext="Single-Bit Clear (Register)"]
+==== bclr
+
+Synopsis::
+Single-Bit Clear (Register)
+
+Mnemonic::
+bclr _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BCLR'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x24, attr: ['BCLR/BEXT'] },
+]}
+....
+
+Description::
+This instruction returns _rs1_ with a single bit cleared at the index specified in _rs2_.
+The index is read from the lower log2(XLEN) bits of _rs2_.
+
+Operation::
+[source,sail]
+--
+let index = X(rs2) & (XLEN - 1);
+X(rd) = X(rs1) & ~(1 << index)
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-bclri,reftext="Single-Bit Clear (Immediate)"]
+==== bclri
+
+Synopsis::
+Single-Bit Clear (Immediate)
+
+Mnemonic::
+bclri _rd_, _rs1_, _shamt_
+
+Encoding (RV32)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BCLRI'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'shamt' },
+    { bits:  7, name: 0x24, attr: ['BCLRI'] },
+]}
+....
+
+Encoding (RV64)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BCLRI'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  6, name: 'shamt' },
+    { bits:  6, name: 0x12, attr: ['BCLRI'] },
+]}
+....
+
+Description::
+This instruction returns _rs1_ with a single bit cleared at the index specified in _shamt_.
+The index is read from the lower log2(XLEN) bits of _shamt_.
+For RV32, the encodings corresponding to shamt[5]=1 are reserved.
+
+Operation::
+[source,sail]
+--
+let index = shamt & (XLEN - 1);
+X(rd) = X(rs1) & ~(1 << index)
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-bext,reftext="Single-Bit Extract (Register)"]
+==== bext
+
+Synopsis::
+Single-Bit Extract (Register)
+// Should we describe this as a Set-if-bit-is-set?
+
+Mnemonic::
+bext _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['BEXT'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x24, attr: ['BCLR/BEXT'] },
+]}
+....
+
+Description::
+This instruction returns a single bit extracted from _rs1_ at the index specified in _rs2_.
+The index is read from the lower log2(XLEN) bits of _rs2_.
+
+Operation::
+[source,sail]
+--
+let index = X(rs2) & (XLEN - 1);
+X(rd) = (X(rs1) >> index) & 1;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-bexti,reftext="Single-Bit Extract (Immediate)"]
+==== bexti
+
+Synopsis::
+Single-Bit Extract (Immediate)
+
+Mnemonic::
+bexti _rd_, _rs1_, _shamt_
+
+Encoding (RV32)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['BEXTI'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'shamt' },
+    { bits:  7, name: 0x24, attr: ['BEXTI/BCLRI'] },
+]}
+....
+
+Encoding (RV64)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['BEXTI'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  6, name: 'shamt' },
+    { bits:  6, name: 0x12, attr: ['BEXTI/BCLRI'] },
+]}
+....
+
+Description::
+This instruction returns a single bit extracted from _rs1_ at the index specified in _rs2_.
+The index is read from the lower log2(XLEN) bits of _shamt_.
+For RV32, the encodings corresponding to shamt[5]=1 are reserved.
+
+Operation::
+[source,sail]
+--
+let index = shamt & (XLEN - 1);
+X(rd) = (X(rs1) >> index) & 1;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-binv,reftext="Single-Bit Invert (Register)"]
+==== binv
+
+Synopsis::
+Single-Bit Invert (Register)
+
+Mnemonic::
+binv _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BINV'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x34, attr: ['BINV'] },
+]}
+....
+
+Description::
+This instruction returns _rs1_ with a single bit inverted at the index specified in _rs2_.
+The index is read from the lower log2(XLEN) bits of _rs2_.
+
+Operation::
+[source,sail]
+--
+let index = X(rs2) & (XLEN - 1);
+X(rd) = X(rs1) ^ (1 << index)
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-binvi,reftext="Single-Bit Invert (Immediate)"]
+==== binvi
+
+Synopsis::
+Single-Bit Invert (Immediate)
+
+Mnemonic::
+binvi _rd_, _rs1_, _shamt_
+
+Encoding (RV32)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BINV'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'shamt' },
+    { bits:  7, name: 0x34, attr: ['BINVI'] },
+]}
+....
+
+Encoding (RV64)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BINV'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  6, name: 'shamt' },
+    { bits:  6, name: 0x1a, attr: ['BINVI'] },
+]}
+....
+
+Description::
+This instruction returns _rs1_ with a single bit inverted at the index specified in _shamt_.
+The index is read from the lower log2(XLEN) bits of _shamt_.
+For RV32, the encodings corresponding to shamt[5]=1 are reserved.
+
+Operation::
+[source,sail]
+--
+let index = shamt & (XLEN - 1);
+X(rd) = X(rs1) ^ (1 << index)
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-bset,reftext="Single-Bit Set (Register)"]
+==== bset
+
+Synopsis::
+Single-Bit Set (Register)
+
+Mnemonic::
+bset _rd_, _rs1_,_rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BSET'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x14, attr: ['BSET'] },
+]}
+....
+
+Description::
+This instruction returns _rs1_ with a single bit set at the index specified in _rs2_.
+The index is read from the lower log2(XLEN) bits of _rs2_.
+
+Operation::
+[source,sail]
+--
+let index = X(rs2) & (XLEN - 1);
+X(rd) = X(rs1) | (1 << index)
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-bseti,reftext="Single-Bit Set (Immediate)"]
+==== bseti
+
+Synopsis::
+Single-Bit Set (Immediate)
+
+Mnemonic::
+bseti _rd_, _rs1_,_shamt_
+
+Encoding (RV32)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BSETI'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'shamt' },
+    { bits:  7, name: 0x14, attr: ['BSETI'] },
+]}
+....
+
+Encoding (RV64)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['BSETI'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  6, name: 'shamt' },
+    { bits:  6, name: 0x0a, attr: ['BSETI'] },
+]}
+....
+
+Description::
+This instruction returns _rs1_ with a single bit set at the index specified in _shamt_.
+The index is read from the lower log2(XLEN) bits of _shamt_.
+For RV32, the encodings corresponding to shamt[5]=1 are reserved.
+
+Operation::
+[source,sail]
+--
+let index = shamt & (XLEN - 1);
+X(rd) = X(rs1) | (1 << index)
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbs (<<#zbs>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-clmul,reftext="Carry-less multiply (low-part)"]
+==== clmul
+
+Synopsis::
+Carry-less multiply (low-part)
+
+Mnemonic::
+clmul _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['CLMUL'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x5, attr: ['MINMAX/CLMUL'] },
+]}
+....
+
+Description::
+clmul produces the lower half of the 2·XLEN carry-less product.
+
+Operation::
+[source,sail]
+--
+let rs1_val = X(rs1);
+let rs2_val = X(rs2);
+let output : xlenbits = 0;
+
+foreach (i from 0 to (xlen - 1) by 1) {
+   output = if   ((rs2_val >> i) & 1)
+            then output ^ (rs1_val << i);
+            else output;
+}
+
+X[rd] = output
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbc (<<#zbc>>)
+|v1.0
+|Ratified
+
+|Zbkc (<<#zbkc>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-clmulh,reftext="Carry-less multiply (high-part)"]
+==== clmulh
+
+Synopsis::
+Carry-less multiply (high-part)
+
+Mnemonic::
+clmulh _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x3, attr: ['CLMULH'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x5, attr: ['MINMAX/CLMUL'] },
+]}
+....
+
+Description::
+clmulh produces the upper half of the 2·XLEN carry-less product.
+
+Operation::
+[source,sail]
+--
+let rs1_val = X(rs1);
+let rs2_val = X(rs2);
+let output : xlenbits = 0;
+
+foreach (i from 1 to xlen by 1) {
+   output = if   ((rs2_val >> i) & 1)
+            then output ^ (rs1_val >> (xlen - i));
+            else output;
+}
+
+X[rd] = output
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbc (<<#zbc>>)
+|v1.0
+|Ratified
+
+|Zbkc (<<#zbkc>>)
+|v1.0
+|Ratified
+|===
+
+
+<<<
+[#insns-clmulr,reftext="Carry-less multiply (reversed)"]
+==== clmulr
+
+Synopsis::
+Carry-less multiply (reversed)
+
+Mnemonic::
+clmulr _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x2, attr: ['CLMULR'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x5, attr: ['MINMAX/CLMUL'] },
+]}
+....
+
+Description::
+*clmulr* produces bits 2·XLEN−2:XLEN-1 of the 2·XLEN carry-less
+product.
+
+Operation::
+[source,sail]
+--
+let rs1_val = X(rs1);
+let rs2_val = X(rs2);
+let output : xlenbits = 0;
+
+foreach (i from 0 to (xlen - 1) by 1) {
+   output = if   ((rs2_val >> i) & 1)
+            then output ^ (rs1_val >> (xlen - i - 1));
+            else output;
+}
+
+X[rd] = output
+--
+
+.Note
+[NOTE, caption="A" ]
+===============================================================
+The *clmulr* instruction is used to accelerate CRC calculations.
+The *r* in the instruction's mnemonic stands for _reversed_, as the
+instruction is equivalent to bit-reversing the inputs, performing
+a *clmul*, then bit-reversing the output.
+===============================================================
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbc (<<#zbc>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-clz,reftext="Count leading zero bits"]
+==== clz
+
+Synopsis::
+Count leading zero bits
+
+Mnemonic::
+clz _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['CLZ']  },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 0x0, attr: ['CLZ'] },
+    { bits:  7, name: 0x30, attr: ['CLZ']  },
+]}
+....
+
+Description:: 
+This instruction counts the number of 0's before the first 1, starting at the most-significant bit (i.e., XLEN-1) and progressing to bit 0. Accordingly, if the input is 0, the output is XLEN, and if the most-significant bit of the input is a 1, the output is 0.
+
+Operation::
+[source,sail]
+--
+val HighestSetBit : forall ('N : Int), 'N >= 0. bits('N) -> int
+
+function HighestSetBit x = {
+  foreach (i from (xlen - 1) to 0 by 1 in dec)
+    if [x[i]] == 0b1 then return(i) else ();
+  return -1;
+}
+
+let rs = X(rs);
+X[rd] = (xlen - 1) - HighestSetBit(rs);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-clzw,reftext="Count leading zero bits in word"]
+==== clzw
+
+Synopsis::
+Count leading zero bits in word
+
+Mnemonic::
+clzw _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x1b, attr: ['OP-IMM-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['CLZW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 0x0, attr: ['CLZW'] },
+    { bits:  7, name: 0x30, attr: ['CLZW'] },
+]}
+....
+
+Description::
+This instruction counts the number of 0's before the first 1 starting at bit 31 and progressing to bit 0.
+Accordingly, if the least-significant word is 0, the output is 32, and if the most-significant bit of the word (i.e., bit 31) is a 1, the output is 0.
+
+Operation::
+[source,sail]
+--
+val HighestSetBit32 : forall ('N : Int), 'N >= 0. bits('N) -> int
+
+function HighestSetBit32 x = {
+  foreach (i from 31 to 0 by 1 in dec)
+    if [x[i]] == 0b1 then return(i) else ();
+  return -1;
+}
+
+let rs = X(rs);
+X[rd] = 31 - HighestSetBit(rs);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-cpop,reftext="Count set bits"]
+==== cpop
+
+Synopsis::
+Count set bits
+
+Mnemonic::
+cpop _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['CPOP'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 0x2, attr: ['CPOP'] },
+    { bits:  7, name: 0x30, attr: ['CPOP'] },
+]}
+....
+Description:: 
+This instructions counts the number of 1's (i.e., set bits) in the source register.
+
+Operation::
+[source,sail]
+--
+let bitcount = 0;
+let rs = X(rs);
+
+foreach (i from 0 to (xlen - 1) in inc)
+    if rs[i] == 0b1 then bitcount = bitcount + 1 else ();
+
+X[rd] = bitcount
+--
+
+.Software Hint
+[NOTE, caption="SH" ]
+===============================================================
+This operations is known as population count, popcount, sideways sum, bit summation, or Hamming weight.
+
+The GCC builtin function `+__builtin_popcount (unsigned int x)+` is implemented by cpop on RV32 and by *cpopw* on RV64.
+The GCC builtin function `+__builtin_popcountl (unsigned long x)+` for LP64 is implemented by *cpop* on RV64.
+===============================================================
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-cpopw,reftext="Count set bits in word"]
+==== cpopw
+
+Synopsis::
+Count set bits in word
+
+Mnemonic::
+cpopw _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x1b, attr: ['OP-IMM-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['CPOPW'] },
+    { bits:  5, name: 'rs' },
+    { bits:  5, name: 0x2, attr: ['CPOPW'] },
+    { bits:  7, name: 0x30, attr: ['CPOPW'] },
+]}
+....
+Description:: 
+This instructions counts the number of 1's (i.e., set bits) in the least-significant word of the source register.
+
+Operation::
+[source,sail]
+--
+let bitcount = 0;
+let val = X(rs);
+
+foreach (i from 0 to 31 in inc)
+    if val[i] == 0b1 then bitcount = bitcount + 1 else ();
+
+X[rd] = bitcount
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-ctz,reftext="Count trailing zero bits"]
+==== ctz
+
+Synopsis::
+Count trailing zeros
+
+Mnemonic::
+ctz _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['CTZ/CTZW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 0x1, attr: ['CTZ/CTZW'] },
+    { bits:  7, name: 0x30, attr: ['CTZ/CTZW'] },
+]}
+....
+
+Description:: 
+This instruction counts the number of 0's before the first 1, starting at the least-significant bit (i.e., 0) and progressing to the most-significant bit (i.e., XLEN-1).
+Accordingly, if the input is 0, the output is XLEN, and if the least-significant bit of the input is a 1, the output is 0.
+
+Operation::
+[source,sail]
+--
+val LowestSetBit : forall ('N : Int), 'N >= 0. bits('N) -> int
+
+function LowestSetBit x = {
+  foreach (i from 0 to (xlen - 1) by 1 in dec)
+    if [x[i]] == 0b1 then return(i) else ();
+  return xlen;
+}
+
+let rs = X(rs);
+X[rd] = LowestSetBit(rs);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-ctzw,reftext="Count trailing zero bits in word"]
+==== ctzw
+
+Synopsis::
+Count trailing zero bits in word
+
+Mnemonic::
+ctzw _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x1b, attr: ['OP-IMM-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['CTZ/CTZW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 0x1, attr: ['CTZ/CTZW'] },
+    { bits:  7, name: 0x30, attr: ['CTZ/CTZW'] },
+]}
+....
+
+Description::
+This instruction counts the number of 0's before the first 1, starting at the least-significant bit (i.e., 0) and progressing to the most-significant bit of the least-significant word (i.e., 31). Accordingly, if the least-significant word is 0, the output is 32, and if the least-significant bit of the input is a 1, the output is 0.
+
+Operation::
+[source,sail]
+--
+val LowestSetBit32 : forall ('N : Int), 'N >= 0. bits('N) -> int
+
+function LowestSetBit32 x = {
+  foreach (i from 0 to 31 by 1 in dec)
+    if [x[i]] == 0b1 then return(i) else ();
+  return 32;
+}
+
+let rs = X(rs);
+X[rd] = LowestSetBit32(rs);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-max,reftext="Maximum"]
+==== max
+
+Synopsis::
+Maximum 
+
+Mnemonic::
+max _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x6, attr: ['MAX']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x05, attr: ['MINMAX/CLMUL'] },
+]}
+....
+
+Description::
+This instruction returns the larger of two signed integers.
+
+Operation::
+[source,sail]
+--
+let rs1_val = X(rs1);
+let rs2_val = X(rs2);
+
+let result = if   rs1_val <_s rs2_val
+             then rs2_val
+             else rs1_val;
+
+X(rd) = result;
+--
+
+.Software Hint
+[NOTE, caption="SW"]
+===============================================================
+Calculating the absolute value of a signed integer can be performed
+using the following sequence: *neg rD,rS* followed by *max
+rD,rS,rD*. When using this common sequence, it is suggested that they
+are scheduled with no intervening instructions so that
+implementations that are so optimized can fuse them together.
+===============================================================
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-maxu,reftext="Unsigned maximum"]
+==== maxu
+
+Synopsis::
+Unsigned maximum
+
+Mnemonic::
+maxu _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x7, attr: ['MAXU']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x05, attr: ['MINMAX/CLMUL'] },
+]}
+....
+
+Description::
+This instruction returns the larger of two unsigned integers.
+
+Operation::
+[source,sail]
+--
+let rs1_val = X(rs1);
+let rs2_val = X(rs2);
+
+let result = if   rs1_val <_u rs2_val
+             then rs2_val
+             else rs1_val;
+
+X(rd) = result;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-min,reftext="Minimum"]
+==== min
+
+Synopsis::
+Minimum
+
+Mnemonic::
+min _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x4, attr: ['MIN']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x05, attr: ['MINMAX/CLMUL'] },
+]}
+....
+
+Description::
+This instruction returns the smaller of two signed integers.
+
+Operation::
+[source,sail]
+--
+let rs1_val = X(rs1);
+let rs2_val = X(rs2);
+
+let result = if   rs1_val <_s rs2_val
+             then rs1_val
+             else rs2_val;
+
+X(rd) = result;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-minu,reftext="Unsigned minimum"]
+==== minu
+
+Synopsis::
+Unsigned minimum
+
+Mnemonic::
+minu _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['MINU']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x05, attr: ['MINMAX/CLMUL'] },
+]}
+....
+
+Description::
+This instruction returns the smaller of two unsigned integers.
+
+Operation::
+[source,sail]
+--
+let rs1_val = X(rs1);
+let rs2_val = X(rs2);
+
+let result = if   rs1_val <_u rs2_val
+             then rs1_val
+             else rs2_val;
+
+X(rd) = result;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-orc_b,reftext="Bitwise OR-Combine, byte granule"]
+==== orc.b
+
+Synopsis::
+Bitwise OR-Combine, byte granule
+
+Mnemonic::
+orc.b _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5 },
+    { bits:  5, name: 'rs' },
+    { bits: 12, name: 0x287 }
+]}
+....
+
+Description:: 
+Combines the bits within each byte using bitwise logical OR.
+This sets the bits of each byte in the result _rd_ to all zeros if no bit within the respective byte of _rs_ is set, or to all ones if any bit within the respective byte of _rs_ is set.
+
+Operation::
+[source,sail]
+--
+let input = X(rs);
+let output : xlenbits = 0;
+
+foreach (i from 0 to (xlen - 8) by 8) {
+   output[(i + 7)..i] = if   input[(i + 7)..i] == 0
+                        then 0b00000000
+                        else 0b11111111;
+}
+
+X[rd] = output;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-orn,reftext="OR with inverted operand"]
+==== orn
+
+Synopsis::
+OR with inverted operand
+
+Mnemonic::
+orn _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x6, attr: ['ORN']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x20, attr: ['ORN'] },
+]}
+....
+
+Description:: 
+This instruction performs the bitwise logical OR operation between _rs1_ and the bitwise inversion of _rs2_.
+
+Operation::
+[source,sail]
+--
+X(rd) = X(rs1) | ~X(rs2);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-pack,reftext="Pack low halves of registers"]
+==== pack
+
+Synopsis::
+Pack the low halves of _rs1_ and _rs2_ into _rd_.
+
+Mnemonic::
+pack _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    {bits:  7, name: 0x33, attr: ['OP'] },
+    {bits: 5, name: 'rd'},
+    {bits: 3, name: 0x4, attr:['PACK']},
+    {bits: 5, name: 'rs1'},
+    {bits: 5, name: 'rs2'},
+    {bits: 7, name: 0x4, attr:['PACK']},
+]}
+....
+
+Description:: 
+The pack instruction packs the XLEN/2-bit lower halves of _rs1_ and _rs2_ into
+_rd_, with _rs1_ in the lower half and _rs2_ in the upper half.
+
+Operation::
+[source,sail]
+--
+let lo_half : bits(xlen/2) = X(rs1)[xlen/2-1..0];
+let hi_half : bits(xlen/2) = X(rs2)[xlen/2-1..0];
+X(rd) = EXTZ(hi_half @ lo_half);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-packh,reftext="Pack low bytes of registers"]
+==== packh
+
+Synopsis::
+Pack the low bytes of _rs1_ and _rs2_ into _rd_.
+
+Mnemonic::
+packh _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    {bits:  7, name: 0x33, attr: ['OP'] },
+    {bits: 5, name: 'rd'},
+    {bits: 3, name: 0x7, attr: ['PACKH']},
+    {bits: 5, name: 'rs1'},
+    {bits: 5, name: 'rs2'},
+    {bits: 7, name: 0x4, attr: ['PACKH']},
+]}
+....
+
+Description:: 
+And the packh instruction packs the least-significant bytes of
+_rs1_ and _rs2_ into the 16 least-significant bits of _rd_,
+zero extending the rest of _rd_.
+
+Operation::
+[source,sail]
+--
+let lo_half : bits(8) = X(rs1)[7..0];
+let hi_half : bits(8) = X(rs2)[7..0];
+X(rd) = EXTZ(hi_half @ lo_half);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-packw,reftext="Pack low 16-bits of registers (RV64)"]
+==== packw
+
+Synopsis::
+Pack the low 16-bits of _rs1_ and _rs2_ into _rd_ on RV64.
+
+Mnemonic::
+packw _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 2, name: 0x3},
+{bits: 5, name: 0xe},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x4},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 7, name: 0x4},
+]}
+....
+
+Description:: 
+This instruction packs the low 16 bits of
+_rs1_ and _rs2_ into the 32 least-significant bits of _rd_,
+sign extending the 32-bit result to the rest of _rd_.
+This instruction only exists on RV64 based systems.
+
+Operation::
+[source,sail]
+--
+let lo_half : bits(16) = X(rs1)[15..0];
+let hi_half : bits(16) = X(rs2)[15..0];
+X(rd) = EXTS(hi_half @ lo_half);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-rev8,reftext="Byte-reverse register"]
+==== rev8
+
+Synopsis::
+Byte-reverse register
+
+Mnemonic::
+rev8 _rd_, _rs_
+
+Encoding (RV32)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5 },
+    { bits:  5, name: 'rs' },
+    { bits: 12, name: 0x698 }
+]}
+....
+
+Encoding (RV64)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5 },
+    { bits:  5, name: 'rs' },
+    { bits: 12, name: 0x6b8 }
+]}
+....
+
+Description:: 
+This instruction reverses the order of the bytes in _rs_.
+
+Operation::
+[source,sail]
+--
+let input = X(rs);
+let output : xlenbits = 0;
+let j = xlen - 1;
+
+foreach (i from 0 to (xlen - 8) by 8) {
+   output[i..(i + 7)] = input[(j - 7)..j];
+   j = j - 8;
+}
+
+X[rd] = output
+--
+
+.Note
+[NOTE, caption="A" ]
+===============================================================
+The *rev8* mnemonic corresponds to different instruction encodings in RV32 and RV64.
+===============================================================
+
+.Software Hint
+[NOTE, caption="SH" ]
+===============================================================
+The byte-reverse operation is only available for the full register
+width.  To emulate word-sized and halfword-sized byte-reversal,
+perform a `rev8 rd,rs` followed by a `srai rd,rd,K`, where K is
+XLEN-32 and XLEN-16, respectively.
+===============================================================
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|v1.0
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-revb,reftext="Reverse bits in bytes"]
+==== rev.b
+
+Synopsis::
+Reverse the bits in each byte of a source register.
+
+Mnemonic::
+rev.b _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5 },
+    { bits:  5, name: 'rs' },
+    { bits: 12, name: 0x687 }
+]}
+....
+
+Description:: 
+This instruction reverses the order of the bits in every byte of a register.
+
+Operation::
+[source,sail]
+--
+result : xlenbits = EXTZ(0b0);
+foreach (i from 0 to sizeof(xlen) by 8) {
+    result[i+7..i] = reverse_bits_in_byte(X(rs1)[i+7..i]);
+};
+X(rd) = result;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-rol,reftext="Rotate left (Register)"]
+==== rol
+
+Synopsis::
+Rotate Left (Register)
+
+Mnemonic::
+rol _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['ROL']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x30, attr: ['ROL'] },
+]}
+....
+
+Description::
+This instruction performs a rotate left of _rs1_ by the amount in least-significant log2(XLEN) bits of _rs2_.
+
+Operation::
+[source,sail]
+--
+let shamt = if   xlen == 32
+            then X(rs2)[4..0]
+            else X(rs2)[5..0];
+let result = (X(rs1) << shamt) | (X(rs1) >> (xlen - shamt));
+
+X(rd) = result;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-rolw,reftext="Rotate Left Word (Register)"]
+==== rolw
+
+Synopsis::
+Rotate Left Word (Register)
+
+Mnemonic::
+rolw _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x3b, attr: ['OP-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['ROLW']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x30, attr: ['ROLW'] },
+]}
+....
+
+Description::
+This instruction performs a rotate left on the least-significant word of  _rs1_ by the amount in least-significant 5 bits of _rs2_.
+The resulting word value is sign-extended by copying bit 31 to all of the more-significant bits. 
+
+Operation::
+[source,sail]
+--
+let rs1 = EXTZ(X(rs1)[31..0])
+let shamt = X(rs2)[4..0];
+let result = (rs1 << shamt) | (rs1 >> (32 - shamt));
+X(rd) = EXTS(result[31..0]);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-ror,reftext="Rotate right (Register)"]
+==== ror
+
+Synopsis::
+Rotate Right
+
+Mnemonic::
+ror _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['ROR']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x30, attr: ['ROR'] },
+]}
+....
+
+Description::
+This instruction performs a rotate right of _rs1_ by the amount in least-significant log2(XLEN) bits of _rs2_.
+
+Operation::
+[source,sail]
+--
+let shamt = if   xlen == 32
+            then X(rs2)[4..0]
+            else X(rs2)[5..0];
+let result = (X(rs1) >> shamt) | (X(rs1) << (xlen - shamt));
+
+X(rd) = result;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-rori,reftext="Rotate right (Immediate)"]
+==== rori
+
+Synopsis::
+Rotate Right (Immediate)
+
+Mnemonic::
+rori _rd_, _rs1_, _shamt_
+
+Encoding (RV32)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['RORI']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'shamt' },
+    { bits:  7, name: 0x30, attr: ['RORI'] },
+]}
+....
+
+Encoding (RV64)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['RORI']},
+    { bits:  5, name: 'rs1' },
+    { bits:  6, name: 'shamt' },
+    { bits:  6, name: 0x18, attr: ['RORI'] },
+]}
+....
+
+Description:: 
+This instruction performs a rotate right of _rs1_ by the amount in the least-significant log2(XLEN) bits of _shamt_.
+For RV32, the encodings corresponding to shamt[5]=1 are reserved.
+
+Operation::
+[source,sail]
+--
+let shamt = if   xlen == 32
+            then shamt[4..0]
+            else shamt[5..0];
+let result = (X(rs1) >> shamt) | (X(rs1) << (xlen - shamt));
+
+X(rd) = result;
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-roriw,reftext="Rotate right Word (Immediate)"]
+==== roriw
+
+Synopsis::
+Rotate Right Word by Immediate
+
+Mnemonic::
+roriw _rd_, _rs1_, _shamt_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x1b, attr: ['OP-IMM-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['RORIW']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'shamt' },
+    { bits:  7, name: 0x30, attr: ['RORIW'] },
+]}
+....
+
+Description:: 
+This instruction performs a rotate right on the least-significant word
+of _rs1_ by the amount in the least-significant log2(XLEN) bits of
+_shamt_.
+The resulting word value is sign-extended by copying bit 31 to all of
+the more-significant bits.
+
+
+Operation::
+[source,sail]
+--
+let rs1_data = EXTZ(X(rs1)[31..0];
+let result = (rs1_data >> shamt) | (rs1_data << (32 - shamt));
+X(rd) = EXTS(result[31..0]);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-rorw,reftext="Rotate right Word (Register)"]
+==== rorw
+
+Synopsis::
+Rotate Right Word (Register)
+
+Mnemonic::
+rorw _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x3b, attr: ['OP-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x5, attr: ['RORW']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x30, attr: ['RORW'] },
+]}
+....
+
+Description:: 
+This instruction performs a rotate right on the least-significant word of  _rs1_ by the amount in least-significant 5 bits of _rs2_.
+The resultant word is sign-extended by copying bit 31 to all of the more-significant bits.
+
+Operation::
+[source,sail]
+--
+let rs1 = EXTZ(X(rs1)[31..0])
+let shamt = X(rs2)[4..0];
+let result = (rs1 >> shamt) | (rs1 << (32 - shamt));
+X(rd) = EXTS(result);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-sext_b,reftext="Sign-extend byte"]
+==== sext.b
+
+Synopsis::
+Sign-extend byte
+
+Mnemonic::
+sext.b _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['SEXT.B/SEXT.H'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 0x04, attr: ['SEXT.B'] },
+    { bits:  7, name: 0x30 },
+]}
+....
+
+Description::
+This instruction sign-extends the least-significant byte in the source to XLEN by copying the most-significant bit in the byte (i.e., bit 7) to all of the more-significant bits.
+
+Operation::
+[source,sail]
+--
+X(rd) = EXTS(X(rs)[7..0]);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-sext_h,reftext="Sign-extend halfword"]
+==== sext.h
+
+Synopsis::
+Sign-extend halfword
+
+Mnemonic::
+sext.h _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x13, attr: ['OP-IMM'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['SEXT.B/SEXT.H'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 0x05, attr: ['SEXT.H'] },
+    { bits:  7, name: 0x30 },
+]}
+....
+
+Description::
+This instruction sign-extends the least-significant halfword in _rs_ to XLEN by copying the most-significant bit in the halfword (i.e., bit 15) to all of the more-significant bits.
+
+Operation::
+[source,sail]
+--
+X(rd) = EXTS(X(rs)[15..0]);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+|===
+
+
+<<<
+[#insns-sh1add,reftext=Shift left by 1 and add]
+==== sh1add
+
+Synopsis::
+Shift left by 1 and add
+
+Mnemonic::
+sh1add _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x2, attr: ['SH1ADD'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x10, attr: ['SH1ADD'] },
+]}
+....
+
+Description::
+This instruction shifts _rs1_ to the left by 1 bit and adds it to _rs2_.
+
+Operation::
+[source,sail]
+--
+X(rd) = X(rs2) + (X(rs1) << 1);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<#zba>>)
+|0.93
+|Ratified
+|===
+
+// We have decided that this and all other instructions will not have reserved encodings for "useless encodings"
+// We could follow suit of the base ISA and create HINTs if there is some recognized value for doing so
+
+<<<
+[#insns-sh1add_uw,reftext=Shift unsigned word left by 1 and add]
+==== sh1add.uw
+
+Synopsis::
+Shift unsigned word left by 1 and add
+
+Mnemonic::
+sh1add.uw _rd_, _rs1_, _rs2_
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x3b, attr: ['OP-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x2, attr: ['SH1ADD.UW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x10, attr: ['SH1ADD.UW']  },
+]}
+....
+
+Description::
+This instruction performs an XLEN-wide addition of two addends.
+The first addend is _rs2_. The second addend is the unsigned value formed by extracting the least-significant word of _rs1_ and shifting it left by 1 place.
+
+Operation::
+[source,sail]
+--
+let base = X(rs2);
+let index = EXTZ(X(rs1)[31..0]);
+
+X(rd) = base + (index << 1);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<#zba>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-sh2add,reftext=Shift left by 2 and add]
+==== sh2add
+
+Synopsis::
+Shift left by 2 and add
+
+Mnemonic::
+sh2add _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x4, attr: ['SH2ADD'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x10, attr: ['SH2ADD'] },
+]}
+....
+
+Description::
+This instruction shifts _rs1_ to the left by 2 places and adds it to _rs2_.
+
+Operation::
+[source,sail]
+--
+X(rd) = X(rs2) + (X(rs1) << 2);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<#zba>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-sh2add_uw,reftext=Shift unsigned word left by 2 and add]
+==== sh2add.uw
+
+Synopsis::
+Shift unsigned word left by 2 and add
+
+Mnemonic::
+sh2add.uw _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x3b, attr: ['OP-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x4, attr: ['SH2ADD.UW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x10, attr: ['SH2ADD.UW'] },
+]}
+....
+
+Description::
+This instruction performs an XLEN-wide addition of two addends.
+The first addend is _rs2_.
+The second addend is the unsigned value formed by extracting the least-significant word of _rs1_ and shifting it left by 2 places.
+
+Operation::
+[source,sail]
+--
+let base = X(rs2);
+let index = EXTZ(X(rs1)[31..0]);
+
+X(rd) = base + (index << 2);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<#zba>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-sh3add,reftext=Shift left by 3 and add]
+==== sh3add
+
+Synopsis::
+Shift left by 3 and add
+
+Mnemonic::
+sh3add _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x6, attr: ['SH3ADD'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x10, attr: ['SH3ADD'] },
+]}
+....
+
+Description::
+This instruction shifts _rs1_ to the left by 3 places and adds it to _rs2_.
+
+Operation::
+[source,sail]
+--
+X(rd) = X(rs2) + (X(rs1) << 3);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<#zba>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-sh3add_uw,reftext=Shift unsigned word left by 3 and add]
+==== sh3add.uw
+
+Synopsis::
+Shift unsigned word left by 3 and add
+
+Mnemonic::
+sh3add.uw _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x3b, attr: ['OP-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x6, attr: ['SH3ADD.UW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x10, attr: ['SH3ADD.UW'] },
+]}
+....
+
+Description::
+This instruction performs an XLEN-wide addition of two addends. The first addend is _rs2_. The second addend is the unsigned value formed by extracting the least-significant word of _rs1_ and shifting it left by 3 places.
+
+Operation::
+[source,sail]
+--
+let base = X(rs2);
+let index = EXTZ(X(rs1)[31..0]);
+
+X(rd) = base + (index << 3);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<#zba>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-slli_uw,reftext="Shift-left unsigned word (Immediate)"]
+==== slli.uw
+
+Synopsis::
+Shift-left unsigned word (Immediate)
+
+Mnemonic::
+slli.uw _rd_, _rs1_, _shamt_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x1b, attr: ['OP-IMM-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x1, attr: ['SLLI.UW'] },
+    { bits:  5, name: 'rs1' },
+    { bits:  6, name: 'shamt' },
+    { bits:  6, name: 0x02, attr: ['SLLI.UW'] },
+]}
+....
+
+Description::
+This instruction takes the least-significant word of _rs1_, zero-extends it, and shifts it left by the immediate.
+
+Operation::
+[source,sail]
+--
+X(rd) = (EXTZ(X(rs)[31..0]) << shamt);
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zba (<<#zba>>)
+|0.93
+|Ratified
+|===
+
+.Architecture Explanation
+[NOTE, caption="A" ]
+===============================================================
+This instruction is the same as *slli* with *zext.w* performed on _rs1_ before shifting.
+===============================================================
+
+<<<
+[#insns-unzip,reftext="Bit deinterleave"]
+==== unzip
+
+Synopsis::
+Implements the inverse of the zip instruction.
+
+Mnemonic::
+unzip _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x13, attr: ['OP-IMM']},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x5},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 0x1f},
+{bits: 7, name: 0x4},
+]}
+....
+
+Description:: 
+This instruction gathers bits from the high and low halves of the source
+word into odd/even bit positions in the destination word.
+It is the inverse of the <<insns-zip,zip>> instruction.
+This instruction is available only on RV32.
+
+Operation::
+[source,sail]
+--
+foreach (i from 0 to xlen/2-1) {
+  X(rd)[i] = X(rs1)[2*i]
+  X(rd)[i+xlen/2] = X(rs1)[2*i+1]
+}
+--
+
+.Software Hint
+[NOTE, caption="SH" ]
+===============================================================
+This instruction is useful for implementing the SHA3 cryptographic
+hash function on a 32-bit architecture, as it implements the
+bit-interleaving operation used to speed up the 64-bit rotations
+directly.
+===============================================================
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkb (<<#zbkb>>) (RV32)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-xnor,reftext="Exclusive NOR"]
+==== xnor
+
+Synopsis::
+Exclusive NOR
+
+Mnemonic::
+xnor _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x4, attr: ['XNOR']},
+    { bits:  5, name: 'rs1' },
+    { bits:  5, name: 'rs2' },
+    { bits:  7, name: 0x20, attr: ['XNOR'] },
+]}
+....
+
+Description:: 
+This instruction performs the bit-wise exclusive-NOR operation on _rs1_ and _rs2_.
+
+Operation::
+[source,sail]
+--
+X(rd) = ~(X(rs1) ^ X(rs2));
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+
+|Zbkb (<<#zbkb>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-xpermb,reftext="Crossbar permutation (bytes)"]
+==== xperm.b
+
+Synopsis::
+Byte-wise lookup of indices into a vector in registers.
+
+Mnemonic::
+xperm.b _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 2, name: 0x3},
+{bits: 5, name: 0xc},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x4},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 7, name: 0x14},
+]}
+....
+
+Description:: 
+The xperm.b instruction operates on bytes.
+The _rs1_ register contains a vector of XLEN/8 8-bit elements.
+The _rs2_ register contains a vector of XLEN/8 8-bit indexes.
+The result is each element in _rs2_ replaced by the indexed element in _rs1_,
+or zero if the index into _rs2_ is out of bounds.
+
+Operation::
+[source,sail]
+--
+val xpermb_lookup : (bits(8), xlenbits) -> bits(8)
+function xpermb_lookup (idx, lut) = {
+    (lut >> (idx @ 0b000))[7..0]
+}
+
+function clause execute ( XPERM_B (rs2,rs1,rd)) = {
+    result : xlenbits = EXTZ(0b0);
+    foreach(i from 0 to xlen by 8) {
+        result[i+7..i] = xpermn_lookup(X(rs2)[i+7..i], X(rs1));
+    };
+    X(rd) = result;
+    RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkx (<<#zbkx>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-xpermn,reftext="Crossbar permutation (nibbles)"]
+==== xperm.n
+
+Synopsis::
+Nibble-wise lookup of indices into a vector.
+
+Mnemonic::
+xperm.n _rd_, _rs1_, _rs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 2, name: 0x3},
+{bits: 5, name: 0xc},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x2},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'rs2'},
+{bits: 7, name: 0x14},
+]}
+....
+
+Description:: 
+The xperm.n instruction operates on nibbles.
+The _rs1_ register contains a vector of XLEN/4 4-bit elements.
+The _rs2_ register contains a vector of XLEN/4 4-bit indexes.
+The result is each element in _rs2_ replaced by the indexed element in _rs1_,
+or zero if the index into _rs2_ is out of bounds.
+
+Operation::
+[source,sail]
+--
+val xpermn_lookup : (bits(4), xlenbits) -> bits(4)
+function xpermn_lookup (idx, lut) = {
+    (lut >> (idx @ 0b00))[3..0]
+}
+
+function clause execute ( XPERM_N (rs2,rs1,rd)) = {
+    result : xlenbits = EXTZ(0b0);
+    foreach(i from 0 to xlen by 4) {
+        result[i+3..i] = xpermn_lookup(X(rs2)[i+3..i], X(rs1));
+    };
+    X(rd) = result;
+    RETIRE_SUCCESS
+}
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkx (<<#zbkx>>)
+|v1.0
+|Ratified
+|===
+
+<<<
+[#insns-zext_h,reftext="Zero-extend halfword"]
+==== zext.h
+
+Synopsis::
+Zero-extend halfword
+
+Mnemonic::
+zext.h _rd_, _rs_
+
+Encoding (RV32)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x33, attr: ['OP'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x4, attr: ['ZEXT.H']},
+    { bits:  5, name: 'rs' },
+    { bits:  5, name: 0x00 },
+    { bits:  7, name: 0x04 },
+]}
+....
+
+Encoding (RV64)::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  7, name: 0x3b, attr: ['OP-32'] },
+    { bits:  5, name: 'rd' },
+    { bits:  3, name: 0x4, attr: ['ZEXT.H']},
+    { bits:  5, name: 'rs' },
+    { bits:  5, name: 0x00 },
+    { bits:  7, name: 0x04 },
+]}
+....
+
+Description::
+This instruction zero-extends the least-significant halfword of the source to XLEN by inserting 0's into all of the bits more significant than 15.
+
+Operation::
+[source,sail]
+--
+X(rd) = EXTZ(X(rs)[15..0]);
+--
+
+.Note
+[NOTE, caption="A" ]
+===============================================================
+The *zext.h* mnemonic corresponds to different instruction encodings in RV32 and RV64.
+===============================================================
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbb (<<#zbb>>)
+|0.93
+|Ratified
+|===
+
+<<<
+[#insns-zip,reftext="Bit interleave"]
+==== zip
+
+Synopsis::
+Gather odd and even bits of the source word into upper/lower halves of the
+destination.
+
+Mnemonic::
+zip _rd_, _rs_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 0x13, attr: ['OP-IMM']},
+{bits: 5, name: 'rd'},
+{bits: 3, name: 0x1},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 0x1e},
+{bits: 7, name: 0x4},
+]}
+....
+
+Description:: 
+This instruction scatters all of the odd and even bits of a source word into
+the high and low halves of a destination word.
+It is the inverse of the <<insns-unzip,unzip>> instruction.
+This instruction is available only on RV32.
+
+Operation::
+[source,sail]
+--
+foreach (i from 0 to xlen/2-1) {
+  X(rd)[2*i] = X(rs1)[i]
+  X(rd)[2*i+1] = X(rs1)[i+xlen/2]
+}
+--
+
+.Software Hint
+[NOTE, caption="SH" ]
+===============================================================
+This instruction is useful for implementing the SHA3 cryptographic
+hash function on a 32-bit architecture, as it implements the
+bit-interleaving operation used to speed up the 64-bit rotations
+directly.
+===============================================================
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zbkb (<<#zbkb>>) (RV32)
+|v1.0
+|Ratified
+|===
+
+
+=== Software optimization guide
+
+==== strlen
+
+The *orc.b* instruction allows for the efficient detection of *NUL* bytes in an XLEN-sized chunk of data:
+
+ * the result of *orc.b* on a chunk that does not contain any *NUL* bytes will be all-ones, and
+ * after a bitwise-negation of the result of *orc.b*, the number of data bytes before the  first *NUL* byte (if any) can be detected by *ctz*/*clz* (depending on the endianness of data).
+
+A full example of a *strlen* function, which uses these techniques and also demonstrates the use of it for unaligned/partial data, is the following:
+
+[source,asm]
+--
+#include <sys/asm.h>
+
+	.text
+	.globl strlen
+	.type  strlen, @function
+strlen:
+	andi	a3, a0, (SZREG-1)   // offset
+	andi    a1, a0, -SZREG      // align pointer
+.Lprologue:
+	li      a4, SZREG
+	sub     a4, a4, a3          // XLEN - offset
+	slli	a3, a3, 3           // offset * 8
+	REG_L   a2, 0(a1)           // chunk
+	/*
+	 * Shift the partial/unaligned chunk we loaded to remove the bytes
+	 * from before the start of the string, adding NUL bytes at the end.
+	 */
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__	
+	srl	a2, a2 ,a3          // chunk >> (offset * 8)
+#else
+	sll     a2, a2, a3
+#endif
+	orc.b   a2, a2
+	not	a2, a2
+	/*
+	 * Non-NUL bytes in the string have been expanded to 0x00, while
+ 	 * NUL bytes have become 0xff.  Search for the first set bit
+	 * (corresponding to a NUL byte in the original chunk).
+	 */
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	ctz     a2, a2
+#else
+	clz     a2, a2
+#endif
+	/*
+	 * The first chunk is special: compare against the number of valid
+	 * bytes in this chunk.
+	 */
+	srli    a0, a2, 3
+	bgtu    a4, a0, .Ldone
+	addi    a3, a1, SZREG
+	li      a4, -1
+	.align 2
+	/*
+	 * Our critical loop is 4 instructions and processes data in 4 byte
+	 * or 8 byte chunks.
+	 */
+.Lloop:
+	REG_L   a2, SZREG(a1)
+	addi    a1, a1, SZREG
+	orc.b   a2, a2
+	beq     a2, a4, .Lloop
+
+.Lepilogue:
+	not     a2, a2
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	ctz     a2, a2
+#else
+	clz     a2, a2
+#endif
+	sub     a1, a1, a3
+	add	a0, a0, a1
+	srli    a2, a2, 3
+	add 	a0, a0, a2
+.Ldone:
+	ret
+--
+
+==== strcmp
+
+[source,asm]
+--
+#include <sys/asm.h>
+
+  .text
+  .globl strcmp
+  .type  strcmp, @function
+strcmp:
+  or    a4, a0, a1
+  li    t2, -1
+  and   a4, a4, SZREG-1
+  bnez  a4, .Lsimpleloop
+
+  # Main loop for aligned strings
+.Lloop:
+  REG_L a2, 0(a0)
+  REG_L a3, 0(a1)
+  orc.b t0, a2
+  bne   t0, t2, .Lfoundnull
+  addi  a0, a0, SZREG
+  addi  a1, a1, SZREG
+  beq   a2, a3, .Lloop
+  
+  # Words don't match, and no null byte in first word.
+  # Get bytes in big-endian order and compare.
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  rev8  a2, a2
+  rev8  a3, a3
+#endif
+  # Synthesize (a2 >= a3) ? 1 : -1 in a branchless sequence.
+  sltu a0, a2, a3
+  neg  a0, a0
+  ori  a0, a0, 1
+  ret
+
+.Lfoundnull:
+  # Found a null byte.
+  # If words don't match, fall back to simple loop.
+  bne   a2, a3, .Lsimpleloop
+
+  # Otherwise, strings are equal.
+  li    a0, 0
+  ret
+
+  # Simple loop for misaligned strings
+.Lsimpleloop:
+  lbu   a2, 0(a0)
+  lbu   a3, 0(a1)
+  addi  a0, a0, 1
+  addi  a1, a1, 1
+  bne   a2, a3, 1f
+  bnez  a2, .Lsimpleloop
+
+1:
+  sub   a0, a2, a3
+  ret
+
+.size   strcmp, .-strcmp
+--

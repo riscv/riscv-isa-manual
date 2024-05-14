@@ -1,0 +1,263 @@
+== "Zacas" Extension for Atomic Compare-and-Swap (CAS) Instructions, Version 1.0.0
+
+Compare-and-Swap (CAS) provides an easy and typically faster way to perform
+thread synchronization operations when supported as a hardware instruction. CAS
+is typically used by lock-free and wait-free algorithms. This extension proposes
+CAS instructions to operate on 32-bit, 64-bit, and 128-bit (RV64 only) data
+values. The CAS instruction supports the C++11 atomic compare and exchange
+operation.
+
+While compare-and-swap for XLEN wide data may be accomplished using LR/SC, the
+CAS atomic instructions scale better to highly parallel systems than LR/SC.
+Many lock-free algorithms, such as a lock-free queue, require manipulation of
+pointer variables. A simple CAS operation may not be sufficient to guard against
+what is commonly referred to as the ABA problem in such algorithms that
+manipulate pointer variables. To avoid the ABA problem, the algorithms associate
+a reference counter with the pointer variable and perform updates using a
+quadword compare and swap (of both the pointer and the counter). The double and
+quadword CAS instructions support implementation of algorithms for ABA problem
+avoidance.
+
+The Zacas extension depends upon the Zaamo extension.
+
+=== Word/Doubleword/Quadword CAS (AMOCAS.W/D/Q) Instructions
+
+[wavedrom, , svg]
+.... 
+{reg: [
+  {bits:  7, name: 'opcode', attr:'AMO'},
+  {bits:  5, name: 'rd', attr:'dest'},
+  {bits:  3, name: 'funct3', attr:['010', '011', '100']},
+  {bits:  5, name: 'rs1', attr:'addr'},
+  {bits:  5, name: 'rs2', attr:'src'},
+  {bits:  1, name: 'rl'},
+  {bits:  1, name: 'aq'},
+  {bits:  5, name: '00101', attr:['AMOCAS.W', 'AMOCAS.D', 'AMOCAS.Q']},
+], config:{lanes: 1, hspace:1024}}
+....
+
+For RV32, `AMOCAS.W` atomically loads a 32-bit data value from address in `rs1`,
+compares the loaded value to the 32-bit value held in `rd`, and if the comparison
+is bitwise equal, then stores the 32-bit value held in `rs2` to the original
+address in `rs1`. The value loaded from memory is placed into register `rd`. The
+operation performed by `AMOCAS.W` for RV32 is as follows:
+
+[listing]
+----
+    temp = mem[X(rs1)]
+    if ( temp == X(rd) )
+        mem[X(rs1)] = X(rs2)
+    X(rd) = temp
+----
+
+`AMOCAS.D` is similar to `AMOCAS.W` but operates on 64-bit data values.
+
+For RV32, `AMOCAS.D` atomically loads 64-bits of a data value from address in
+`rs1`, compares the loaded value to a 64-bit value held in a register pair
+consisting of `rd` and `rd+1`, and if the comparison is bitwise equal, then
+stores the 64-bit value held in the register pair `rs2` and `rs2+1` to the
+original address in `rs1`. The value loaded from memory is placed into the
+register pair `rd` and `rd+1`. The instruction requires the first register in
+the pair to be even numbered; encodings with odd numbered registers specified
+in `rs2` and `rd` are reserved. When the first register of a source register
+pair is `x0`, then both halves of the pair read as zero. When the first
+register of a destination register pair is `x0`, then the entire register
+result is discarded and neither destination register is written.
+The operation performed by `AMOCAS.D` for RV32 is as follows:
+
+<<<
+
+[listing]
+    temp0 = mem[X(rs1)+0]
+    temp1 = mem[X(rs1)+4]
+    comp0 = (rd == x0)  ? 0 : X(rd)
+    comp1 = (rd == x0)  ? 0 : X(rd+1)
+    swap0 = (rs2 == x0) ? 0 : X(rs2)
+    swap1 = (rs2 == x0) ? 0 : X(rs2+1)
+    if ( temp0 == comp0 ) && ( temp1 == comp1 )
+        mem[X(rs1)+0] = swap0
+        mem[X(rs1)+4] = swap1
+    endif
+    if ( rd != x0 )
+        X(rd)   = temp0
+        X(rd+1) = temp1
+    endif
+
+For RV64, `AMOCAS.W` atomically loads a 32-bit data value from address in
+`rs1`, compares the loaded value to the lower 32 bits of the value held in `rd`,
+and if the comparison is bitwise equal, then stores the lower 32 bits of the
+value held in `rs2` to the original address in `rs1`. The 32-bit value loaded
+from memory is sign-extended and is placed into register `rd`. The operation
+performed by `AMOCAS.W` for RV64 is as follows:
+
+[listing]
+    temp[31:0] = mem[X(rs1)]
+    if ( temp[31:0] == X(rd)[31:0] )
+        mem[X(rs1)] = X(rs2)[31:0]
+    X(rd) = SignExtend(temp[31:0])
+
+For RV64, `AMOCAS.D` atomically loads 64-bits of a data value from address in
+`rs1`, compares the loaded value to a 64-bit value held in `rd`, and if the
+comparison is bitwise equal, then stores the 64-bit value held in `rs2` to the
+original address in `rs1`. The value loaded from memory is placed into register
+`rd`. The operation performed by `AMOCAS.D` for RV64 is as follows:
+[listing]
+    temp = mem[X(rs1)]
+    if ( temp == X(rd) )
+        mem[X(rs1)] = X(rs2)
+    X(rd) = temp
+
+`AMOCAS.Q` (RV64 only) atomically loads 128-bits of a data value from address in
+`rs1`, compares the loaded value to a 128-bit value held in a register pair
+consisting of `rd` and `rd+1`, and if the comparison is bitwise equal, then
+stores the 128-bit value held in the register pair `rs2` and `rs2+1` to the
+original address in `rs1`. The value loaded from memory is placed into the
+register pair `rd` and `rd+1`. The instruction requires the first register in
+the pair to be even numbered; encodings with odd numbered registers specified in
+`rs2` and `rd` are reserved. When the first register of a source register pair
+is `x0`, then both halves of the pair read as zero. When the first register of a
+destination register pair is `x0`, then the entire register result is discarded
+and neither destination register is written. The operation performed by
+`AMOCAS.Q` is as follows:
+
+<<<
+
+[listing]
+    temp0 = mem[X(rs1)+0]
+    temp1 = mem[X(rs1)+8]
+    comp0 = (rd == x0)  ? 0 : X(rd)
+    comp1 = (rd == x0)  ? 0 : X(rd+1)
+    swap0 = (rs2 == x0) ? 0 : X(rs2)
+    swap1 = (rs2 == x0) ? 0 : X(rs2+1)
+    if ( temp0 == comp0 ) && ( temp1 == comp1 )
+        mem[X(rs1)+0] = swap0
+        mem[X(rs1)+8] = swap1
+    endif
+    if ( rd != x0 )
+        X(rd)   = temp0
+        X(rd+1) = temp1
+    endif
+
+[NOTE]
+====
+For a future RV128 extension, `AMOCAS.Q` would encode a single XLEN=128 register
+in `rs2` and `rd`.
+====
+
+[NOTE]
+====
+Some algorithms may load the previous data value of a memory location into the
+register used as the compare data value source by a Zacas instruction. When
+using a Zacas instruction that uses a register pair to source the compare value,
+the two registers may be loaded using two individual loads. The two individual
+loads may read an inconsistent pair of values but that is not an issue since the
+`AMOCAS` operation itself uses an atomic load-pair from memory to obtain the
+data value for its comparison.
+
+The following example code sequence illustrates the use of `AMOCAS.D` in a RV32
+implementation to atomically increment a 64-bit counter.
+[listing]
+# a0 - address of the counter.
+increment:
+  lw   a2, (a0)      # Load current counter value using
+  lw   a3, 4(a0)     # two individual loads.
+retry:
+  mv   a6, a2        # Save the low 32 bits of the current value.
+  mv   a7, a3        # Save the high 32 bits of the current value.
+  addi a4, a2, 1     # Increment the low 32 bits.
+  sltu a1, a4, a2    # Determine if there is a carry out.
+  add  a5, a3, a1    # Add the carry if any to high 32 bits.
+  amocas.d.aqrl a2, a4, (a0)
+  bne  a2, a6, retry # If amocas.d failed then retry
+  bne  a3, a7, retry # using current values loaded by amocas.d.
+  ret
+====
+
+Just as for AMOs in the A extension, `AMOCAS.W/D/Q` requires that the address
+held in `rs1` be naturally aligned to the size of the operand (i.e., 16-byte
+aligned for _quadwords_, eight-byte aligned for _doublewords_, and four-byte
+aligned for _words_). And the same exception options apply if the address
+is not naturally aligned.
+
+Just as for AMOs in the A extension, the `AMOCAS.W/D/Q` optionally provide
+release consistency semantics, using the `aq` and `rl` bits, to help implement
+multiprocessor synchronization. The memory operation performed by an
+`AMOCAS.W/D/Q`, when successful, has acquire semantics if `aq` bit is 1 and has
+release semantics if `rl` bit is 1. The memory operation performed by an
+`AMOCAS.W/D/Q`, when not successful, has acquire semantics if `aq` bit is 1 but
+does not have release semantics, regardless of `rl`.
+
+A FENCE instruction may be used to order the memory read access and, if
+produced, the memory write access by an `AMOCAS.W/D/Q` instruction.
+
+[NOTE]
+====
+An unsuccessful `AMOCAS.W/D/Q` may either not perform a memory write or may
+write back the old value loaded from memory. The memory write, if produced, does
+not have release semantics, regardless of `rl`.
+====
+
+An `AMOCAS.W/D/Q` instruction always requires write permissions.
+
+[NOTE]
+====
+The following example code sequence illustrates the use of `AMOCAS.Q` to
+implement the _enqueue_ operation for a non-blocking concurrent queue using the
+algorithm outlined in cite:[queue]. The algorithm atomically operates on a
+pointer and its associated modification counter using the `AMOCAS.Q` instruction
+to avoid the ABA problem.
+
+[listing]
+# Enqueue operation of a non-blocking concurrent queue.
+# Data structures used by the queue:
+#   structure pointer_t {ptr:   node_t *, count: uint64_t}
+#   structure node_t    {next: pointer_t, value: data type}
+#   structure queue_t   {Head: pointer_t, Tail:  pointer_t}
+# Inputs to the procedure:
+#   a0 - address of Tail variable
+#   a4 - address of a new node to insert at tail
+enqueue:
+  ld   a6, (a0)          # a6 = Tail.ptr
+  ld   a7, 8(a0)         # a7 = Tail.count
+  ld   a2, (a6)          # a2 = Tail.ptr->next.ptr
+  ld   a3, 8(a6)         # a3 = Tail.ptr->next.count
+  ld   t1, (a0)
+  ld   t2, 8(a0)
+  bne  a6, t1, enqueue   # Retry if Tail & next are not consistent
+  bne  a7, t2, enqueue   # Retry if Tail & next are not consistent
+  bne  a2, x0, move_tail # Was tail pointing to the last node?
+  mv   t1, a2            # Save Tail.ptr->next.ptr
+  mv   t2, a3            # Save Tail.ptr->next.count
+  addi a5, a3, 1         # Link the node at the end of the list
+  amocas.q.aqrl a2, a4, (a6)
+  bne  a2, t1, enqueue   # Retry if CAS failed
+  bne  a3, t2, enqueue   # Retry if CAS failed
+  addi a5, a7, 1         # Update Tail to the inserted node
+  amocas.q.aqrl a6, a4, (a0)
+  ret                    # Enqueue done
+move_tail:               # Tail was not pointing to the last node
+  addi a3, a7, 1         # Try to swing Tail to the next node
+  amocas.q.aqrl a6, a2, (a0)
+  j    enqueue           # Retry
+
+====
+
+<<<
+
+=== Additional AMO PMAs
+
+There are four levels of PMA support defined for AMOs in the A extension. Zacas
+defines three additional levels of support: `AMOCASW`, `AMOCASD`, and `AMOCASQ`.
+
+`AMOCASW` indicates that in addition to instructions indicated by `AMOArithmetic`
+level support, the `AMOCAS.W` instruction is supported. `AMOCASD` indicates that
+in addition to instructions indicated by `AMOCASW` level support, the `AMOCAS.D`
+instruction is supported. `AMOCASQ` indicates that in addition to instructions
+indicated by `AMOCASD` level support, the `AMOCAS.Q` instruction is supported.
+
+[NOTE]
+====
+`AMOCASW/D/Q` require `AMOArithmetic` level support as the `AMOCAS.W/D/Q`
+instructions require ability to perform an arithmetic comparison and a swap
+operation. 
+====

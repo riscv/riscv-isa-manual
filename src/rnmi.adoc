@@ -1,9 +1,9 @@
 [[rnmi]]
-== "Smrnmi" Standard Extension for Resumable Non-Maskable Interrupts, Version 0.4
+== "Smrnmi" Extension for Resumable Non-Maskable Interrupts, Version 0.5
 
 [WARNING]
 ====
-*Warning! This draft specification may change before being accepted as
+*Warning! This frozen specification may change before being accepted as
 standard by RISC-V International.*
 ====
 
@@ -32,6 +32,9 @@ The RNMI interrupt trap handler address is implementation-defined.
 
 RNMI also has an associated exception trap handler address, which is
 implementation defined.
+
+NOTE: For example, some implementations might use the address specified
+in `mtvec` as the RNMI exception trap handler.
 
 === RNMI CSRs
 
@@ -71,19 +74,29 @@ of holding.
 .Resumable NMI cause `mncause`.
 include::images/bytefield/mncause.edn[]
 
-The `mncause` CSR holds the reason for the NMI, with bit MXLEN-1 set to
-1, and the NMI cause encoded in the least-significant bits or zero if
-NMI causes are not supported.
+The `mncause` CSR holds the reason for the NMI.
+If the reason is an interrupt, bit MXLEN-1 is set to 1, and the NMI
+cause is encoded in the least-significant bits.
+If the reason is an interrupt and NMI causes are not supported, bit MXLEN-1 is
+set to 1, and zero is written to the least-significant bits.
+If the reason is an exception within M-mode that results in a double trap as
+specified in the Smdbltrp extension, bit MXLEN-1 is set to 0 and the
+least-significant bits are set to the cause code corresponding to the
+exception that precipitated the double trap.
 
 .Resumable NMI status register `mnstatus`.
 include::images/bytefield/mnstatus.edn[]
 
 The `mnstatus` CSR holds a two-bit field, MNPP, which on entry to the
-trap handler holds the privilege mode of the interrupted context,
+RNMI trap handler holds the privilege mode of the interrupted context,
 encoded in the same manner as `mstatus`.MPP. It also holds a one-bit
-field, MNPV, which on entry to the trap handler holds the virtualization
+field, MNPV, which on entry to the RNMI trap handler holds the virtualization
 mode of the interrupted context, encoded in the same manner as
 `mstatus`.MPV.
+
+If the Zicfilp extension is implemented, `mnstatus` also holds the MNPELP
+field, which on entry to the RNMI trap handler holds the previous `ELP` state.
+When an RNMI trap is taken, MNPELP is set to `ELP` and `ELP` is set to 0.
 
 `mnstatus` also holds the NMIE bit. When NMIE=1, nonmaskable interrupts
 are enabled. When NMIE=0, _all_ interrupts are disabled.
@@ -131,6 +144,8 @@ MNRET is an M-mode-only instruction that uses the values in `mnepc` and
 `mnstatus` to return to the program counter, privilege mode, and
 virtualization mode of the interrupted context. This instruction also
 sets `mnstatus`.NMIE.  If MNRET changes the privilege mode to a mode less privileged than M, it also sets `mstatus`.MPRV to 0.
+If the Zicfilp extension is implemented, then if `mnstatus`.MNPP holds the
+value __y__, MNRET sets `ELP` to the logical AND of __y__LPE and `mnstatus`.MNPELP.
 
 === RNMI Operation
 
@@ -146,7 +161,7 @@ The RNMI handler can resume original execution using the new MNRET
 instruction, which restores the PC from `mnepc`, the privilege mode from
 `mnstatus`, and also sets `mnstatus`.NMIE, which re-enables interrupts.
 
-If the hart encounters an exception while executing in M-mode with the `mnstatus`.NMIE bit clear, the actions taken are the same as if the exception had occurred while `mnstatus`.NMIE were set, except that the program counter is set to the RNMI exception trap handler address (rather than the address specified by `mtvec`).
+If the hart encounters an exception while executing in M-mode with the `mnstatus`.NMIE bit clear, the actions taken are the same as if the exception had occurred while `mnstatus`.NMIE were set, except that the program counter is set to the RNMI exception trap handler address.
 
 [NOTE]
 ====

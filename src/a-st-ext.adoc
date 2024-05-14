@@ -1,7 +1,7 @@
 [[atomics]]
-== "A" Standard Extension for Atomic Instructions, Version 2.1
+== "A" Extension for Atomic Instructions, Version 2.1
 
-The standard atomic-instruction extension, named "A", contains
+The atomic-instruction extension, named "A", contains
 instructions that atomically read-modify-write memory to support
 synchronization between multiple RISC-V harts running in the same memory
 space. The two forms of atomic instruction provided are
@@ -18,6 +18,10 @@ appear to have finally settled on release consistency as the standard
 memory consistency model and so the RISC-V atomic support is built
 around this model.
 ====
+
+The A extension comprises instructions provided by the Zaamo and Zalrsc
+extensions.
+
 === Specifying Ordering of Atomic Instructions
 
 The base RISC-V ISA has a relaxed memory model, with the FENCE
@@ -48,7 +52,7 @@ after any later memory operations in the same RISC-V hart and to the
 same address domain.
 
 [[sec:lrsc]]
-=== Load-Reserved/Store-Conditional Instructions
+=== "Zalrsc" Extension for Load-Reserved/Store-Conditional Instructions
 
 include::images/wavedrom/load-reserve-st-conditional.adoc[]
 
@@ -62,10 +66,11 @@ if the reservation is still valid and the reservation set contains the
 bytes being written. If the SC.W succeeds, the instruction writes the
 word in _rs2_ to memory, and it writes zero to _rd_. If the SC.W fails,
 the instruction does not write to memory, and it writes a nonzero value
-to _rd_. Regardless of success or failure, executing an SC.W instruction
-invalidates any reservation held by this hart. LR.D and SC.D act
-analogously on doublewords and are only available on RV64. For RV64,
-LR.W and SC.W sign-extend the value placed in _rd_.
+to _rd_.  For the purposes of memory protection, a failed SC.W may be
+treated like a store.  Regardless of success or failure, executing an
+SC.W instruction invalidates any reservation held by this hart. LR.D and
+SC.D act analogously on doublewords and are only available on RV64. For
+RV64, LR.W and SC.W sign-extend the value placed in _rd_.
 
 [NOTE]
 ====
@@ -113,7 +118,7 @@ for the SLT/SLTU instructions. More specific failure codes might be
 defined in future versions or extensions to the ISA.
 ====
 
-For LR and SC, the A extension requires that the address held in _rs1_
+For LR and SC, the Zalrsc extension requires that the address held in _rs1_
 be naturally aligned to the size of the operand (i.e., eight-byte
 aligned for _doublewords_ and four-byte aligned for _words_). If the
 address is not naturally aligned, an address-misaligned exception or an
@@ -249,7 +254,7 @@ using LR/SC to implement a compare-and-swap function is shown in
 [[sec:lrscseq]]
 === Eventual Success of Store-Conditional Instructions
 
-The standard A extension defines _constrained LR/SC loops_, which have
+The Zalrsc extension defines _constrained LR/SC loops_, which have
 the following properties:
 
 * The loop comprises only an LR/SC sequence and code to retry the
@@ -348,7 +353,7 @@ substantially easier to provide in some microarchitectural styles.
 ====
 
 [[sec:amo]]
-=== Atomic Memory Operations
+=== "Zaamo" Extension for Atomic Memory Operations
 
 include::images/wavedrom/atomic-mem.adoc[]
 
@@ -362,14 +367,26 @@ can either operate on _doublewords_ (RV64 only) or _words_ in memory. For
 RV64, 32-bit AMOs always sign-extend the value placed in _rd_, and
 ignore the upper 32 bits of the original value of _rs2_.
 
-For AMOs, the A extension requires that the address held in _rs1_ be
+For AMOs, the Zaamo extension requires that the address held in _rs1_ be
 naturally aligned to the size of the operand (i.e., eight-byte aligned
 for _doublewords_ and four-byte aligned for _words_). If the address
 is not naturally aligned, an address-misaligned exception or an
 access-fault exception will be generated. The access-fault exception can
 be generated for a memory access that would otherwise be able to
 complete except for the misalignment, if the misaligned access should
-not be emulated. The "Zam" extension, described in <<zam>>, relaxes this requirement and specifies the semantics of misaligned AMOs.
+not be emulated.
+
+The misaligned atomicity granule PMA, defined in Volume II of this manual,
+optionally relaxes this alignment requirement.
+If present, the misaligned atomicity granule PMA specifies the size
+of a misaligned atomicity granule, a power-of-two number of bytes.
+The misaligned atomicity granule PMA applies only to AMOs, loads and stores
+defined in the base ISAs, and loads and stores of no more than XLEN bits
+defined in the F, D, and Q extensions.
+For an instruction in that set, if all accessed bytes lie within the same
+misaligned atomicity granule, the instruction will not raise an exception for
+reasons of address alignment, and the instruction will give rise to only one
+memory operation for the purposes of RVWMO--i.e., it will execute atomically.
 
 The operations supported are swap, integer add, bitwise AND, bitwise OR,
 bitwise XOR, and signed and unsigned integer maximum and minimum.
@@ -391,6 +408,11 @@ operations efficiently, and also to support parallel reductions in
 memory. Another use of AMOs is to provide atomic updates to
 memory-mapped device registers (e.g., setting, clearing, or toggling
 bits) in the I/O space.
+
+The Zaamo extension enables microcontroller class implementations to utilize
+atomic primitives from the AMO subset of the A extension. Typically such
+implementations do not have caches and thus may not be able to naturally support
+the LR/SC instructions provided by the Zalrsc extension.
 ====
 
 To help implement multiprocessor synchronization, the AMOs optionally

@@ -1,9 +1,9 @@
 [[machine]]
-== Machine-Level ISA, Version 1.12
+== Machine-Level ISA, Version 1.13
 
 This chapter describes the machine-level operations available in
 machine-mode (M-mode), which is the highest privilege mode in a RISC-V
-system. M-mode is used for low-level access to a hardware platform and
+hart. M-mode is used for low-level access to a hardware platform and
 is the first mode entered at reset. M-mode can also be used to implement
 features that are too difficult or expensive to implement in hardware
 directly. The RISC-V machine-level ISA contains a common core that is
@@ -16,19 +16,18 @@ In addition to the machine-level CSRs described in this section, M-mode
 code can access all CSRs at lower privilege levels.
 
 [[misa]]
-==== Machine ISA Register `misa`
+==== Machine ISA (`misa`) Register 
 
 The `misa` CSR is a *WARL* read-write register reporting the ISA supported by the hart. This register must be readable in any implementation, but a value of zero can be returned to indicate the `misa` register has not been implemented, requiring that CPU capabilities be determined through a separate non-standard mechanism.
 
 .Machine ISA register (misa)
 include::images/bytefield/misareg.edn[]
 
-The MXL (Machine XLEN) field encodes the native base integer ISA width
-as shown in <<misabase>>. The MXL field may be
-writable in implementations that support multiple base ISAs. The
-effective XLEN in M-mode, _MXLEN_, is given by the setting of MXL, or
-has a fixed value if `misa` is zero. The MXL field is always set to the
-widest supported ISA variant at reset.
+The MXL (Machine XLEN) field encodes the native base integer ISA width as
+shown in <<misabase>>. The MXL field is read-only.  If `misa` is nonzero, the
+MXL field indicates the effective XLEN in M-mode, a constant termed _MXLEN_.
+XLEN is never greater than MXLEN, but XLEN might be smaller than MXLEN in
+less-privileged modes.
 
 [[misabase]]
 .Encoding of MXL field in `misa`
@@ -43,23 +42,20 @@ widest supported ISA variant at reset.
 128
 |===
 
-The `misa` CSR is MXLEN bits wide. If the value read from `misa` is
-nonzero, field MXL of that value always denotes the current MXLEN. If a
-write to `misa` causes MXLEN to change, the position of MXL moves to the
-most-significant two bits of `misa` at the new width.
+The `misa` CSR is MXLEN bits wide.
 
 [NOTE]
 ====
 The base width can be quickly ascertained using branches on the sign of
 the returned `misa` value, and possibly a shift left by one and a second
 branch on the sign. These checks can be written in assembly code without
-knowing the register width (XLEN) of the machine. The base width is
-given by __XLEN=2^MXL+4^__.
+knowing the register width (MXLEN) of the hart. The base width is
+given by __MXLEN=2^MXL+4^__.
 
 The base width can also be found if `misa` is zero, by placing the
-immediate 4 in a register then shifting the register left by 31 bits at
-a time. If zero after one shift, then the machine is RV32. If zero after
-two shifts, then the machine is RV64, else RV128.
+immediate 4 in a register, then shifting the register left by 31 bits at
+a time. If zero after one shift, then the hart is RV32. If zero after
+two shifts, then the hart is RV64, else RV128.
 ====
 
 The Extensions field encodes the presence of the standard extensions,
@@ -160,7 +156,7 @@ X +
 Y +
 Z
 |Atomic extension +
-_Reserved_ +
+B extension +
 Compressed extension +
 Double-precision floating-point extension +
 RV32E/64E base ISA +
@@ -180,7 +176,7 @@ _Reserved_ +
 Supervisor mode implemented +
 _Reserved_ +
 User mode implemented +
-"V" Vector extension implemented +
+Vector extension +
 _Reserved_ +
 Non-standard extensions present +
 _Reserved_ +
@@ -195,6 +191,10 @@ The "U" and "S" bits will be set if there is support for user and
 supervisor modes respectively.
 
 The "X" bit will be set if there are any non-standard extensions.
+
+When "B" bit is 1, the implementation supports the instructions provided by the
+Zba, Zbb, and Zbs extensions. When "B" bit is 0, it indicates that the
+implementation may not support one or more of the Zba, Zbb, or Zbs extensions.
 
 [NOTE]
 ====
@@ -232,7 +232,14 @@ write to `misa` is suppressed, leaving `misa` unchanged.
 When software enables an extension that was previously disabled, then
 all state uniquely associated with that extension is UNSPECIFIED, unless otherwise specified by that extension.
 
-==== Machine Vendor ID Register `mvendorid`
+NOTE: Although one of the bits 25--0 in `misa` being set to 1 implies that
+the corresponding feature is implemented, the inverse is not necessarily
+true: one of these bits being clear does not necessarily imply that the
+corresponding feature is not implemented.  This follows from the fact that,
+when a feature is not implemented, the corresponding opcodes and CSRs become
+reserved, not necessarily illegal.
+
+==== Machine Vendor ID (`mvendorid`) Register 
 
 The `mvendorid` CSR is a 32-bit read-only register providing the JEDEC
 manufacturer ID of the provider of the core. This register must be
@@ -269,7 +276,7 @@ manufacturer ID standard. At time of writing, registering a manufacturer
 ID with JEDEC has a one-time cost of $500.
 ====
 
-==== Machine Architecture ID Register `marchid`
+==== Machine Architecture ID (`marchid`) Register 
 
 The `marchid` CSR is an MXLEN-bit read-only register encoding the base
 microarchitecture of the hart. This register must be readable in any
@@ -278,7 +285,7 @@ is not implemented. The combination of `mvendorid` and `marchid` should
 uniquely identify the type of hart microarchitecture that is
 implemented.
 
-.Machine Architecture ID register (`marchid`)
+.Machine Architecture ID (`marchid`) register 
 include::images/bytefield/marchid.adoc[]
 
 Open-source project architecture IDs are allocated globally by RISC-V
@@ -308,7 +315,7 @@ organization. The `misa` register also helps distinguish different
 variants of a design.
 ====
 
-==== Machine Implementation ID Register `mimpid`
+==== Machine Implementation ID (`mimpid`) Register 
 
 The `mimpid` CSR provides a unique encoding of the version of the
 processor implementation. This register must be readable in any
@@ -316,7 +323,7 @@ implementation, but a value of 0 can be returned to indicate that the
 field is not implemented. The Implementation value should reflect the
 design of the RISC-V processor itself and not any surrounding system.
 
-.Machine Implementation ID register (`mimpid`)
+.Machine Implementation ID (`mimpid`) register 
 include::images/bytefield/mimpid.adoc[]
 
 [NOTE]
@@ -329,7 +336,7 @@ most-significant nibble down) with subfields aligned on nibble
 boundaries to ease human readability.
 ====
 
-==== Hart ID Register `mhartid`
+==== Hart ID (`mhartid`) Register 
 
 The `mhartid` CSR is an MXLEN-bit read-only register containing the
 integer ID of the hardware thread running the code. This register must
@@ -338,7 +345,7 @@ numbered contiguously in a multiprocessor system, but at least one hart
 must have a hart ID of zero. Hart IDs must be unique within the
 execution environment.
 
-.Hart ID register (`mhartid`)
+.Hart ID (`mhartid`) register 
 include::images/bytefield/mhartid.adoc[]
 
 [NOTE]
@@ -350,7 +357,7 @@ For efficiency, system implementers should aim to reduce the magnitude
 of the largest hart ID used in a system.
 ====
 
-==== Machine Status Registers (`mstatus` and `mstatush`)
+==== Machine Status (`mstatus` and `mstatush`) Registers 
 
 The `mstatus` register is an MXLEN-bit read/write register formatted as
 shown in <<mstatusreg-rv32>> for RV32 and
@@ -360,21 +367,88 @@ restricted view of `mstatus` appears as the `sstatus` register in the
 S-level ISA.
 
 [[mstatusreg-rv32]]
-.Machine-mode status register (`mstatus`) for RV32
-include::images/bytefield/mstatusreg-rv32.adoc[]
+.Machine-mode status (`mstatus`) register for RV32
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SIE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'MIE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SPIE'},
+  {bits:  1, name: 'UBE'},
+  {bits:  1, name: 'MPIE'},
+  {bits:  1, name: 'SPP'},
+  {bits:  2, name: 'VS[1:0]'},
+  {bits:  2, name: 'MPP[1:0]'},
+  {bits:  2, name: 'FS[1:0]'},
+  {bits:  2, name: 'XS[1:0]'},
+  {bits:  1, name: 'MPRV'},
+  {bits:  1, name: 'SUM'},
+  {bits:  1, name: 'MXR'},
+  {bits:  1, name: 'TVM'},
+  {bits:  1, name: 'TW'},
+  {bits:  1, name: 'TSR'},
+  {bits:  1, name: 'SPELP'},
+  {bits:  7, name: 'WPRI'},
+  {bits:  1, name: 'SD'},
+], config:{lanes: 2, hspace:1024}}
+....
 
-include::images/bytefield/mstatusreg.adoc[]
 [[mstatusreg]]
-.Machine-mode status register (`mstatus`) for RV64
-include::images/bytefield/mstatusreg2.adoc[]
-
+.Machine-mode status (`mstatus`) register for RV64
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SIE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'MIE'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SPIE'},
+  {bits:  1, name: 'UBE'},
+  {bits:  1, name: 'MPIE'},
+  {bits:  1, name: 'SPP'},
+  {bits:  2, name: 'VS[1:0]'},
+  {bits:  2, name: 'MPP[1:0]'},
+  {bits:  2, name: 'FS[1:0]'},
+  {bits:  2, name: 'XS[1:0]'},
+  {bits:  1, name: 'MPRV'},
+  {bits:  1, name: 'SUM'},
+  {bits:  1, name: 'MXR'},
+  {bits:  1, name: 'TVM'},
+  {bits:  1, name: 'TW'},
+  {bits:  1, name: 'TSR'},
+  {bits:  1, name: 'SPELP'},
+  {bits:  8, name: 'WPRI'},
+  {bits:  2, name: 'UXL[1:0]'},
+  {bits:  2, name: 'SXL[1:0]'},
+  {bits:  1, name: 'SBE'},
+  {bits:  1, name: 'MBE'},
+  {bits:  1, name: 'GVA'},
+  {bits:  1, name: 'MPV'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'MPELP'},
+  {bits: 21, name: 'WPRI'},
+  {bits:  1, name: 'SD'},
+], config:{lanes: 4, hspace:1024}}
+....
 
 For RV32 only, `mstatush` is a 32-bit read/write register formatted as
 shown in <<mstatushreg>>. Bits 30:4 of `mstatush` generally contain the same fields found in bits 62:36 of `mstatus` for RV64. Fields SD, SXL, and UXL do not exist in `mstatush`.
 
 [[mstatushreg]]
-.Additional machine-mode status register (`mstatush`) for RV32.
-include::images/bytefield/mstatushreg.adoc[]
+.Additional machine-mode status (`mstatush`) register  for RV32.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  4, name: 'WPRI'},
+  {bits:  1, name: 'SBE'},
+  {bits:  1, name: 'MBE'},
+  {bits: 26, name: 'WPRI'},
+], config:{lanes: 1, hspace:1024}}
+....
 
 [[privstack]]
 ===== Privilege and Global Interrupt-Enable Stack in `mstatus` register
@@ -441,6 +515,19 @@ __y__&#8800;M, __x__RET also sets MPRV=0.
 Setting __x__PP to the least-privileged supported mode on an __x__RET helps identify software bugs in the management of the two-level privilege-mode stack.
 ====
 
+[NOTE]
+====
+Trap handlers must be designed to neither enable interrupts nor cause exceptions
+during the phase of handling where the trap handler preserves the critical state
+information required to handle and resume from the trap. An exception or
+interrupt in this critical phase of trap handling may lead to a trap that can
+overwrite such critical state. This could result in the loss of data needed to
+recover from the initial trap. Further, if an exception occurs in the code path
+needed to handle traps, then such a situation may lead to an infinite loop of
+traps. To prevent this, trap handlers must be meticulously designed to identify
+and safely manage exceptions within their operational flow.
+====
+
 __x__PP fields are *WARL* fields that can hold only privilege mode _x_ and any implemented privilege mode lower than _x_. If privilege mode _x_ is not implemented, then __x__PP must be read-only 0.
 
 [NOTE]
@@ -455,7 +542,7 @@ storage bit is required to represent either 00 or 11 in MPP.
 [[xlen-control]]
 ===== Base ISA Control in `mstatus` Register
 
-For RV64 systems, the SXL and UXL fields are *WARL* fields that control the
+For RV64 harts, the SXL and UXL fields are *WARL* fields that control the
 value of XLEN for S-mode and U-mode, respectively. The encoding of these
 fields is the same as the MXL field of `misa`, shown in
 <<misabase>>. The effective XLEN in S-mode and
@@ -495,11 +582,6 @@ next-higher privilege mode. In practice, such settings would almost
 always be a software bug, but machine operation is well-defined even in
 this case.
 ====
-
-If MXLEN is changed from 32 to a wider width, each of `mstatus` fields
-SXL and UXL, if not restricted to a single value, gets the value
-corresponding to the widest supported width not wider than the new
-MXLEN.
 
 ===== Memory Privilege in `mstatus` Register
 
@@ -774,7 +856,7 @@ If neither the `v` registers nor S-mode is implemented, then VS is
 read-only zero. If S-mode is implemented but the `v` registers are not,
 VS may optionally be read-only zero.
 
-In systems without additional user extensions requiring new state, the
+In harts without additional user extensions requiring new state, the
 XS field is read-only zero. Every additional extension with state
 provides a CSR field that encodes the equivalent of the XS states. The
 XS field represents a summary of all extensions' status as shown in
@@ -1052,7 +1134,16 @@ their context to be saved and restored to service asynchronous
 interrupts, unless the interrupt results in a user-level context swap.
 ====
 
-==== Machine Trap-Vector Base-Address Register (`mtvec`)
+===== Previous Expected Landing Pad (ELP) State in `mstatus` Register
+
+The Zicfilp extension adds the `SPELP` and `MPELP` fields that hold the previous
+`ELP`, and are updated as specified in <<ZICFILP_FORWARD_TRAPS>>. The
+*__x__*`PELP` fields are encoded as follows:
+
+* 0 - `NO_LP_EXPECTED` - no landing pad instruction expected.
+* 1 - `LP_EXPECTED` - a landing pad instruction is expected.
+
+==== Machine Trap-Vector Base-Address (`mtvec`) Register 
 
 The `mtvec` register is an MXLEN-bit *WARL* read/write register that holds
 trap vector configuration, consisting of a vector base address (BASE)
@@ -1087,7 +1178,7 @@ hand, we wish to allow flexibility for larger systems.
 |Direct +
 Vectored +
 ---
-|All exceptions set `pc` to BASE. +
+|All traps set `pc` to BASE. +
 Asynchronous interrupts set `pc` to BASE+4&#215;cause. +
 _Reserved_
 |===
@@ -1117,7 +1208,7 @@ implemented without a hardware adder circuit.
 Reset and NMI vector locations are given in a platform specification.
 ====
 
-==== Machine Trap Delegation Registers (`medeleg` and `mideleg`)
+==== Machine Trap Delegation (`medeleg` and `mideleg`) Registers 
 
 By default, all traps at any privilege level are handled in machine
 mode, though a machine-mode handler can redirect traps back to the
@@ -1127,19 +1218,19 @@ implementations can provide individual read/write bits within `medeleg`
 and `mideleg` to indicate that certain exceptions and interrupts should
 be processed directly by a lower privilege level. The machine exception
 delegation register (`medeleg`) is a 64-bit read/write register.
-The machine interrupt delegation register (`mideleg`) is an MXLEN-bit
+The machine interrupt delegation (`mideleg`) register is an MXLEN-bit
 read/write register.
 
-In systems with S-mode, the `medeleg` and `mideleg` registers must
+In harts with S-mode, the `medeleg` and `mideleg` registers must
 exist, and setting a bit in `medeleg` or `mideleg` will delegate the
 corresponding trap, when occurring in S-mode or U-mode, to the S-mode
-trap handler. In systems without S-mode, the `medeleg` and `mideleg`
+trap handler. In harts without S-mode, the `medeleg` and `mideleg`
 registers should not exist.
 
 [NOTE]
 ====
 In versions 1.9.1 and earlier , these registers existed but were
-hardwired to zero in M-mode only, or M/U without N systems. There is no
+hardwired to zero in M-mode only, or M/U without N harts. There is no
 reason to require they return zero in those cases, as the `misa`
 register indicates whether they exist.
 ====
@@ -1187,7 +1278,7 @@ will not be taken when executing in M-mode. By contrast, if `mideleg`[5]
 is clear, STIs can be taken in any mode and regardless of current mode
 will transfer control to M-mode.
 
-.Machine Exception Delegation Register `medeleg`.
+.Machine Exception Delegation (`medeleg`) register.
 include::images/bytefield/medeleg.adoc[]
 
 `medeleg` has a bit position allocated for every synchronous exception
@@ -1198,9 +1289,9 @@ lower-privilege trap handler).
 
 When XLEN=32, `medelegh` is a 32-bit read/write register
 that aliases bits 63:32 of `medeleg`.
-Register `medelegh` does not exist when XLEN=64.
+The `medelegh` register does not exist when XLEN=64.
 
-.Machine Interrupt Delegation Register `mideleg`.
+.Machine Interrupt Delegation (`mideleg`) Register.
 include::images/bytefield/mideleg.adoc[]
 
 `mideleg` holds trap delegation bits for individual interrupts, with the
@@ -1211,7 +1302,7 @@ For exceptions that cannot occur in less privileged modes, the
 corresponding `medeleg` bits should be read-only zero. In particular,
 `medeleg`[11] is read-only zero.
 
-==== Machine Interrupt Registers (`mip` and `mie`)
+==== Machine Interrupt (`mip` and `mie`) Registers 
 
 The `mip` register is an MXLEN-bit read/write register containing
 information on pending interrupts, while `mie` is the corresponding
@@ -1224,10 +1315,10 @@ bits 16 and above are designated for platform use.
 NOTE: Interrupts designated for platform use may be designated for custom use
 at the platform's discretion.
 
-.Machine Interrupt-Pending Register (mip).
+.Machine Interrupt-Pending (`mip`) register.
 include::images/bytefield/mideleg.adoc[]
 
-.Machine Interrupt-Enable Register (mie)
+.Machine Interrupt-Enable (`mie`) register
 include::images/bytefield/mideleg.adoc[]
 
 An interrupt _i_ will trap to M-mode (causing the privilege mode to
@@ -1257,7 +1348,7 @@ A bit in `mie` must be writable if the corresponding interrupt can ever
 become pending. Bits of `mie` that are not writable must be read-only
 zero.
 
-The standard portions (bits 15:0) of registers `mip` and `mie` are
+The standard portions (bits 15:0) of the `mip` and `mie` registers are
 formatted as shown in <<mipreg-standard>> and <<miereg-standard>> respectively.
 
 [[mipreg-standard]]
@@ -1289,7 +1380,7 @@ interrupt controller.
 
 Bits `mip`.MTIP and `mie`.MTIE are the interrupt-pending and
 interrupt-enable bits for machine timer interrupts. MTIP is read-only in
-`mip`, and is cleared by writing to the memory-mapped machine-mode timer
+the `mip` register, and is cleared by writing to the memory-mapped machine-mode timer
 compare register.
 
 Bits `mip`.MSIP and `mie`.MSIE are the interrupt-pending and
@@ -1346,8 +1437,17 @@ the interrupt-pending and interrupt-enable bits for supervisor-level
 software interrupts. SSIP is writable in `mip` and may also be set to 1
 by a platform-specific interrupt controller.
 
+If the Sscofpmf extension is implemented, bits `mip`.LCOFIP and `mie`.LCOFIE
+are the interrupt-pending and interrupt-enable bits for local counter-overflow
+interrupts.
+LCOFIP is read-write in `mip` and reflects the occurrence of a local
+counter-overflow overflow interrupt request resulting from any of the
+`mhpmevent__n__`.OF bits being set.
+If the Sscofpmf extension is not implemented, `mip`.LCOFIP and `mie`.LCOFIE are
+read-only zeros.
+
 Multiple simultaneous interrupts destined for M-mode are handled in the
-following decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI.
+following decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI, LCOFI.
 
 [NOTE]
 ====
@@ -1389,7 +1489,7 @@ M-mode includes a basic hardware performance-monitoring facility. The
 `mcycle` CSR counts the number of clock cycles executed by the processor
 core on which the hart is running. The `minstret` CSR counts the number
 of instructions the hart has retired. The `mcycle` and `minstret`
-registers have 64-bit precision on all RV32 and RV64 systems.
+registers have 64-bit precision on all RV32 and RV64 harts.
 
 The counter registers have an arbitrary value after the hart is reset,
 and can be written with a given value. Any CSR write takes effect after
@@ -1400,7 +1500,7 @@ to indicate which harts share an `mcycle` CSR.
 
 The hardware performance monitor includes 29 additional 64-bit event
 counters, `mhpmcounter3`-`mhpmcounter31`. The event selector CSRs,
-`mhpmevent3`-`mhpmevent31`, are MXLEN-bit *WARL* registers that control which
+`mhpmevent3`-`mhpmevent31`, are 64-bit *WARL* registers that control which
 event causes the corresponding counter to increment. The meaning of
 these events is defined by the platform, but event 0 is defined to mean
 "no event." All counters should be implemented, but a legal
@@ -1420,23 +1520,21 @@ generate an interrupt when a hardware performance monitor counter
 overflows.
 ====
 
-When XLEN=32, reads of the `mcycle`, `minstret`, and `mhpmcountern`
-CSRs return bits 31-0 of the corresponding counter, and writes change
-only bits 31-0; reads of the `mcycleh`, `minstreth`, and `mhpmcounternh`
-CSRs return bits 63-32 of the corresponding counter, and writes change
+When XLEN=32, reads of the `mcycle`, `minstret`, `mhpmcounter__n__`, and `mhpmevent__n__`
+CSRs return bits 31-0 of the corresponding register, and writes change
+only bits 31-0; reads of the `mcycleh`, `minstreth`, `mhpmcounter__n__h`, and `mhpmevent__n__h`
+CSRs return bits 63-32 of the corresponding register, and writes change
 only bits 63-32.
-
-.Upper 32 bits of hardware performance monitor counters, RV32 only.
-include::images/bytefield/hpmcounters.adoc[]
+The `mhpmevent__n__h` CSRs are provided only if the Sscofpmf extension is implemented.
 
 [[mcounteren]]
-==== Machine Counter-Enable Register (`mcounteren`)
+==== Machine Counter-Enable (`mcounteren`) Register 
 
-The counter-enable register `mcounteren` is a 32-bit register that
+The counter-enable `mcounteren` register is a 32-bit register that
 controls the availability of the hardware performance-monitoring
 counters to the next-lower privileged mode.
 
-.Counter-enable register (`mcounteren`).
+.Counter-enable (`mcounteren`) register.
 include::images/bytefield/counteren.adoc[]
 
 The settings in this register only control accessibility. The act of
@@ -1453,9 +1551,9 @@ privilege mode (S-mode if implemented, otherwise U-mode).
 [NOTE]
 ====
 The counter-enable bits support two common use cases with minimal
-hardware. For systems that do not need high-performance timers and
+hardware. For harts that do not need high-performance timers and
 counters, machine-mode software can trap accesses and implement all
-features in software. For systems that need high-performance timers and
+features in software. For harts that need high-performance timers and
 counters but are not concerned with obfuscating the underlying hardware
 counters, the counters can be directly exposed to lower privilege modes.
 ====
@@ -1476,15 +1574,15 @@ loads to the memory-mapped `mtime` register, or emulate this
 functionality on behalf of less-privileged modes in M-mode software.
 ====
 
-In systems with U-mode, the `mcounteren` must be implemented, but all
+In harts with U-mode, the `mcounteren` must be implemented, but all
 fields are *WARL* and may be read-only zero, indicating reads to the
 corresponding counter will cause an illegal-instruction exception when
-executing in a less-privileged mode. In systems without U-mode, the
+executing in a less-privileged mode. In harts without U-mode, the
 `mcounteren` register should not exist.
 
-==== Machine Counter-Inhibit CSR (`mcountinhibit`)
+==== Machine Counter-Inhibit (`mcountinhibit`) Register 
 
-.Counter-inhibit register `mcountinhibit`
+.Counter-inhibit `mcountinhibit` register
 include::images/bytefield/counterinh.adoc[]
 
 The counter-inhibit register `mcountinhibit` is a 32-bit *WARL* register that
@@ -1516,7 +1614,7 @@ Because the `time` counter can be shared between multiple cores, it
 cannot be inhibited with the `mcountinhibit` mechanism.
 ====
 
-==== Machine Scratch Register (`mscratch`)
+==== Machine Scratch (`mscratch`) Register 
 
 The `mscratch` register is an MXLEN-bit read/write register dedicated
 for use by machine mode. Typically, it is used to hold a pointer to a
@@ -1543,7 +1641,7 @@ design, the OS can rely on holding a value in the `mscratch` register
 while the user context is running.
 ====
 
-==== Machine Exception Program Counter (`mepc`)
+==== Machine Exception Program Counter (`mepc`) Register
 
 `mepc` is an MXLEN-bit read/write register formatted as shown in
 <<mepcreg>>. The low bit of `mepc` (`mepc[0]`) is
@@ -1580,7 +1678,7 @@ though it may be explicitly written by software.
 include::images/bytefield/mepcreg.adoc[]
 
 [[mcause]]
-==== Machine Cause Register (`mcause`)
+==== Machine Cause (`mcause`) Register 
 
 The `mcause` register is an MXLEN-bit read-write register formatted as
 shown in <<mcausereg>>. When a trap is taken into
@@ -1595,7 +1693,7 @@ the possible machine-level exception codes. The Exception Code is a
 *WLRL* field, so is only guaranteed to hold supported exception codes.
 
 [[mcausereg]]
-.Machine Cause register `mcause`.
+.Machine Cause (`mcause`) register.
 include::images/bytefield/mcausereg.adoc[]
 
 Note that load and load-reserved instructions generate load exceptions,
@@ -1627,7 +1725,7 @@ synchronous exceptions is implementation-defined.
 <<<
 
 [[mcauses]]
-.Machine cause register (mcause) values after trap.
+.Machine cause (`mcause`) register values after trap.
 [%autowidth,float="center",align="center",cols=">,>,<",options="header",]
 |===
 |Interrupt |Exception Code |Description 
@@ -1677,7 +1775,7 @@ Machine external interrupt
 14-15 +
 &#8805;16
 |_Reserved_ +
-_Reserved for counter-overflow interrupt_ +
+Counter-overflow interrupt +
 _Reserved_ +
 _Designated for platform use_ 
 |0 +
@@ -1836,10 +1934,13 @@ this context, "data" encompasses all types of information used within a RISC-V
 hart. Upon a hardware error exception, the `__x__epc` register is set to the
 address of the instruction that attempted to access corrupted data, while the
 `__x__tval` register is set either to 0 or to the virtual address of an
-instruction fetch, load, or store that attempted to access corrupted data.
+instruction fetch, load, or store that attempted to access corrupted data. The
+priority of Hardware Error exception is implementation-defined, but any given
+occurrence is generally expected to be recognized at the point in the overall
+priority order at which the hardware error is discovered.
 ====
 
-==== Machine Trap Value Register (`mtval`)
+==== Machine Trap Value (`mtval`) Register 
 
 The `mtval` register is an MXLEN-bit read-write register formatted as
 shown in <<mtvalreg>>. When a trap is taken into
@@ -1864,7 +1965,7 @@ exceptions. This design reduces datapath cost for most implementations,
 particularly those with hardware page-table walkers.
 
 [[mtvalreg]]
-.Machine Trap Value register.
+.Machine Trap Value (`mtval`) register.
 include::images/bytefield/mtvalreg.adoc[]
 
 
@@ -1874,7 +1975,7 @@ contain the virtual address of the portion of the access that caused the
 fault.
 
 If `mtval` is written with a nonzero value when an instruction
-access-fault or page-fault exception occurs on a system with
+access-fault or page-fault exception occurs on a hart with
 variable-length instructions, then `mtval` will contain the virtual
 address of the portion of the instruction that caused the fault, while
 `mepc` will point to the beginning of the instruction.
@@ -1917,6 +2018,13 @@ two cases (or alternatively, the system configuration information can be
 interrogated to install the appropriate trap handling before runtime).
 ====
 
+On a trap caused by a software check exception, the `mtval` register holds
+the cause for the exception. The following encodings are defined:
+
+* 0 - No information provided.
+* 2 - Landing Pad Fault. Defined by the Zicfilp extension (<<priv-forward>>).
+* 3 - Shadow Stack Fault. Defined by the Zicfiss extension (<<priv-backward>>).
+
 For other traps, `mtval` is set to zero, but a future standard may
 redefine `mtval`’s setting for other traps.
 
@@ -1929,25 +2037,25 @@ return the faulting instruction bits is implemented, `mtval` must also
 be able to hold all values less than 2^__N__^, where
 _N_ is the smaller of MXLEN and ILEN.
 
-==== Machine Configuration Pointer Register (`mconfigptr`)
+==== Machine Configuration Pointer (`mconfigptr`) Register 
 
-`mconfigptr` is an MXLEN-bit read-only CSR, formatted as shown in
+The `mconfigptr` register is an MXLEN-bit read-only CSR, formatted as shown in
 <<mconfigptrreg>>, that holds the physical
 address of a configuration data structure. Software can traverse this
 data structure to discover information about the harts, the platform,
 and their configuration.
 
 [[mconfigptrreg]]
-.Machine Configuration Pointer register.
+.Machine Configuration Pointer (`mconfigptr`) register.
 include::images/bytefield/mconfigptrreg.adoc[]
 
 
-The pointer alignment in bits must be no smaller than the greatest
-supported MXLEN: i.e., if the greatest supported MXLEN is
+The pointer alignment in bits must be no smaller than MXLEN:
+i.e., if MXLEN is
 latexmath:[$8\times n$], then `mconfigptr`[latexmath:[$\log_2n$]-1:0]
 must be zero.
 
-`mconfigptr` must be implemented, but it may be zero to indicate the
+The `mconfigptr` register must be implemented, but it may be zero to indicate the
 configuration data structure does not exist or that an alternative
 mechanism must be used to locate it.
 
@@ -1958,22 +2066,42 @@ standardized.
 
 ***
 
-While `mconfigptr` will simply be hardwired in some implementations,
+While the `mconfigptr` register will simply be hardwired in some implementations,
 other implementations may provide a means to configure the value
 returned on CSR reads. For example, `mconfigptr` might present the value
 of a memory-mapped register that is programmed by the platform or by
 M-mode software towards the beginning of the boot process.
 ====
 
-====  Machine Environment Configuration Register (`menvcfg`)
+[[sec:menvcfg]]
+====  Machine Environment Configuration (`menvcfg`) Register 
 
 The `menvcfg` CSR is a 64-bit read/write register, formatted
-as shown in [[menvcfg]], that controls
+as shown in <<menvcfgreg>>, that controls
 certain characteristics of the execution environment for modes less
 privileged than M.
 
-.Machine environment configuration register (`menvcfg`).
-include::images/bytefield/menvcfgreg.adoc[]
+[#menvcfgreg]
+.Machine environment configuration (`menvcfg`) register.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'FIOM'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'LPE'},
+  {bits:  1, name: 'SSE'},
+  {bits:  2, name: 'CBIE'},
+  {bits:  1, name: 'CBCFE'},
+  {bits:  1, name: 'CBZE'},
+  {bits: 24, name: 'WPRI'},
+  {bits:  2, name: 'PMM'},
+  {bits: 26, name: 'WPRI'},
+  {bits:  1, name: 'CDE'},
+  {bits:  1, name: 'ADUE'},
+  {bits:  1, name: 'PBMTE'},
+  {bits:  1, name: 'STCE'},
+], config:{lanes: 4, hspace:1024}}
+....
 
 If bit FIOM (Fence of I/O implies Memory) is set to one in `menvcfg`,
 FENCE instructions executed in modes less privileged than M are modified
@@ -2027,6 +2155,27 @@ with respect to the altered interpretation of page-table entries' PBMT fields.
 See <<hyp-mm-fences>> for additional synchronization requirements when the
 hypervisor extension is implemented.
 
+If the Svadu extension is implemented, the ADUE bit controls whether hardware
+updating of PTE A/D bits is enabled for S-mode and G-stage address
+translations.
+When ADUE=1, hardware updating of PTE A/D bits is enabled during S-mode
+address translation, and the implementation behaves as though the Svade
+extension were not implemented for S-mode address translation.
+When the hypervisor extension is implemented, if ADUE=1, hardware updating of
+PTE A/D bits is enabled during G-stage address translation, and the
+implementation behaves as though the Svade extension were not implemented for
+G-stage address translation.
+When ADUE=0, the implementation behaves as though Svade were implemented for
+S-mode and G-stage address translation.
+If Svadu is not implemented, ADUE is read-only zero.
+Furthermore, for implementations with the hypervisor extension, `henvcfg`.ADUE
+is read-only zero if `menvcfg`.ADUE is zero.
+
+NOTE: The Svade extension requires page-fault exceptions be raised when PTE
+A/D bits need be set, hence Svade is implemented when ADUE=0.
+
+If the Smcdeleg extension is implemented, the CDE (Counter Delegation Enable) bit controls whether Zicntr and Zihpm counters can be delegated to S-mode. When CDE=1, the Smcdeleg extension is enabled, see <<smcdeleg>>. When CDE=0, the Smcdeleg and Ssccfg extensions appear to be not implemented. If Smcdeleg is not implemented, CDE is read-only zero.
+
 The definition of the STCE field will be furnished by the forthcoming
 Sstc extension. Its allocation within `menvcfg` may change prior to the
 ratification of that extension.
@@ -2039,21 +2188,57 @@ The definitions of the CBCFE and CBIE fields will be furnished by the
 forthcoming Zicbom extension. Their allocations within `menvcfg` may
 change prior to the ratification of that extension.
 
+The definition of the PMM field will be furnished by the forthcoming
+Smnpm extension. Its allocation within `menvcfg` may change prior to the
+ratification of that extension.
+
+The Zicfilp extension adds the `LPE` field in `menvcfg`. When the `LPE` field is
+set to 1 and S-mode is implemented, the Zicfilp extension is enabled in S-mode.
+If `LPE` field is set to 1 and S-mode is not implemented, the Zicfilp extension
+is enabled in U-mode. When the `LPE` field is 0, the Zicfilp extension is not
+enabled in S-mode, and the following rules apply to S-mode. If the `LPE` field
+is 0 and S-mode is not implemented, then the same rules apply to U-mode.
+
+* The hart does not update the `ELP` state; it remains as `NO_LP_EXPECTED`.
+* The `LPAD` instruction operates as a no-op.
+
+The Zicfiss extension adds the `SSE` field to `menvcfg`. When the `SSE` field is
+set to 1 the Zicfiss extension is activated in S-mode. When `SSE` field is 0,
+the following rules apply to privilege modes that are less than M:
+
+* 32-bit Zicfiss instructions will revert to their behavior as defined by Zimop.
+* 16-bit Zicfiss instructions will revert to their behavior as defined by Zcmop.
+* The `pte.xwr=010b` encoding in VS/S-stage page tables becomes reserved.
+* The `henvcfg.SSE` and `senvcfg.SSE` fields will read as zero and are read-only.
+* `SSAMOSWAP.W/D` raises an illegal-instruction exception.
+
 When XLEN=32, `menvcfgh` is a 32-bit read/write register
 that aliases bits 63:32 of `menvcfg`.
-Register `menvcfgh` does not exist when XLEN=64.
+The `menvcfgh` register does not exist when XLEN=64.
 
 If U-mode is not supported, then registers `menvcfg` and `menvcfgh` do
 not exist.
 
-==== Machine Security Configuration Register (`mseccfg`)
+==== Machine Security Configuration (`mseccfg`) Register 
 
 `mseccfg` is an optional 64-bit read/write register, formatted as
 shown in <<mseccfg>>, that controls security features.
 
 [[mseccfg]]
-.Machine security configuration register (`mseccfg`).
-include::images/bytefield/mseccfg.adoc[]
+.Machine security configuration (`mseccfg`) register.
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  1, name: 'MML'},
+  {bits:  1, name: 'MMWP'},
+  {bits:  1, name: 'RLB'},
+  {bits:  5, name: 'WPRI'},
+  {bits:  1, name: 'USEED'},
+  {bits:  1, name: 'SSEED'},
+  {bits:  1, name: 'MLPE'},
+  {bits: 53, name: 'WPRI'},
+], config:{lanes: 4, hspace:1024}}
+....
 
 The definitions of the SSEED and USEED fields will be furnished by the
 forthcoming entropy-source extension, Zkr. Their allocations within
@@ -2063,13 +2248,25 @@ The definitions of the RLB, MMWP, and MML fields will be furnished by
 the forthcoming PMP-enhancement extension, Smepmp. Their allocations
 within `mseccfg` may change prior to the ratification of that extension.
 
+The definition of the PMM field will be furnished by the forthcoming
+Smmpm extension. Its allocation within `mseccfg` may change prior to the
+ratification of that extension.
+
+The Zicfilp extension adds the `MLPE` field in `mseccfg`. When `MLPE` field is
+1, Zicfilp extension is enabled in M-mode. When the `MLPE` field is 0, the
+Zicfilp extension is not enabled in M-mode and the following rules apply to
+M-mode.
+
+* The hart does not update the `ELP` state; it remains as `NO_LP_EXPECTED`.
+* The `LPAD` instruction operates as a no-op.
+
 When XLEN=32 only, `mseccfgh` is a 32-bit read/write register that
 aliases bits 63:32 of `mseccfg`.
 Register `mseccfgh` does not exist when XLEN=64.
 
 === Machine-Level Memory-Mapped Registers
 
-==== Machine Timer Registers (`mtime` and `mtimecmp`)
+==== Machine Timer (`mtime` and `mtimecmp`) Registers 
 
 Platforms provide a real-time counter, exposed as a memory-mapped
 machine-mode read-write register, `mtime`. `mtime` must increment at
@@ -2172,8 +2369,9 @@ S-mode the environment-call-from-U-mode exception but not the others.
 ====
 
 The EBREAK instruction is used by debuggers to cause control to be
-transferred back to a debugging environment. It generates a breakpoint
-exception and performs no other operation.
+transferred back to a debugging environment.
+Unless overridden by an external debug environment, EBREAK raises
+a breakpoint exception and performs no other operation.
 
 [NOTE]
 ====
@@ -2315,8 +2513,8 @@ include::images/bytefield/cust-sys-instr.adoc[]
 Upon reset, a hart’s privilege mode is set to M. The `mstatus` fields
 MIE and MPRV are reset to 0. If little-endian memory accesses are
 supported, the `mstatus`/`mstatush` field MBE is reset to 0. The `misa`
-register is reset to enable the maximal set of supported extensions and
-widest MXLEN, as described in <<misa>>.  For
+register is reset to enable the maximal set of supported extensions,
+as described in <<misa>>.  For
 implementations with the "A" standard extension, there is no valid
 load reservation. The `pc` is set to an implementation-defined reset
 vector. The `mcause` register is set to a value indicating the cause of
@@ -2575,39 +2773,37 @@ should provide alternative fall-back mechanisms used when lack of
 progress is detected.
 ====
 
-===== Alignment
+==== Misaligned Atomicity Granule PMA
 
-Memory regions that support aligned LR/SC or aligned AMOs might also
-support misaligned LR/SC or misaligned AMOs for some addresses and
-access widths. If, for a given address and access width, a misaligned
-LR/SC or AMO generates an address-misaligned exception, then _all_
-loads, stores, LRs/SCs, and AMOs using that address and access width
-must generate address-misaligned exceptions.
+The misaligned atomicity granule PMA provides constrained support for
+misaligned AMOs.
+This PMA, if present, specifies the size of a _misaligned atomicity granule_,
+a naturally aligned power-of-two number of bytes.
+Specific supported values for this PMA are represented by MAG__NN__, e.g.,
+MAG16 indicates the misaligned atomicity granule is at least 16 bytes.
 
-[NOTE]
-====
-The standard "A" extension does not support misaligned AMOs or LR/SC
-pairs. Support for misaligned AMOs is provided by the standard "Zam"
-extension. Support for misaligned LR/SC sequences is not currently
-standardized, so LR and SC to misaligned addresses must raise an
-exception.
+The misaligned atomicity granule PMA applies only to AMOs, loads and stores
+defined in the base ISAs, and loads and stores of no more than MXLEN bits
+defined in the F, D, and Q extensions.
+For an instruction in that set, if all accessed bytes lie within the same
+misaligned atomicity granule, the instruction will not raise an exception for
+reasons of address alignment, and the instruction will give rise to only one
+memory operation for the purposes of RVWMO--i.e., it will execute atomically.
 
-Mandating that misaligned loads and stores raise address-misaligned
-exceptions wherever misaligned AMOs raise address-misaligned exceptions
-permits the emulation of misaligned AMOs in an M-mode trap handler. The
-handler guarantees atomicity by acquiring a global mutex and emulating
-the access within the critical section. Provided that the handler for
-misaligned loads and stores uses the same mutex, all accesses to a given
-address that use the same word size will be mutually atomic.
-====
-
+If a misaligned AMO accesses a region that does not specify a misaligned
+atomicity granule PMA, or if not all accessed bytes lie within the same
+misaligned atomicity granule, then an exception is raised.
+For regular loads and stores that access such a region or for which not all
+accessed bytes lie within the same atomicity granule, then either an exception
+is raised, or the access proceeds but is not guaranteed to be atomic.
 Implementations may raise access-fault exceptions instead of
-address-misaligned exceptions for some misaligned accesses, indicating
-the instruction should not be emulated by a trap handler. If, for a
-given address and access width, all misaligned LRs/SCs and AMOs generate
-access-fault exceptions, then regular misaligned loads and stores using
-the same address and access width are not required to execute
-atomically.
+address-misaligned exceptions for some misaligned accesses, indicating the
+instruction should not be emulated by a trap handler.
+
+NOTE: LR/SC instructions are unaffected by this PMA and so always raise an
+exception when misaligned.  Vector memory accesses are also unaffected, so
+might execute non-atomically even when contained within a misaligned atomicity
+granule.  Implicit accesses are similarly unaffected by this PMA.
 
 ==== Memory-Ordering PMAs
 
@@ -2673,7 +2869,7 @@ same interconnect path and the path does not reorder requests.
 
 Coherence is a property defined for a single physical address, and
 indicates that writes to that address by one agent will eventually be
-made visible to other agents in the system. Coherence is not to be
+made visible to other coherent agents in the system. Coherence is not to be
 confused with the memory consistency model of a system, which defines
 what values a memory read can return given the previous history of reads
 and writes to the entire memory system. In RISC-V platforms, the use of
@@ -2848,7 +3044,7 @@ illegal.
 
 [NOTE]
 ====
-RV64 systems use `pmpcfg2`, rather than `pmpcfg1`, to hold
+RV64 harts use `pmpcfg2`, rather than `pmpcfg1`, to hold
 configurations for PMP entries 8-15. This design reduces the cost of
 supporting multiple MXLEN values, since the configurations for PMP
 entries 8-11 appear in `pmpcfg2`[31:0] for both RV32 and RV64.
@@ -2909,13 +3105,6 @@ load access-fault exception. Attempting to execute a store,
 store-conditional, or AMO instruction which accesses a physical address
 within a PMP region without write permissions raises a store
 access-fault exception.
-
-If MXLEN is changed, the contents of the `pmpxcfg` fields are preserved,
-but appear in the `pmpcfgy` CSR prescribed by the new setting of MXLEN.
-For example, when MXLEN is changed from 64 to 32, `pmp4cfg` moves from
-`pmpcfg0`[39:32] to `pmpcfg1`[7:0]. The `pmpaddr` CSRs follow the usual
-CSR width modulation rules described in
-<<csrwidthmodulation>>.
 
 ===== Address Matching
 

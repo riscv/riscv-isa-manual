@@ -54,3 +54,12 @@ VexRiscv      | SpinalHDL                       | [Charles Papon](mailto:charles
 Shuttle       | UC Berkeley                     | [Jerry Zhao](mailto:jerryz123@berkeley.edu)                 | 34               | https://github.com/ucb-bar/shuttle
 CV32E2        | OpenHW Group                    | [Davide Schiavone](mailto:davide@openhwgroup.org), OpenHW Group | 35                 | https://github.com/openhwgroup/cve2
 Wally        | OpenHW Group                       | [James Stine](mailto:james.stine@okstate.edu), OpenHW Group | 36             | https://github.com/openhwgroup/cvw
+Boa32         | Julian Scheffers                | [Julian Scheffers](mailto:julian@scheffers.net)             | 37               | https://github.com/robotman2412/boa-risc-v
+WIV64         | Jesús Sanz del Rey              | [Jesús Sanz del Rey](mailto:jesussanz2003@gmail.com)        | 38               | https://github.com/StartForKiller/WivCPU
+RV6           | Nikola Lukić                    | [Nikola Lukić](mailto:lukicn@protonmail.com)                | 39               | https://github.com/kiclu/rv6
+ApogeoRV      | Gabriele Tripi                  | [Gabriele Tripi](mailto:tripi.gabriele2002@gmail.com)       | 40               | https://github.com/GabbedT/ApogeoRV
+MicroRV32      | AGRA, Group of Computer Architecture, University of Bremen | [RISC-V @ AGRA](mailto:riscv@informatik.uni-bremen.de)       | 41               | https://github.com/agra-uni-bremen/microrv32
+QEMU          | qemu.org                        | [QEMU Mailing List](mailto:qemu-riscv@nongnu.org)           | 42               | https://qemu.org
+KianV         | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 43               | https://github.com/splinedrive/kianRiscV
+Coreblocks    | Kuźnia Rdzeni, University of Wrocław | [Coreblocks Team](mailto:coreblocks@cs.uni.wroc.pl)    | 44               | https://github.com/kuznia-rdzeni/coreblocks
+rrv32         | Solra Bizna                     | [Solra Bizna](mailto:solra@bizna.name)                      | 45               | https://github.com/SolraBizna/rrv32
