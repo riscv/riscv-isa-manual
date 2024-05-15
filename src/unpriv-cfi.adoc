@@ -1,0 +1,874 @@
+== Control-flow Integrity (CFI)
+
+Control-flow Integrity (CFI) capabilities help defend against Return-Oriented
+Programming (ROP) and Call/Jump-Oriented Programming (COP/JOP) style
+control-flow subversion attacks. These attack methodologies use code sequences
+in authorized modules, with at least one instruction in the sequence being a
+control transfer instruction that depends on attacker-controlled data either in
+the return stack or in memory used to obtain the target address for a call or
+jump. Attackers stitch these sequences together by diverting the control flow
+instructions (e.g., `JALR`, `C.JR`, `C.JALR`), from their original target
+address to a new target via modification in the return stack or in the memory
+used to obtain the jump/call target address.
+
+RV32/RV64 provides two types of control transfer instructions - unconditional
+jumps and conditional branches. Conditional branches encode an offset in the
+immediate field of the instruction and are thus direct branches that are not
+susceptible to control-flow subversion. Unconditional direct jumps using `JAL`
+transfer control to a target that is in a +/- 1 MiB range from the current `pc`.
+Unconditional indirect jumps using the `JALR` obtain their branch target by
+adding the sign extended 12-bit immediate encoded in the instruction to the
+`rs1` register.
+
+The RV32I/RV64I does not have a dedicated instruction for calling a procedure or
+returning from a procedure. A `JAL` or `JALR` may be used to perform a procedure
+call and `JALR` to return from a procedure. The RISC-V ABI however defines the
+convention that a `JAL`/`JALR` where `rd` (i.e. the link register) is `x1` or
+`x5` is a procedure call, and a `JALR` where `rs1` is the conventional
+link register (i.e. `x1` or `x5`) is a return from procedure. The architecture
+allows for using these hints and conventions to support return address
+prediction (See <<rashints>>).
+
+The RVC standard extension for compressed instructions provides unconditional
+jump and conditional branch instructions. The `C.J` and `C.JAL` instructions
+encode an offset in the immediate field of the instruction and thus are not
+susceptible to control-flow subversion. The `C.JR` and `C.JALR` RVC instructions
+perform an unconditional control transfer to the address in register `rs1`. The
+`C.JALR` additionally writes the address of the instruction following the jump
+(`pc+2`) to the link register `x1` and is a procedure call. The `C.JR` is a
+return from procedure if `rs1` is a conventional link register (i.e. `x1` or
+`x5`); else it is an indirect jump.
+
+The term _call_ is used to refer to a `JAL` or `JALR` instruction with a link
+register as destination, i.e., `rd != x0`. Conventionally, the link register is
+`x1` or `x5`. A _call_ using `JAL` or `C.JAL` is termed a direct call. A
+`C.JALR` expands to `JALR x1, 0(rs1)` and is a _call_. A _call_ using `JALR` or
+`C.JALR` is termed an _indirect-call_.
+
+The term _return_ is used to refer to a `JALR` instruction with `rd == x0` and
+with `rs1 == x1` or `rs1 == x5` and `rd == x0`. A `C.JR` instruction expands to
+`JALR x0, 0(rs1)` and is a _return_ if `rs1 == x1` or `rs1 == x5`.
+
+The term _indirect-jump_ is used to refer to a `JALR` instruction with `rd == x0`
+and where the `rs1` is not `x1` or `x5` (i.e., not a return). A `C.JR`
+instruction where `rs1` is not `x1` or `x5` (i.e., not a return) is an
+_indirect-jump_.
+
+The Zicfiss and Zicfilp extensions build on these conventions and hints and
+provide backward-edge and forward-edge control flow integrity respectively. 
+
+The Unprivileged ISA for Zicfilp extension is specified in <<unpriv-forward>>
+and for the Unprivileged ISA for Zicfiss extension is specified in
+<<unpriv-backward>>. The Privileged ISA for these extensions is specified in the
+Privileged ISA specification.
+
+[[unpriv-forward]]
+=== Landing Pad (Zicfilp)
+
+To enforce forward-edge control-flow integrity, the Zicfilp extension introduces
+a landing pad (`LPAD`) instruction. The `LPAD` instruction must be placed at the
+program locations that are valid targets of indirect jumps or calls. The `LPAD`
+instruction (See <<LP_INST>>) is encoded using the `AUIPC` major opcode with
+`rd=x0`.
+
+Compilers emit a landing pad instruction as the first instruction of an
+address-taken function, as well as at any indirect jump targets. A landing pad
+instruction is not required in functions that are only reached using a direct
+call or direct jump.
+
+The landing pad is designed to provide integrity to control transfers performed
+using indirect calls and jumps, and this is referred to as forward-edge
+protection. When the Zicfilp is active, the hart tracks an expected landing pad
+(`ELP`) state that is updated by an _indirect_call_ or _indirect_jump_ to
+require a landing pad instruction at the target of the branch. If the
+instruction at the target is not a landing pad, then a software-check exception
+is raised.
+
+A landing pad may be optionally associated with a 20-bit label. With labeling
+enabled, the number of landing pads that can be reached from an indirect call
+or jump sites can be defined using programming language-based policies. Labeling
+of the landing pads enables software to achieve greater precision in pairing up
+indirect call/jump sites with valid targets. When labeling of landing pads
+is used, indirect call or indirect jump site can specify the expected label of
+the landing pad and thereby constrain the set of landing pads that may be
+reached from each indirect call or indirect jump site in the program.
+
+In the simplest form, a program can be built with a single label value to
+implement a coarse-grained version of forward-edge control-flow integrity. By
+constraining gadgets to be preceded by a landing pad instruction that marks
+the start of indirect callable functions, the program can significantly reduce
+the available gadget space. A second form of label generation may generate a
+signature, such as a MAC, using the prototype of the function. Programs that use
+this approach would further constrain the gadgets accessible from a call site to
+only indirectly callable functions that match the prototype of the called
+functions. Another approach to label generation involves analyzing the
+control-flow-graph (CFG) of the program, which can lead to even more stringent
+constraints on the set of reachable gadgets. Such programs may further use
+multiple labels per function, which means that if a function is called from two
+or more call sites, the functions can be labeled as being reachable from each of
+the call sites. For instance, consider two call sites A and B, where A calls the
+functions X and Y, and B calls the functions Y and Z. In a single label scheme,
+functions X, Y, and Z would need to be assigned the same label so that both call
+sites A and B can invoke the common function Y. This scheme would allow call
+site A to also call function Z and call site B to also call function X. However,
+if function Y was assigned two labels - one corresponding to call site A and the
+other to call site B, then Y can be invoked by both call sites, but X can only be
+invoked by call site A and Z can only be invoked by call site B. To support
+multiple labels, the compiler could generate a call-site-specific entry point
+for shared functions, with each entry point having its own landing pad
+instruction followed by a direct branch to the start of the function. This would
+allow the function to be labeled with multiple labels, each corresponding to a
+specific call site. A portion of the label space may be dedicated to labeled
+landing pads that are only valid targets of an indirect jump (and not an
+indirect call).
+
+The `LPAD` instruction uses the code points defined as HINTs for the `AUIPC`
+opcode. When Zicfilp is not active at a privilege level or when the extension
+is not implemented, the landing pad instruction executes as a no-op. A program
+that is built with `LPAD` instructions can thus continue to operate correctly,
+but without forward-edge control-flow integrity, on processors that do not
+support the Zicfilp extension or if the Zicfilp extension is not active.
+
+Compilers and linkers should provide an attribute flag to indicate if the
+program has been compiled with the Zicfilp extension and use that to determine
+if the Zicfilp extension should be activated. The dynamic loader should activate
+the use of Zicfilp extension for an application only if all executables (the
+application and the dependent dynamically linked libraries) used by that
+application use the Zicfilp extension.
+
+When Zicfilp extension is not active or not implemented, the hart does not
+require landing pad instructions at the targets of indirect calls/jumps, and the
+landing instructions revert to being no-ops. This allows a program compiled
+with landing pad instructions to operate correctly but without forward-edge
+control-flow integrity.
+
+The Zicfilp extensions may be activated for use individually and independently
+for each privilege mode.
+
+The Zicfilp extension depends on the Zicsr extension.
+
+==== Landing Pad Enforcement
+
+To enforce that the target of an indirect call or indirect jump must be a valid
+landing pad instruction, the hart maintains an expected landing pad (`ELP`) state
+to determine if a landing pad instruction is required at the target of an
+indirect call or an indirect jump. The `ELP` state can be one of:
+
+* 0 - `NO_LP_EXPECTED`
+* 1 - `LP_EXPECTED`
+
+The `ELP` state is initialized to `NO_LP_EXPECTED` by the hart upon reset.
+
+The Zicfilp extension, when enabled, determines if an indirect call or an
+indirect jump must land on a landing pad, as specified in <<IND_CALL_JMP>>. If
+`is_lp_expected` is 1, then the hart updates the `ELP` to `LP_EXPECTED`.
+
+[[IND_CALL_JMP]]
+.Landing pad expected determination
+[listing]
+----
+  is_lp_expected = ( (JALR || C.JR || C.JALR) &&
+                     (rs1 != x1) && (rs1 != x5) && (rs1 != x7) ) ? 1 : 0;
+----
+
+An indirect branch using `JALR`, `C.JALR`, or `C.JR` with `rs1` as `x7` is
+termed a software guarded branch. Such branches do not need to land on a
+`LPAD` instruction and thus do not set `ELP` to `LP_EXPECTED`.
+
+[NOTE]
+====
+When the register source is a link register and the register destination is
+`x0`, then it's a return from a procedure and does not require a landing pad at
+the target.
+
+When the register source and register destination are both link registers, then
+it is a semantically-direct-call. For example, the `call offset`
+pseudoinstruction may expand to a two instruction sequence composed of a
+`lui ra, imm20` or a `auipc ra, imm20` instruction followed by a
+`jalr ra, imm12(ra)` instruction where `ra` is the link register (either `x1` or
+`x5`). Since the address of the procedure was not explicitly taken and the
+computed address is not obtained from mutable memory, such semantically-direct
+calls do not require a landing pad to be placed at the target. Compilers and
+JITers must use the semantically-direct calls only if the `rs1` was computed as
+a PC-relative or an absolute offset to the symbol.
+
+The `tail offset` pseudoinstruction used to tail call a far-away procedure may
+also be expanded to a two instruction sequence composed of a `lui x7, imm20` or
+`auipc x7, imm20` followed by a `jalr x0, x7`. Since the address of the
+procedure was not explicitly taken and the computed address is not obtained from
+mutable memory, such semantically-direct tail-calls do not require a landing pad
+to be placed at the target.
+
+Software guarded branches may also be used by compilers to generate code for
+constructs like switch-cases. When using the software guarded branches, the
+compiler is required to ensure it has full control on the possible jump
+targets (e.g., by obtaining the targets from a read-only table in memory and
+performing bounds checking on the index into the table, etc.).
+====
+
+The landing pad may be labeled. Zicfilp extension designates the register `x7`
+for use as the landing pad label register. To support labeled landing pads, the
+indirect call/jump sites establish an expected landing pad label (e.g., using
+the `LUI` instruction) in the bits 31:12 of the `x7` register. The `LPAD`
+instruction is encoded with a 20-bit immediate value called the landing-pad-label
+(`LPL`) that is matched to the expected landing pad label. When `LPL` is encoded
+as zero, the `LPAD` instruction does not perform the label check and in programs
+built with this single label mode of operation the indirect call/jump sites do
+not need to establish an expected landing pad label value in `x7`.
+
+When `ELP` is set to `LP_EXPECTED`, if the next instruction in the instruction
+stream is not 4-byte aligned, or is not `LPAD`, or if the landing pad label
+encoded in `LPAD` is not zero and does not match the expected landing pad label
+in bits 31:12 of the `x7` register, then a software-check exception (cause=18)
+with `__x__tval` set to "landing pad fault (code=2)" is raised else the `ELP` is
+updated to `NO_LP_EXPECTED`.
+
+[NOTE]
+====
+The tracking of `ELP` and the requirement for a landing pad instruction
+at the target of indirect call and jump enables a processor implementation to
+significantly reduce or to prevent speculation to non-landing-pad instructions.
+Constraining speculation using this technique, greatly reduces the gadget space
+and increases the difficulty of using techniques such as branch-target-injection,
+also known as Spectre variant 2, which use speculative execution to leak data
+through side channels.
+
+The `LPAD` requires a 4-byte alignment to address the concatenation of two
+instructions `A` and `B` accidentally forming an unintended landing pad in the
+program. For example, consider a 32-bit instruction where the bytes 3 and 2 have
+a pattern of `?017h` (for example, the immediate fields of a `LUI`, `AUIPC`, or
+a `JAL` instruction), followed by a 16-bit or a 32-bit instruction. When
+patterns that can accidentally form a valid landing pad are detected, the
+assembler or linker can force instruction `A` to be aligned to a 4-byte
+boundary to force the unintended `LPAD` pattern to become misaligned, and thus
+not a valid landing pad, or may use an alternate register allocation to prevent
+the accidental landing pad.
+====
+
+<<<
+
+[[LP_INST]]
+==== Landing Pad Instruction
+
+When Zicfilp is enabled, `LPAD` is the only instruction allowed to execute when
+the `ELP` state is `LP_EXPECTED`. If Zicfilp is not enabled then the instruction
+is a no-op. If Zicfilp is enabled, the `LPAD` instruction causes a
+software-check exception with `__x__tval` set to "landing pad fault (code=2)" if
+any of the following conditions are true:
+
+* The `pc` is not 4-byte aligned and `ELP` is `LP_EXPECTED`.
+* The `ELP` is `LP_EXPECTED` and the `LPL` is not zero and the `LPL` does not
+  match the expected landing pad label in bits 31:12 of the `x7` register.
+
+If a software-check exception is not caused then the `ELP` is updated to
+`NO_LP_EXPECTED`.
+
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  7, name: 'opcode', attr:'AUIPC'},
+  {bits:  5, name: 'rd', attr:'00000'},
+  {bits: 20, name: 'LPL'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+The operation of the `LPAD` instruction is as follows:
+
+.`LPAD` operation
+[listing]
+----
+if (xLPE == 1 && ELP == LP_EXPECTED)
+    // If PC not 4-byte aligned then software-check exception
+    if pc[1:0] != 0
+        raise software-check exception
+    // If landing pad label not matched -> software-check exception
+    else if (inst.LPL != x7[31:12] && inst.LPL != 0)
+        raise software-check exception
+    else
+        ELP = NO_LP_EXPECTED
+else
+    no-op
+endif
+----
+
+<<<
+
+[[unpriv-backward]]
+=== Shadow Stack (Zicfiss)
+
+The Zicfiss extension introduces a shadow stack to enforce backward-edge
+control-flow integrity. A shadow stack is a second stack used to store a
+shadow copy of the return address in the link register if it needs to be
+spilled.
+
+The shadow stack is designed to provide integrity to control transfers performed
+using a _return_, where the return may be from a procedure invoked using an
+indirect call or a direct call, and this is referred to as backward-edge
+protection.
+
+A program using backward-edge control-flow integrity has two stacks: a regular
+stack and a shadow stack. The shadow stack is used to spill the link register,
+if required, by non-leaf functions. An additional register, shadow-stack-pointer
+(`ssp`), is introduced in the architecture to hold the address of the top of the
+active shadow stack.
+
+The shadow stack, similar to the regular stack, grows downwards, from
+higher addresses to lower addresses. Each entry on the shadow stack is `XLEN`
+wide and holds the link register value. The `ssp` points to the top of the
+shadow stack, which is the address of the last element stored on the shadow
+stack.
+
+The shadow stack is architecturally protected from inadvertent corruptions and
+modifications, as detailed in the Privileged specification.
+
+The Zicfiss extension provides instructions to store and load the link register
+to/from the shadow stack and to check the integrity of the return address. The
+extension provides instructions to support common stack maintenance operations
+such as stack unwinding and stack switching.
+
+When Zicfiss is enabled, each function that needs to spill the link register,
+typically non-leaf functions, store the link register value to the regular stack
+and a shadow copy of the link register value to the shadow stack when the
+function is entered (the prologue). When such a function returns (the
+epilogue), the function loads the link register from the regular stack and
+the shadow copy of the link register from the shadow stack. Then, the link
+register value from the regular stack and the shadow link register value from
+the shadow stack are compared. A mismatch of the two values is indicative of a
+subversion of the return address control variable and causes a software-check
+exception.
+
+The Zicfiss instructions are encoded using a subset of May-Be-Operation
+instructions defined by the Zimop and Zcmop extensions. This subset
+of instructions revert to their Zimop/Zcmop defined behavior when the Zicfiss
+extension is not implemented or if the extension has not been activated. A
+program that is built with Zicfiss instructions can thus continue to operate
+correctly, but without backward-edge control-flow integrity, on processors that
+do not support the Zicfiss extension or if the Zicfiss extension is not active.
+The Zicfiss extension may be activated for use individually and independently
+for each privilege mode.
+
+Compilers should flag each object file (for example, using flags in the ELF
+attributes) to indicate if the object file has been compiled with the Zicfiss
+instructions. The linker should flag (for example, using flags in the ELF
+attributes) the binary/executable generated by linking objects as being
+compiled with the Zicfiss instructions only if all the object files that are
+linked have the same Zicfiss attributes.
+
+The dynamic loader should activate the use of Zicfiss extension for an
+application only if all executables (the application and the dependent
+dynamically-linked libraries) used by that application use the Zicfiss
+extension.
+
+<<<
+
+An application that has the Zicfiss extension active may request the dynamic
+loader at runtime to load a new dynamic shared object (using dlopen() for
+example). If the requested object does not have the Zicfiss attribute then
+the dynamic loader, based on its policy (e.g., established by the operating
+system or the administrator) configuration, could either deny the request or
+deactivate the Zicfiss extension for the application. It is strongly recommended
+that the policy enforces a strict security posture and denies the request.
+
+The Zicfiss extension depends on the Zicsr and Zimop extensions. Furthermore,
+if the Zcmop extension is implemented, the Zicfiss extension also provides the
+`C.SSPUSH` and `C.SSPOPCHK` instructions. Moreover, use of Zicfiss in U-mode
+requires S-mode to be implemented. Use of Zicfiss in M-mode is not supported.
+
+==== Zicfiss Instructions Summary
+
+The Zicfiss extension introduces the following instructions:
+
+* Push to the shadow stack (See <<SS_PUSH>>)
+** `SSPUSH x1` and `SSPUSH x5` - encoded using `MOP.RR.7`
+** `C.SSPUSH x1` - encoded using `C.MOP.1`
+
+* Pop from the shadow stack (See <<SS_POP>>)
+** `SSPOPCHK x1` and `SSPOPCHK x5` - encoded using `MOP.R.28`
+** `C.SSPOPCHK x5` - encoded using `C.MOP.5`
+
+* Read the value of `ssp` into a register (See <<SSP_READ>>)
+** `SSRDP` - encoded using `MOP.R.28`
+
+* Perform an atomic swap from a shadow stack location (See <<SSAMOSWAP>>)
+** `SSAMOSWAP.W` and `SSAMOSWAP.D`
+
+Zicfiss does not use all encodings of `MOP.RR.7` or `MOP.R.28`. When a
+`MOP.RR.7` or `MOP.R.28` encoding is not used by the Zicfiss extension, the
+corresponding instruction adheres to its Zimop-defined behavior, unless
+redefined by another extension.
+
+==== Shadow Stack Pointer (`ssp`)
+
+The `ssp` CSR is an unprivileged read-write (URW) CSR that reads and writes
+`XLEN` low order bits of the shadow stack pointer (`ssp`). The CSR address is
+0x011. There is no high CSR defined as the `ssp` is always as wide as the `XLEN`
+of the current privilege mode. The bits 1:0 of `ssp` are read-only zero. If the
+UXLEN or SXLEN may never be 32, then the bit 2 is also read-only zero.
+
+<<<
+
+==== Zicfiss Instructions
+
+[[SS_PUSH]]
+==== Push to the Shadow Stack
+A shadow stack push operation is defined as decrement of the `ssp` by `XLEN/8`
+followed by a store of the value in the link register to memory at the new top
+of the shadow stack.
+
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  7, name: 'opcode', attr:'SYSTEM'},
+  {bits:  5, name: 'rd', attr:['00000']},
+  {bits:  3, name: 'funct3', attr:['100']},
+  {bits:  5, name: 'rs1', attr:['00000']},
+  {bits:  5, name: 'rs2', attr:['00001', '00101']},
+  {bits:  7, name: '1100111', attr:['SSPUSH x1','SSPUSH x5']},
+], config:{lanes: 1, hspace:1024}}
+....
+
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  2, name: 'op', attr:'C1'},
+  {bits:  5, name: '00000'},
+  {bits:  1, name: '1'},
+  {bits:  3, name: 'n[3:1]', attr:['000']},
+  {bits:  1, name: '0'},
+  {bits:  1, name: '0'},
+  {bits:  3, name: '011', attr:['C.SSPUSH x1']},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Only `x1` and `x5` registers are supported as `rs2` for `SSPUSH`. Zicfiss
+provides a 16-bit version of the `SSPUSH x1` instruction using the Zcmop
+defined `C.MOP.1` encoding. The `C.SSPUSH x1` expands to `SSPUSH x1`.
+
+The `SSPUSH` instruction and its compressed form `C.SSPUSH` can be used to push
+a link register on the shadow stack. The `SSPUSH` and `C.SSPUSH` instructions
+perform a store identically to the existing store instructions, with the
+difference that the base is implicitly `ssp` and the width is implicitly `XLEN`.
+
+The operation of the `SSPUSH` and `C.SSPUSH` instructions is as follows:
+
+.`SSPUSH` and `C.SSPUSH` operation
+[listing]
+----
+if (xSSE == 1)
+    mem[ssp - (XLEN/8)] = X(src)  # Store src value to ssp - XLEN/8
+    ssp = ssp - (XLEN/8)          # decrement ssp by XLEN/8
+endif
+----
+
+The `ssp` is decremented by `SSPUSH` and `C.SSPUSH` only if the store to the
+shadow stack completes successfully.
+
+<<<
+
+[[SS_POP]]
+==== Pop from the Shadow Stack
+
+A shadow stack pop operation is defined as an `XLEN` wide read from the
+current top of the shadow stack followed by an increment of the `ssp` by
+`XLEN/8`.
+
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  7, name: 'opcode', attr:'SYSTEM'},
+  {bits:  5, name: 'rd',  attr:['00000','00000']},
+  {bits:  3, name: 'funct3', attr:['100']},
+  {bits:  5, name: 'rs1', attr:['00001','00101']},
+  {bits: 12, name: '110011011100', attr:['SSPOPCHK x1','SSPOPCHK x5']},
+], config:{lanes: 1, hspace:1024}}
+....
+
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  2, name: 'op', attr:'C1'},
+  {bits:  5, name: '00000'},
+  {bits:  1, name: '1'},
+  {bits:  3, name: 'n[3:1]', attr:['010']},
+  {bits:  1, name: '0'},
+  {bits:  1, name: '0'},
+  {bits:  3, name: '011', attr:['C.SSPOPCHK x5']},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Only `x1` and `x5` registers are supported as `rs1` for `SSPOPCHK`. Zicfiss
+provides a 16-bit version of the `SSPOPCHK x5` using the Zcmop defined `C.MOP.5`
+encoding. The `C.SSPOPCHK x5` expands to `SSPOPCHK x5`.
+
+Programs with a shadow stack push the return address onto the regular stack as
+well as the shadow stack in the prologue of non-leaf functions. When returning
+from these non-leaf functions, such programs pop the link register from the
+regular stack and pop a shadow copy of the link register from the shadow stack.
+The two values are then compared. If the values do not match, it is indicative
+of a corruption of the return address variable on the regular stack.
+
+The `SSPOPCHK` instruction, and its compressed form `C.SSPOPCHK`, can be used to
+pop the shadow return address value from the shadow stack and check that the
+value matches the contents of the link register, and if not cause a
+software-check exception with `__x__tval` set to "shadow stack fault (code=3)".
+
+While any register may be used as link register, conventionally the `x1` or `x5`
+registers are used. The shadow stack instructions are designed to be most
+efficient when the `x1` and `x5` registers are used as the link register.
+
+[NOTE]
+====
+Return-address prediction stacks are a common feature of high-performance
+instruction-fetch units, but they require accurate detection of instructions
+used for procedure calls and returns to be effective. For RISC-V, hints as to
+the instructions' usage are encoded implicitly via the register numbers used.
+The return-address stack (RAS) actions to pop and/or push onto the RAS are
+specified in <<rashints>>.
+
+Using `x1` or `x5` as the link register allows a program to benefit from the
+return-address prediction stacks. Additionally, since the shadow stack
+instructions are designed around the use of `x1` or `x5` as the link register,
+using any other register as a link register would incur the cost of additional
+register movements.
+
+Compilers, when generating code with backward-edge CFI, must protect the link
+register, e.g., `x1` and/or `x5`, from arbitrary modification by not emitting
+unsafe code sequences.
+====
+
+<<<
+
+[NOTE]
+====
+Storing the return address on both stacks preserves the call stack layout and
+the ABI, while also allowing for the detection of corruption of the return
+address on the regular stack. The prologue and epilogue of a non-leaf function
+that uses shadow stacks is as follows:
+
+[listing]
+----
+    function_entry:
+        addi sp,sp,-8  # push link register x1
+        sd x1,(sp)     # on regular stack
+        sspush x1      # push link register x1 on shadow stack
+         :
+        ld x1,(sp)     # pop link register x1 from regular stack
+        addi sp,sp,8
+        sspopchk x1    # fault if x1 not equal to shadow return address
+        ret
+----
+
+This example illustrates the use of `x1` register as the link register.
+Alternatively, the `x5` register may also be used as the link register.
+
+A leaf function, a function that does not itself make function calls, does
+not need to spill the link register. Consequently, the return value may be held
+in the link register itself for the duration of the leaf function's execution.
+====
+
+The `C.SSPOPCHK`, and `SSPOPCHK` instructions perform a load identically to the
+existing load instructions, with the difference that the base is implicitly
+`ssp` and the width is implicitly `XLEN`.
+
+The operation of the `SSPOPCHK` and `C.SSPOPCHK` instructions is as follows:
+
+.`SSPOPCHK` and `C.SSPOPCHK` operation
+[listing]
+----
+if (xSSE == 1)
+    temp = mem[ssp]            # Load temp from address in ssp and
+    if temp != X(src)          # Compare temp to value in src and
+                               # cause an software-check exception
+                               # if they are not bitwise equal.
+                               # Only x1 and x5 may be used as src
+       raise software-check exception
+    else
+       ssp = ssp + (XLEN/8)    # increment ssp by XLEN/8.
+    endif
+endif
+----
+
+If the value loaded from the address in `ssp` does not match the value in `rs1`,
+a software-check exception (cause=18) is raised with `__x__tval` set to "shadow
+stack fault (code=3)". The software-check exception caused by `SSPOPCHK`/
+`C.SSPOPCHK` is lower in priority than a load/store/AMO access-fault exception.
+
+The `ssp` is incremented by `SSPOPCHK` and `C.SSPOPCHK` only if the load from
+the shadow stack completes successfully and no software-check exception is
+raised.
+
+<<<
+
+[NOTE]
+====
+The use of the compressed instruction `C.SSPUSH x1` to push on the shadow stack
+is most efficient when the ABI uses `x1` as the link register, as the link
+register may then be pushed without needing a register-to-register move in the
+function prologue. To use the compressed instruction `C.SSPOPCHK x5`, the
+function should pop the return address from regular stack into the alternate
+link register `x5` and use the `C.SSPOPCHK x5` to compare the return address to
+the shadow copy stored on the shadow stack. The function then uses `C.JR x5` to
+jump to the return address.
+
+[listing]
+----
+    function_entry:
+        c.addi sp,sp,-8  # push link register x1
+        c.sd x1,(sp)     # on regular stack
+        c.sspush x1      # push link register x1 on shadow stack
+         :
+        c.ld x5,(sp)     # pop link register x5 from regular stack
+        c.addi sp,sp,8
+        c.sspopchk x5    # fault if x5 not equal to shadow return address
+        c.jr x5
+----
+
+====
+
+[NOTE]
+====
+Store-to-load forwarding is a common technique employed by high-performance
+processor implementations. Zicfiss implementations may prevent forwarding from
+a non-shadow-stack store to the `SSPOPCHK` or the `C.SSPOPCHK` instructions. A
+non-shadow-stack store causes a fault if done to a page mapped as a shadow
+stack. However, such determination may be delayed till the PTE has been examined
+and thus may be used to transiently forward the data from such stores to
+`SSPOPCHK` or to `C.SSPOPCHK`.
+====
+
+<<<
+
+[[SSP_READ]]
+==== Read `ssp` into a Register
+
+The `SSRDP` instruction is provided to move the contents of `ssp` to a destination
+register.
+
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  7, name: 'opcode', attr:'SYSTEM'},
+  {bits:  5, name: 'rd', attr:['dst']},
+  {bits:  3, name: 'funct3', attr:['100']},
+  {bits:  5, name: '00000'},
+  {bits: 12, name: '110011011100', attr:['SSRDP']},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Encoding `rd` as `x0` is not supported for `SSRDP`.
+
+The operation of the `SSRDP` instructions is as follows:
+
+.`SSRDP` operation
+[listing]
+----
+if (xSSE == 1)
+    X(dst) = ssp
+else
+    X(dst) = 0
+endif
+----
+
+[NOTE]
+====
+The property of Zimop writing 0 to the `rd` when the extension using Zimop is
+not implemented or not active may be used by to determine if Zicfiss extension
+is active. For example, functions that unwind shadow stacks may skip over the
+unwind actions by dynamically detecting if the Zicfiss extension is active.
+
+An example sequence such as the following may be used:
+
+[listing]
+    ssrdp t0                      # mv ssp to t0
+    beqz t0, zicfiss_not_active   # zero is not a valid shadow stack
+                                  # pointer by convention
+    # Zicfiss is active
+    :
+    :
+zicfiss_not_active:
+
+To assist with the use of such code sequences, operating systems and runtimes
+must not locate shadow stacks at address 0.
+====
+
+<<<
+
+[NOTE]
+====
+A common operation performed on stacks is to unwind them to support constructs
+like `setjmp`/`longjmp`, C++ exception handling, etc. A program that uses shadow
+stacks must unwind the shadow stack in addition to the stack used to store data.
+The unwind function must verify that it does not accidentally unwind past the
+bounds of the shadow stack. Shadow stacks are expected to be bounded on each end
+using guard pages. A guard page for a stack is a page that is not accessible by
+the process that owns the stack. To detect if the unwind occurs past the bounds
+of the shadow stack, the unwind may be done in maximal increments of 4 KiB,
+testing whether the `ssp` is still pointing to a shadow stack page or has
+unwound into the guard page. The following examples illustrate the use of shadow
+stack instructions to unwind a shadow stack. This example assumes that the
+`setjmp` function itself does not push on to the shadow stack (being a leaf
+function, it is not required to).
+
+[listing]
+setjmp() {
+    :
+    :
+    // read and save the shadow stack pointer to jmp_buf
+    asm("ssrdp %0" : "=r"(cur_ssp):);
+    jmp_buf->saved_ssp = cur_ssp;
+    :
+    :
+}
+longjmp() {
+    :
+    // Read current shadow stack pointer and
+    // compute number of call frames to unwind
+    asm("ssrdp %0" : "=r"(cur_ssp):);
+    // Skip the unwind if backward-edge CFI not active
+    asm("beqz %0, back_cfi_not_active" : "=r"(cur_ssp):);
+    // Unwind the frames in a loop
+    while ( jmp_buf->saved_ssp > cur_ssp ) {
+        // advance by a maximum of 4K at a time to avoid
+        // unwinding past bounds of the shadow stack
+        cur_ssp = ( (jmp_buf->saved_ssp - cur_ssp) >= 4096 ) ?
+                  (cur_ssp + 4096) : jmp_buf->saved_ssp;
+        asm("csrw ssp, %0" : :  "r" (cur_ssp));
+        // Test if unwound past the shadow stack bounds
+        asm("sspush x5");
+        asm("sspopchk x5");
+    }
+back_cfi_not_active:
+    :
+}
+====
+
+<<<
+
+[[SSAMOSWAP]]
+==== Atomic Swap from a Shadow Stack Location
+
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits:  7, name: 'opcode', attr:'AMO'},
+  {bits:  5, name: 'rd', attr:'dest'},
+  {bits:  3, name: 'funct3', attr:['010', '011']},
+  {bits:  5, name: 'rs1', attr:'addr'},
+  {bits:  5, name: 'rs2', attr:'src'},
+  {bits:  1, name: 'rl'},
+  {bits:  1, name: 'aq'},
+  {bits:  5, name: '01001', attr:['SSAMOSWAP.W', 'SSAMOSWAP.D']},
+], config:{lanes: 1, hspace:1024}}
+....
+
+For RV32, `SSAMOSWAP.W` atomically loads a 32-bit data value from address of a
+shadow stack location in `rs1`, puts the loaded value into register `rd`, and
+stores the 32-bit value held in `rs2` to the original address in `rs1`.
+`SSAMOSWAP.D` (RV64 only) is similar to `SSAMOSWAP.W` but operates on 64-bit
+data values.
+
+.`SSAMOSWAP.W` for RV32 and `SSAMOSWAP.D` (RV64 only) operation
+[listing]
+----
+  if privilege_mode != M && menvcfg.SSE == 0
+      raise illegal-instruction exception
+  if S-mode not implemented
+      raise illegal-instruction exception
+  else if privilege_mode == U && senvcfg.SSE == 0
+      raise illegal-instruction exception
+  else if privilege_mode == VS && henvcfg.SSE == 0
+      raise virtual instruction exception
+  else if privilege_mode == VU && senvcfg.SSE == 0
+      raise virtual instruction exception
+  else
+      X(rd) = mem[X(rs1)]
+      mem[X(rs1)] = X(rs2)
+  endif
+----
+
+For RV64, `SSAMOSWAP.W` atomically loads a 32-bit data value from address of a
+shadow stack location in `rs1`, sign-extends the loaded value and puts it in
+`rd`, and stores the lower 32 bits of the value held in `rs2` to the original
+address in `rs1`.
+
+.`SSAMOSWAP.W` for RV64
+[listing]
+----
+  if privilege_mode != M && menvcfg.SSE == 0
+      raise illegal-instruction exception
+  if S-mode not implemented
+      raise illegal-instruction exception
+  else if privilege_mode == U && senvcfg.SSE == 0
+      raise illegal-instruction exception
+  else if privilege_mode == VS && henvcfg.SSE == 0
+      raise virtual instruction exception
+  else if privilege_mode == VU && senvcfg.SSE == 0
+      raise virtual instruction exception
+  else
+      temp[31:0] = mem[X(rs1)]
+      X(rd) = SignExtend(temp[31:0])
+      mem[X(rs1)] = X(rs2)[31:0]
+  endif
+----
+
+Just as for AMOs in the A extension, `SSAMOSWAP.W/D` requires that the address
+held in `rs1` be naturally aligned to the size of the operand (i.e., eight-byte
+aligned for __doublewords__, and four-byte aligned for __words__). The same
+exception options apply if the address is not naturally aligned.
+
+Just as for AMOs in the A extension, `SSAMOSWAP.W/D` optionally provides release
+consistency semantics, using the `aq` and `rl` bits, to help implement
+multiprocessor synchronization. An `SSAMOSWAP.W/D` operation has acquire
+semantics if `aq=1` and release semantics if `rl=1`.
+
+[NOTE]
+====
+Stack switching is a common operation in user programs as well as supervisor
+programs. When a stack switch is performed the stack pointer of the currently
+active stack is saved into a context data structure and the new stack is made
+active by loading a new stack pointer from a context data structure.
+
+When shadow stacks are active for a program, the program needs to additionally
+switch the shadow stack pointer. If the pointer to the top of the deactivated
+shadow stack is held in a context data structure, then it  may be susceptible to
+memory corruption vulnerabilities. To protect the pointer value, the program may
+store it at the top of the deactivated shadow stack itself and thereby create a
+checkpoint. A legal checkpoint is defined as one that holds a value of `X`,
+where `X` is the address at which the checkpoint is positioned on the shadow
+stack.
+====
+
+[NOTE]
+====
+An example sequence to restore the shadow stack pointer from the new shadow
+stack and save the old shadow stack pointer on the old shadow stack is as
+follows:
+
+[listing]
+----
+# a0 hold pointer to top of new shadow stack to switch to
+stack_switch:
+   ssrdp ra
+   beqz ra, 2f                    # skip if Zicfiss not active
+   ssamoswap.d ra, x0,  (a0)      # ra=*[a0] and *[a0]=0
+   beq         ra, a0,  1f        # [a0] must be == [ra]
+   unimp                          # else crash
+1: addi        ra, ra,  XLEN/8    # pop the checkpoint
+   csrrw       ra, ssp, ra        # swap ssp: ra=ssp, ssp=ra
+   addi        ra, ra,  -(XLEN/8) # checkpoint = "old ssp - XLEN/8"
+   ssamoswap.d x0, ra,  (ra)      # Save checkpoint at "old ssp - XLEN/8"
+2:
+----
+
+This sequence uses the `ra` register. If the privilege mode at which this
+sequence is executed can be interrupted, then the trap handler should save the
+`ra` on the shadow stack itself. There it is guarded against tampering and
+can be restored prior to returning from the trap.
+
+When a new shadow stack is created by the supervisor, it needs to store a
+checkpoint at the highest address on that stack. This enables the shadow stack
+pointer to be switched using the process outlined in this note. The
+`SSAMOSWAP.W/D` instruction can be used to store this checkpoint. When the old
+value at the memory location operated on by `SSAMOSWAP.W/D` is not required,
+`rd` can be set to `x0`.
+====
