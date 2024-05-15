@@ -28,7 +28,7 @@ all: $(TARGETS)
 # Build with preinstalled docker container; first install it with:
 #   docker pull riscvintl/riscv-docs-base-container-image:latest
 docker:
-	cd .. && docker run -it -v `pwd`:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'cd ./build; make -$(MAKEFLAGS) $(TARGETS_PDF) $(TARGETS_HTML)'
+	cd .. && docker run -it -v `pwd`:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'export LANG=C.utf8; cd ./build; make -$(MAKEFLAGS) $(TARGETS)'
 
 # Asciidoctor options
 ASCIIDOCTOR_OPTS := -a compress \
