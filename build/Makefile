@@ -46,71 +46,71 @@ SRCDIR := ../src
 JUNK := *.pdf *.aux *.log *.bbl *.blg *.toc *.out *.fdb_latexmk *.fls *.synctex.gz
 
 # Privileged ISA build
-priv-pdf: priv-isa-asciidoc.pdf
+priv-pdf: priv-isa.pdf
 
-priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
+priv-isa.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Privileged ISA"
 	rm -f $@.tmp
 	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
 	mv $@.tmp $@
 
 # Unprivileged ISA build
-unpriv-pdf: unpriv-isa-asciidoc.pdf
+unpriv-pdf: unpriv-isa.pdf
 
-unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
+unpriv-isa.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Unprivileged ISA"
 	rm -f $@.tmp
 	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
 	mv $@.tmp $@
 
 # Privileged ISA HTML build
-priv-html: priv-isa-asciidoc.html
+priv-html: priv-isa.html
 
-priv-isa-asciidoc.html: $(SRCDIR)/riscv-privileged.adoc
+priv-isa.html: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA HTML"
 	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
 # Unprivileged ISA HTML build
-unpriv-html: unpriv-isa-asciidoc.html
+unpriv-html: unpriv-isa.html
 
-unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-unprivileged.adoc
+unpriv-isa.html: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA HTML"
 	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
-priv-epub: priv-isa-asciidoc.epub
+priv-epub: priv-isa.epub
 
-priv-isa-asciidoc.epub: $(SRCDIR)/riscv-privileged.adoc
+priv-isa.epub: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA EPUB"
 	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
-unpriv-epub: unpriv-isa-asciidoc.epub
+unpriv-epub: unpriv-isa.epub
 
-unpriv-isa-asciidoc.epub: $(SRCDIR)/riscv-unprivileged.adoc
+unpriv-isa.epub: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA EPUB"
 	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
 
 clean:
-	@if [ -f priv-isa-asciidoc.pdf ]; then \
-		echo "Removing priv-isa-asciidoc.pdf"; \
-		rm -f priv-isa-asciidoc.pdf; \
+	@if [ -f priv-isa.pdf ]; then \
+		echo "Removing priv-isa.pdf"; \
+		rm -f priv-isa.pdf; \
 	fi
-	@if [ -f unpriv-isa-asciidoc.pdf ]; then \
-		echo "Removing unpriv-isa-asciidoc.pdf"; \
-		rm -f unpriv-isa-asciidoc.pdf; \
+	@if [ -f unpriv-isa.pdf ]; then \
+		echo "Removing unpriv-isa.pdf"; \
+		rm -f unpriv-isa.pdf; \
 	fi
-	@if [ -f priv-isa-asciidoc.html ]; then \
-		echo "Removing priv-isa-asciidoc.html"; \
-		rm -f priv-isa-asciidoc.html; \
+	@if [ -f priv-isa.html ]; then \
+		echo "Removing priv-isa.html"; \
+		rm -f priv-isa.html; \
 	fi
-	@if [ -f unpriv-isa-asciidoc.html ]; then \
-		echo "Removing unpriv-isa-asciidoc.html"; \
-		rm -f unpriv-isa-asciidoc.html; \
+	@if [ -f unpriv-isa.html ]; then \
+		echo "Removing unpriv-isa.html"; \
+		rm -f unpriv-isa.html; \
 	fi
-	@if [ -f priv-isa-asciidoc.epub ]; then \
-		echo "Removing priv-isa-asciidoc.epub"; \
-		rm -f priv-isa-asciidoc.epub; \
+	@if [ -f priv-isa.epub ]; then \
+		echo "Removing priv-isa.epub"; \
+		rm -f priv-isa.epub; \
 	fi
-	@if [ -f unpriv-isa-asciidoc.epub ]; then \
-		echo "Removing unpriv-isa-asciidoc.epub"; \
-		rm -f unpriv-isa-asciidoc.epub; \
+	@if [ -f unpriv-isa.epub ]; then \
+		echo "Removing unpriv-isa.epub"; \
+		rm -f unpriv-isa.epub; \
 	fi
