@@ -20,9 +20,9 @@
 #
 
 # Build Targets
-TARGETS_PDF := priv-isa.pdf unpriv-isa.pdf
-TARGETS_HTML := priv-isa.html unpriv-isa.html
-TARGETS_EPUB := priv-isa.epub unpriv-isa.epub
+TARGETS_PDF := riscv-privileged.pdf riscv-unprivileged.pdf
+TARGETS_HTML := riscv-privileged.html riscv-unprivileged.html
+TARGETS_EPUB := riscv-privileged.epub riscv-unprivileged.epub
 TARGETS := $(TARGETS_PDF) $(TARGETS_HTML) $(TARGETS_EPUB)
 
 SHORT_TARGETS := priv-pdf unpriv-pdf  priv-html unpriv-html priv-epub unpriv-epub
@@ -63,52 +63,52 @@ ASCIIDOCTOR_OPTS := -a compress \
 SRCDIR := ../src
 
 # Privileged ISA build
-priv-pdf: priv-isa.pdf
+priv-pdf: riscv-privileged.pdf
 
-priv-isa.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
+riscv-privileged.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Privileged ISA"
 	@rm -f $@.tmp
 	$(call maybe_run_with_docker, asciidoctor-pdf, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
 	@mv $@.tmp $@
 
 # Unprivileged ISA build
-unpriv-pdf: unpriv-isa.pdf
+unpriv-pdf: riscv-unprivileged.pdf
 
-unpriv-isa.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
+riscv-unprivileged.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Unprivileged ISA"
 	@rm -f $@.tmp
 	$(call maybe_run_with_docker, asciidoctor-pdf, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
 	@mv $@.tmp $@
 
 # Privileged ISA HTML build
-priv-html: priv-isa.html
+priv-html: riscv-privileged.html
 
-priv-isa.html: $(SRCDIR)/riscv-privileged.adoc
+riscv-privileged.html: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA HTML"
 	@rm -f $@.tmp
 	$(call maybe_run_with_docker, asciidoctor, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
 	@mv $@.tmp $@
 
 # Unprivileged ISA HTML build
-unpriv-html: unpriv-isa.html
+unpriv-html: riscv-unprivileged.html
 
-unpriv-isa.html: $(SRCDIR)/riscv-unprivileged.adoc
+riscv-unprivileged.html: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA HTML"
 	@rm -f $@.tmp
 	$(call maybe_run_with_docker, asciidoctor, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
 	@mv $@.tmp $@
 
-priv-epub: priv-isa.epub
+priv-epub: riscv-privileged.epub
 
-priv-isa.epub: $(SRCDIR)/riscv-privileged.adoc
+riscv-privileged.epub: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA EPUB"
 	@rm -f $@.tmp
 	$(call maybe_run_with_docker, asciidoctor-epub3, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
 	@mv $@.tmp $@
 
-unpriv-epub: unpriv-isa.epub
+unpriv-epub: riscv-unprivileged.epub
 
-unpriv-isa.epub: $(SRCDIR)/riscv-unprivileged.adoc
+riscv-unprivileged.epub: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA EPUB"
 	@rm -f $@.tmp
 	$(call maybe_run_with_docker, asciidoctor-epub3, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
