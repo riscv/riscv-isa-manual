@@ -14,13 +14,15 @@
 # for generating documentation in various formats (PDF, HTML).
 
 # Build Targets
-TARGETS_PDF := priv-pdf unpriv-pdf
-TARGETS_HTML := priv-html unpriv-html
-TARGETS_EPUB := priv-epub unpriv-epub
+TARGETS_PDF := priv-isa.pdf unpriv-isa.pdf
+TARGETS_HTML := priv-isa.html unpriv-isa.html
+TARGETS_EPUB := priv-isa.epub unpriv-isa.epub
 TARGETS := $(TARGETS_PDF) $(TARGETS_HTML) $(TARGETS_EPUB)
 
+SHORT_TARGETS := priv-pdf unpriv-pdf  priv-html unpriv-html priv-epub unpriv-epub
+
 # Declare phony targets
-.PHONY: all $(TARGETS) clean
+.PHONY: all docker clean $(SHORT_TARGETS)
 
 # Default target builds all
 all: $(TARGETS)
@@ -41,9 +43,6 @@ ASCIIDOCTOR_OPTS := -a compress \
 
 # Source directory
 SRCDIR := ../src
-
-# Temporary files to clean up for LaTeX build
-JUNK := *.pdf *.aux *.log *.bbl *.blg *.toc *.out *.fdb_latexmk *.fls *.synctex.gz
 
 # Privileged ISA build
 priv-pdf: priv-isa.pdf
@@ -98,27 +97,4 @@ unpriv-isa.epub: $(SRCDIR)/riscv-unprivileged.adoc
 	mv $@.tmp $@
 
 clean:
-	@if [ -f priv-isa.pdf ]; then \
-		echo "Removing priv-isa.pdf"; \
-		rm -f priv-isa.pdf; \
-	fi
-	@if [ -f unpriv-isa.pdf ]; then \
-		echo "Removing unpriv-isa.pdf"; \
-		rm -f unpriv-isa.pdf; \
-	fi
-	@if [ -f priv-isa.html ]; then \
-		echo "Removing priv-isa.html"; \
-		rm -f priv-isa.html; \
-	fi
-	@if [ -f unpriv-isa.html ]; then \
-		echo "Removing unpriv-isa.html"; \
-		rm -f unpriv-isa.html; \
-	fi
-	@if [ -f priv-isa.epub ]; then \
-		echo "Removing priv-isa.epub"; \
-		rm -f priv-isa.epub; \
-	fi
-	@if [ -f unpriv-isa.epub ]; then \
-		echo "Removing unpriv-isa.epub"; \
-		rm -f unpriv-isa.epub; \
-	fi
+	rm -f $(TARGETS) $(addsuffix .tmp,$(TARGETS))
