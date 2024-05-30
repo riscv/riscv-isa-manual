@@ -68,26 +68,34 @@ priv-html: priv-isa.html
 
 priv-isa.html: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA HTML"
-	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	rm -f $@.tmp
+	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
+	mv $@.tmp $@
 
 # Unprivileged ISA HTML build
 unpriv-html: unpriv-isa.html
 
 unpriv-isa.html: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA HTML"
-	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	rm -f $@.tmp
+	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
+	mv $@.tmp $@
 
 priv-epub: priv-isa.epub
 
 priv-isa.epub: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA EPUB"
-	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	rm -f $@.tmp
+	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
+	mv $@.tmp $@
 
 unpriv-epub: unpriv-isa.epub
 
 unpriv-isa.epub: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA EPUB"
-	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	rm -f $@.tmp
+	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
+	mv $@.tmp $@
 
 clean:
 	@if [ -f priv-isa.pdf ]; then \
