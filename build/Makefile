@@ -12,6 +12,12 @@
 # This Makefile is designed to automate the process of building and packaging 
 # the documentation for RISC-V ISA Manuals. It supports multiple build targets 
 # for generating documentation in various formats (PDF, HTML).
+#
+# Building with a preinstalled docker container is recommended.
+# Install by running:
+#
+#   docker pull riscvintl/riscv-docs-base-container-image:latest
+#
 
 # Build Targets
 TARGETS_PDF := priv-isa.pdf unpriv-isa.pdf
