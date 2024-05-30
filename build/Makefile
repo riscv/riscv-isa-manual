@@ -12,23 +12,43 @@
 # This Makefile is designed to automate the process of building and packaging 
 # the documentation for RISC-V ISA Manuals. It supports multiple build targets 
 # for generating documentation in various formats (PDF, HTML).
+#
+# Building with a preinstalled docker container is recommended.
+# Install by running:
+#
+#   docker pull riscvintl/riscv-docs-base-container-image:latest
+#
 
 # Build Targets
-TARGETS_PDF := priv-pdf unpriv-pdf
-TARGETS_HTML := priv-html unpriv-html
-TARGETS_EPUB := priv-epub unpriv-epub
+TARGETS_PDF := riscv-privileged.pdf riscv-unprivileged.pdf
+TARGETS_HTML := riscv-privileged.html riscv-unprivileged.html
+TARGETS_EPUB := riscv-privileged.epub riscv-unprivileged.epub
 TARGETS := $(TARGETS_PDF) $(TARGETS_HTML) $(TARGETS_EPUB)
 
+SHORT_TARGETS := priv-pdf unpriv-pdf  priv-html unpriv-html priv-epub unpriv-epub
+
 # Declare phony targets
-.PHONY: all $(TARGETS) clean
+.PHONY: all docker clean $(SHORT_TARGETS)
 
 # Default target builds all
 all: $(TARGETS)
 
-# Build with preinstalled docker container; first install it with:
-#   docker pull riscvintl/riscv-docs-base-container-image:latest
+define run_with_docker
+	cd .. && docker run -it -v `pwd`:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'export LANG=C.utf8; cd ./build; $(1)'
+endef
+
+# Run natively if command exists, otherwise run with docker
+define maybe_run_with_docker
+	@if command -v $(1) &> /dev/null; \
+	then \
+		$(1) $(2); \
+	else \
+		$(call run_with_docker, $(1) $(2)); \
+	fi
+endef
+
 docker:
-	cd .. && docker run -it -v `pwd`:/build riscvintl/riscv-docs-base-container-image:latest /bin/sh -c 'export LANG=C.utf8; cd ./build; make -$(MAKEFLAGS) $(TARGETS)'
+	$(call run_with_docker, make -$(MAKEFLAGS) all)
 
 # Asciidoctor options
 ASCIIDOCTOR_OPTS := -a compress \
@@ -42,75 +62,57 @@ ASCIIDOCTOR_OPTS := -a compress \
 # Source directory
 SRCDIR := ../src
 
-# Temporary files to clean up for LaTeX build
-JUNK := *.pdf *.aux *.log *.bbl *.blg *.toc *.out *.fdb_latexmk *.fls *.synctex.gz
-
 # Privileged ISA build
-priv-pdf: priv-isa-asciidoc.pdf
+priv-pdf: riscv-privileged.pdf
 
-priv-isa-asciidoc.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
+riscv-privileged.pdf: $(SRCDIR)/riscv-privileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Privileged ISA"
-	rm -f $@.tmp
-	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
-	mv $@.tmp $@
+	@rm -f $@.tmp
+	$(call maybe_run_with_docker, asciidoctor-pdf, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
+	@mv $@.tmp $@
 
 # Unprivileged ISA build
-unpriv-pdf: unpriv-isa-asciidoc.pdf
+unpriv-pdf: riscv-unprivileged.pdf
 
-unpriv-isa-asciidoc.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
+riscv-unprivileged.pdf: $(SRCDIR)/riscv-unprivileged.adoc $(SRCDIR)/*.adoc
 	@echo "Building Unprivileged ISA"
-	rm -f $@.tmp
-	asciidoctor-pdf $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<
-	mv $@.tmp $@
+	@rm -f $@.tmp
+	$(call maybe_run_with_docker, asciidoctor-pdf, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
+	@mv $@.tmp $@
 
 # Privileged ISA HTML build
-priv-html: priv-isa-asciidoc.html
+priv-html: riscv-privileged.html
 
-priv-isa-asciidoc.html: $(SRCDIR)/riscv-privileged.adoc
+riscv-privileged.html: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA HTML"
-	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	@rm -f $@.tmp
+	$(call maybe_run_with_docker, asciidoctor, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
+	@mv $@.tmp $@
 
 # Unprivileged ISA HTML build
-unpriv-html: unpriv-isa-asciidoc.html
+unpriv-html: riscv-unprivileged.html
 
-unpriv-isa-asciidoc.html: $(SRCDIR)/riscv-unprivileged.adoc
+riscv-unprivileged.html: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA HTML"
-	asciidoctor $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	@rm -f $@.tmp
+	$(call maybe_run_with_docker, asciidoctor, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
+	@mv $@.tmp $@
 
-priv-epub: priv-isa-asciidoc.epub
+priv-epub: riscv-privileged.epub
 
-priv-isa-asciidoc.epub: $(SRCDIR)/riscv-privileged.adoc
+riscv-privileged.epub: $(SRCDIR)/riscv-privileged.adoc
 	@echo "Building Privileged ISA EPUB"
-	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	@rm -f $@.tmp
+	$(call maybe_run_with_docker, asciidoctor-epub3, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
+	@mv $@.tmp $@
 
-unpriv-epub: unpriv-isa-asciidoc.epub
+unpriv-epub: riscv-unprivileged.epub
 
-unpriv-isa-asciidoc.epub: $(SRCDIR)/riscv-unprivileged.adoc
+riscv-unprivileged.epub: $(SRCDIR)/riscv-unprivileged.adoc
 	@echo "Building Unprivileged ISA EPUB"
-	asciidoctor-epub3 $(ASCIIDOCTOR_OPTS) --out-file=$@ $<
+	@rm -f $@.tmp
+	$(call maybe_run_with_docker, asciidoctor-epub3, $(ASCIIDOCTOR_OPTS) --out-file=$@.tmp $<)
+	@mv $@.tmp $@
 
 clean:
-	@if [ -f priv-isa-asciidoc.pdf ]; then \
-		echo "Removing priv-isa-asciidoc.pdf"; \
-		rm -f priv-isa-asciidoc.pdf; \
-	fi
-	@if [ -f unpriv-isa-asciidoc.pdf ]; then \
-		echo "Removing unpriv-isa-asciidoc.pdf"; \
-		rm -f unpriv-isa-asciidoc.pdf; \
-	fi
-	@if [ -f priv-isa-asciidoc.html ]; then \
-		echo "Removing priv-isa-asciidoc.html"; \
-		rm -f priv-isa-asciidoc.html; \
-	fi
-	@if [ -f unpriv-isa-asciidoc.html ]; then \
-		echo "Removing unpriv-isa-asciidoc.html"; \
-		rm -f unpriv-isa-asciidoc.html; \
-	fi
-	@if [ -f priv-isa-asciidoc.epub ]; then \
-		echo "Removing priv-isa-asciidoc.epub"; \
-		rm -f priv-isa-asciidoc.epub; \
-	fi
-	@if [ -f unpriv-isa-asciidoc.epub ]; then \
-		echo "Removing unpriv-isa-asciidoc.epub"; \
-		rm -f unpriv-isa-asciidoc.epub; \
-	fi
+	rm -f $(TARGETS) $(addsuffix .tmp,$(TARGETS))
