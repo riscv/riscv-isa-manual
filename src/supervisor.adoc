@@ -64,7 +64,8 @@ register keeps track of the processor's current operating state.
   {bits:  1, name: 'MXR'},
   {bits:  3, name: 'WPRI'},
   {bits:  1, name: 'SPELP'},
-  {bits:  7, name: 'WPRI'},
+  {bits:  1, name: 'SDT'},
+  {bits:  6, name: 'WPRI'},
   {bits:  1, name: 'SD'},
 ], config:{lanes: 2, hspace:1024}}
 ....
@@ -90,7 +91,8 @@ register keeps track of the processor's current operating state.
   {bits:  1, name: 'MXR'},
   {bits:  3, name: 'WPRI'},
   {bits:  1, name: 'SPELP'},
-  {bits:  8, name: 'WPRI'},
+  {bits:  1, name: 'SDT'},
+  {bits:  7, name: 'WPRI'},
   {bits:  2, name: 'UXL[1:0]'},
   {bits: 29, name: 'WPRI'},
   {bits:  1, name: 'SD'},
@@ -223,6 +225,63 @@ endianness.
 Access to the `SPELP` field, added by Zicfilp, accesses the homonymous
 fields of `mstatus` when `V=0`, and the homonymous fields of `vsstatus`
 when `V=1`.
+
+[[supv-double-trap]]
+===== Double Trap Control in `sstatus` Register
+
+The S-mode-disable-trap (`SDT`) bit is a WARL field introduced by the Ssdbltrp
+extension to address double trap (See <<machine-double-trap>>) at privilege
+modes lower than M.
+
+When the `SDT` bit is set to 1 by an explicit CSR write, the `SIE` (Supervisor
+Interrupt Enable) bit is cleared to 0. This clearing occurs regardless of the
+value written, if any, to the `SIE` bit by the same write. The `SIE` bit can
+only be set to 1 by an explicit CSR write if the `SDT` bit is being set to 0 by
+the same write or is already 0.
+
+When a trap is to be taken into S-mode, if the `SDT` bit is currently 0,
+it is then set to 1, and the trap is delivered as expected. However, if `SDT` is
+already set to 1, then this is an _unexpected trap_. In the event of an
+_unexpected trap_, a double-trap exception trap is delivered into M-mode. To
+deliver this trap, the hart writes registers, except `mcause` and `mtval2`, with
+the same information that the _unexpected trap_ would have written if it was
+taken into M-mode. The `mtval2` register is then set to what would be otherwise
+written into the `mcause` register by the _unexpected trap_. The `mcause`
+register is set to 16, the double-trap exception code.
+
+An `SRET` instruction sets the `SDT` bit to 0.
+
+[NOTE]
+====
+A trap handler after saving the state needed for resuming from the trap,
+including `scause`, `sepc`, and `stval` among others, should clear the `SDT` bit
+when it is reentrant.
+
+Resetting of the `SDT` by an `SRET` enables the trap handler to detect double
+trap occuring during the tail phase, where it restores critical state to return
+from a trap.
+
+The consequence of this specification is that if a critical error condition was
+caused by a guest page-fault, then the GPA will not be available in `mtval2`
+when the double trap is delivered to M-mode. This condition arises if the
+HS-mode invokes a hypervisor virtual-machine load or store instruction when
+`SDT` is 1 and the instruction raises a guest page-fault. The use of such an
+instruction in this phase of trap handling is not common. However, not recording
+the GPA is considered benign because, if required, it can still be obtained
+-- albeit with added effort -- through the process of walking the page tables.
+
+For a double trap originating in VS-mode, M-mode should redirect the exception
+to HS-mode by copying the values of M-mode CSRs updated by the trap to HS-mode
+CSRs and should use an `MRET` to resume execution at the address in `stvec`.
+
+Supervisor Software Events (SSE), an extension to the SBI, provide a
+mechanism for supervisor software to register and service system events
+emanating from an SBI implementation, such as firmware or a hypervisor. In the
+event of a double trap, HS-mode and M-mode can utilize the SSE mechanism to
+invoke a critical-error handler in VS-mode or S/HS-mode, respectively.
+Additionally, the implementation of an SSE protocol can be considered as an
+optional measure to aid in the recovery from such critical errors.
+====
 
 ==== Supervisor Trap Vector Base Address (`stvec`)  Register 
 
