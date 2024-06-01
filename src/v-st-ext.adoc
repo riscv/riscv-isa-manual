@@ -1,5 +1,5 @@
 [[vector]]
-== "V" Standard Extension for Vector Operations, Version 1.0 
+== "V" Standard Extension for Vector Operations, Version 1.0
 
 [NOTE]
 ====
@@ -180,7 +180,7 @@ is anticipated that a future extended 64-bit instruction encoding
 would allow these fields to be specified statically in the instruction
 encoding.
 
-===== Vector selected element width `vsew[2:0]`
+===== Vector Selected Element Width (`vsew[2:0]`)
 
 The value in `vsew` sets the dynamic _selected_ _element_ _width_
 (SEW).  By default, a vector register is viewed as being divided into
@@ -452,7 +452,7 @@ when it cares about the non-participating elements, but given the
 historical meaning of the instruction prior to introduction of these
 flags, it was decided to always require them in future assembly code.
 
-===== Vector Type Illegal `vill`
+===== Vector Type Illegal (`vill`)
 
 The `vill` bit is used to encode that a previous `vset{i}vl{i}`
 instruction attempted to write an unsupported value to `vtype`.
@@ -602,7 +602,7 @@ roundoff_signed(v, d) = (signed(v) >> d) + r
 ----
 are used to represent this operation in the instruction descriptions below.
 
-==== Vector Fixed-Point Saturation Flag `vxsat`
+==== Vector Fixed-Point Saturation Flag (`vxsat`)
 
 The `vxsat` CSR has a single read-write least-significant bit
 (`vxsat[0]`) that indicates if a fixed-point instruction has had to
@@ -843,7 +843,7 @@ that it can be aligned with the other datawidths in the same column
 that also have an LMUL setting, such that all have the same VLMAX.
 
 |===
-|       7+^|            SEW/LMUL 
+|       7+^|            SEW/LMUL
 |          | 1 |  2 |  4 |  8 | 16  | 32  |  64
 
 | SEW=   8 | 8 |  4 |  2 |  1 | 1/2 | 1/4 |  1/8
@@ -1258,6 +1258,7 @@ NOTE: The `vsetivli` instruction provides more compact code when the
 dimensions of vectors are small and known to fit inside the vector
 registers, in which case there is no stripmining overhead.
 
+[[constraints-on-setting-vl]]
 ==== Constraints on Setting `vl`
 
 The `vset{i}vl{i}` instructions first set VLMAX according to their `vtype`
@@ -1733,7 +1734,7 @@ can be used to probe for valid effective addresses.  The unit-stride
 versions only allow probing a region immediately contiguous to a known
 region, and so reduce the security impact when used in unprivileged
 code.  However, code running in S-mode can establish arbitrary page
-translations that allow probing of random guest physical addresses 
+translations that allow probing of random guest physical addresses
 provided by a hypervisor.  Strided and scatter/gather fault-only-first
 instructions are not provided due to lack of encoding space, but they
 can also represent a larger security hole, allowing even unprivileged
@@ -5063,7 +5064,7 @@ All Zve* extensions support all vector mask instructions (Section
 <<sec-vector-mask>>).
 
 All Zve* extensions support all vector permutation instructions
-(Section <<sec-vector-permute>>), except that Zve32x and Zve64x 
+(Section <<sec-vector-permute>>), except that Zve32x and Zve64x
 do not include those with floating-point operands, and Zve64f does not include those
 with EEW=64 floating-point operands.
 
@@ -5180,6 +5181,147 @@ vector-scalar instructions substantially more useful.
 We considered requiring more complete scalar half-precision support, but we
 reasoned that, for many half-precision vector workloads, performing the scalar
 computation in single-precision will suffice.
+
+[[vector-element-groups]]
+=== Vector Element Groups
+
+Some vector instructions treat operands as a vector of one or more
+_element_ _groups_, where each element group is a fixed number of
+elements.  For example, complex numbers can be viewed as a two-element
+group (one real element and one imaginary element).
+As another example, the SHA-256 cryptographic instructions in the Zvknha
+extension operate on 128-bit values represented as a 4-element group of 32-bit
+elements.
+
+This section describes recommendations and terminology for generic
+instruction set design for vector instructions that operate on element
+groups.
+
+==== Element Group Size
+
+The _element_ _group_ _size_ (EGS) is the number of elements in one
+group, and must be a power-of-two (POT).
+
+NOTE: Support for non-POT EGS was considered but causes many practical
+complications and so has been dropped.  Error checking for `vl` is a
+little more difficult.  For LMUL>1, non-POT EGSs will result in groups
+straddling the individual vector registers in a vector register
+group. Non-POT EGS can also cause large increases in the
+lowest-common-multiple of element group sizes, which adds constraints
+to `vl` setting in order to avoid splitting an element group across
+stripmine iterations in vector-length-agnostic code.
+
+The element group size is statically encoded in the instruction, often
+implicitly as part of the opcode.
+
+Executing a vector instruction with EGS > VLMAX causes an illegal
+instruction exception to be raised.
+
+NOTE: The vector instructions in the base V vector ISA can be viewed
+as all having an element group size of 1 for all operands statically
+encoded in the instruction.
+
+NOTE: Many operations only make sense with a certain number of
+elements per group (e.g., complex operations require a element group
+size of 2 and SHA-256 requires an element group size of 4).
+
+==== Setting `vl`
+
+Each source and destination operand to a vector instruction might be
+defined as either a single element group or a vector of element
+groups.  When an operand is a vector of element groups, the `vl`
+setting must correspond to an integer multiple of the element group
+size, with other values of `vl` reserved.
+
+NOTE: For example, a SHA-256 instruction would require that `vl` is a
+multiple of 4.
+
+When element group instructions are present, an additional constraint
+is placed on the setting of `vl` based on an AVL value
+(augmenting <<constraints-on-setting-vl>>).
+EGSMAX is the largest EGS supported by the
+implementation.  When AVL > VLMAX, the value of `vl` must be set to
+either VLMAX or a positive integer multiple of EGSMAX.
+
+NOTE: As the base vector extension only has element group size of 1,
+this constraint is backwards-compatible.
+
+NOTE: This constraint prevents element groups being broken across
+stripmining iterations in vector-length-agnostic code when a
+VLMAX-size vector would otherwise be able to accomodate a whole number
+of element groups.
+
+NOTE: If EEW is encoded statically in the instruction, or if an
+instruction has multiple operands containing vectors of element groups
+with different EEW, an appropriate SEW must be chosen for `vsetvl`
+instructions.
+
+NOTE: Additional constraints may be required for some element group
+instructions to ensure legal length values for all operands.
+
+==== Determining EEW 
+
+The `vtype` SEW can be used to indicate or calculate the effective
+element size (EEW) of one or more operands of an element group
+instruction.  Where the operand is an element group, SEW and EEW refer
+to the number of bits in each individual element within a group not
+the number of bits in the group as a whole.
+
+Alternatively, the opcode might encode EEW of all operands statically
+and ignore the value of SEW when the operation only makes sense for a
+single size on each operand.
+
+NOTE: Many operations are only defined for one EEW, e.g., SHA-256
+requires EEW=32.  Encoding EEWs statically in the instruction removes
+a dynamic dependency on the SEW value and the need to check for errors
+in SEW values.  However, ignoring SEW also prevents reuse of the
+static opcode with a different dynamic SEW, and in many cases, the SEW
+setting will be needed for regular vector instructions used to process
+the individual elements in the vector.
+
+==== Determining EMUL
+
+The `vtype` LMUL setting can be used to indicate or calculate the
+effective length multiplier (EMUL) for one or more operands.  Element
+group instructions tend to exhibit a much wider range of relationships
+between various operand EEW/EMUL values.  For example, an instruction
+might take a vector of length N of 4-element groups with EEW=8b and
+reduce each group to produce a vector length N of 1-element groups
+with EEW=32b. In this case, the input and output EMUL values are equal
+even though the EEW settings differ by a factor of 4.
+
+Each source and destination operand to a vector instruction may have a
+different element group size, different EMUL, and/or different EEW.
+
+==== Element Group Width
+
+The _element_ _group_ _width_ (EGW) is the number of bits in the
+element group as a whole.
+For example, the SHA-256 instructions in the Zvknha extension operate on an
+EGW of 128, with EGS=4 and EEW=32.
+It is possible to use LMUL to concatenate multiple vector registers together
+to support larger EGW>VLEN.
+
+NOTE: If software using large-EGW instructions need be portable
+across a range of implementations, some of which may have VLEN<EGW and
+hence require LMUL>1, then software can only use a subset of the
+architectural registers.  Profiles can set minimum VLEN requirements
+to inform authors of such software.
+
+NOTE: Element group operations by their nature will gather data from
+across a wider portion of a vector datapath than regular vector
+instructions.  Some element group instructions might allow temporal
+execution of individual element operations in a larger group, while
+others will require all EGW bits of a group to be presented to a
+functional unit at the same time.
+
+==== Masking
+
+No ratified extensions include masked element-group instructions.
+Future extensions might extend the element-group scheme to support
+element-level masking, or might define the concept of a _mask element group_
+(which might, e.g., update the destination element group if any mask bit in
+the mask element group is set).
 
 === Vector Instruction Listing
 
