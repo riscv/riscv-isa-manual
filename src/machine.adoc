@@ -430,7 +430,8 @@ S-level ISA.
   {bits:  1, name: 'MPV'},
   {bits:  1, name: 'WPRI'},
   {bits:  1, name: 'MPELP'},
-  {bits: 21, name: 'WPRI'},
+  {bits:  1, name: 'MDT'},
+  {bits: 20, name: 'WPRI'},
   {bits:  1, name: 'SD'},
 ], config:{lanes: 4, hspace:1024}}
 ....
@@ -446,8 +447,13 @@ shown in <<mstatushreg>>. Bits 30:4 of `mstatush` generally contain the same fie
   {bits:  4, name: 'WPRI'},
   {bits:  1, name: 'SBE'},
   {bits:  1, name: 'MBE'},
-  {bits: 26, name: 'WPRI'},
-], config:{lanes: 1, hspace:1024}}
+  {bits:  1, name: 'GVA'},
+  {bits:  1, name: 'MPV'},
+  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'MPELP'},
+  {bits:  1, name: 'MDT'},
+  {bits: 21, name: 'WPRI'},
+], config:{lanes: 2, hspace:1024}}
 ....
 
 [[privstack]]
@@ -538,6 +544,71 @@ writing that mode to MPP then reading it back.
 If the machine provides only U and M modes, then only a single hardware
 storage bit is required to represent either 00 or 11 in MPP.
 ====
+
+[[machine-double-trap]]
+===== Double Trap Control in `mstatus` Register
+
+A double trap typically arises during a sensitive phase in trap handling
+operations -- when an exception or interrupt occurs while the trap handler (the
+component responsible for managing these events) is in a non-reentrant state.
+This non-reentrancy usually occurs in the early phase of trap handling, wherein
+the trap handler has not yet preserved the necessary state to handle and resume
+from the trap. The occurrence of a trap during this phase can lead to an
+overwrite of critical state information, resulting in the loss of data needed to
+recover from the initial trap. The trap that caused this critical error
+condition is henceforth called the _unexpected trap_. Trap handlers are designed
+to neither enable interrupts nor cause exceptions during this phase of handling.
+However, managing Hardware-Error exceptions,  which may occur unpredictably,
+presents significant challenges in trap handler implementation due to the
+potential risk of a double trap.
+
+The M-mode-disable-trap (`MDT`) bit is a WARL field introduced by the Smdbltrp
+extension. Upon reset, the `MDT` field is set to 1. When the `MDT` bit is set to
+1 by an explicit CSR write, the `MIE` (Machine Interrupt Enable) bit is cleared
+to 0. For RV64, this clearing occurs regardless of the value written, if any, to
+the `MIE` bit by the same write. The `MIE` bit can only be set to 1 by an
+explicit CSR write if the `MDT` bit is already 0 or, for RV64, is being set to 0
+by the same write (For RV32, the `MDT` bit is in `mstatush` and the `MIE` bit in
+`mstatus` register).
+
+When a trap is to be taken into M-mode, if the `MDT` bit is currently 0, it is
+then set to 1, and the trap is delivered as expected. However, if `MDT` is
+already set to 1, then this is an _unexpected trap_. Additionally, when the
+Smrnmi extension is implemented, a trap that occurs when executing in M-mode
+with the `mnstatus.NMIE` set to 0 is an _unexpected trap_.
+
+In the event of a _unexpected trap_, the handling is as follows:
+
+* When the Smrnmi extension is implemented and `mnstatus.NMIE` is 1, the hart
+  traps to the RNMI handler. To deliver this trap, the `mnepc` and `mncause`
+  registers are written with the values that the _unexpected trap_ would have
+  written to the `mepc` and `mcause` registers respectively. The privilege
+  mode information fields in the `mnstatus` register are written to indicate
+  M-mode and its `NMIE` field is set to 0.
+
+[NOTE]
+====
+The consequence of this specification is that on occurrence of double trap the
+RNMI handler is not provided with information that a trap would report in the
+`mtval` and the `mtval2` registers. This information, if needed, may be obtained
+by the RNMI handler by decoding the instruction at the address in `mnepc` and
+examining its source register contents.
+====
+
+* When the Smrnmi extension is not implemented, or if the Smrnmi extension is
+  implemented and `mnstatus.NMIE` is 0, the hart enters a critical-error state
+  without updating any architectural state including the `pc`. This state
+  involves ceasing execution, disabling all interrupts (including NMIs), and
+  asserting a `critical-error` signal to the platform.
+
+[NOTE]
+====
+The actions performed by the platform on assertion of a `critical-error` signal
+by a hart are platform specific. The range of possible actions include restarting
+the affected hart or restarting the entire platform among others.
+====
+
+An `MRET` instruction sets the `MDT` bit to 0.
 
 [[xlen-control]]
 ===== Base ISA Control in `mstatus` Register
@@ -1302,6 +1373,8 @@ For exceptions that cannot occur in less privileged modes, the
 corresponding `medeleg` bits should be read-only zero. In particular,
 `medeleg`[11] is read-only zero.
 
+The `medeleg`[16] is read-only zero as double trap is not delegatable.
+
 ==== Machine Interrupt (`mip` and `mie`) Registers 
 
 The `mip` register is an MXLEN-bit read/write register containing
@@ -1798,6 +1871,7 @@ _Designated for platform use_
 0 +
 0 +
 0 +
+0 +
 0
 |0 +
 1 +
@@ -1815,7 +1889,8 @@ _Designated for platform use_
 13 +
 14 +
 15 +
-16-17 +
+16 +
+17 +
 18 +
 19 +
 20-23 +
@@ -1839,6 +1914,7 @@ Instruction page fault +
 Load page fault +
 _Reserved_ +
 Store/AMO page fault +
+Double trap +
 _Reserved_ +
 Software check +
 Hardware error +
@@ -2095,7 +2171,8 @@ privileged than M.
   {bits:  1, name: 'CBZE'},
   {bits: 24, name: 'WPRI'},
   {bits:  2, name: 'PMM'},
-  {bits: 26, name: 'WPRI'},
+  {bits: 25, name: 'WPRI'},
+  {bits:  1, name: 'DTE'},
   {bits:  1, name: 'CDE'},
   {bits:  1, name: 'ADUE'},
   {bits:  1, name: 'PBMTE'},
@@ -2205,6 +2282,11 @@ the following rules apply to privilege modes that are less than M:
 * The `pte.xwr=010b` encoding in VS/S-stage page tables becomes reserved.
 * The `henvcfg.SSE` and `senvcfg.SSE` fields will read as zero and are read-only.
 * `SSAMOSWAP.W/D` raises an illegal-instruction exception.
+
+The Ssdbltrp extension adds the double-trap-enable (`DTE`) field in `menvcfg`.
+When `menvcfg.DTE` is zero, the implementation behaves as though Ssdbltrp is not
+implemented. When Ssdbltrp is not implemented `sstatus.SDT`, `vsstatus.SDT`, and
+`henvcfg.DTE` bits are read-only zero.
 
 When XLEN=32, `menvcfgh` is a 32-bit read/write register
 that aliases bits 63:32 of `menvcfg`.
