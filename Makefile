@@ -56,11 +56,14 @@ REQUIRES := --require=asciidoctor-bibtex \
 			--require=asciidoctor-lists \
             --require=asciidoctor-mathematical
 
-.PHONY: all build clean build-container build-no-container build-docs
+.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub
 
 all: build
 
 build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB)
+build-pdf: $(DOCS_PDF)
+build-html: $(DOCS_HTML)
+build-epub: $(DOCS_EPUB)
 
 vpath %.adoc $(SRC_DIR)
 
