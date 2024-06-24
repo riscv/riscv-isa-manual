@@ -37,10 +37,11 @@ DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
 DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
 
+ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
-ASCIIDOCTOR_PDF := asciidoctor-pdf
-ASCIIDOCTOR_HTML := asciidoctor
-ASCIIDOCTOR_EPUB := asciidoctor-epub3
+ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
+ASCIIDOCTOR_HTML := $(ENV) asciidoctor
+ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
 OPTIONS := --trace \
            -a compress \
            -a mathematical-format=svg \
