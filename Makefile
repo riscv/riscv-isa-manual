@@ -19,9 +19,7 @@
 #   docker pull riscvintl/riscv-docs-base-container-image:latest
 #
 
-DOCS := \
-	riscv-privileged.adoc \
-	riscv-unprivileged.adoc
+DOCS := riscv-privileged riscv-unprivileged
 
 DATE ?= $(shell date +%Y-%m-%d)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
@@ -35,25 +33,26 @@ endif
 SRC_DIR := src
 BUILD_DIR := build
 
-DOCS_PDF := $(DOCS:%.adoc=%.pdf)
-DOCS_HTML := $(DOCS:%.adoc=%.html)
-DOCS_EPUB := $(DOCS:%.adoc=%.epub)
+DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
+DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
+DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
 
+ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
-ASCIIDOCTOR_PDF := asciidoctor-pdf
-ASCIIDOCTOR_HTML := asciidoctor
-ASCIIDOCTOR_EPUB := asciidoctor-epub3
+ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
+ASCIIDOCTOR_HTML := $(ENV) asciidoctor
+ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
 OPTIONS := --trace \
            -a compress \
            -a mathematical-format=svg \
            -a pdf-fontsdir=docs-resources/fonts \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
            $(XTRA_ADOC_OPTS) \
-		   -D build \
+           -D build \
            --failure-level=ERROR
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
-			--require=asciidoctor-lists \
+            --require=asciidoctor-lists \
             --require=asciidoctor-mathematical
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub
@@ -65,15 +64,15 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 
-vpath %.adoc $(SRC_DIR)
+ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
-%.pdf: %.adoc
+$(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 
-%.html: %.adoc
+$(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 
-%.epub: %.adoc
+$(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 
 build:
