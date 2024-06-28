@@ -19,7 +19,7 @@
 #   docker pull riscvintl/riscv-docs-base-container-image:latest
 #
 
-DOCS := riscv-privileged riscv-unprivileged
+DOCS := riscv-privileged
 
 DATE ?= $(shell date +%Y-%m-%d)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
@@ -34,8 +34,6 @@ SRC_DIR := src
 BUILD_DIR := build
 
 DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
-DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
-DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
 
 ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
@@ -69,11 +67,6 @@ ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 
-$(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
-
-$(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 
 build:
 	@echo "Checking if Docker is available..."
