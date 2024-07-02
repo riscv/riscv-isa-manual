@@ -73,7 +73,7 @@ c_row_loop: # Loop across rows of C blocks
     mv cnp, cp # Initialize C n-loop pointer
 
 c_col_loop: # Loop across one row of C blocks
-    vsetvli nvl, nt, e32, ta, ma  # 32-bit vectors, LMUL=1
+    vsetvli nvl, nt, e32, m1, ta, ma  # 32-bit vectors, LMUL=1
 
     mv akp, ap   # reset pointer into A to beginning
     mv bkp, bnp # step to next column in B matrix

@@ -8,7 +8,7 @@
     # a0 = n, a1 = x, a2 = y, a3 = z
     # Non-vector instructions are indented
 vvaddint32:
-    vsetvli t0, a0, e32, ta, ma  # Set vector length based on 32-bit vectors
+    vsetvli t0, a0, e32, m1, ta, ma  # Set vector length based on 32-bit vectors
     vle32.v v0, (a1)         # Get first vector
       sub a0, a0, t0         # Decrement number done
       slli t0, t0, 2         # Multiply number done by 4 bytes
