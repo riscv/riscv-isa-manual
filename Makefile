@@ -24,11 +24,24 @@ DOCS := riscv-privileged riscv-unprivileged
 DATE ?= $(shell date +%Y-%m-%d)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
-	DOCKER_CMD := docker run --rm -v ${PWD}:/build -w /build \
-	${DOCKER_IMG} \
-	/bin/sh -c
+	DOCKER_CMD = \
+		docker run --rm -v ${PWD}/$@.workdir:/build -w /build \
+			${DOCKER_IMG} \
+			/bin/sh -c
 	DOCKER_QUOTE := "
+else
+	DOCKER_CMD = \
+		cd $@.workdir &&
 endif
+
+WORKDIR_SETUP = \
+	rm -rf $@.workdir && \
+	mkdir -p $@.workdir && \
+	cp -r src docs-resources $@.workdir
+
+WORKDIR_TEARDOWN = \
+	mv $@.workdir/$@ $@ && \
+	rm -rf $@.workdir
 
 SRC_DIR := src
 BUILD_DIR := build
@@ -67,13 +80,19 @@ build-epub: $(DOCS_EPUB)
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
 $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(WORKDIR_TEARDOWN)
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(WORKDIR_TEARDOWN)
 
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(WORKDIR_TEARDOWN)
 
 build:
 	@echo "Checking if Docker is available..."
