@@ -70,12 +70,15 @@ BUILD_DIR := build
 DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
 DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
+DOCS_REDUCED_ADOC := $(addprefix $(BUILD_DIR)/, $(addsuffix .reduced.adoc, $(DOCS)))
 
 ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
 ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
+ASCIIDOCTOR_REDUCER := $(ENV) asciidoctor-reducer
+
 OPTIONS := --trace \
            -a compress \
            -a mathematical-format=svg \
@@ -97,6 +100,7 @@ build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB)
 build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
+build-adoc: $(DOCS_REDUCER_ADOC)
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
@@ -113,6 +117,11 @@ $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(WORKDIR_TEARDOWN)
+
+$(BUILD_DIR)/%.reduced.adoc: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+	$(WORKDIR_SETUP)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_REDUCER) -o $@ $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 build:
