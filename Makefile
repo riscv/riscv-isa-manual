@@ -74,7 +74,8 @@ OPTIONS := --trace \
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
-            --require=asciidoctor-mathematical
+            --require=asciidoctor-mathematical \
+            --require=./docs-resources/extensions/asciidoctor-sail/asciidoctor-sail.rb
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub
 
