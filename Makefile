@@ -24,32 +24,32 @@ DOCS := riscv-privileged riscv-unprivileged
 DATE ?= $(shell date +%Y-%m-%d)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
-	DOCKER_IS_PODMAN = \
-		$(shell ! docker -v 2>&1 | grep podman >/dev/null ; echo $$?)
-	ifeq "$(DOCKER_IS_PODMAN)" "1"
-		DOCKER_VOL_SUFFIX = :z
-	endif
+    DOCKER_IS_PODMAN = \
+        $(shell ! docker -v 2>&1 | grep podman >/dev/null ; echo $$?)
+    ifeq "$(DOCKER_IS_PODMAN)" "1"
+        DOCKER_VOL_SUFFIX = :z
+    endif
 
-	DOCKER_CMD = \
-		docker run --rm \
-			-v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
-			-w /build \
-			${DOCKER_IMG} \
-			/bin/sh -c
-	DOCKER_QUOTE := "
+    DOCKER_CMD = \
+        docker run --rm \
+            -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
+            -w /build \
+            ${DOCKER_IMG} \
+            /bin/sh -c
+    DOCKER_QUOTE := "
 else
-	DOCKER_CMD = \
-		cd $@.workdir &&
+    DOCKER_CMD = \
+        cd $@.workdir &&
 endif
 
 WORKDIR_SETUP = \
-	rm -rf $@.workdir && \
-	mkdir -p $@.workdir && \
-	cp -r src docs-resources $@.workdir
+    rm -rf $@.workdir && \
+    mkdir -p $@.workdir && \
+    cp -r src docs-resources $@.workdir
 
 WORKDIR_TEARDOWN = \
-	mv $@.workdir/$@ $@ && \
-	rm -rf $@.workdir
+    mv $@.workdir/$@ $@ && \
+    rm -rf $@.workdir
 
 SRC_DIR := src
 BUILD_DIR := build
