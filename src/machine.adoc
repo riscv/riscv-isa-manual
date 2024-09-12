@@ -368,18 +368,18 @@ S-level ISA.
 
 [[mstatusreg-rv32]]
 .Machine-mode status (`mstatus`) register for RV32
-include::images/wavedrom/mstatusreg-rv321.adoc[]
+include::images/wavedrom/mstatusreg-rv321.edn[]
 
 [[mstatusreg]]
 .Machine-mode status (`mstatus`) register for RV64
-include::images/wavedrom/mstatusreg.adoc[]
+include::images/wavedrom/mstatusreg.edn[]
 
 For RV32 only, `mstatush` is a 32-bit read/write register formatted as
 shown in <<mstatushreg>>. Bits 30:4 of `mstatush` generally contain the same fields found in bits 62:36 of `mstatus` for RV64. Fields SD, SXL, and UXL do not exist in `mstatush`.
 
 [[mstatushreg]]
 .Additional machine-mode status (`mstatush`) register  for RV32.
-include::images/wavedrom/mstatushreg.adoc[]
+include::images/wavedrom/mstatushreg.edn[]
 
 [[privstack]]
 ===== Privilege and Global Interrupt-Enable Stack in `mstatus` register
@@ -498,9 +498,11 @@ by the same write (For RV32, the `MDT` bit is in `mstatush` and the `MIE` bit in
 
 When a trap is to be taken into M-mode, if the `MDT` bit is currently 0, it is
 then set to 1, and the trap is delivered as expected. However, if `MDT` is
-already set to 1, then this is an _unexpected trap_. Additionally, when the
-Smrnmi extension is implemented, a trap that occurs when executing in M-mode
-with the `mnstatus.NMIE` set to 0 is an _unexpected trap_.
+already set to 1, then this is an _unexpected trap_. When the Smrnmi extension
+is implemented, a trap caused by an RNMI is not considered an _unexpected trap_
+irrespective of the state of the `MDT` bit. A trap caused by an RNMI does not
+set the `MDT` bit. However, a trap that occurs when executing in M-mode with
+`mnstatus.NMIE` set to 0 is an _unexpected trap_.
 
 In the event of a _unexpected trap_, the handling is as follows:
 
@@ -536,6 +538,10 @@ the affected hart or restarting the entire platform, among others.
 The `MRET` and `SRET` instructions, when executed in M-mode, set the `MDT` bit
 to 0. If the new privilege mode is U, VS, or VU, then `sstatus.SDT` is also set
 to 0. Additionally, if it is VU, then `vsstatus.SDT` is also set to 0.
+
+The `MNRET` instruction, provided by the Smrnmi extension, sets the `MDT` bit to
+0 if the new privilege mode is not M. If it is U, VS, or VU, then `sstatus.SDT` is
+also set to 0. Additionally, if it is VU, then `vsstatus.SDT` is also set to 0.
 
 [[xlen-control]]
 ===== Base ISA Control in `mstatus` Register
@@ -580,6 +586,21 @@ next-higher privilege mode. In practice, such settings would almost
 always be a software bug, but machine operation is well-defined even in
 this case.
 ====
+
+Some HINT instructions are encoded as integer computational instructions that
+overwrite their destination register with its current value, e.g.,
+`c.addi x8, 0`.
+When such a HINT is executed with XLEN < MXLEN and bits MXLEN..XLEN of the
+destination register not all equal to bit XLEN-1, it is implementation-defined
+whether bits MXLEN..XLEN of the destination register are unchanged or are
+overwritten with copies of bit XLEN-1.
+
+NOTE: This definition allows implementations to elide register writeback for
+some HINTs, while allowing them to execute other HINTs in the same manner as
+other integer computational instructions.
+The implementation choice is observable only by privilege modes with an XLEN
+setting greater than the current XLEN; it is invisible to the current
+privilege mode.
 
 ===== Memory Privilege in `mstatus` Register
 
@@ -1554,9 +1575,9 @@ counters, the counters can be directly exposed to lower privilege modes.
 The `cycle`, `instret`, and `hpmcountern` CSRs are read-only shadows of
 `mcycle`, `minstret`, and `mhpmcounter n`, respectively. The `time` CSR
 is a read-only shadow of the memory-mapped `mtime` register.
-Analogously, on RV32I the `cycleh`, `instreth` and `hpmcounternh` CSRs
+Analogously, when XLEN=32, the `cycleh`, `instreth` and `hpmcounternh` CSRs
 are read-only shadows of `mcycleh`, `minstreth` and `mhpmcounternh`,
-respectively. On RV32I the `timeh` CSR is a read-only shadow of the
+respectively. When XLEN=32, the `timeh` CSR is a read-only shadow of the
 upper 32 bits of the memory-mapped `mtime` register, while `time`
 shadows only the lower 32 bits of `mtime`.
 
@@ -1772,6 +1793,9 @@ Counter-overflow interrupt +
 _Reserved_ +
 _Designated for platform use_ 
 |0 +
+0 +
+0 +
+0 +
 0 +
 0 +
 0 +
@@ -2079,7 +2103,7 @@ privileged than M.
 
 [[menvcfgreg]]
 .Machine environment configuration (`menvcfg`) register.
-include::images/wavedrom/menvcfgreg.adoc[]
+include::images/wavedrom/menvcfgreg.edn[]
 
 
 If bit FIOM (Fence of I/O implies Memory) is set to one in `menvcfg`,
@@ -2182,8 +2206,10 @@ the following rules apply to privilege modes that are less than M:
 * 32-bit Zicfiss instructions will revert to their behavior as defined by Zimop.
 * 16-bit Zicfiss instructions will revert to their behavior as defined by Zcmop.
 * The `pte.xwr=010b` encoding in VS/S-stage page tables becomes reserved.
-* The `henvcfg.SSE` and `senvcfg.SSE` fields will read as zero and are read-only.
 * `SSAMOSWAP.W/D` raises an illegal-instruction exception.
+
+When `menvcfg.SSE` is 0, the `henvcfg.SSE` and `senvcfg.SSE` fields are
+read-only zero.
 
 The Ssdbltrp extension adds the double-trap-enable (`DTE`) field in `menvcfg`.
 When `menvcfg.DTE` is zero, the implementation behaves as though Ssdbltrp is not
@@ -2204,7 +2230,7 @@ shown in <<mseccfg>>, that controls security features.
 
 [[mseccfg]]
 .Machine security configuration (`mseccfg`) register.
-include::images/wavedrom/mseccfg.adoc[]
+include::images/wavedrom/mseccfg.edn[]
 
 The definitions of the SSEED and USEED fields will be furnished by the
 forthcoming entropy-source extension, Zkr. Their allocations within
@@ -2313,13 +2339,19 @@ For RV64, naturally aligned 64-bit memory accesses to the `mtime` and
 ....
 
 
+The `time` CSR is a read-only shadow of the memory-mapped `mtime` register.
+When XLEN=32, the `timeh` CSR is a read-only shadow of the upper 32 bits of the
+memory-mapped `mtime` register, while `time` shadows only the lower 32 bits of
+`mtime`.
+When `mtime` changes, it is guaranteed to be reflected in `time` and `timeh`
+eventually, but not necessarily immediately.
 
 
 === Machine-Mode Privileged Instructions
 
 ==== Environment Call and Breakpoint
 
-include::images/wavedrom/mm-env-call.adoc[]
+include::images/wavedrom/mm-env-call.edn[]
 
 The ECALL instruction is used to make a request to the supporting
 execution environment. When executed in U-mode, S-mode, or M-mode, it
@@ -2359,7 +2391,7 @@ not increment the `minstret` CSR.
 Instructions to return from trap are encoded under the PRIV minor
 opcode.
 
-include::images/wavedrom/trap-return.adoc[]
+include::images/wavedrom/trap-return.edn[]
 
 To return after handling a trap, there are separate trap return
 instructions per privilege level, MRET and SRET. MRET is always
@@ -2396,7 +2428,7 @@ privileged modes, and optionally available to U-mode. This instruction
 may raise an illegal-instruction exception when TW=1 in `mstatus`, as
 described in <<virt-control>>.
 
-include::images/wavedrom/wfi.adoc[]
+include::images/wavedrom/wfi.edn[]
 
 If an enabled interrupt is present or later becomes present while the
 hart is stalled, the interrupt trap will be taken on the following
@@ -2490,7 +2522,9 @@ the platform mandates a different reset value for some PMP registers’ A
 and L fields. If the hypervisor extension is implemented, the
 `hgatp`.MODE and `vsatp`.MODE fields are reset to 0. If the Smrnmi
 extension is implemented, the `mnstatus`.NMIE field is reset to 0. No
- *WARL* field contains an illegal value. All other hart state is UNSPECIFIED.
+ *WARL* field contains an illegal value. If the Zicfilp extension is
+implemented, the `mseccfg`.MLPE field is reset to 0. All other hart
+state is UNSPECIFIED.
 
 The `mcause` values after reset have implementation-specific
 interpretation, but the value 0 should be returned on implementations

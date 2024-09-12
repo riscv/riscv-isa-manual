@@ -191,7 +191,7 @@ along with their specific mapping:
 
 |&#10003;
 |&#10003;
-|orc.b _rd_, _rs1_, _rs2_
+|orc.b _rd_, _rs_
 |<<#insns-orc_b>>
 |
 |&#10003;
@@ -836,7 +836,7 @@ a single bit in a register. The bit is specified by its index.
 
 |===
 
-[#zbkb,reftext="Bit-manipulation for Cryptography"]
+[[zbkb,Bit-manipulation for Cryptography]]
 ==== Zbkb: Bit-manipulation for Cryptography
 
 This extension contains instructions essential for implementing
@@ -912,8 +912,8 @@ common operations in cryptographic workloads.
 
 | &#10003; 
 | &#10003; 
-|  rev.b       
-| <<insns-revb>>
+|  brev8       
+| <<insns-brev8>>
 
 | &#10003; 
 | &#10003; 
@@ -932,7 +932,7 @@ common operations in cryptographic workloads.
 
 |===
 
-[#zbkc,reftext="Carry-less multiplication for Cryptography"]
+[[zbkc,Carry-less multiplication for Cryptography]]
 ==== Zbkc: Carry-less multiplication for Cryptography
 
 Carry-less multiplication is the multiplication in the polynomial ring over
@@ -960,7 +960,7 @@ efficiently implement the GHASH operation, which is part of this workload.
 
 |===
 
-[#zbkx,reftext="Crossbar permutations"]
+[[zbkx,Crossbar permutations]]
 ==== Zbkx: Crossbar permutations
 
 These instructions implement a "lookup table" for 4 and 8 bit elements
@@ -984,13 +984,13 @@ latency does not depend on the (secret) data being operated on.
 
 |&#10003;
 |&#10003;
-|xperm.n _rd_, _rs1_, _rs2_
-|<<#insns-xpermn>>
+|xperm4 _rd_, _rs1_, _rs2_
+|<<#insns-xperm4>>
 
 |&#10003;
 |&#10003;
-|xperm.b _rd_, _rs1_, _rs2_
-|<<#insns-xpermb>>
+|xperm8 _rd_, _rs1_, _rs2_
+|<<#insns-xperm8>>
 
 |===
 
@@ -2386,6 +2386,13 @@ Included in::
 |Ratified
 |===
 
+NOTE: For RV32, the `pack` instruction with _rs2_=`x0` is the `zext.h`
+instruction.
+Hence, for RV32, any extension that contains the `pack` instruction also
+contains the `zext.h` instruction (but not necessarily the `c.zext.h`
+instruction, which is only guaranteed to exist if both the Zcb and Zbb
+extensions are implemented).
+
 <<<
 [#insns-packh,reftext="Pack low bytes of registers"]
 ==== packh
@@ -2484,6 +2491,13 @@ Included in::
 |Ratified
 |===
 
+NOTE: For RV64, the `packw` instruction with _rs2_=`x0` is the `zext.h`
+instruction.
+Hence, for RV64, any extension that contains the `packw` instruction also
+contains the `zext.h` instruction (but not necessarily the `c.zext.h`
+instruction, which is only guaranteed to exist if both the Zcb and Zbb
+extensions are implemented).
+
 <<<
 [#insns-rev8,reftext="Byte-reverse register"]
 ==== rev8
@@ -2568,14 +2582,14 @@ Included in::
 |===
 
 <<<
-[#insns-revb,reftext="Reverse bits in bytes"]
-==== rev.b
+[#insns-brev8,reftext="Reverse bits in bytes"]
+==== brev8
 
 Synopsis::
 Reverse the bits in each byte of a source register.
 
 Mnemonic::
-rev.b _rd_, _rs_
+brev8 _rd_, _rs_
 
 Encoding::
 [wavedrom, , svg]
@@ -3368,7 +3382,8 @@ This instruction is the same as *slli* with *zext.w* performed on _rs1_ before s
 ==== unzip
 
 Synopsis::
-Implements the inverse of the zip instruction.
+Place odd and even bits of the source register into upper and lower halves of
+the destination register, respectively.
 
 Mnemonic::
 unzip _rd_, _rs_
@@ -3381,15 +3396,15 @@ Encoding::
 {bits: 5, name: 'rd'},
 {bits: 3, name: 0x5},
 {bits: 5, name: 'rs1'},
-{bits: 5, name: 0x1f},
+{bits: 5, name: 0xf},
 {bits: 7, name: 0x4},
 ]}
 ....
 
 Description:: 
-This instruction gathers bits from the high and low halves of the source
-word into odd/even bit positions in the destination word.
-It is the inverse of the <<insns-zip,zip>> instruction.
+This instruction scatters all of the odd and even bits of a source word into
+the high and low halves of a destination word.
+It is the inverse of the <<insns-zip-sc,zip>> instruction.
 This instruction is available only on RV32.
 
 Operation::
@@ -3471,14 +3486,14 @@ Included in::
 |===
 
 <<<
-[#insns-xpermb,reftext="Crossbar permutation (bytes)"]
-==== xperm.b
+[#insns-xperm8,reftext="Crossbar permutation (bytes)"]
+==== xperm8
 
 Synopsis::
 Byte-wise lookup of indices into a vector in registers.
 
 Mnemonic::
-xperm.b _rd_, _rs1_, _rs2_
+xperm8 _rd_, _rs1_, _rs2_
 
 Encoding::
 [wavedrom, , svg]
@@ -3495,7 +3510,7 @@ Encoding::
 ....
 
 Description:: 
-The xperm.b instruction operates on bytes.
+The xperm8 instruction operates on bytes.
 The _rs1_ register contains a vector of XLEN/8 8-bit elements.
 The _rs2_ register contains a vector of XLEN/8 8-bit indexes.
 The result is each element in _rs2_ replaced by the indexed element in _rs1_,
@@ -3504,15 +3519,15 @@ or zero if the index into _rs2_ is out of bounds.
 Operation::
 [source,sail]
 --
-val xpermb_lookup : (bits(8), xlenbits) -> bits(8)
-function xpermb_lookup (idx, lut) = {
+val xperm8_lookup : (bits(8), xlenbits) -> bits(8)
+function xperm8_lookup (idx, lut) = {
     (lut >> (idx @ 0b000))[7..0]
 }
 
-function clause execute ( XPERM_B (rs2,rs1,rd)) = {
+function clause execute ( XPERM8 (rs2,rs1,rd)) = {
     result : xlenbits = EXTZ(0b0);
     foreach(i from 0 to xlen by 8) {
-        result[i+7..i] = xpermn_lookup(X(rs2)[i+7..i], X(rs1));
+        result[i+7..i] = xperm8_lookup(X(rs2)[i+7..i], X(rs1));
     };
     X(rd) = result;
     RETIRE_SUCCESS
@@ -3532,14 +3547,14 @@ Included in::
 |===
 
 <<<
-[#insns-xpermn,reftext="Crossbar permutation (nibbles)"]
-==== xperm.n
+[#insns-xperm4,reftext="Crossbar permutation (nibbles)"]
+==== xperm4
 
 Synopsis::
 Nibble-wise lookup of indices into a vector.
 
 Mnemonic::
-xperm.n _rd_, _rs1_, _rs2_
+xperm4 _rd_, _rs1_, _rs2_
 
 Encoding::
 [wavedrom, , svg]
@@ -3556,7 +3571,7 @@ Encoding::
 ....
 
 Description:: 
-The xperm.n instruction operates on nibbles.
+The xperm4 instruction operates on nibbles.
 The _rs1_ register contains a vector of XLEN/4 4-bit elements.
 The _rs2_ register contains a vector of XLEN/4 4-bit indexes.
 The result is each element in _rs2_ replaced by the indexed element in _rs1_,
@@ -3565,15 +3580,15 @@ or zero if the index into _rs2_ is out of bounds.
 Operation::
 [source,sail]
 --
-val xpermn_lookup : (bits(4), xlenbits) -> bits(4)
-function xpermn_lookup (idx, lut) = {
+val xperm4_lookup : (bits(4), xlenbits) -> bits(4)
+function xperm4_lookup (idx, lut) = {
     (lut >> (idx @ 0b00))[3..0]
 }
 
-function clause execute ( XPERM_N (rs2,rs1,rd)) = {
+function clause execute ( XPERM4 (rs2,rs1,rd)) = {
     result : xlenbits = EXTZ(0b0);
     foreach(i from 0 to xlen by 4) {
-        result[i+3..i] = xpermn_lookup(X(rs2)[i+3..i], X(rs1));
+        result[i+3..i] = xperm4_lookup(X(rs2)[i+3..i], X(rs1));
     };
     X(rd) = result;
     RETIRE_SUCCESS
@@ -3660,8 +3675,8 @@ Included in::
 ==== zip
 
 Synopsis::
-Gather odd and even bits of the source word into upper/lower halves of the
-destination.
+Interleave upper and lower halves of the source register into odd and even
+bits of the destination register, respectivley.
 
 Mnemonic::
 zip _rd_, _rs_
@@ -3674,15 +3689,15 @@ Encoding::
 {bits: 5, name: 'rd'},
 {bits: 3, name: 0x1},
 {bits: 5, name: 'rs1'},
-{bits: 5, name: 0x1e},
+{bits: 5, name: 0xf},
 {bits: 7, name: 0x4},
 ]}
 ....
 
 Description:: 
-This instruction scatters all of the odd and even bits of a source word into
-the high and low halves of a destination word.
-It is the inverse of the <<insns-unzip,unzip>> instruction.
+This instruction gathers bits from the high and low halves of the source
+word into odd/even bit positions in the destination word.
+It is the inverse of the <<insns-unzip-sc,unzip>> instruction.
 This instruction is available only on RV32.
 
 Operation::
