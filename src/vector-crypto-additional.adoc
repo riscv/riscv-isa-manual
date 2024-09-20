@@ -53,9 +53,16 @@ and hashing (e.g., Elliptic curve cryptography, GHASH, CRC).
 These instructions are only defined for `SEW`=32.
 Zvbc32e can be supported when `ELEN >=32`.
 
+This extension covers two gaps of `Zvbc`:
+
+- allowing vector implementations with smaller `ELEN=32` (e.g. implementations selecting `Zve32*`) to implement some support for vector carry-less multiplication (this is not allowed by `Zvbc` which requires `ELEN >= 64`)
+- for implementations which have `ELEN >= 64`: allowing more efficient implementations of algorithms relying on 32-bit carry less multiplications. The list of such algorithms includes the CLM-based folding algorithm used to compute the widespread 32-bit CRCs (e.g. ethernet CRC). This technique can already be implemented with `Zvbc` but only half the 64-bit multiplication is exploited. Selecting `Zvbc32e` only allows implementations to save area while providing identical performance on those algorithms.
+
 
 Note:: The extension `Zvbc32e` is independent from `Zvbc` which defines the same instructions for `SEW=64`.
        When `ELEN>=64` both extensions can be combined to have `vclmul.v[vx]` and `vclmulh.v[vx]` defined for both `SEW=32` and `SEW=64`.
+
+Note:: The extra cost of supporting `Zvbc32e` on top of `Zvbc` should be minimal, as the hardware required to implement the instructions in `Zvbc32e` is a subset of the hardware required to implement `Zvbc`'s instructions.
 
 [%autowidth]
 [%header,cols="^2,4"]
@@ -89,6 +96,11 @@ The number of element groups to be processed is `vl`/`EGS`.
 `vl` must be set to the number of `SEW=32` elements to be processed and
 therefore must be a multiple of `EGS=4`. +
 Likewise, `vstart` must be a multiple of `EGS=4`.
+
+One of the key use cases for the vector instructions `vghsh.vv` and `vgmul.vv` defined in **Zvkg** is to speed-up GCM cipher mode for a single stream by computing the GHASH algorithm for multiple blocks of the same message in parallel.
+The parallel processing accumulates and multiplies multiple blocks of the message by the same power of H (encryption of `0` by the cipher key). The power being equal to the number of blocks processed in parallel. The processing completes by reducing the parallel accumulators into a single output tag.
+With `Zvkg` only, a full vector register was required to old the multiple copies of the power of H. `Zvkgs` reduces the size of the vector register group needed for powers of H: it just needs to contain a 128-bit wide element group, freeing some vector registers.
+This exploits the same scalar element group broadcast mechanism used in other instructions defined in the vector crypto extensions (e.g. `vaesem.vs` from **Zvkned**).
 
 [%autowidth]
 [%header,cols="^2,4,4,4"]
@@ -334,7 +346,7 @@ Encoding (Vector-Scalar)::
 [wavedrom, , svg]
 ....
 {reg:[
-{bits: 7, name: 'OP-P'},
+{bits: 7, name: 'OP-VE'},
 {bits: 5, name: 'vd'},
 {bits: 3, name: 'OPMVV'},
 {bits: 5, name: 'vs1'},
@@ -473,7 +485,7 @@ Encoding (Vector-Scalar)::
 [wavedrom, , svg]
 ....
 {reg:[
-{bits: 7, name: 'OP-P'},
+{bits: 7, name: 'OP-VE'},
 {bits: 5, name: 'vd'},
 {bits: 3, name: 'OPMVV'},
 {bits: 5, name: '10001'},
@@ -601,7 +613,7 @@ Included in::
 [[crypto_vector_instructions_Zvkgs]]
 ==== Additional Vector Cryptographic Instructions
 
-OP-P (0x77)
+OP-VE (0x77)
 Vector Crypto instructions, including `Zvkgs`, except `Zvbb` and `Zvbc`.
 The new/modified encodings are in bold.
 
