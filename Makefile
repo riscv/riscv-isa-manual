@@ -8,9 +8,9 @@
 # SPDX-License-Identifier: CC-BY-SA-4.0
 #
 # Description:
-# 
-# This Makefile is designed to automate the process of building and packaging 
-# the documentation for RISC-V ISA Manuals. It supports multiple build targets 
+#
+# This Makefile is designed to automate the process of building and packaging
+# the documentation for RISC-V ISA Manuals. It supports multiple build targets
 # for generating documentation in various formats (PDF, HTML, EPUB).
 #
 # Building with a preinstalled docker container is recommended.
@@ -27,13 +27,26 @@ ifneq ($(SKIP_DOCKER),true)
     DOCKER_IS_PODMAN = \
         $(shell ! docker -v 2>&1 | grep podman >/dev/null ; echo $$?)
     ifeq "$(DOCKER_IS_PODMAN)" "1"
+        # Modify the SELinux label for the host directory to indicate
+        # that it can be shared with multiple containers. This is apparently
+        # only required for Podman, though it is also supported by Docker.
         DOCKER_VOL_SUFFIX = :z
+    else
+        DOCKER_IS_ROOTLESS = \
+            $(shell ! docker info -f '{{println .SecurityOptions}}' | grep rootless >/dev/null ; echo $$?)
+        ifneq "$(DOCKER_IS_ROOTLESS)" "1"
+            # Rooted Docker requires this flag so that the files it creates are
+            # owned by the current user instead of root. Rootless docker does not
+            # require it, and Podman doesn't either since it is always rootless.
+            DOCKER_USER_ARG := --user $(shell id -u)
+        endif
     endif
 
     DOCKER_CMD = \
         docker run --rm \
             -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
             -w /build \
+            $(DOCKER_USER_ARG) \
             ${DOCKER_IMG} \
             /bin/sh -c
     DOCKER_QUOTE := "
