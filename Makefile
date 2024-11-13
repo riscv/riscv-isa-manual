@@ -45,6 +45,8 @@ ifneq ($(SKIP_DOCKER),true)
     DOCKER_CMD = \
         docker run --rm \
             -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
+            -v ${PWD}/src:/src:ro \
+            -v ${PWD}/docs-resources:/docs-resources:ro \
             -w /build \
             $(DOCKER_USER_ARG) \
             ${DOCKER_IMG} \
@@ -58,7 +60,7 @@ endif
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
     mkdir -p $@.workdir && \
-    cp -r src docs-resources $@.workdir
+    ln -sfn ../../src ../../docs-resources $@.workdir/
 
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
