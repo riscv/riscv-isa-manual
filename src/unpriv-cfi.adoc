@@ -46,7 +46,7 @@ register as destination, i.e., `rd != x0`. Conventionally, the link register is
 `C.JALR` is termed an _indirect-call_.
 
 The term _return_ is used to refer to a `JALR` instruction with `rd == x0` and
-with `rs1 == x1` or `rs1 == x5`. A `C.JR` instruction expands to 
+with `rs1 == x1` or `rs1 == x5`. A `C.JR` instruction expands to
 `JALR x0, 0(rs1)` and is a _return_ if `rs1 == x1` or `rs1 == x5`.
 
 The term _indirect-jump_ is used to refer to a `JALR` instruction with `rd == x0`
@@ -762,11 +762,11 @@ back_cfi_not_active:
 ], config:{lanes: 1, hspace:1024}}
 ....
 
-For RV32, `SSAMOSWAP.W` atomically loads a 32-bit data value from address of a
-shadow stack location in `rs1`, puts the loaded value into register `rd`, and
-stores the 32-bit value held in `rs2` to the original address in `rs1`.
-`SSAMOSWAP.D` (RV64 only) is similar to `SSAMOSWAP.W` but operates on 64-bit
-data values.
+For RV32, `SSAMOSWAP.W`, if granted access according to page protections rules,
+atomically loads a 32-bit data value from address of a shadow stack location
+in `rs1`, puts the loaded value into register `rd`, and stores the 32-bit value
+held in `rs2` to the original address in `rs1`. `SSAMOSWAP.D` (RV64 only) is
+similar to `SSAMOSWAP.W` but operates on 64-bit data values.
 
 .`SSAMOSWAP.W` for RV32 and `SSAMOSWAP.D` (RV64 only) operation
 [listing]
@@ -782,15 +782,21 @@ data values.
   else if privilege_mode == VU && senvcfg.SSE == 0
       raise virtual instruction exception
   else
-      X(rd) = mem[X(rs1)]
-      mem[X(rs1)] = X(rs2)
+      if page-fault / guest-page-fault / access-fault
+          raise accordingly
+      else if privilege_mode == M
+          raise store/amo access-fault exception
+      else
+          X(rd) = mem[X(rs1)]
+          mem[X(rs1)] = X(rs2)
+      endif
   endif
 ----
 
-For RV64, `SSAMOSWAP.W` atomically loads a 32-bit data value from address of a
-shadow stack location in `rs1`, sign-extends the loaded value and puts it in
-`rd`, and stores the lower 32 bits of the value held in `rs2` to the original
-address in `rs1`.
+For RV64, `SSAMOSWAP.W`, if granted access according to page protections rules,
+atomically loads a 32-bit data value from address of a shadow stack location
+in `rs1`, sign-extends the loaded value and puts it in `rd`, and stores the
+lower 32 bits of the value held in `rs2` to the original address in `rs1`.
 
 .`SSAMOSWAP.W` for RV64
 [listing]
@@ -806,9 +812,14 @@ address in `rs1`.
   else if privilege_mode == VU && senvcfg.SSE == 0
       raise virtual instruction exception
   else
-      temp[31:0] = mem[X(rs1)]
-      X(rd) = SignExtend(temp[31:0])
-      mem[X(rs1)] = X(rs2)[31:0]
+      if page-fault / guest-page-fault / access-fault
+          raise accordingly
+      else if privilege_mode == M
+          raise store/amo access-fault exception
+      else
+          temp[31:0] = mem[X(rs1)]
+          X(rd) = SignExtend(temp[31:0])
+          mem[X(rs1)] = X(rs2)[31:0]
   endif
 ----
 
