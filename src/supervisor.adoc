@@ -490,8 +490,10 @@ access a counter if the corresponding bits in `scounteren` and
 The `sscratch` CSR is an SXLEN-bit read/write register, dedicated
 for use by the supervisor. Typically, `sscratch` is used to hold a
 pointer to the hart-local supervisor context while the hart is executing
-user code. At the beginning of a trap handler, `sscratch` is swapped
-with a user register to provide an initial working register.
+user code.
+At the beginning of a trap handler, software normally uses a CSRRW
+instruction to swap `sscratch` with an integer register to obtain an
+initial working register.
 
 .Supervisor Scratch Register
 include::images/bytefield/sscratch.edn[]
@@ -816,17 +818,12 @@ to implement that we consider it worth supporting even if only rarely
 enabled.
 ====
 
-The definition of the CBZE field will be furnished by the forthcoming
-Zicboz extension. Its allocation within `senvcfg` may change prior to
-the ratification of that extension.
+The definition of the CBZE field is furnished by the Zicboz extension.
 
-The definitions of the CBCFE and CBIE fields will be furnished by the
-forthcoming Zicbom extension. Their allocations within `senvcfg` may
-change prior to the ratification of that extension.
+The definitions of the CBCFE and CBIE fields are furnished by the Zicbom
+extension.
 
-The definition of the PMM field will be furnished by the forthcoming
-Ssnpm extension. Its allocation within `senvcfg` may change prior to the
-ratification of that extension.
+The definition of the PMM field is furnished by the Ssnpm extension.
 
 The Zicfilp extension adds the `LPE` field in `senvcfg`. When the `LPE` field is
 set to 1, the Zicfilp extension is enabled in VU/U-mode. When the `LPE` field is
@@ -1444,8 +1441,9 @@ Two schemes to manage the A and D bits are defined:
   architecturally. However, updates to the D bit, resulting from an
   explicit store, must be exact (i.e., non-speculative), and observed in
   program order by the local hart. When two-stage address translation is
-  active, updates of the D bit in G-stage PTEs may be performed as a
-  result of speculative updates of the A bit in VS-stage PTEs.          +
+  active, updates to the D bit in G-stage PTEs may be performed by an
+  implicit access to a VS-stage PTE, if the G-stage PTE provides write
+  permission, before any speculative access to the VS-stage PTE.        +
                                                                         +
   The PTE update must appear in the global memory order before the
   memory access that caused the PTE update and before any subsequent
@@ -2134,6 +2132,11 @@ bits override the intermediate attributes to produce the final set of
 attributes used by accesses to the page in question. Otherwise, the
 intermediate attributes are used as the final set of attributes.
 
+NOTE: These final attributes apply to implicit and explicit accesses that
+are subject to both stages of address translation.
+For accesses that are not subject to the first stage of address translation,
+e.g. VS-stage page-table accesses, the intermediate attributes apply instead.
+
 [[svinval]]
 == "Svinval" Extension for Fine-Grained Address-Translation Cache Invalidation, Version 1.0
 
@@ -2270,8 +2273,7 @@ Invalid PTEs using a bounded timer, or making address-translation caches
 coherent with store instructions that modify PTEs.
 ====
 
-////
-[[sec:ssqosid]]
+[[ssqosid]]
 == "Ssqosid" Extension for Quality-of-Service (QoS) Identifiers, Version 1.0
 
 Quality of Service (QoS) is defined as the minimal end-to-end performance
@@ -2353,11 +2355,11 @@ modes of software execution on that hart by default, but this behavior may be
 overridden by future extensions.
 
 If extension Smstateen is implemented together with Ssqosid, then Ssqosid also
-requires the bit 55 in `mstateen0` introduced by Priv 1.14 to be implemented. If
-bit 55 of `mstateen0` is 0, attempts to access `srmcfg` in privilege modes less
-privileged than M-mode raise an illegal-instruction exception. If bit 55 of
-`mstateen0` is 1 or if extension Smstateen is not implemented, attempts to
-access `srmcfg` when `V=1` raise a virtual-instruction exception.
+requires the P1P14 bit in `mstateen0` to be implemented.
+If P1P14 of `mstateen0` is 0, attempts to access `srmcfg` in privilege modes
+less privileged than M-mode raise an illegal-instruction exception.
+If P1P14 bit of `mstateen0` is 1 or if extension Smstateen is not implemented,
+attempts to access `srmcfg` when `V=1` raise a virtual-instruction exception.
 
 [NOTE]
 ====
@@ -2393,4 +2395,3 @@ the new context, it switches to the new VM's `srmcfg`. The supervisor can also
 use a separate configuration for execution not to be attributed to either
 contexts.
 ====
-////
