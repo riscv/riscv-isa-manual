@@ -246,7 +246,7 @@ The 32-bit `sctrstatus` register grants access to CTR status information and is 
 [width="100%",cols="15%,85%",options="header",]
 |===
 |Field |Description
-|WRPTR |WARL field that indicates the physical CTR buffer entry to be written next.  It is incremented after new transfers are recorded (see <<Behavior>>), though there are exceptions when `mctrctl`.RASEMU=1, see <<RAS (Return Address Stack) Emulation Mode>>.  For a given CTR depth (where depth = 2^(DEPTH+4)^), WRPTR wraps to 0 on an increment when the value matches depth-1, and to depth-1 on a decrement when the value is 0.  Bits above those needed to represent depth-1 (e.g., bits 7:4 for a depth of 16) are read-only 0. On depth changes, WRPTR holds an unspecified but legal value.
+|WRPTR |WARL field that indicates the physical CTR buffer entry to be written next.  It is incremented after new transfers are recorded (see <<Behavior>>), though there are exceptions when `__x__ctrctl`.RASEMU=1, see <<RAS (Return Address Stack) Emulation Mode>>.  For a given CTR depth (where depth = 2^(DEPTH+4)^), WRPTR wraps to 0 on an increment when the value matches depth-1, and to depth-1 on a decrement when the value is 0.  Bits above those needed to represent depth-1 (e.g., bits 7:4 for a depth of 16) are read-only 0. On depth changes, WRPTR holds an unspecified but legal value.
 |FROZEN |Inhibit transfer recording. See <<Freeze>>.
 |===
 
@@ -407,7 +407,7 @@ When Smstateen is implemented, the `mstateen0`.CTR bit controls access to CTR re
 
 When `mstateen0`.CTR=0, qualified control transfers executed in privilege modes less privileged than M-mode will continue to implicitly update entry registers and `sctrstatus`.
 
-If the H extension is implemented and `mstateen0`.CTR=1, the `hstateen0`.CTR bit controls access to supervisor CTR state when V=1.  This state includes `sctrctl` (really vsctrctl), `sctrstatus`, and `sireg*` (really `vsireg*`) when `siselect` (really `vsiselect`) is in 0x200..0x2FF.  `hstateen0`.CTR is read-only 0 when `mstateen0`.CTR=0.
+If the H extension is implemented and `mstateen0`.CTR=1, the `hstateen0`.CTR bit controls access to supervisor CTR state when V=1.  This state includes `sctrctl` (really `vsctrctl`), `sctrstatus`, and `sireg*` (really `vsireg*`) when `siselect` (really `vsiselect`) is in 0x200..0x2FF.  `hstateen0`.CTR is read-only 0 when `mstateen0`.CTR=0.
 
 When `mstateen0`.CTR=1 and `hstateen0`.CTR=1, VS-mode accesses to supervisor CTR state behave as described in <<CSRs>> and <<Entry Registers>> above, while SCTRCLR behaves as described in <<Supervisor CTR Clear Instruction>>.  When `mstateen0`.CTR=1 and `hstateen0`.CTR=0, both VS-mode accesses to supervisor CTR state and VS-mode execution of SCTRCLR raise a virtual-instruction exception.
 
@@ -422,7 +422,7 @@ When `hstateen0`.CTR=0, qualified control transfers executed while V=1 will cont
 [NOTE]
 [%unbreakable]
 ====
-_See <<indirect-csr>> for how bit 60 in mstateen0 and hstateen0 can also restrict access to `sireg*`/`siselect` and `vsireg*`/`vsiselect` from privilege modes less privileged than M-mode._
+_See <<indirect-csr>> for how bit 60 in `mstateen0` and `hstateen0` can also restrict access to `sireg*`/`siselect` and `vsireg*`/`vsiselect` from privilege modes less privileged than M-mode._
 ====
 
 === Behavior
@@ -502,7 +502,7 @@ External trap recording depends not only on the target mode, but on any interven
 [NOTE]
 [%unbreakable]
 ====
-_Requiring intervening modes to be enabled for external traps simplifies software management of CTR.  Consider a scenario where S-mode software is configuring CTR for U-mode contexts A and B, such that external traps (to any mode) are enabled for A but not for B.  When switching between the two contexts, S-mode can simply toggle sctrctl.STE, rather than requiring a trap to M-mode to additionally toggle mctrctl.MTE._
+_Requiring intervening modes to be enabled for external traps simplifies software management of CTR.  Consider a scenario where S-mode software is configuring CTR for U-mode contexts A and B, such that external traps (to any mode) are enabled for A but not for B.  When switching between the two contexts, S-mode can simply toggle `sctrctl`.STE, rather than requiring a trap to M-mode to additionally toggle `mctrctl`.MTE._
 
 _This method does not provide the flexibility to record external traps to a more privileged mode but not to all intervening mode(s).  Because it is expected that profiling tools generally wish to observe all external traps or none, this is not considered a meaningful limitation._
 ====
@@ -677,7 +677,7 @@ The CC value is only valid when the Cycle Count Valid (CCV) bit is set.  If CCV=
 
 ==== RAS (Return Address Stack) Emulation Mode
 
-When the optional `mctrctl`.RASEMU bit is implemented and set to 1, transfer recording behavior is altered to emulate the behavior of a return-address stack (RAS).
+When the optional `__x__ctrctl`.RASEMU bit is implemented and set to 1, transfer recording behavior is altered to emulate the behavior of a return-address stack (RAS).
 
 * Indirect and direct calls are recorded as normal
 * Function returns pop the most recent call, by decrementing the WRPTR then invalidating the WRPTR entry (by setting ctrsource.V=0).  As a result, logical entry 0 is invalidated and moves to logical entry depth-1, while logical entries 1..depth-1 move to 0..depth-2.
@@ -724,13 +724,13 @@ When `sctrctl`.LCOFIFRZ=1 and a local counter overflow interrupt
 [%unbreakable]
 ====
 _Freeze on LCOFI ensures that the execution path leading to the sampled
-instruction (xepc) is preserved, and that the local counter overflow
+instruction (`__x__epc`) is preserved, and that the local counter overflow
 interrupt (LCOFI) and associated Interrupt Service Routine (ISR) do not
 displace any recorded transfer history state. It is the responsibility
-of the ISR to clear FROZEN before xRET, if continued control transfer
+of the ISR to clear FROZEN before __x__RET, if continued control transfer
 recording is desired._
 
-_LCOFI refers only to architectural traps directly caused by a local counter overflow. If a local counter overflow interrupt is recognized without a trap, for instance by reading mip, FROZEN is not automatically set._
+_LCOFI refers only to architectural traps directly caused by a local counter overflow. If a local counter overflow interrupt is recognized without a trap, FROZEN is not automatically set.  For instance, no freeze occurs if the LCOFI is pended while interrupts are masked, and software recognizes the LCOFI (perhaps by reading `stopi` or `sip`) and clears `sip`.LCOFIP before the trap is raised.  As a result, some or all CTR history may be overwritten while handling the LCOFI.  Such cases are expected to be very rare; for most usages (e.g., application profiling) privilege mode filtering is sufficient to ensure that CTR updates are inhibited while interrupts are handled in a more privileged mode._
 ====
 Similarly, on a breakpoint exception that traps to M-mode or S-mode with `sctrctl`.BPFRZ=1, FROZEN is set by hardware. The breakpoint exception itself is not recorded.  
 
