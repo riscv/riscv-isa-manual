@@ -1,0 +1,275 @@
+
+[[zvbc32e,Zvbc32e]]
+== "Zvbc32e" Extension for Vector Carryless Multiplication for SEW <= 32
+
+This chapter describes the `Zvbc32e` Vector Cryptography Extension, which adds instructions
+for vector carryless multiplication of small elements.
+
+This document is in _Discussion Document_ state.
+Assume that everything can change.
+This document is not complete yet and was created only for the purpose of conversation outside of the document.
+For more information, see link:http://riscv.org/spec-state[here].
+
+
+[[zvbc32e-overview]]
+=== Extension Overview
+
+Zvbc32e carryless multiplication instructions are commonly used in cryptography
+and hashing (e.g., Elliptic curve cryptography, GHASH, CRC).
+
+These instructions are only defined for `SEW`=`32`, `16` or `8`.
+Zvbc32e can be supported when `ELEN >=32`.
+
+This extension covers three gaps of `Zvbc`:
+
+- allowing vector implementations with smaller `ELEN=32` (e.g. implementations selecting `Zve32*`) to implement some support for vector carryless multiplication (this is not allowed by `Zvbc` which requires `ELEN >= 64`)
+- for implementations which have `ELEN >= 64`: allowing more efficient implementations of algorithms relying on 32-bit carry less multiplications. The list of such algorithms includes the CLM-based folding algorithm used to compute the widespread 32-bit CRCs (e.g. ethernet CRC). This technique can already be implemented with `Zvbc` but only half the 64-bit multiplication is exploited. Selecting `Zvbc32e` only allows implementations to save area while providing identical performance on those algorithms.
+- for all implementation: better implementations (less instructions and better use of hardware resources) of algorithms relying on 8-bit and 16-bit carryless multiplications (e.g. erasure coding).
+
+
+Note:: The extension `Zvbc32e` is independent from `Zvbc` which defines the same instructions for `SEW=64`.
+       When `ELEN>=64` both extensions can be combined to have `vclmul.v[vx]` and `vclmulh.v[vx]` defined for all `SEW` values in `8`, `16`, `32` and, `64`.
+
+Note:: The extra cost of supporting `Zvbc32e` on top of `Zvbc` should be minimal, as the hardware required to implement the instructions in `Zvbc32e` is a subset of the hardware required to implement `Zvbc`'s instructions.
+
+`Zvbc32e` can be built on _any_ embedded (Zve*) or application ("V") base Vector Extension.
+In particular, `Zvbc32e` allows `Zve32*` implementations to support vector carryless multiplication.
+
+
+As the instructions defined in this specification might be used to implement cryptographic primitives,
+they may be implemented with data-independent execution latencies as defined in 
+link:https://github.com/riscv/riscv-isa-manual/blob/main/src/scalar-crypto.adoc#data-independent-execution-latency-subset-zkt.
+
+If `Zvkt` is implemented, all the instructions from `Zvbc32e` (`vclmul[h].[vv,vx]`) 
+shall be executed with data-independent execution latency.
+
+Detection of individual cryptography extensions uses the
+unified software-based RISC-V discovery method.
+
+[NOTE]
+====
+At the time of writing, these discovery mechanisms are still a work in
+progress.
+====
+
+
+This extension defines two instructions:
+
+[%autowidth]
+[%header,cols="^2,4"]
+|===
+|Mnemonic
+|Instruction
+| `vclmul.[vv,vx]`     | <<insns-vclmul-32e>>
+| `vclmulh.[vv,vx]`    | <<insns-vclmulh-32e>>
+
+|===
+
+
+
+[[insns-vclmul-32e, Vector Carryless Multiply]]
+=== vclmul.[vv,vx]
+
+Synopsis::
+Vector Carryless Multiply by vector or scalar - returning low half of product.
+
+Mnemonic::
+vclmul.vv vd, vs2, vs1, vm +
+vclmul.vx vd, vs2, rs1, vm
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001100'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001100'},
+]}
+....
+Reserved Encodings::
+* `SEW` is any value other than 32, 16 or 8 (`Zvbc32e` only)
+* `SEW` is any value other than 64 (`Zvbc` only)
+* `SEW` is any value other than 64, 32, 16 or 8 (`Zvbc` and `Zvbc32e`)
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `vs1`/`rs1` | input  | multiplier
+| `vs2`       | input  | multiplicand
+| `vd`        | output | lower part of carryless multiply 
+|===
+
+[NOTE]
+====
+`vclmul` instruction was initially defined in `Zvbc` with only `SEW=64-bit` support, this page describes how the specification is extended in `Zvbc32e` to support `SEW=32 or 16 or 8`bits.
+====
+
+Description::
+Produces the low half of `2*SEW`-bit carryless product.
+
+Each SEW-bit element in the `vs2` vector register is carryless multiplied by
+either each SEW-bit element in `vs1` (vector-vector), or the SEW-bit value
+from integer register `rs1` (vector-scalar). The result is the least
+significant SEW bits of the carryless product.
+
+[NOTE]
+====
+The 32-bit carryless multiply instructions can be used for implementing GCM in the absence of the `zvkg` extension.
+In particular for implementation with `ELEN=32` where `Zvkg` cannot be implemented. 
+It can also be used to speed-up CRC evaluation.
+====
+
+Operation::
+[source,sail]
+--
+
+
+function clause execute (VCLMUL(vs2, vs1, vd, suffix)) = {
+
+  foreach (i from vstart to vl-1) {
+    let op1 : bits (SEW) = if suffix =="vv" then get_velem(vs1, i)
+                          else zext_or_truncate_to_sew(X(vs1));
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmul(op1, op2, SEW);
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+
+function clmul(x, y, width) = {
+  let result : bits(width) = zeros();
+  foreach (i from 0 to (width - 1)) {
+    if y[i] == 1 then result = result ^ (x << i);
+  }
+  result
+}
+--
+
+Included in::
+<<zvbc32e>>, <<zvbc>>
+
+
+[[insns-vclmulh-32e, Vector Carryless Multiply High]]
+=== vclmulh.[vv,vx]
+
+Synopsis::
+Vector Carryless Multiply by vector or scalar - returning high half of product.
+
+Mnemonic::
+vclmulh.vv vd, vs2, vs1, vm +
+vclmulh.vx vd, vs2, rs1, vm
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001101'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001101'},
+]}
+....
+Reserved Encodings::
+* `SEW` is any value other than 32, 16 or 8 (`Zvbc32e` only)
+* `SEW` is any value other than 64 (`Zvbc` only)
+* `SEW` is any value other than 64, 32, 16 or 8 (`Zvbc` and `Zvbc32e`)
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `vs1`/`rs1` | input  | multiplier
+| `vs2`       | input  | multiplicand
+| `vd`        | output | upper part of carryless multiply 
+|===
+
+[NOTE]
+====
+`vclmulh` instruction was initially defined in `Zvbc`, this page describes how the specification is extended in `Zvbc32e` to support `SEW=32 or 16 or 8` bits.
+====
+
+Description::
+Produces the high half of `2*SEW`-bit carryless product.
+
+Each SEW-bit element in the `vs2` vector register is carryless multiplied by
+either each SEW-bit element in `vs1` (vector-vector), or the SEW-bit value
+from integer register `rs1` (vector-scalar). The result is the most
+significant SEW bits of the carryless product.
+
+// This instruction must always be implemented such that its execution latency does not depend
+// on the data being operated upon.
+
+Operation::
+[source,sail]
+--
+function clause execute (VCLMULH(vs2, vs1, vd, suffix)) = {
+
+  foreach (i from vstart to vl-1) {
+    let op1 : bits (SEW) = if suffix =="vv" then get_velem(vs1,i)
+                          else zext_or_truncate_to_sew(X(vs1));
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmulh(op1, op2, SEW);
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+
+function clmulh(x, y, width) = {
+  let result : bits(width) = 0;
+  foreach (i from 1 to (width - 1)) {
+    if y[i] == 1 then result = result ^ (x >> (width - i));
+  }
+  result
+}
+
+--
+
+Included in::
+<<zvbc32e>>, <<zvbc>>
+
