@@ -44,10 +44,11 @@ ifneq ($(SKIP_DOCKER),true)
 
     DOCKER_CMD = \
         docker run --rm \
-            -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
+            -v ${PWD}/$@.workdir:/work${DOCKER_VOL_SUFFIX} \
             -v ${PWD}/src:/src:ro \
+            -v ${PWD}/build:/build:ro \
             -v ${PWD}/docs-resources:/docs-resources:ro \
-            -w /build \
+            -w /work \
             $(DOCKER_USER_ARG) \
             ${DOCKER_IMG} \
             /bin/sh -c
@@ -100,7 +101,10 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 
-ALL_SRCS := $(shell git ls-files $(SRC_DIR))
+# Source files that aren't checked in but can be generated.
+GEN_SRCS := $(BUILD_DIR)/hwbp_registers.adoc
+
+ALL_SRCS := $(GEN_SRCS) $(shell git ls-files $(SRC_DIR))
 
 $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
@@ -140,6 +144,9 @@ build-no-container:
 # Update docker image to latest
 docker-pull-latest:
 	docker pull ${DOCKER_IMG}
+
+$(BUILD_DIR)/%.adoc:	$(SRC_DIR)/%.xml $(SRC_DIR)/scripts/registers.py
+	$(SRC_DIR)/scripts/registers.py --adoc $@ $<
 
 clean:
 	@echo "Cleaning up generated files..."
