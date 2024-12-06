@@ -103,7 +103,9 @@ build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 
 # Source files that aren't checked in but can be generated.
-GEN_SRCS := $(BUILD_DIR)/hwbp_registers.adoc
+GEN_SRCS := \
+	$(BUILD_DIR)/hwbp_registers.adoc \
+	$(BUILD_DIR)/hwbp_registers-def.adoc
 
 ALL_SRCS := $(GEN_SRCS) $(shell git ls-files $(SRC_DIR))
 
@@ -147,7 +149,12 @@ docker-pull-latest:
 	docker pull ${DOCKER_IMG}
 
 $(BUILD_DIR)/%.adoc:	$(SRC_DIR)/%.xml $(SRC_DIR)/scripts/registers.py
+	mkdir -p $(BUILD_DIR) && \
 	$(SRC_DIR)/scripts/registers.py --adoc $@ $<
+
+$(BUILD_DIR)/%-def.adoc:	$(SRC_DIR)/%.xml $(SRC_DIR)/scripts/registers.py
+	mkdir -p $(BUILD_DIR) && \
+	$(SRC_DIR)/scripts/registers.py --adoc-definitions $@ $< > /dev/null
 
 clean:
 	@echo "Cleaning up generated files..."
