@@ -60,7 +60,8 @@ endif
 
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
-    mkdir -p $@.workdir && \
+    mkdir -p $@.workdir/build && \
+    cp $(GEN_SRCS) $@.workdir/build/ && \
     ln -sfn ../../src ../../docs-resources $@.workdir/
 
 WORKDIR_TEARDOWN = \
