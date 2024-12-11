@@ -1,0 +1,294 @@
+[[sec:zilsd]]
+== "Zilsd", "Zclsd" Extensions for Load/Store pair for RV32, Version 1.0
+
+The Zilsd & Zclsd extensions provide load/store pair instructions for RV32, reusing the existing RV64 doubleword load/store instruction encodings.
+
+Operands containing `src` for store instructions and `dest` for load instructions are held in aligned `x`-register pairs, i.e., register numbers must be even. Use of misaligned (odd-numbered) registers for these operands is _reserved_.
+
+Regardless of endianness, the lower-numbered register holds the
+low-order bits, and the higher-numbered register holds the high-order
+bits: e.g., bits 31:0 of an operand in Zilsd might be held in register `x14`, with bits 63:32 of that operand held in `x15`.
+
+[[zilsd, Zilsd]]
+=== Load/Store pair instructions (Zilsd)
+
+The Zilsd extension adds the following RV32-only instructions:
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|yes
+|no
+|ld rd, offset(rs1)
+|<<#insns-ld>>
+
+|yes
+|no
+|sd rs2, offset(rs1)
+|<<#insns-sd>>
+
+|===
+
+As the access size is 64-bit, accesses are only considered naturally aligned for effective addresses that are a multiple of 8.
+In this case, these instruction are guaranteed to not raise an address-misaligned exception.
+Even if naturally aligned, the memory access might not be performed atomically.
+
+If the effective address is a multiple of 4, then each word access is required to be performed atomically.
+
+To ensure fault handling is possible for the load instructions, it must be ensured that the register which is the source of the base address is not overwritten before the entire operation is complete.
+This affects x2 for the stack pointer relative instruction and rs1 otherwise.
+To guarantee this, if one of the destination registers of the pair is the source register containing the base, it must not be written to before the other register in the pair has been written.
+
+[NOTE]
+====
+If an implementation performs a doubleword load access atomically and the register file implements writeback for even/odd register pairs,
+the mentioned atomicity requirements are inherently fulfilled.
+Otherwise, an implementation either needs to delay the writeback until the write can be performed atomically,
+or order sequential writes to the registers to ensure the requirement above is satisfied.
+====
+
+[[zclsd, Zclsd]]
+=== Compressed Load/Store pair instructions (Zclsd)
+
+Zclsd depends on Zilsd and Zca. It has overlapping encodings with Zcf and is thus incompatible with Zcf.
+
+Zclsd adds the following RV32-only instructions:
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|yes
+|no
+|c.ldsp rd, offset(sp)
+|<<#insns-cldsp>>
+
+|yes
+|no
+|c.sdsp rs2, offset(sp)
+|<<#insns-csdsp>>
+
+|yes
+|no
+|c.ld rd', offset(rs1')
+|<<#insns-cld>>
+
+|yes
+|no
+|c.sd rs2', offset(rs1')
+|<<#insns-csd>>
+
+|===
+
+=== Use of x0 as operand
+
+LD instructions with destination `x0` are processed as any other load, but the result is discarded entirely. Specifically, a load pair to `x0` does not cause `x1` to be written. For C.LDSP, usage of `x0` as the destination is reserved.
+
+When using `x0` as `src` of SD or C.SDSP, the entire 64-bit operand is zero — i.e., register `x1` is not accessed.
+
+=== Exception Handling
+
+For the purposes of RVWMO and exception handling, LD and SD instructions are
+considered to be misaligned loads and stores, with one additional constraint:
+an LD or SD instruction whose effective address is a multiple of 4 gives rise
+to two 4-byte memory operations.
+
+NOTE: This definition permits LD and SD instructions giving rise to exactly one
+memory access, regardless of alignment.
+If instructions with 4-byte-aligned effective address are decomposed
+into two 32b operations, there is no constraint on the order in which the
+operations are performed and each operation is guaranteed to be atomic.
+These decomposed sequences are interruptible.
+Exceptions might occur on subsequent operations, making the effects of previous
+operations within the same instruction visible.
+
+NOTE: Software should make no assumptions about the number or order of
+accesses these instructions might give rise to, beyond the 4-byte constraint
+mentioned above.
+For example, an interrupted store might overwrite the same bytes upon return
+from the interrupt handler.
+
+<<<
+
+=== Instructions
+[#insns-ld,reftext="Load doubleword to register pair, 32-bit encoding"]
+==== ld
+
+Synopsis::
+Load doubleword to even/odd register pair, 32-bit encoding
+
+Mnemonic::
+ld rd, offset(rs1)
+
+Encoding (RV32)::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 7,  name: 0x3,    attr: ['LOAD'], type: 8},
+  {bits: 5,  name: 'rd', attr: ['dest, dest[0]=0'], type: 2},
+  {bits: 3,  name: 0x3, attr: ['width=D'], type: 8},
+  {bits: 5,  name: 'rs1', attr: ['base'], type: 4},
+  {bits: 12, name: 'imm[11:0]', attr: ['offset[11:0]'], type: 3},
+]}
+....
+
+Description:: 
+Loads a 64-bit value into registers `rd` and `rd+1`.
+The effective address is obtained by adding register rs1 to the
+sign-extended 12-bit offset.
+
+Included in: <<zilsd>>
+
+<<<
+
+[#insns-sd,reftext="Store doubleword from register pair, 32-bit encoding"]
+==== sd
+
+Synopsis::
+Store doubleword from even/odd register pair, 32-bit encoding
+
+Mnemonic::
+sd rs2, offset(rs1)
+
+Encoding (RV32)::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 7,  name: 0x23,   attr: ['STORE'], type: 8},
+  {bits: 5,  name: 'imm[4:0]', attr: ['offset[4:0]'], type: 3},
+  {bits: 3,  name: 0x3, attr: ['width=D'], type: 8},
+  {bits: 5,  name: 'rs1', attr: ['base'], type: 4},
+  {bits: 5,  name: 'rs2', attr: ['src, src[0]=0'], type: 4},
+  {bits: 7,  name: 'imm[11:5]', attr: ['offset[11:5]'], type: 3},
+]}
+....
+
+Description:: 
+Stores a 64-bit value from registers `rs2` and `rs2+1`.
+The effective address is obtained by adding register rs1 to the
+sign-extended 12-bit offset.
+
+Included in: <<zilsd>>
+
+<<<
+
+[#insns-cldsp,reftext="Stack-pointer based load doubleword to register pair, 16-bit encoding"]
+==== c.ldsp
+
+Synopsis::
+Stack-pointer based load doubleword to even/odd register pair, 16-bit encoding
+
+Mnemonic::
+c.ldsp rd, offset(sp)
+
+Encoding (RV32)::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 2, name: 0x2,      type: 8, attr: ['C2']},
+  {bits: 5, name: 'imm',    type: 3, attr: ['offset[4:3|8:6]']},
+  {bits: 5, name: 'rd',     type: 2, attr: ['dest≠0, dest[0]=0']},
+  {bits: 1, name: 'imm',    type: 3, attr: ['offset[5]']},
+  {bits: 3, name: 0x3,      type: 8, attr: ['C.LDSP']},
+], config: {bits: 16}}
+....
+
+Description:: 
+Loads stack-pointer relative 64-bit value into registers `rd'` and `rd'+1`. It computes its effective address by adding the zero-extended offset, scaled by 8, to the stack pointer, `x2`. It expands to `ld rd, offset(x2)`. C.LDSP is only valid when _rd_&#x2260;x0; the code points with _rd_=x0 are reserved.
+
+Included in: <<zclsd>>
+
+<<<
+
+[#insns-csdsp,reftext="Stack-pointer based store doubleword from register pair, 16-bit encoding"]
+==== c.sdsp
+
+Synopsis::
+Stack-pointer based store doubleword from even/odd register pair, 16-bit encoding
+
+Mnemonic::
+c.sdsp rs2, offset(sp)
+
+Encoding (RV32)::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 2, name: 0x2,      type: 8, attr: ['C2']},
+  {bits: 5, name: 'rs2',    type: 4, attr: ['src, src[0]=0']},
+  {bits: 6, name: 'imm',    type: 3, attr: ['offset[5:3|8:6]']},
+  {bits: 3, name: 0x7,      type: 8, attr: ['C.SDSP']},
+], config: {bits: 16}}
+....
+
+Description:: 
+Stores a stack-pointer relative 64-bit value from registers `rs2'` and `rs2'+1`. It computes an effective address by adding the _zero_-extended offset, scaled by 8, to the stack pointer, `x2`. It expands to `sd rs2, offset(x2)`.
+
+Included in: <<zclsd>>
+
+<<<
+
+[#insns-cld,reftext="Load doubleword to register pair, 16-bit encoding"]
+==== c.ld
+
+Synopsis::
+Load doubleword to even/odd register pair, 16-bit encoding
+
+Mnemonic::
+c.ld rd', offset(rs1')
+
+Encoding (RV32)::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 2, name: 0x0,       type: 8, attr: ['C0']},
+  {bits: 3, name: 'rd`',     type: 2, attr: ['dest, dest[0]=0']},
+  {bits: 2, name: 'imm',     type: 3, attr: ['offset[7:6]']},
+  {bits: 3, name: 'rs1`',    type: 4, attr: ['base']},
+  {bits: 3, name: 'imm',     type: 3, attr: ['offset[5:3]']},
+  {bits: 3, name: 0x3,       type: 8, attr: ['C.LD']},
+], config: {bits: 16}}
+....
+
+Description:: 
+Loads a 64-bit value into registers `rd'` and `rd'+1`.
+It computes an effective address by adding the zero-extended offset, scaled by 8, to the base address in register rs1'.
+
+Included in: <<zclsd>>
+
+<<<
+
+[#insns-csd,reftext="Store doubleword from register pair, 16-bit encoding"]
+==== c.sd
+
+Synopsis::
+Store doubleword from even/odd register pair, 16-bit encoding
+
+Mnemonic::
+c.sd rs2', offset(rs1')
+
+Encoding (RV32)::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 2, name: 0x0,      type: 8, attr: ['C0']},
+  {bits: 3, name: 'rs2`',   type: 4, attr: ['src, src[0]=0']},
+  {bits: 2, name: 'imm',    type: 3, attr: ['offset[7:6]']},
+  {bits: 3, name: 'rs1`',   type: 4, attr: ['base']},
+  {bits: 3, name: 'imm',    type: 3, attr: ['offset[5:3]']},
+  {bits: 3, name: 0x7,      type: 8, attr: ['C.SD']},
+], config: {bits: 16}}
+....
+
+Description:: 
+Stores a 64-bit value from registers `rs2'` and `rs2'+1`.
+It computes an effective address by adding the zero-extended offset, scaled by 8, to the base address in register rs1'.
+It expands to `sd rs2', offset(rs1')`.
+
+Included in: <<zclsd>>
