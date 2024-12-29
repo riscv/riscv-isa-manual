@@ -83,6 +83,7 @@ OPTIONS := --trace \
            -a mathematical-format=svg \
            -a pdf-fontsdir=docs-resources/fonts \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
+           -a docinfo=shared \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=ERROR
