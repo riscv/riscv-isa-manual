@@ -64,4 +64,4 @@ KianV         | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@d
 Coreblocks    | Kuźnia Rdzeni, University of Wrocław | [Coreblocks Team](mailto:coreblocks@cs.uni.wroc.pl)    | 44               | https://github.com/kuznia-rdzeni/coreblocks
 rrv32         | Solra Bizna                     | [Solra Bizna](mailto:solra@bizna.name)                      | 45               | https://github.com/SolraBizna/rrv32
 VexiiRiscv    | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 46               | https://github.com/SpinalHDL/VexiiRiscv
-Wildcat       | Technical University od Denmark | [Martin Schoeberl](mailto:masca@dtu.dk)                     | 47               | https://github.com/schoeberl/wildcat
+Wildcat       | Technical University of Denmark | [Martin Schoeberl](mailto:masca@dtu.dk)                     | 47               | https://github.com/schoeberl/wildcat
