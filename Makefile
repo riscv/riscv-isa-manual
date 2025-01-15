@@ -91,9 +91,17 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-lists \
             --require=asciidoctor-mathematical
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub
+.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub submodule-check
 
 all: build
+
+# Check if the docs-resources/global-config.adoc file exists. If not, the user forgot to check out submodules.
+submodule-check:
+	if [ ! -e docs-resources/global-config.adoc ]; then \
+	  echo "WARNING: You must clone with --recurse-submodules to automatically populate the submodule 'docs-resources'." 1>&2; \
+	  echo "Checking out submodules for you via 'git submodule update --init --recurse'..."; \
+	  git submodule update --init --recursive; \
+	fi
 
 build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB)
 build-pdf: $(DOCS_PDF)
@@ -117,7 +125,7 @@ $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
-build:
+build: submodule-check
 	@echo "Checking if Docker is available..."
 	@if command -v docker >/dev/null 2>&1 ; then \
 		echo "Docker is available, building inside Docker container..."; \
@@ -127,12 +135,12 @@ build:
 		$(MAKE) build-no-container; \
 	fi
 
-build-container:
+build-container: submodule-check
 	@echo "Starting build inside Docker container..."
 	$(MAKE) build-docs
 	@echo "Build completed successfully inside Docker container."
 
-build-no-container:
+build-no-container: submodule-check
 	@echo "Starting build..."
 	$(MAKE) SKIP_DOCKER=true build-docs
 	@echo "Build completed successfully."
