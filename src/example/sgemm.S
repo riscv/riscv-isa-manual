@@ -78,7 +78,7 @@ c_col_loop: # Loop across one row of C blocks
     mv akp, ap   # reset pointer into A to beginning
     mv bkp, bnp # step to next column in B matrix
 
-    # Initalize current C submatrix block from memory.
+    # Initialize current C submatrix block from memory.
     vle32.v  v0, (cnp); add ccp, cnp, cstride;
     vle32.v  v1, (ccp); add ccp, ccp, cstride;
     vle32.v  v2, (ccp); add ccp, ccp, cstride;
