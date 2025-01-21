@@ -85,11 +85,13 @@ OPTIONS := --trace \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
            $(XTRA_ADOC_OPTS) \
            -D build \
-           --failure-level=ERROR
+           --failure-level=ERROR \
+           -b multipage_html5 
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
-            --require=asciidoctor-mathematical
+            --require=asciidoctor-mathematical \
+            --require=asciidoctor-multipage
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub submodule-check
 
@@ -118,7 +120,6 @@ $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
 
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
