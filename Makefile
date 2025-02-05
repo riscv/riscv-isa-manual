@@ -107,6 +107,7 @@ OPTIONS := --trace \
            $(WATERMARK_OPT) \
            -a revnumber='$(DATE)' \
            -a revremark='$(RELEASE_DESCRIPTION)' \
+           -a docinfo=shared \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=ERROR
