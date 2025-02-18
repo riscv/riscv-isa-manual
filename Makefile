@@ -11,7 +11,7 @@
 #
 # This Makefile is designed to automate the process of building and packaging
 # the documentation for RISC-V ISA Manuals. It supports multiple build targets
-# for generating documentation in various formats (PDF, HTML, EPUB, XML).
+# for generating documentation in various formats (PDF, HTML, EPUB).
 #
 # Building with a preinstalled docker container is recommended.
 # Install by running:
@@ -72,14 +72,12 @@ BUILD_DIR := build
 DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
 DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
-DOCS_XML := $(addprefix $(BUILD_DIR)/, $(addsuffix .xml, $(DOCS)))
 
 ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
 ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
-ASCIIDOCTOR_XML := $(ENV) asciidoctor -b docbook
 OPTIONS := --trace \
            -a compress \
            -a mathematical-format=svg \
@@ -93,7 +91,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-lists \
             --require=asciidoctor-mathematical
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-xml submodule-check
+.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub submodule-check
 
 all: build
 
@@ -105,11 +103,10 @@ submodule-check:
 	  git submodule update --init --recursive; \
 	fi
 
-build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB) $(DOCS_XML)
+build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB)
 build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
-build-xml: $(DOCS_XML)
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
@@ -126,11 +123,6 @@ $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
-
-$(BUILD_DIR)/%.xml: $(SRC_DIR)/%.adoc $(ALL_SRCS)
-	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_XML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 build: submodule-check
