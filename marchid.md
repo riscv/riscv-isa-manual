@@ -65,3 +65,4 @@ Coreblocks    | Kuźnia Rdzeni, University of Wrocław | [Coreblocks Team](mailt
 rrv32         | Solra Bizna                     | [Solra Bizna](mailto:solra@bizna.name)                      | 45               | https://github.com/SolraBizna/rrv32
 VexiiRiscv    | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 46               | https://github.com/SpinalHDL/VexiiRiscv
 Wildcat       | Technical University of Denmark | [Martin Schoeberl](mailto:masca@dtu.dk)                     | 47               | https://github.com/schoeberl/wildcat
+CVA5          | OpenHW Group                    | [Lesley Shannon](mailto:lesley_shannon@sfu.ca)              | 48               | https://github.com/openhwgroup/cva5
