@@ -45,10 +45,11 @@ ifneq ($(SKIP_DOCKER),true)
 
     DOCKER_CMD = \
         docker run --rm \
-            -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
+            -v ${PWD}/$@.workdir:/work${DOCKER_VOL_SUFFIX} \
             -v ${PWD}/src:/src:ro \
+            -v ${PWD}/build:/build:ro \
             -v ${PWD}/docs-resources:/docs-resources:ro \
-            -w /build \
+            -w /work \
             $(DOCKER_USER_ARG) \
             ${DOCKER_IMG} \
             /bin/sh -c
@@ -60,7 +61,8 @@ endif
 
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
-    mkdir -p $@.workdir && \
+    mkdir -p $@.workdir/build && \
+    cp $(GEN_SRCS) $@.workdir/build/ && \
     ln -sfn ../../src ../../docs-resources $@.workdir/
 
 WORKDIR_TEARDOWN = \
@@ -109,7 +111,12 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 
-ALL_SRCS := $(shell git ls-files $(SRC_DIR))
+# Source files that aren't checked in but can be generated.
+GEN_SRCS := \
+	$(BUILD_DIR)/hwbp_registers.adoc \
+	$(BUILD_DIR)/hwbp_registers-def.adoc
+
+ALL_SRCS := $(GEN_SRCS) $(shell git ls-files $(SRC_DIR))
 
 $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
@@ -149,6 +156,14 @@ build-no-container: submodule-check
 # Update docker image to latest
 docker-pull-latest:
 	docker pull ${DOCKER_IMG}
+
+$(BUILD_DIR)/%.adoc:	$(SRC_DIR)/%.xml $(SRC_DIR)/scripts/registers.py
+	mkdir -p $(BUILD_DIR) && \
+	$(SRC_DIR)/scripts/registers.py --adoc $@ $<
+
+$(BUILD_DIR)/%-def.adoc:	$(SRC_DIR)/%.xml $(SRC_DIR)/scripts/registers.py
+	mkdir -p $(BUILD_DIR) && \
+	$(SRC_DIR)/scripts/registers.py --adoc-definitions $@ $< > /dev/null
 
 clean:
 	@echo "Cleaning up generated files..."

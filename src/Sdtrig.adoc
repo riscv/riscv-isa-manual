@@ -1,0 +1,375 @@
+include::../build/hwbp_registers-def.adoc[]
+
+[[trigger]]
+== Sdtrig (ISA Extension)
+
+This chapter describes the Sdtrig ISA extension, which can be
+implemented independently of functionality described in the other
+chapters. It consists exclusively of the Trigger Module \(TM).
+
+Triggers can cause a breakpoint exception, entry into Debug Mode, or a
+trace action without having to execute a special instruction. This makes
+them invaluable when debugging code from ROM. They can trigger on
+execution of instructions at a given memory address, or on the
+address/data in loads/stores.
+
+If Sdtrig is implemented, the Trigger Module must support at least one
+trigger. Accessing trigger CSRs that are not used by any of the
+implemented triggers must result in an illegal instruction exception.
+M-Mode and Debug Mode accesses to trigger CSRs that are used by any of
+the implemented triggers must succeed, regardless of the current type of
+the currently selected trigger.
+
+A trigger matches when the conditions that it specifies (e.g. a load
+from a specific address) are met. A trigger fires when a trigger that
+matches performs the action configured for that trigger.
+
+Triggers do not fire while in Debug Mode.
+
+=== Enumeration
+
+Each trigger may support a variety of features. A debugger can build a
+list of all triggers and their features as follows:
+
+. Write 0 to {csr-tselect}. If this results in an illegal instruction exception, then there are no triggers implemented.
+. Read back {csr-tselect} and check that it contains the written value. If not, exit the loop.
+. Read {csr-tinfo}.
+. If that caused an exception, the debugger must read {csr-tdata1} to discover the type. (If {tdata1-type} is 0, this trigger doesn't exist. Exit the loop.)
+. If {tinfo-info} is 1, this trigger doesn't exist. Exit the loop.
+. Otherwise, the selected trigger supports the types discovered in {tinfo-info}.
+. Repeat, incrementing the value in {csr-tselect}.
+
+[NOTE]
+====
+The above algorithm reads back {csr-tselect} so that implementations which have
+latexmath:[$2^n$] triggers only need to implement latexmath:[$n$] bits
+of {csr-tselect}.
+
+The algorithm checks {csr-tinfo} and {tdata1-type} in case the implementation has latexmath:[$m$] bits of {csr-tselect} but fewer than latexmath:[$2^m$] triggers.
+====
+
+=== Actions
+
+Triggers can be configured to take one of several actions when they fire. <<tab:action>> lists all options.
+
+[[tab:action]]
+.{mcontrol-action} encoding
+[align="center",float="center",cols=">1,<10",options="header"]
+|===
+^| Value | Description
+|0 | Raise a breakpoint exception. (Used when software wants to use the trigger module without an external debugger attached.) `xepc` must contain the virtual address of the next instruction that must be executed to preserve the program flow.
+|1 | Enter Debug Mode. {csr-dpc} must contain the virtual address of the next instruction that must be executed to preserve the program flow. +
+This action is only legal when the trigger's {mcontrol-dmode} is 1.  Since
+{csr-tdata1} is WARL, hardware must prevent it from containing {tdata1-dmode}=0
+and action=1. +
+This action can only be supported if `Sdext` is implemented on the hart.
+| 2 | Trace on, described in the trace specification. 
+| 3 | Trace off, described in the trace specification.
+| 4 | Trace notify, described in the trace specification.
+| 5 | Reserved for use by the trace specification.
+| 8 - 9 | Send a signal to TM external trigger output 0 or 1 (respectively).
+| other | Reserved for future use.
+|===
+
+[NOTE]
+====
+Actions 8 and 9 are intended to increment custom event counters, but
+these signals could also be brought to outputs for use by external
+logic.
+====
+
+=== Priority
+
+<<tab:priority>> lists the synchronous exceptions from the Privileged Spec, and where the various types of triggers fit in. The first 3 columns come from the Privileged Spec, and the final
+column shows where triggers fit in. Priorities in the table are
+separated by horizontal lines, so e.g. etrigger and itrigger have the
+same priority. If this table contradicts the table in the Privileged
+Spec, then the latter takes precedence.
+
+This table only applies if triggers are precise. Otherwise triggers will
+fire some indeterminate time after the event, and the priority is
+irrelevant. When triggers are chained, the priority is the lowest
+priority of the triggers in the chain.
+
+[[tab:priority]]
+.Synchronous exception priority in decreasing priority order.
+[align="center",float="center", cols="^1,<1,<2,<2", options="header"]
+|===
+| Priority | Exception Code | Description | Trigger
+| _Highest_
+| 3 +
+3 +
+3 +
+3
+|
+| etrigger +
+icount +
+itrigger +
+mcontrol/mcontrol6 after (on previous instruction) +
+|| 3 | Instruction address breakpoint | mcontrol/mcontrol6 execute address before
+|| 12, 20, 1 | During instruction address translation: First encountered page fault, guest-page fault, or access fault |
+|| 1 | With physical address for instruction: Instruction access fault |
+|| 3 || mcontrol/mcontrol6 execute data before
+|| 2 +
+22 +
+0 +
+8, 9, 10, 11 +
+3 +
+3 +
+| Illegal instruction +
+Virtual instruction +
+Instruction address misaligned +
+Environment call +
+Environment break +
+Load/Store/AMO address breakpoint
+.>| mcontrol/mcontrol6 load/store address before, store data before
+|| 4, 6 | Optionally: Load/Store/AMO address misaligned |
+|| 13, 15, 21, 23, 5, 7 | During address translation for an explicit
+memory access: First encountered page fault, guest-page fault, or access
+fault |
+|| 5, 7 | With physical address for an explicit memory access: Load/store/AMO access fault |
+|| 4, 6 | If not higher priority: Load/store/AMO address misaligned |
+| _Lowest_ | 3 || mcontrol/mcontrol6 load data before
+|===
+
+When multiple triggers in the same priority fire at once, {mcontrol-hit} (if
+implemented) is set for all of them. If more than one of these triggers
+has {mcontrol-action}=0 then `tval` is updated in accordance with one of them, but which one is UNSPECIFIED . If one of these triggers has the "enter Debug Mode" action (1)
+and another trigger has the "raise a breakpoint exception" action (0),
+the preferred behavior is to have both actions take place. It is
+implementation-dependent which of the two happens first. This ensures
+both that the presence of an external debugger doesn't affect execution
+and that a trigger set by user code doesn't affect the external
+debugger. If this is not implemented, then the hart must enter Debug
+Mode and ignore the breakpoint exception. In the latter case, {mcontrol-hit} of the
+trigger whose action is 0 must still be set, giving a debugger an
+opportunity to handle this case.
+Since triggers that have an action other than 0 or 1 don't affect the execution
+of the hart, they are not mentioned in the priority table. Such triggers fire
+independently from those that have an action of 0 or 1.
+
+[[nativetrigger]]
+=== Native Triggers
+
+Triggers can be used for native debugging when {mcontrol-action}=0. If supported by the
+hart and desired by the debugger, triggers will often be programmed to
+have {mcontrol-m}=0 so that when they fire they cause a breakpoint exception to trap to
+a more privileged mode. That breakpoint exception can either be taken in
+M-mode or it can be delegated to a less privileged mode. However, it is
+possible for triggers to fire in the same mode that the resulting
+exception will be handled in.
+
+In these cases such a trigger may cause a breakpoint exception while
+already in a trap handler. This might leave the hart unable to resume
+normal execution because state such as `mcause` and `mepc` would be overwritten.
+
+[NOTE]
+====
+In particular, when {mcontrol-action}=0:
+
+. mcontrol and mcontrol6 triggers with {mcontrol-m}=1 can cause a breakpoint exception
+that is taken from M-mode to M-mode (regardless of delegation).
+. mcontrol and mcontrol6 triggers with {mcontrol-s}=1 can cause a breakpoint exception
+that is taken from S-mode to S-mode if `medeleg` [3]=1.
+. mcontrol6 triggers with {mcontrol6-vs}=1 can cause a breakpoint exception that is taken from VS-mode to VS-mode if `medeleg` [3]=1 and `hedeleg` [3]=1 .
+. icount triggers with {mcontrol-m}=1can cause a breakpoint exception that is taken from M-mode to M-mode (regardless of delegation).
+. icount triggers with {mcontrol-s}=1 can cause a breakpoint exception that is taken from S-mode to S-mode if `medeleg` [3]=1 .
+. icount triggers with {mcontrol6-vs}=1 can cause a breakpoint exception that is taken from VS-mode to VS-mode if `medeleg` [3]=1 and `hedeleg` [3]=1.
+. etrigger and itrigger triggers will always be taken from a trap handler
+before the first instruction of the handler. If etrigger/itrigger is set
+to trigger on exception/interrupt X and if X is delegated to mode Y then
+the trigger will cause a breakpoint exception that is taken from mode Y
+to mode Y unless breakpoint exceptions are delegated to a more
+privileged mode than Y.
+. tmexttrigger triggers are asynchronous and may occur in any mode and at
+any time.
+====
+
+Harts that support triggers with {mcontrol-action}=0 should implement one of the following two solutions to solve the problem of reentrancy:
+
+. The hardware prevents triggers with {mcontrol-action}=0 from matching or firing while in M-mode and while `MIE` in `mstatus` is 0. If `medeleg` [3]=1 then it prevents triggers with {mcontrol-action}=0 from
+matching or firing while in S-mode and while `SIE` in `sstatus` is 0. If `medeleg` [3]=1 and `hedeleg` [3]=1 then it
+prevents triggers with {mcontrol-action}=0 from matching or firing while in VS-mode and while `SIE` in `vstatus` is 0.
+
+. {tcontrol-mte} and {tcontrol-mpte} in {csr-tcontrol} is implemented. `medeleg` [3] is hard-wired to 0.
+
+[NOTE]
+====
+The first option has the limitation that interrupts might be disabled at
+times when a user still might want triggers to fire. It has the benefit
+that breakpoints are not required to be handled in M-mode.
+
+The second option has the benefit that it only disables triggers during
+the trap handler, though it requires specific software support for this
+debug feature in the M-mode trap handlers. It can only work if
+breakpoints are not delegated to less privileged modes and therefore
+targets primarily implementations without S-mode.
+
+Because {csr-tcontrol} is not accessible to S-mode, the second option can not be
+extended to accommodate delegation without adding additional S-mode and
+VS-mode CSRs.
+
+Both options prevent etrigger and itrigger from having any effect on
+exceptions and interrupts that are handled in M-mode. They also prevent
+triggering during some initial portion of each handler. Debuggers should
+use other mechanisms to debug these cases, such as patching the handler
+or setting a breakpoint on the instruction after `MIE` is cleared.
+====
+
+=== Memory Access Triggers
+
+{csr-mcontrol} and {csr-mcontrol6} both enable triggers on memory accesses. This section describes for
+both of them how certain corner cases are treated.
+
+==== A Extension
+
+If the A extension is supported, then triggers on loads/stores treat
+them as follows:
+
+. `lr` instructions are loads.
+. Successful `sc` instructions are stores.
+. It is UNSPECIFIED whether failing `sc` instructions are stores or not.
+. Each AMO instruction is a load for the read portion of the operation.
+The address is always available to trigger on, although the value loaded
+might not be, depending on the hardware implementation.
+. Each AMO instruction is a store for the write portion of the operation.
+The address is always available to trigger on. Whether data store triggers match on AMOs is UNSPECIFIED.
+. If the destination register of any load or AMO is `zero` then it is UNSPECIFIED whether a
+data load trigger will match.
+
+==== Combined Accesses
+
+Some instructions lead a hart to perform multiple memory accesses. This
+includes vector loads and stores, as well as `cm.push` and `cm.pop`
+instructions. The Trigger Module should match such accesses as if they
+all happened individually. E.g. a vector load should be treated as if it
+performed multiple loads of size SEW (selected element width), and
+`cm.push` should be treated as if it performed multiple stores of size
+XLEN.
+
+==== Cache Operations
+
+Cache operations are infrequently performed, and code that uses them can
+have hard-to-find bugs. For the purposes of debug triggers, two classes
+of cache operations must match as stores:
+
+. Cache operations that enable software to maintain coherence between
+otherwise non-coherent implicit and explicit memory accesses.
+. Cache operations that perform block writes of constant data.
+
+Only triggers with {mcontrol6-size}=0 and {mcontrol6-select}=0 will match. Since cache operations affect
+multiple addresses, there are multiple possible values to compare
+against. Implementations must implement one of the following options.
+From most desirable to least desirable, they are:
+
+. Every address from the effective address rounded down to the nearest
+cache block boundary (inclusive) to the effective address rounded up to
+the nearest cache block boundary (exclusive) is a compare value.
+. The effective address rounded down to the nearest cache block boundary
+is a compare value.
+. The effective address of the instruction is a compare value.
+
+Cache operations encoded as HINTs do not match debug triggers.
+
+[NOTE]
+====
+The above language intends to capture the trigger behavior with respect
+to the cache operations to be introduced in a forthcoming I/D
+consistency extension.
+
+For RISC-V Base Cache Management Operation ISA Extensions 1.0.1, this
+means the following:
+
+. `cbo.clean`, `cbo.flush`, and `cbo.inval` match as if they are stores because they affect consistency.
+. `cbo.zero` matches as if it is a store because it performs a block write of
+constant data.
+. The prefetch instructions don't match at all.
+====
+
+==== Address Matches
+
+For address matches without a mask, {csr-tdata2} must be able to hold all valid
+addresses in all supported translation modes. That means that after writing any
+of these valid addresses, the exact same value XLEN-wide value is read back,
+including any high bits. An implementation may be able to optimize the storage
+required, depending on the widest addresses it supports.
+
+[NOTE]
+====
+If physical addresses are less than XLEN bits wide, they are zero-extended.
+If virtual addresses are less than XLEN bits wide, they are sign-extended.
+{csr-tdata2} must be implemented with enough bits of storage to represent
+the full range of supported physical and virtual address values when read by
+software and used by hardware.
+====
+
+===== Invalid Addresses
+
+If {csr-tdata2} can hold any invalid addresses, then writes of an
+invalid address that can not be represented as-is should be converted to
+a different invalid address that can be represented.
+
+For invalid instruction fetch addresses and load and store effective addresses,
+the compare value may be changed to a different invalid address.
+
+In addition, an implementation may choose to inhibit all trigger matching
+against invalid addresses, especially if there is no support for storage of any
+invalid address values in tdata2.
+
+[[multistate]]
+=== Multiple State Change Instructions
+
+An instruction that performs multiple architectural state changes (e.g.,
+register updates and/or memory accesses) might cause a trigger to fire
+at an intermediate point in its execution. As a result, architectural
+state changes up to that point might have been performed, while
+subsequent state changes, starting from the event that activated the
+trigger, might not have been. The definition of such an instruction will
+specify the order in which architectural state changes take place.
+Alternatively, it may state that partial execution is not allowed,
+implying that a mid-execution trigger must prevent any architectural
+state changes from occurring.
+
+Debuggers won't be aware if an instruction has been partially executed.
+When they resume execution, they will execute the same instruction once
+more. Therefore, it's crucial that partially executing the instruction
+and then executing it again leaves the hart in a state closely
+resembling the state it would have been in if the instruction had only
+been executed once.
+
+=== Trigger Module Registers
+
+These registers are CSRs, accessible using the RISC-V `csr` opcodes and
+optionally also using abstract debug commands. They are the only mechanism
+to access the triggers.
+
+Almost all trigger functionality is optional. All `tdata` registers
+follow write-any-read-legal semantics. If a debugger writes an
+unsupported configuration, the register will read back a value that is
+supported (which may simply be a disabled trigger). This means that a
+debugger must always read back values it writes to `tdata` registers,
+unless it already knows what is supported. Writes to one `tdata`
+register must not modify the contents of other `tdata` registers, nor
+the configuration of any trigger besides the one that is currently
+selected.
+
+The combination of these rules means that a debugger cannot simply set a
+trigger by writing {csr-tdata1}, then {csr-tdata2}, etc. The current value of {csr-tdata2} might not be legal
+with the new value of {csr-tdata1}. To help with this situation, it is guaranteed
+that writing 0 to {csr-tdata1} disables the trigger, and leaves it in a state where {csr-tdata2} and {csr-tdata3} can be written with any value that makes sense for any trigger type supported by this trigger.
+
+As a result, a debugger can write any supported trigger as follows:
+
+. Write 0 to {csr-tdata1}. (This will result in containing a non-zero value, since the register is *WARL*.)
+. Write desired values to {csr-tdata2} and {csr-tdata3}.
+. Write desired value to {csr-tdata1}.
+
+Code that restores CSR context of triggers that might be configured to
+fire in the current privilege mode must use this same sequence to
+restore the triggers. This avoids the problem of a partially written
+trigger firing at a different time than is expected.
+
+Attempts to access an unimplemented Trigger Module Register raise an illegal
+instruction exception.
+
+include::../build/hwbp_registers.adoc[]
