@@ -22,10 +22,11 @@
 DOCS := riscv-privileged riscv-unprivileged
 
 DATE ?= $(shell date +%Y-%m-%d)
+SKIP_DOCKER ?= $(shell if command -v docker >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
     DOCKER_IS_PODMAN = \
-        $(shell ! docker -v 2>&1 | grep podman >/dev/null ; echo $$?)
+        $(shell ! docker -v | grep podman >/dev/null ; echo $$?)
     ifeq "$(DOCKER_IS_PODMAN)" "1"
         # Modify the SELinux label for the host directory to indicate
         # that it can be shared with multiple containers. This is apparently
@@ -137,7 +138,7 @@ build: submodule-check
 
 build-container: submodule-check
 	@echo "Starting build inside Docker container..."
-	$(MAKE) build-docs
+	$(MAKE) SKIP_DOCKER=false build-docs
 	@echo "Build completed successfully inside Docker container."
 
 build-no-container: submodule-check
