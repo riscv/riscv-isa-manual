@@ -58,6 +58,10 @@ else
         cd $@.workdir &&
 endif
 
+ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
+WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../docs-resources $@.workdir/
+WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
+else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
     mkdir -p $@.workdir && \
@@ -66,6 +70,7 @@ WORKDIR_SETUP = \
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
     rm -rf $@.workdir
+endif
 
 SRC_DIR := src
 BUILD_DIR := build
