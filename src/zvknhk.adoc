@@ -1,0 +1,435 @@
+
+[[zvknhk,zvknhk]]
+== "Zvknhk" Extension for Vector Keccak 
+
+This chapter describes the `Zvknhk`  Vector Cryptography extension, which adds vector instructions to compute the Keccak sponge function using in NIST SHA3 and numerous Post Quantum Cryptography (PQC) algorithms.
+
+
+This document is in _Development_ state.
+Assume that everything can change.
+This document has not been publicly reviewed nor approved yet.
+For more information, see link:https://lf-riscv.atlassian.net/wiki/spaces/HOME/pages/16154861/RISC-V+Specification+Status[here].
+
+
+[[zvknhk-overview]]
+=== Extension Overview
+
+This section introduces `Zvknhk`.
+
+`Zvknhk` depends on Zve64x.
+
+
+As the instructions defined in this specification might be used to implement cryptographic primitives,
+they must be implemented with data-independent execution latencies as defined in 
+link:https://github.com/riscv/riscv-isa-manual/blob/main/src/scalar-crypto.adoc#data-independent-execution-latency-subset-zkt.
+
+Detection of individual cryptography extensions uses the
+unified software-based RISC-V discovery method.
+
+[NOTE]
+====
+At the time of writing, these discovery mechanisms are still a work in
+progress.
+====
+
+
+`Zvknhk` defines instructions to enable the efficient implementation of the Keccak sponge function.
+
+The instructions defined in this specification share the following constraints:
+
+- element group size (EGS) is 32
+- data independent execution timing
+- `vl`/`vstart` must be multiples of EGS=32 (else behavior is _reserved_)
+
+All of these instructions work on 2048-bit element groups comprised of 32 64-bit elements, in element group parlance `EGS=32`, `EGW=2048` and the instructions are only defined for `SEW=64`.
+
+Note:: The value of EGS makes the current state of this specification unsuitable for implementation with `VLEN < 256` (including VLEN=128 which is the current minimum mandate in RVA profiles). This is a known limitation which the PQC task group intends to address before finalizing the specification.
+
+Note:: The DIEL mandate is independent from the support of `Zvkt`: Zvknhk defines instructions used primarily for cryptography and there are of little use if their execution latency can leak information about input data.
+
+The number of element groups to be processed is `vl`/`EGS`.
+`vl` must be set to the number of `SEW=64` elements to be processed and
+therefore must be a multiple of `EGS=32`. Otherwise the behavior is _reserved_. +
+Likewise, `vstart` must be a multiple of `EGS=32`. Otherwise the behavior is _reserved_.
+
+`Zvknhk` defines the following instructions:
+
+[%autowidth]
+[%header,cols="^2,4,4,4"]
+|===
+
+|SEW
+|EGW
+|Mnemonic
+|Instruction
+| 64 | 2048 | `vkeccak.vi` | <<insns-vkeccak-vi>>
+
+|===
+
+
+[[insns-vkeccak-vi, Vector Multi-Round Keccak ]]
+=== vkeccak.vi
+
+Synopsis::
+Vector-Immediate Multi-Round Keccak
+
+Mnemonic::
+vkeccak.vi vd, imm5
+
+
+Encoding (Vector-Immediate)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-VE'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '10010'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: '1'},
+{bits: 6, name: '101001'},
+]}
+....
+
+Reserved Encodings::
+* `SEW` is any value other than 64
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2,2,2,2"]
+|===
+|Register
+|Direction
+|EGW
+|EGS
+|SEW
+|Definition
+
+| `vd`   | input  | 2048  | 32 | 64 | Partial hash
+| `imm5` | input  | -     | -  | - | Round Number (Immediate)
+| `vd`   | output | 2048  | 32 | 64 | Partial hash
+|===
+
+Description::
+
+The instructions performs the number of Keccak round(s) indicated by the immediate value `imm5` plus one (1-32 round(s)) on the state contained in the `vd` vector register group. The final result is written back into the same `vd` register group.
+
+
+Note:: out of the 32 64-bit elements in each element groups only the lower 25 are used. The upper 7 elements follows the tail policy.
+
+Note:: we could leave the behavior on the upper 7 elements of each element groups implementation defined.
+
+
+
+
+
+
+// The following is copied from vghsh.vv and could be omitted
+// (replaced with a link to the original specification)
+
+
+[NOTE]
+====
+====
+
+
+Operation::
+[source,pseudocode]
+--
+function clause execute (VKECCAKVI(vs2, vd)) = {
+  // operands are input with bits reversed in each byte
+  if(LMUL*VLEN < EGW)  then {
+    handle_illegal();  // illegal instruction exception
+    RETIRE_FAIL
+  } else {
+
+  eg_len = (vl/EGS)
+  eg_start = (vstart/EGS)
+
+  // TODO need to describe properly the iteration over element group(s)
+  foreach (i from eg_start to eg_len-1) {
+    const uint32_t roundCnt = zimm5;,
+  {
+    // For VKECCAK
+    //  - vd contains the input state,
+    //  - vs2 contains the round index,
+    //  - vd does receive the output state.
+    //
+    // note that in the 32 elements of each EGU64x32 only the first 25
+    // elements are actually used (the Keccak state is 1600-bit wide)
+    EGU64x32_t keccak_state = P.VU.elt_group<EGU64x32_t>(vd_num, idx_eg);
+
+    // unpacking state
+    uint64_t A_0_0 = keccak_state[0 + 5 * 0];
+    uint64_t A_0_1 = keccak_state[0 + 5 * 1];
+    uint64_t A_0_2 = keccak_state[0 + 5 * 2];
+    uint64_t A_0_3 = keccak_state[0 + 5 * 3];
+    uint64_t A_0_4 = keccak_state[0 + 5 * 4];
+    uint64_t A_1_0 = keccak_state[1 + 5 * 0];
+    uint64_t A_1_1 = keccak_state[1 + 5 * 1];
+    uint64_t A_1_2 = keccak_state[1 + 5 * 2];
+    uint64_t A_1_3 = keccak_state[1 + 5 * 3];
+    uint64_t A_1_4 = keccak_state[1 + 5 * 4];
+    uint64_t A_2_0 = keccak_state[2 + 5 * 0];
+    uint64_t A_2_1 = keccak_state[2 + 5 * 1];
+    uint64_t A_2_2 = keccak_state[2 + 5 * 2];
+    uint64_t A_2_3 = keccak_state[2 + 5 * 3];
+    uint64_t A_2_4 = keccak_state[2 + 5 * 4];
+    uint64_t A_3_0 = keccak_state[3 + 5 * 0];
+    uint64_t A_3_1 = keccak_state[3 + 5 * 1];
+    uint64_t A_3_2 = keccak_state[3 + 5 * 2];
+    uint64_t A_3_3 = keccak_state[3 + 5 * 3];
+    uint64_t A_3_4 = keccak_state[3 + 5 * 4];
+    uint64_t A_4_0 = keccak_state[4 + 5 * 0];
+    uint64_t A_4_1 = keccak_state[4 + 5 * 1];
+    uint64_t A_4_2 = keccak_state[4 + 5 * 2];
+    uint64_t A_4_3 = keccak_state[4 + 5 * 3];
+    uint64_t A_4_4 = keccak_state[4 + 5 * 4];
+    // executed the number of requested keccak rounds
+    for (std::size_t ridx = 0; ridx < roundCnt; ++ridx) {
+        uint64_t C_0= A_0_0 ^ A_0_1 ^ A_0_2 ^ A_0_3 ^ A_0_4;
+        uint64_t C_1= A_1_0 ^ A_1_1 ^ A_1_2 ^ A_1_3 ^ A_1_4;
+        uint64_t C_2= A_2_0 ^ A_2_1 ^ A_2_2 ^ A_2_3 ^ A_2_4;
+        uint64_t C_3= A_3_0 ^ A_3_1 ^ A_3_2 ^ A_3_3 ^ A_3_4;
+        uint64_t C_4= A_4_0 ^ A_4_1 ^ A_4_2 ^ A_4_3 ^ A_4_4;
+        uint64_t D_0 = C_4 ^ KECCAK_ROL(C_1,1);
+        A_0_0 ^= D_0;
+        A_0_1 ^= D_0;
+        A_0_2 ^= D_0;
+        A_0_3 ^= D_0;
+        A_0_4 ^= D_0;
+        uint64_t D_1 = C_0 ^ KECCAK_ROL(C_2,1);
+        A_1_0 ^= D_1;
+        A_1_1 ^= D_1;
+        A_1_2 ^= D_1;
+        A_1_3 ^= D_1;
+        A_1_4 ^= D_1;
+        uint64_t D_2 = C_1 ^ KECCAK_ROL(C_3,1);
+        A_2_0 ^= D_2;
+        A_2_1 ^= D_2;
+        A_2_2 ^= D_2;
+        A_2_3 ^= D_2;
+        A_2_4 ^= D_2;
+        uint64_t D_3 = C_2 ^ KECCAK_ROL(C_4,1);
+        A_3_0 ^= D_3;
+        A_3_1 ^= D_3;
+        A_3_2 ^= D_3;
+        A_3_3 ^= D_3;
+        A_3_4 ^= D_3;
+        uint64_t D_4 = C_3 ^ KECCAK_ROL(C_0,1);
+        A_4_0 ^= D_4;
+        A_4_1 ^= D_4;
+        A_4_2 ^= D_4;
+        A_4_3 ^= D_4;
+        A_4_4 ^= D_4;
+        uint64_t T_0 = A_1_0;
+        uint64_t T_1 = A_0_2;
+        A_0_2 = KECCAK_ROL(T_0, 1);
+        uint64_t T_2 = A_2_1;
+        A_2_1 = KECCAK_ROL(T_1, 3);
+        uint64_t T_3 = A_1_2;
+        A_1_2 = KECCAK_ROL(T_2, 6);
+        uint64_t T_4 = A_2_3;
+        A_2_3 = KECCAK_ROL(T_3, 10);
+        uint64_t T_5 = A_3_3;
+        A_3_3 = KECCAK_ROL(T_4, 15);
+        uint64_t T_6 = A_3_0;
+        A_3_0 = KECCAK_ROL(T_5, 21);
+        uint64_t T_7 = A_0_1;
+        A_0_1 = KECCAK_ROL(T_6, 28);
+        uint64_t T_8 = A_1_3;
+        A_1_3 = KECCAK_ROL(T_7, 36);
+        uint64_t T_9 = A_3_1;
+        A_3_1 = KECCAK_ROL(T_8, 45);
+        uint64_t T_10 = A_1_4;
+        A_1_4 = KECCAK_ROL(T_9, 55);
+        uint64_t T_11 = A_4_4;
+        A_4_4 = KECCAK_ROL(T_10, 2);
+        uint64_t T_12 = A_4_0;
+        A_4_0 = KECCAK_ROL(T_11, 14);
+        uint64_t T_13 = A_0_3;
+        A_0_3 = KECCAK_ROL(T_12, 27);
+        uint64_t T_14 = A_3_4;
+        A_3_4 = KECCAK_ROL(T_13, 41);
+        uint64_t T_15 = A_4_3;
+        A_4_3 = KECCAK_ROL(T_14, 56);
+        uint64_t T_16 = A_3_2;
+        A_3_2 = KECCAK_ROL(T_15, 8);
+        uint64_t T_17 = A_2_2;
+        A_2_2 = KECCAK_ROL(T_16, 25);
+        uint64_t T_18 = A_2_0;
+        A_2_0 = KECCAK_ROL(T_17, 43);
+        uint64_t T_19 = A_0_4;
+        A_0_4 = KECCAK_ROL(T_18, 62);
+        uint64_t T_20 = A_4_2;
+        A_4_2 = KECCAK_ROL(T_19, 18);
+        uint64_t T_21 = A_2_4;
+        A_2_4 = KECCAK_ROL(T_20, 39);
+        uint64_t T_22 = A_4_1;
+        A_4_1 = KECCAK_ROL(T_21, 61);
+        uint64_t T_23 = A_1_1;
+        A_1_1 = KECCAK_ROL(T_22, 20);
+        uint64_t T_24 = A_1_0;
+        A_1_0 = KECCAK_ROL(T_23, 44);
+        uint64_t C_0_0 = A_0_0;
+        uint64_t C_0_1 = A_1_0;
+        uint64_t C_0_2 = A_2_0;
+        uint64_t C_0_3 = A_3_0;
+        uint64_t C_0_4 = A_4_0;
+        A_0_0 = C_0_0 ^ (~C_0_1 & C_0_2);
+        A_1_0 = C_0_1 ^ (~C_0_2 & C_0_3);
+        A_2_0 = C_0_2 ^ (~C_0_3 & C_0_4);
+        A_3_0 = C_0_3 ^ (~C_0_4 & C_0_0);
+        A_4_0 = C_0_4 ^ (~C_0_0 & C_0_1);
+        uint64_t C_1_0 = A_0_1;
+        uint64_t C_1_1 = A_1_1;
+        uint64_t C_1_2 = A_2_1;
+        uint64_t C_1_3 = A_3_1;
+        uint64_t C_1_4 = A_4_1;
+        A_0_1 = C_1_0 ^ (~C_1_1 & C_1_2);
+        A_1_1 = C_1_1 ^ (~C_1_2 & C_1_3);
+        A_2_1 = C_1_2 ^ (~C_1_3 & C_1_4);
+        A_3_1 = C_1_3 ^ (~C_1_4 & C_1_0);
+        A_4_1 = C_1_4 ^ (~C_1_0 & C_1_1);
+        uint64_t C_2_0 = A_0_2;
+        uint64_t C_2_1 = A_1_2;
+        uint64_t C_2_2 = A_2_2;
+        uint64_t C_2_3 = A_3_2;
+        uint64_t C_2_4 = A_4_2;
+        A_0_2 = C_2_0 ^ (~C_2_1 & C_2_2);
+        A_1_2 = C_2_1 ^ (~C_2_2 & C_2_3);
+        A_2_2 = C_2_2 ^ (~C_2_3 & C_2_4);
+        A_3_2 = C_2_3 ^ (~C_2_4 & C_2_0);
+        A_4_2 = C_2_4 ^ (~C_2_0 & C_2_1);
+        uint64_t C_3_0 = A_0_3;
+        uint64_t C_3_1 = A_1_3;
+        uint64_t C_3_2 = A_2_3;
+        uint64_t C_3_3 = A_3_3;
+        uint64_t C_3_4 = A_4_3;
+        A_0_3 = C_3_0 ^ (~C_3_1 & C_3_2);
+        A_1_3 = C_3_1 ^ (~C_3_2 & C_3_3);
+        A_2_3 = C_3_2 ^ (~C_3_3 & C_3_4);
+        A_3_3 = C_3_3 ^ (~C_3_4 & C_3_0);
+        A_4_3 = C_3_4 ^ (~C_3_0 & C_3_1);
+        uint64_t C_4_0 = A_0_4;
+        uint64_t C_4_1 = A_1_4;
+        uint64_t C_4_2 = A_2_4;
+        uint64_t C_4_3 = A_3_4;
+        uint64_t C_4_4 = A_4_4;
+        A_0_4 = C_4_0 ^ (~C_4_1 & C_4_2);
+        A_1_4 = C_4_1 ^ (~C_4_2 & C_4_3);
+        A_2_4 = C_4_2 ^ (~C_4_3 & C_4_4);
+        A_3_4 = C_4_3 ^ (~C_4_4 & C_4_0);
+        A_4_4 = C_4_4 ^ (~C_4_0 & C_4_1);
+        /*ι*/ // XL(0,0,RC[i]);
+        A_0_0 ^= KECCAK_RC[ridx];
+    };
+    // epilog: populating back keccak state
+    keccak_state[0 + 5 * 0] = A_0_0;
+    keccak_state[0 + 5 * 1] = A_0_1;
+    keccak_state[0 + 5 * 2] = A_0_2;
+    keccak_state[0 + 5 * 3] = A_0_3;
+    keccak_state[0 + 5 * 4] = A_0_4;
+    keccak_state[1 + 5 * 0] = A_1_0;
+    keccak_state[1 + 5 * 1] = A_1_1;
+    keccak_state[1 + 5 * 2] = A_1_2;
+    keccak_state[1 + 5 * 3] = A_1_3;
+    keccak_state[1 + 5 * 4] = A_1_4;
+    keccak_state[2 + 5 * 0] = A_2_0;
+    keccak_state[2 + 5 * 1] = A_2_1;
+    keccak_state[2 + 5 * 2] = A_2_2;
+    keccak_state[2 + 5 * 3] = A_2_3;
+    keccak_state[2 + 5 * 4] = A_2_4;
+    keccak_state[3 + 5 * 0] = A_3_0;
+    keccak_state[3 + 5 * 1] = A_3_1;
+    keccak_state[3 + 5 * 2] = A_3_2;
+    keccak_state[3 + 5 * 3] = A_3_3;
+    keccak_state[3 + 5 * 4] = A_3_4;
+    keccak_state[4 + 5 * 0] = A_4_0;
+    keccak_state[4 + 5 * 1] = A_4_1;
+    keccak_state[4 + 5 * 2] = A_4_2;
+    keccak_state[4 + 5 * 3] = A_4_3;
+    keccak_state[4 + 5 * 4] = A_4_4;
+
+    // Update the destination register.
+    EGU64x32_t &vd = P.VU.elt_group<EGU64x32_t>(vd_num, idx_eg, true);
+    EGU64x32_COPY(vd, keccak_state);
+  }
+);
+  RETIRE_SUCCESS
+ }
+}
+--
+
+Included in::
+<<zvknhk>>
+
+
+
+
+[[Encodings]]
+=== Encodings
+[appendix]
+[[crypto_vector_instructions_Zvkgs]]
+==== Additional Vector Cryptographic Instructions
+
+OP-VE (0x77)
+Vector Crypto instructions, including `Zvknkk`, except `Zvbb` and `Zvbc`.
+The new/modified encodings are in bold.
+
+[cols="4,1,1,1,1,4,1,1,1,4,1,1,1"]
+|===
+5+^|Integer 4+^|Integer 4+^| FP
+
+| funct3 | | | |            | funct3 | | |             | funct3 | | |
+| OPIVV  |V| | |            | OPMVV  |V| |             | OPFVV  |V| |
+| OPIVX  | |X| |            | OPMVX  | |X|             | OPFVF  | |F|
+| OPIVI  | | |I|            |        | | |             |        | | |
+|===
+
+// [cols="4,1,1,1,8,4,1,1,8,4,1,1,8"]
+[cols="6,1,1,1,1,6,1,1,6,6,1,1,1"]
+
+|===
+5+^| funct6                  4+^| funct6                 4+^| funct6
+
+|100000  | | | |            | 100000 |V| | vsm3me       | 100000 | | |
+| 100001 | | | |            | 100001 |V| | vsm4k.vi     | 100001 | | |
+| 100010 | | | |            | 100010 |V| | vaesfk1.vi   | 100010 | | |
+| 100011 | | | |            | 100011 |V| | vghsh.vs     | 100011 | | |
+| 100100 | | | |            | 100100 | | |              | 100100 | | |
+| 100101 | | | |            | 100101 | | |              | 100101 | | |
+| 100110 | | | |            | 100110 | | |              | 100110 | | |
+| 100111 | | | |            | 100111 | | |              | 100111 | | |
+|        | | | |            |        | | |              |        | | |
+| 101000 | | | |            | 101000 |V| | VAES.vv      | 101000 | | |
+| 101001 | | | |            | 101001 |V| | VAES.vs      | 101001 | | |
+| 101010 | | | |            | 101010 |V| | vaesfk2.vi   | 101010 | | |
+| 101011 | | | |            | 101011 |V| | vsm3c.vi     | 101011 | | |
+| 101100 | | | |            | 101100 |V| | vghsh        | 101100 | | |
+| 101101 | | | |            | 101101 |V| | vsha2ms      | 101101 | | |
+| 101110 | | | |            | 101110 |V| | vsha2ch      | 101110 | | |
+| 101111 | | | |            | 101111 |V| | vsha2cl      | 101111 | | |
+|===
+
+<<<
+
+.VAES.vv and VAES.vs encoding space
+[cols="2,14"]
+|===
+|vs1|
+
+| 00000 | vaesdm
+| 00001 | vaesdf
+| 00010 | vaesem
+| 00011 | vaesef
+| 00111 | vaesz
+| 10000 | vsm4r
+| 10001 | vgmul
+| 10010 | **vkeccack**
+|===
+
+
+
+
