@@ -15,6 +15,9 @@ The RISC-V Instruction Set Manual is organized into the following volumes:
 
 - **Official versions** of the specifications are available at the [RISC-V International website](https://riscv.org/specifications/).
 - **Compiled versions of the most recent drafts** of the specifications can be found on the [GitHub releases page](https://github.com/riscv/riscv-isa-manual/releases/latest).
+- **HTML snapshots of the latest commit** can be viewed at the following locations:
+  - [Unprivileged spec](https://riscv.github.io/riscv-isa-manual/snapshot/unprivileged/)
+  - [Privileged spec](https://riscv.github.io/riscv-isa-manual/snapshot/privileged/)
 - **Older official versions** of the specifications are archived at the [GitHub releases archive](https://github.com/riscv/riscv-isa-manual/releases/tag/archive).
 
 The canonical list of **open-source RISC-V implementations' marchid CSR values** is available in the [marchid.md file](https://github.com/riscv/riscv-isa-manual/blob/main/marchid.md).
