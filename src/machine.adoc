@@ -39,7 +39,7 @@ less-privileged modes.
 3
 |32 +
 64 +
-128
+_Reserved_
 |===
 
 The `misa` CSR is MXLEN bits wide.
@@ -53,16 +53,15 @@ knowing the register width (MXLEN) of the hart. The base width is
 given by __MXLEN=2^MXL+4^__.
 
 The base width can also be found if `misa` is zero, by placing the
-immediate 4 in a register, then shifting the register left by 31 bits at
-a time. If zero after one shift, then the hart is RV32. If zero after
-two shifts, then the hart is RV64, else RV128.
+immediate 2 in a register, then shifting the register left by 31 bits.
+If zero, the hart is RV32, else it is RV64.
 ====
 
 The Extensions field encodes the presence of the standard extensions,
 with a single bit per letter of the alphabet (bit 0 encodes presence of
 extension "A" , bit 1 encodes presence of extension "B", through to
-bit 25 which encodes "Z"). The "I" bit will be set for RV32I, RV64I,
-and RV128I base ISAs, and the "E" bit will be set for RV32E and RV64E. The
+bit 25 which encodes "Z"). The "I" bit will be set for the RV32I and RV64I
+base ISAs, and the "E" bit will be set for RV32E and RV64E. The
 Extensions field is a *WARL* field that can contain writable bits where the
 implementation allows the supported ISA to be modified. At reset, the
 Extensions field shall contain the maximal set of supported extensions,
@@ -163,7 +162,7 @@ RV32E/64E base ISA +
 Single-precision floating-point extension +
 _Reserved_ +
 Hypervisor extension +
-RV32I/64I/128I base ISA +
+RV32I/64I base ISA +
 _Reserved_ +
 _Reserved_ +
 _Reserved_ +
@@ -182,10 +181,6 @@ Non-standard extensions present +
 _Reserved_ +
 _Reserved_
 |===
-
-The design of the RV128I base ISA is not yet complete, and while much of
-the remainder of this specification is expected to apply to RV128, this
-version of the document focuses only on RV32 and RV64.
 
 The "X" bit will be set if there are any non-standard extensions.
 
@@ -1190,6 +1185,9 @@ read-only value. If `mtvec` is writable, the set of values the register
 may hold can vary by implementation. The value in the BASE field must
 always be aligned on a 4-byte boundary, and the MODE setting may impose
 additional alignment constraints on the value in the BASE field.
+Note that the CSR contains only bits XLEN-1 through 2 of the address BASE.
+When used as an address, the lower two bits are filled with zeroes to obtain
+an XLEN-bit address that is always aligned on a 4-byte boundary.
 
 [NOTE]
 ====
@@ -1472,7 +1470,7 @@ software interrupts. SSIP is writable in `mip` and may also be set to 1
 by a platform-specific interrupt controller.
 
 If the Sscofpmf extension is implemented, bits `mip`.LCOFIP and `mie`.LCOFIE
-are the interrupt-pending and interrupt-enable bits for local counter-overflow
+are the interrupt-pending and interrupt-enable bits for local-counter-overflow
 interrupts.
 LCOFIP is read-write in `mip` and reflects the occurrence of a local
 counter-overflow overflow interrupt request resulting from any of the
@@ -1944,7 +1942,7 @@ instruction).
 
 ***
 
-Instruction address misaligned exceptions are raised by control-flow
+Instruction address-misaligned exceptions are raised by control-flow
 instructions with misaligned targets, rather than by the act of fetching
 an instruction. Therefore, these exceptions have lower priority than
 other instruction address exceptions.
@@ -1952,7 +1950,7 @@ other instruction address exceptions.
 
 [NOTE]
 ====
-A Software Check exception is a synchronous exception that is triggered when
+A software-check exception is a synchronous exception that is triggered when
 there are violations of checks and assertions defined by ISA extensions that
 aim to safeguard the integrity of software assets, including e.g. control-flow
 and memory-access constraints. When this exception is raised, the `__x__tval`
@@ -1961,14 +1959,14 @@ that stipulated the exception be raised.  The priority of this exception,
 relative to other synchronous exceptions, depends on the cause of this exception
 and is defined by the extension that stipulated the exception be raised.
 
-A Hardware Error exception is a synchronous exception triggered when corrupted or
+A hardware-error exception is a synchronous exception triggered when corrupted or
 uncorrectable data is accessed explicitly or implicitly by an instruction.  In
 this context, "data" encompasses all types of information used within a RISC-V
-hart. Upon a hardware error exception, the `__x__epc` register is set to the
+hart. Upon a hardware-error exception, the `__x__epc` register is set to the
 address of the instruction that attempted to access corrupted data, while the
 `__x__tval` register is set either to 0 or to the virtual address of an
 instruction fetch, load, or store that attempted to access corrupted data. The
-priority of Hardware Error exception is implementation-defined, but any given
+priority of hardware-error exception is implementation-defined, but any given
 occurrence is generally expected to be recognized at the point in the overall
 priority order at which the hardware error is discovered.
 ====
@@ -2051,7 +2049,7 @@ two cases (or alternatively, the system configuration information can be
 interrogated to install the appropriate trap handling before runtime).
 ====
 
-On a trap caused by a software check exception, the `mtval` register holds
+On a trap caused by a software-check exception, the `mtval` register holds
 the cause for the exception. The following encodings are defined:
 
 * 0 - No information provided.
@@ -2408,7 +2406,9 @@ also raise an illegal-instruction exception when TSR=1 in `mstatus`, as
 described in <<virt-control>>. An __x__RET instruction
 can be executed in privilege mode _x_ or higher, where executing a
 lower-privilege __x__RET instruction will pop the relevant lower-privilege
-interrupt enable and privilege mode stack. In addition to manipulating
+interrupt enable and privilege mode stack. Attempting to execute an __x__RET
+instruction in a mode less privileged than _x_ will raise an
+illegal-instruction exception. In addition to manipulating
 the privilege stack as described in <<privstack>>,
 __x__RET sets the `pc` to the value stored in the `__x__epc` register.
 

@@ -16,8 +16,6 @@ The instructions have mnemonics and encodings that are independent of the extens
 Thus, when implementing extensions with overlapping instructions, there is no redundancy in logic or encoding.
 
 The bitmanip extensions are defined for RV32 and RV64.
-Most of the instructions are expected to be forward compatible with RV128.
-While the shift-immediate instructions are defined to have at most a 6-bit immediate field, a 7th bit is available in the encoding space should this be needed for RV128.
 
 === Word Instructions
 
@@ -2450,8 +2448,7 @@ Encoding::
 [wavedrom, , svg]
 ....
 {reg:[
-{bits: 2, name: 0x3},
-{bits: 5, name: 0xe},
+{bits: 7, name: 0x3b, attr: ['OP-32']},
 {bits: 5, name: 'rd'},
 {bits: 3, name: 0x4},
 {bits: 5, name: 'rs1'},
@@ -3494,8 +3491,7 @@ Encoding::
 [wavedrom, , svg]
 ....
 {reg:[
-{bits: 2, name: 0x3},
-{bits: 5, name: 0xc},
+{bits: 7, name: 0x33, attr: ['OP'] },
 {bits: 5, name: 'rd'},
 {bits: 3, name: 0x4},
 {bits: 5, name: 'rs1'},
@@ -3555,8 +3551,7 @@ Encoding::
 [wavedrom, , svg]
 ....
 {reg:[
-{bits: 2, name: 0x3},
-{bits: 5, name: 0xc},
+{bits: 7, name: 0x33, attr: ['OP'] },
 {bits: 5, name: 'rd'},
 {bits: 3, name: 0x2},
 {bits: 5, name: 'rs1'},
@@ -3741,70 +3736,70 @@ A full example of a *strlen* function, which uses these techniques and also demo
 --
 #include <sys/asm.h>
 
-	.text
-	.globl strlen
-	.type  strlen, @function
+    .text
+    .globl strlen
+    .type  strlen, @function
 strlen:
-	andi	a3, a0, (SZREG-1)   // offset
-	andi    a1, a0, -SZREG      // align pointer
+    andi    a3, a0, (SZREG-1)   // offset
+    andi    a1, a0, -SZREG      // align pointer
 .Lprologue:
-	li      a4, SZREG
-	sub     a4, a4, a3          // XLEN - offset
-	slli	a3, a3, 3           // offset * 8
-	REG_L   a2, 0(a1)           // chunk
-	/*
-	 * Shift the partial/unaligned chunk we loaded to remove the bytes
-	 * from before the start of the string, adding NUL bytes at the end.
-	 */
+    li      a4, SZREG
+    sub     a4, a4, a3          // XLEN - offset
+    slli    a3, a3, 3           // offset * 8
+    REG_L   a2, 0(a1)           // chunk
+    /*
+     * Shift the partial/unaligned chunk we loaded to remove the bytes
+     * from before the start of the string, adding NUL bytes at the end.
+     */
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-	srl	a2, a2 ,a3          // chunk >> (offset * 8)
+    srl     a2, a2 ,a3          // chunk >> (offset * 8)
 #else
-	sll     a2, a2, a3
+    sll     a2, a2, a3
 #endif
-	orc.b   a2, a2
-	not	a2, a2
-	/*
-	 * Non-NUL bytes in the string have been expanded to 0x00, while
- 	 * NUL bytes have become 0xff.  Search for the first set bit
-	 * (corresponding to a NUL byte in the original chunk).
-	 */
+    orc.b   a2, a2
+    not     a2, a2
+    /*
+     * Non-NUL bytes in the string have been expanded to 0x00, while
+     * NUL bytes have become 0xff.  Search for the first set bit
+     * (corresponding to a NUL byte in the original chunk).
+     */
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-	ctz     a2, a2
+    ctz     a2, a2
 #else
-	clz     a2, a2
+    clz     a2, a2
 #endif
-	/*
-	 * The first chunk is special: compare against the number of valid
-	 * bytes in this chunk.
-	 */
-	srli    a0, a2, 3
-	bgtu    a4, a0, .Ldone
-	addi    a3, a1, SZREG
-	li      a4, -1
-	.align 2
-	/*
-	 * Our critical loop is 4 instructions and processes data in 4 byte
-	 * or 8 byte chunks.
-	 */
+    /*
+     * The first chunk is special: compare against the number of valid
+     * bytes in this chunk.
+     */
+    srli    a0, a2, 3
+    bgtu    a4, a0, .Ldone
+    addi    a3, a1, SZREG
+    li      a4, -1
+    .align 2
+    /*
+     * Our critical loop is 4 instructions and processes data in 4 byte
+     * or 8 byte chunks.
+     */
 .Lloop:
-	REG_L   a2, SZREG(a1)
-	addi    a1, a1, SZREG
-	orc.b   a2, a2
-	beq     a2, a4, .Lloop
+    REG_L   a2, SZREG(a1)
+    addi    a1, a1, SZREG
+    orc.b   a2, a2
+    beq     a2, a4, .Lloop
 
 .Lepilogue:
-	not     a2, a2
+    not     a2, a2
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-	ctz     a2, a2
+    ctz     a2, a2
 #else
-	clz     a2, a2
+    clz     a2, a2
 #endif
-	sub     a1, a1, a3
-	add	a0, a0, a1
-	srli    a2, a2, 3
-	add 	a0, a0, a2
+    sub     a1, a1, a3
+    add     a0, a0, a1
+    srli    a2, a2, 3
+    add     a0, a0, a2
 .Ldone:
-	ret
+    ret
 --
 
 ==== strcmp
