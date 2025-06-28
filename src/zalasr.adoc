@@ -1,0 +1,123 @@
+== "Zalasr" Atomic Load-Acquire and Store-Release Instructions, Version 0.8.2
+
+The Zalsr extension provides load-acquire and store-release instructions in RISC-V.
+These can be important for high performance designs by enabling finer-grained synchronisation than is possible with fences alone, by providing a unidirectional fence.
+Load-acquire and store-release are also widely used in language-level memory models.
+Both the Java and {cpp} memory models make use of acquire-release semantics, and {cpp}'s `atomic` provides primitives that are meant to map directly to load-acquire and store-release instructions.
+
+=== Load-Acquire and Store-Release Instructions
+
+The instructions in the Zalasr extension require that the address held in _rs1_ be naturally aligned to the size in bytes (2^width^) of the operand.
+If the address is not naturally aligned, an address-misaligned exception or an access-fault exception will be generated.
+The access-fault exception can be generated for a memory access that would otherwise be able to complete except for the misalignment, if the misaligned access should not be emulated.
+
+The misaligned atomicity granule PMA, defined in Volume II of this manual, optionally relaxes this alignment requirement.
+If all accessed bytes lie within the same misaligned atomicity granule, the instruction will not raise an exception for reasons of address alignment, and the instruction will give rise to only one memory operation for the purposes of RVWMO—i.e., it will execute atomically.
+
+<<<
+
+[#insns-ldatomic,reftext="Load Acquire"]
+=== Load Acquire
+
+Synopsis::
+The load-acquire instruction, atomically and subject to the ordering annotations specified in the instruction, loads a 2^width^-byte value from the address in _rs1_ into the register _rd_.
+
+Mnemonic::
+====
+lb.{aq,aqrl} _rd_, (_rs1_)
+
+lh.{aq,aqrl} _rd_, (_rs1_)
+
+lw.{aq,aqrl} _rd_, (_rs1_)
+
+ld.{aq,aqrl} _rd_, (_rs1_)
+====
+Encoding::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 7,  name: 'opcode',    attr: ['7', 'AMO'], type: 8},
+  {bits: 5,  name: 'rd',        attr: ['5', 'dest'], type: 2},
+  {bits: 3,  name: 'funct3',    attr: ['3', 'width'], type: 8},
+  {bits: 5,  name: 'rs1',       attr: ['5', 'addr'], type: 4},
+  {bits: 5,  name: 'rs2',       attr: ['5', '0'], type: 4},
+  {bits: 1,  name: 'rl',        attr: ['1', 'ring'], type: 8},
+  {bits: 1,  name: 'aq',        attr: ['1', 'orde', '1'], type: 8},
+  {bits: 5,  name: 'funct5',    attr: ['5', 'Load Acquire', '00110'], type: 8},
+]}
+....
+
+Description::
+
+This instruction loads 2^width^ bytes of memory from rs1 atomically.
+If the size (2^width+3^) is less than XLEN, it is sign-extended to fill the destination register.
+This load must have the ordering annotation _aq_ and may have ordering annotation _rl_ encoded in the instruction.
+The instruction always has an "acquire-RCsc" annotation, and if the bit _rl_ is set the instruction has a "release-RCsc" annotation.
++
+The versions without the _aq_ bit set are RESERVED.
+LD.{AQ, AQRL} is RV64-only.
+
+
+[NOTE]
+====
+The _aq_ bit is mandatory because the two encodings that would be produced are not seen as useful at this time.
+The version with neither the _aq_ nor the _rl_ bit set would correspond to a load with no ordering annotations that was guaranteed to be performed atomically.
+This can be achieved with ordinary load instuctions by suitably aligning pointers.
+The version with only the _rl_ bit would correspond to load-release.
+Load-release has theoretical applications in seqlocks, but is not supported in language-level memory models and so is not included.
+====
+
+<<<
+
+[#insns-sdatomic,reftext="Store Release"]
+=== Store Release
+
+Synopsis::
+The store-release instruction, atomically and subject to the ordering annotations specified in the instruction, stores the 2^width^-byte value from the register _rs2_ to the address in _rs1_.
+
+Mnemonic::
+====
+sb.{rl,aqrl} _rs2_, (_rs1_)
+
+sh.{rl,aqrl} _rs2_, (_rs1_)
+
+sw.{rl,aqrl} _rs2_, (_rs1_)
+
+sd.{rl,aqrl} _rs2_, (_rs1_)
+====
+
+Encoding::
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 7,  name: 'opcode',    attr: ['7', 'AMO'], type: 8},
+  {bits: 5,  name: 'rd',        attr: ['5', '0'], type: 2},
+  {bits: 3,  name: 'funct3',    attr: ['3', 'width'], type: 8},
+  {bits: 5,  name: 'rs1',       attr: ['5', 'addr'], type: 4},
+  {bits: 5,  name: 'rs2',       attr: ['5', 'src'], type: 4},
+  {bits: 1,  name: 'rl',        attr: ['1', 'ring', '1'], type: 8},
+  {bits: 1,  name: 'aq',        attr: ['1', 'orde'], type: 8},
+  {bits: 5,  name: 'funct5',    attr: ['5', 'Store Release', '00111'], type: 8},
+]}
+....
+
+Description::
+
+This instruction stores 2^width^ bytes of memory from rs1 atomically.
+This store must have ordering annotation _rl_ and may have ordering annotation _aq_ encoded in the instruction.
+The instruction always has an "release-RCsc" annotation, and if the bit _aq_ is set the instruction has a "acquire-RCsc" annotation.
++
+The versions without the _rl_ bit set are RESERVED.
+SD.{RL, AQRL} is RV64-only.
+
+
+[NOTE]
+====
+The _rl_ bit is mandatory because the two encodings that would be produced are not seen as useful at this time.
+The version with neither the _aq_ nor the _rl_ bit set would correspond to a store with no ordering annotations that was guaranteed to be performed atomically.
+This can be achieved with ordinary store instuctions by suitably aligned pointers.
+The version with only the _aq_ bit would correspond to store-acquire.
+Store-acquire has theoretical applications in seqlocks, but is not supported in language-level memory models and so is not included.
+====
+
+<<<
