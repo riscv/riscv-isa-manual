@@ -21,7 +21,22 @@
 
 DOCS := riscv-privileged riscv-unprivileged
 
-DATE ?= $(shell date +%Y-%m-%d)
+RELEASE_TYPE ?= draft
+
+ifeq ($(RELEASE_TYPE), draft)
+  WATERMARK_OPT := -a draft-watermark
+  RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
+else ifeq ($(RELEASE_TYPE), intermediate)
+  WATERMARK_OPT :=
+  RELEASE_DESCRIPTION := Intermediate Release
+else ifeq ($(RELEASE_TYPE), official)
+  WATERMARK_OPT :=
+  RELEASE_DESCRIPTION := Official Release
+else
+  $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
+endif
+
+DATE ?= $(shell date +%Y%m%d)
 SKIP_DOCKER ?= $(shell if command -v docker >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
@@ -89,6 +104,9 @@ OPTIONS := --trace \
            -a mathematical-format=svg \
            -a pdf-fontsdir=docs-resources/fonts \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
+           $(WATERMARK_OPT) \
+           -a revnumber='$(DATE)' \
+           -a revremark='$(RELEASE_DESCRIPTION)' \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=ERROR
