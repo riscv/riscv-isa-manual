@@ -11,7 +11,7 @@
 #
 # This Makefile is designed to automate the process of building and packaging
 # the documentation for RISC-V ISA Manuals. It supports multiple build targets
-# for generating documentation in various formats (PDF, HTML, EPUB, XML).
+# for generating documentation in various formats (PDF, HTML, EPUB).
 #
 # Building with a preinstalled docker container is recommended.
 # Install by running:
@@ -21,11 +21,27 @@
 
 DOCS := riscv-privileged riscv-unprivileged
 
-DATE ?= $(shell date +%Y-%m-%d)
+RELEASE_TYPE ?= draft
+
+ifeq ($(RELEASE_TYPE), draft)
+  WATERMARK_OPT := -a draft-watermark
+  RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
+else ifeq ($(RELEASE_TYPE), intermediate)
+  WATERMARK_OPT :=
+  RELEASE_DESCRIPTION := Intermediate Release
+else ifeq ($(RELEASE_TYPE), official)
+  WATERMARK_OPT :=
+  RELEASE_DESCRIPTION := Official Release
+else
+  $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
+endif
+
+DATE ?= $(shell date +%Y%m%d)
+SKIP_DOCKER ?= $(shell if command -v docker >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
     DOCKER_IS_PODMAN = \
-        $(shell ! docker -v 2>&1 | grep podman >/dev/null ; echo $$?)
+        $(shell ! docker -v | grep podman >/dev/null ; echo $$?)
     ifeq "$(DOCKER_IS_PODMAN)" "1"
         # Modify the SELinux label for the host directory to indicate
         # that it can be shared with multiple containers. This is apparently
@@ -57,6 +73,10 @@ else
         cd $@.workdir &&
 endif
 
+ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
+WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../docs-resources $@.workdir/
+WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
+else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
     mkdir -p $@.workdir && \
@@ -65,6 +85,7 @@ WORKDIR_SETUP = \
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
     rm -rf $@.workdir
+endif
 
 SRC_DIR := src
 BUILD_DIR := build
@@ -72,19 +93,20 @@ BUILD_DIR := build
 DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
 DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
-DOCS_XML := $(addprefix $(BUILD_DIR)/, $(addsuffix .xml, $(DOCS)))
 
 ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
 ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
-ASCIIDOCTOR_XML := $(ENV) asciidoctor -b docbook
 OPTIONS := --trace \
            -a compress \
            -a mathematical-format=svg \
            -a pdf-fontsdir=docs-resources/fonts \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
+           $(WATERMARK_OPT) \
+           -a revnumber='$(DATE)' \
+           -a revremark='$(RELEASE_DESCRIPTION)' \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=ERROR
@@ -93,7 +115,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-lists \
             --require=asciidoctor-mathematical
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-xml submodule-check
+.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub submodule-check
 
 all: build
 
@@ -105,11 +127,10 @@ submodule-check:
 	  git submodule update --init --recursive; \
 	fi
 
-build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB) $(DOCS_XML)
+build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB)
 build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
-build-xml: $(DOCS_XML)
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
@@ -128,11 +149,6 @@ $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
-$(BUILD_DIR)/%.xml: $(SRC_DIR)/%.adoc $(ALL_SRCS)
-	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_XML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
-
 build: submodule-check
 	@echo "Checking if Docker is available..."
 	@if command -v docker >/dev/null 2>&1 ; then \
@@ -145,7 +161,7 @@ build: submodule-check
 
 build-container: submodule-check
 	@echo "Starting build inside Docker container..."
-	$(MAKE) build-docs
+	$(MAKE) SKIP_DOCKER=false build-docs
 	@echo "Build completed successfully inside Docker container."
 
 build-no-container: submodule-check

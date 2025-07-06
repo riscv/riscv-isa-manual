@@ -545,7 +545,7 @@ instruction exception as defined below.
 NOTE: Making `vstart` visible to unprivileged code supports user-level
 threading libraries.
 
-Implementations are permitted to raise illegal instruction exceptions when
+Implementations are permitted to raise illegal-instruction exceptions when
 attempting to execute a vector instruction with a value of `vstart` that the
 implementation can never produce when executing that same instruction with
 the same `vtype` setting.
@@ -553,7 +553,7 @@ the same `vtype` setting.
 NOTE: For example, some implementations will never take interrupts during
 execution of a vector arithmetic instruction, instead waiting until the
 instruction completes to take the interrupt.  Such implementations are
-permitted to raise an illegal instruction exception when attempting to execute
+permitted to raise an illegal-instruction exception when attempting to execute
 a vector arithmetic instruction when `vstart` is nonzero.
 
 NOTE: When migrating a software thread between two harts with
@@ -592,7 +592,7 @@ mode as specified in the following table.
 
 | 0 | 0 | rnu | round-to-nearest-up (add +0.5 LSB)          | `v[d-1]`
 | 0 | 1 | rne | round-to-nearest-even                       | `v[d-1] & (v[d-2:0]{ne}0 \| v[d])`
-| 1 | 0 | rdn | round-down (truncate)                       | `0`
+| 1 | 0 | rdn | round-down                                  | `0`
 | 1 | 1 | rod | round-to-odd (OR bits into LSB, aka "jam")  | `!v[d] & v[d-1:0]{ne}0`
 |===
 
@@ -816,7 +816,7 @@ The following example shows four different packed element widths (8b,
 16b, 32b, 64b) in a VLEN=128b implementation.  The vector register
 grouping factor (LMUL) is increased by the relative element size such
 that each group can hold the same number of vector elements (VLMAX=8
-in this example) to simplify stripmining code.
+in this example) to simplify strip-mining code.
 
 ----
 Example VLEN=128b, with SEW/LMUL=16
@@ -838,9 +838,9 @@ v4*n+3                  7               6
 The following table shows each possible constant SEW/LMUL operating
 point for loops with mixed-width operations.  Each column represents a
 constant SEW/LMUL operating point.  Entries in table are the LMUL
-values that yield that column's SEW/LMUL value for the datawidth on
-that row.  In each column, an LMUL setting for a datawidth indicates
-that it can be aligned with the other datawidths in the same column
+values that yield that column's SEW/LMUL value for the data width on
+that row.  In each column, an LMUL setting for a data width indicates
+that it can be aligned with the other data widths in the same column
 that also have an LMUL setting, such that all have the same VLMAX.
 
 |===
@@ -956,12 +956,16 @@ A destination vector register group can overlap a source vector register
 group only if one of the following holds:
 
 - The destination EEW equals the source EEW.
-- The destination EEW is smaller than the source EEW and the overlap is in
-  the lowest-numbered part of the source register group (e.g., when LMUL=1,
+- The destination EEW is smaller than the source EEW, and the lowest-numbered
+  register in the destination vector register group is the same as the the
+  lowest-numbered register in the source vector register group.
+  (For example, when LMUL=1,
   `vnsrl.wi v0, v0, 3` is legal, but a destination of `v1` is not).
 - The destination EEW is greater than the source EEW, the source EMUL is
-  at least 1, and the overlap is in the highest-numbered part of the
-  destination register group (e.g., when LMUL=8, `vzext.vf4 v0, v6` is legal,
+  at least 1, and the highest-numbered register in the destination
+  vector register group is the same as the highest-numbered register in
+  the source vector register group.
+  (For example, when LMUL=8, `vzext.vf4 v0, v6` is legal,
   but a source of `v0`, `v2`, or `v4` is not).
 
 For the purpose of determining register group overlap constraints,
@@ -1121,7 +1125,7 @@ VLMAX in the source vector register group.
 === Configuration-Setting Instructions (`vsetvli`/`vsetivli`/`vsetvl`)
 
 One of the common approaches to handling a large number of elements is
-"stripmining" where each iteration of a loop handles some number of elements,
+"strip mining" where each iteration of a loop handles some number of elements,
 and the iterations continue until all elements have been processed. The RISC-V
 vector specification provides direct, portable support for this approach.
 The application specifies the total number of elements to be processed (the application vector length or AVL) as a
@@ -1217,7 +1221,7 @@ fields as follows:
 [%autowidth,float="center",align="center",options="header"]
 |===
 |  `rd`  | `rs1`  | AVL value         | Effect on `vl`
-|  -     | !x0    | Value in `x[rs1]` | Normal stripmining
+|  -     | !x0    | Value in `x[rs1]` | Normal strip mining
 | !x0    |  x0    | ~0                | Set `vl` to VLMAX
 |  x0    |  x0    | Value in `vl` register | Keep existing `vl` (of course, `vtype` may change)
 |===
@@ -1230,24 +1234,24 @@ When _rs1_=`x0` but _rd_≠`x0`, the maximum unsigned integer value (`~0`)
 is used as the AVL, and the resulting VLMAX is written to `vl` and
 also to the `x` register specified by `rd`.
 
-When _rs1_=`x0` and _rd_=`x0`, the instruction operates as if the current
+When _rs1_=`x0` and _rd_=`x0`, the instructions operate as if the current
 vector length in `vl` is used as the AVL, and the resulting value is
 written to `vl`, but not to a destination register.  This form can
 only be used when VLMAX and hence `vl` is not actually changed by the
-new SEW/LMUL ratio.  Use of the instruction with a new SEW/LMUL ratio
+new SEW/LMUL ratio.  Use of the instructions with a new SEW/LMUL ratio
 that would result in a change of VLMAX is reserved.
-Use of the instruction is also reserved if `vill` was 1 beforehand.
+Use of the instructions is also reserved if `vill` was 1 beforehand.
 Implementations may set `vill` in either case.
 
 NOTE: This last form of the instructions allows the `vtype` register to
 be changed while maintaining the current `vl`, provided VLMAX is not
 reduced.  This design was chosen to ensure `vl` would always hold a
 legal value for current `vtype` setting.  The current `vl` value can
-be read from the `vl` CSR.  The `vl` value could be reduced by this
-instruction if the new SEW/LMUL ratio causes VLMAX to shrink, and so
+be read from the `vl` CSR.  The `vl` value could be reduced by these
+instructions if the new SEW/LMUL ratio causes VLMAX to shrink, and so
 this case has been reserved as it is not clear this is a generally
 useful operation, and implementations can otherwise assume `vl` is not
-changed by this instruction to optimize their microarchitecture.
+changed by these instructions to optimize their microarchitecture.
 
 For the `vsetivli` instruction, the AVL is encoded as a 5-bit
 zero-extended immediate (0--31) in the `rs1` field.
@@ -1257,7 +1261,7 @@ CSR immediate values.
 
 NOTE: The `vsetivli` instruction provides more compact code when the
 dimensions of vectors are small and known to fit inside the vector
-registers, in which case there is no stripmining overhead.
+registers, in which case there is no strip-mining overhead.
 
 [[constraints-on-setting-vl]]
 ==== Constraints on Setting `vl`
@@ -1286,17 +1290,17 @@ vector lane utilization for `AVL > VLMAX`.
 
 For example, this permits an implementation to set `vl = ceil(AVL / 2)`
 for `VLMAX < AVL < 2*VLMAX` in order to evenly distribute work over the
-last two iterations of a stripmine loop.
-Requirement 2 ensures that the first stripmine iteration of reduction
+last two iterations of a strip-mine loop.
+Requirement 2 ensures that the first strip-mine iteration of reduction
 loops uses the largest vector length of all iterations, even in the case
 of `AVL < 2*VLMAX`.
 This allows software to avoid needing to explicitly calculate a running
-maximum of vector lengths observed during a stripmined loop.
+maximum of vector lengths observed during a strip-mined loop.
 Requirement 2 also allows an implementation to set vl to VLMAX for `VLMAX < AVL < 2*VLMAX`
 --
 
 [[example-stripmine-sew]]
-==== Example of stripmining and changes to SEW
+==== Example of strip mining and changes to SEW
 
 The SEW and LMUL settings can be changed dynamically to provide high
 throughput on mixed-width operations in a single loop.
@@ -1374,7 +1378,7 @@ SEW/LMUL to specify the data width.
 
 ==== Vector Load/Store Addressing Modes
 
-The vector extension supports unit-stride, strided, and
+The vector extension supports unit-stride, constant-stride, and
 indexed (scatter/gather) addressing modes.  Vector load/store base
 registers and strides are taken from the GPR `x` registers.
 
@@ -1384,7 +1388,7 @@ contents of the `x` register named in `rs1`.
 Vector unit-stride operations access elements stored contiguously in
 memory starting from the base effective address.
 
-Vector constant-strided operations access the first memory element at the base
+Vector constant-stride operations access the first memory element at the base
 effective address, and then access subsequent elements at address
 increments given by the byte offset contained in the `x` register
 specified by `rs2`.
@@ -1410,7 +1414,7 @@ If the vector offset elements are narrower than XLEN, they are
 zero-extended to XLEN before adding to the base effective address.  If
 the vector offset elements are wider than XLEN, the least-significant
 XLEN bits are used in the address calculation.  An implementation must
-raise an illegal instruction exception if the EEW is not supported for
+raise an illegal-instruction exception if the EEW is not supported for
 offset elements.
 
 NOTE: A profile may place an upper limit on the maximum supported index
@@ -1426,7 +1430,7 @@ field.
 
 | 0 | 0 | unit-stride       | VLE<EEW>
 | 0 | 1 | indexed-unordered | VLUXEI<EEW>
-| 1 | 0 | strided           | VLSE<EEW>
+| 1 | 0 | constant-stride   | VLSE<EEW>
 | 1 | 1 | indexed-ordered   | VLOXEI<EEW>
 |===
 
@@ -1437,7 +1441,7 @@ field.
 
 | 0 | 0 | unit-stride       | VSE<EEW>
 | 0 | 1 | indexed-unordered | VSUXEI<EEW>
-| 1 | 0 | strided           | VSSE<EEW>
+| 1 | 0 | constant-stride   | VSSE<EEW>
 | 1 | 1 | indexed-ordered   | VSOXEI<EEW>
 |===
 
@@ -1600,27 +1604,27 @@ mechanism to use packed bit vectors in memory as mask values,
 and also reduce the cost of mask spill/fill by reducing need to change
 `vl`.
 
-==== Vector Strided Instructions
+==== Vector Constant-Stride Instructions
 
 ----
-# Vector strided loads and stores
+# Vector constant-stride loads and stores
 
-# vd destination, rs1 base address, rs2 byte stride
-vlse8.v    vd, (rs1), rs2, vm  #    8-bit strided load
-vlse16.v   vd, (rs1), rs2, vm  #   16-bit strided load
-vlse32.v   vd, (rs1), rs2, vm  #   32-bit strided load
-vlse64.v   vd, (rs1), rs2, vm  #   64-bit strided load
+# vd destination, rs1 base address, rs2 byte constant-stride
+vlse8.v    vd, (rs1), rs2, vm  #    8-bit constant-stride load
+vlse16.v   vd, (rs1), rs2, vm  #   16-bit constant-stride load
+vlse32.v   vd, (rs1), rs2, vm  #   32-bit constant-stride load
+vlse64.v   vd, (rs1), rs2, vm  #   64-bit constant-stride load
 
-# vs3 store data, rs1 base address, rs2 byte stride
-vsse8.v    vs3, (rs1), rs2, vm  #    8-bit strided store
-vsse16.v   vs3, (rs1), rs2, vm  #   16-bit strided store
-vsse32.v   vs3, (rs1), rs2, vm  #   32-bit strided store
-vsse64.v   vs3, (rs1), rs2, vm  #   64-bit strided store
+# vs3 store data, rs1 base address, rs2 byte constant-stride
+vsse8.v    vs3, (rs1), rs2, vm  #    8-bit constant-stride store
+vsse16.v   vs3, (rs1), rs2, vm  #   16-bit constant-stride store
+vsse32.v   vs3, (rs1), rs2, vm  #   32-bit constant-stride store
+vsse64.v   vs3, (rs1), rs2, vm  #   64-bit constant-stride store
 ----
 
 Negative and zero strides are supported.
 
-Element accesses within a strided instruction are unordered with
+Element accesses within a constant-stride instruction are unordered with
 respect to each other.
 
 When `rs2`=`x0`, then an implementation is allowed, but not required,
@@ -1735,7 +1739,7 @@ versions only allow probing a region immediately contiguous to a known
 region, and so reduce the security impact when used in unprivileged
 code.  However, code running in S-mode can establish arbitrary page
 translations that allow probing of random guest physical addresses
-provided by a hypervisor.  Strided and scatter/gather fault-only-first
+provided by a hypervisor. Constant-stride and scatter/gather fault-only-first
 instructions are not provided due to lack of encoding space, but they
 can also represent a larger security hole, allowing even unprivileged
 software to easily check multiple random pages for accessibility
@@ -1838,6 +1842,7 @@ segment loads and stores respectively.
 
 ----
 # Format
+# In this syntax, <nf> equals NFIELDS and is an integer in the range [2, 8].
 vlseg<nf>e<eew>.v vd, (rs1), vm      # Unit-stride segment load template
 vsseg<nf>e<eew>.v vs3, (rs1), vm     # Unit-stride segment store template
 
@@ -1876,16 +1881,19 @@ vlseg<nf>e<eew>ff.v vd, (rs1),  vm    # Unit-stride fault-only-first segment loa
 ----
 
 For fault-only-first segment loads, if an exception is detected partway
-through accessing a segment, regardless of whether the element index is zero,
-it is implementation-defined whether a subset of the segment is loaded.
+through accessing the zeroth segment, the trap is taken.
+If an exception is detected partway through accessing a subsequent segment,
+`vl` is reduced to the index of that segment.
+In both cases, it is implementation-defined whether a subset of the segment is
+loaded.
 
 These instructions may overwrite destination vector register group
 elements past the point at which a trap is reported or past the point
 at which vector length is trimmed.
 
-===== Vector Strided Segment Loads and Stores
+===== Vector Constant-Stride Segment Loads and Stores
 
-Vector strided segment loads and stores move contiguous segments where
+Vector constant-stride segment loads and stores move contiguous segments where
 each segment is separated by the byte-stride offset given in the `rs2`
 GPR argument.
 
@@ -1893,8 +1901,8 @@ NOTE: Negative and zero strides are supported.
 
 ----
 # Format
-vlsseg<nf>e<eew>.v vd, (rs1), rs2, vm          # Strided segment loads
-vssseg<nf>e<eew>.v vs3, (rs1), rs2, vm         # Strided segment stores
+vlsseg<nf>e<eew>.v vd, (rs1), rs2, vm          # Constant-stride segment loads
+vssseg<nf>e<eew>.v vs3, (rs1), rs2, vm         # Constant-stride segment stores
 
 # Examples
 vsetvli a1, t0, e8, m1, ta, ma
@@ -2095,7 +2103,7 @@ vs4r.v v4, (a1)      # Store v4-v7 to address in a1
 vs8r.v v8, (a1)      # Store v8-v15 to address in a1
 ----
 
-NOTE: Implementations should raise illegal instruction exceptions on
+NOTE: Implementations should raise illegal-instruction exceptions on
 `vl<nf>r` instructions for EEW values that are not supported.
 
 NOTE: We have considered adding a whole register mask load instruction
@@ -2119,7 +2127,7 @@ vsetvli x0, t0, <new type>         # Restore vl (potentially already present)
 
 If an element accessed by a vector memory instruction is not naturally
 aligned to the size of the element, either the element is transferred
-successfully or an address misaligned exception is raised on that
+successfully or an address-misaligned exception is raised on that
 element.
 
 Support for misaligned vector memory accesses is independent of an
@@ -2482,8 +2490,8 @@ Encodings corresponding to the unmasked versions (`vm=1`) are reserved.
 
 `vmadc` and `vmsbc` add or subtract the source operands, optionally
 add the carry-in or subtract the borrow-in if masked (`vm=0`), and
-write the resulting carry-out or borrow-out back to mask register `vd`.  
-If unmasked (`vm=1`), there is no carry-in or borrow-in.  These instructions 
+write the resulting carry-out or borrow-out back to mask register `vd`.
+If unmasked (`vm=1`), there is no carry-in or borrow-in.  These instructions
 operate on and write back all body elements, even if masked.  Because these
 instructions produce a mask value, they always operate with a
 tail-agnostic policy.
@@ -3039,7 +3047,7 @@ can shuffle the internal representation according to SEW.
 Implementations that do not internally reorganize data can dynamically
 elide this instruction, and treat as a NOP.
 
-NOTE: The `vmv.v.v vd. vd` instruction is not a RISC-V HINT as a
+NOTE: The `vmv.v.v vd, vd` instruction is not a RISC-V HINT as a
 tail-agnostic setting may cause an architectural state change on some
 implementations.
 
@@ -3093,6 +3101,7 @@ vssub.vx vd, vs2, rs1, vm   # vector-scalar
 
 The averaging add and subtract instructions right shift the result by
 one bit and round off the result according to the setting in `vxrm`.
+Computation is performed in infinite precision before rounding and truncating.
 Both unsigned and signed versions are provided.
 For `vaaddu` and `vaadd` there can be no overflow in the result.
 For `vasub` and `vasubu`, overflow is ignored and the result wraps around.
@@ -3132,7 +3141,7 @@ is set.
 
 ----
 # Signed saturating and rounding fractional multiply
-# See vxrm  description for rounding calculation
+# See vxrm description for rounding calculation
 vsmul.vv vd, vs2, vs1, vm  # vd[i] = clip(roundoff_signed(vs2[i]*vs1[i], SEW-1))
 vsmul.vx vd, vs2, rs1, vm  # vd[i] = clip(roundoff_signed(vs2[i]*x[rs1], SEW-1))
 ----
@@ -3211,7 +3220,7 @@ into an unsigned destination.  A sequence of two vector instructions
 that first removes negative numbers by performing a max against 0
 using `vmax` then clips the resulting unsigned value into the
 destination using `vnclipu` can be used if setting `vxsat` value for
-negative numbers is not required.  A `vsetvli` is required inbetween
+negative numbers is not required.  A `vsetvli` is required between
 these two instructions to change SEW.
 
 For `vnclip`, the shifted rounded source value is treated as a signed
@@ -3246,7 +3255,7 @@ half-precision floating-point support.
 
 If the floating-point unit status field `mstatus.FS` is `Off` then any
 attempt to execute a vector floating-point instruction will raise an
-illegal instruction exception.  Any vector floating-point instruction
+illegal-instruction exception.  Any vector floating-point instruction
 that modifies any floating-point extension state (i.e., floating-point
 CSRs or `f` registers) must set `mstatus.FS` to `Dirty`.
 
@@ -3254,7 +3263,7 @@ If the hypervisor extension is implemented and V=1, the `vsstatus.FS` field is
 additionally in effect for vector floating-point instructions.  If
 `vsstatus.FS` or `mstatus.FS` is `Off` then any
 attempt to execute a vector floating-point instruction will raise an
-illegal instruction exception.  Any vector floating-point instruction
+illegal-instruction exception.  Any vector floating-point instruction
 that modifies any floating-point extension state (i.e., floating-point
 CSRs or `f` registers) must set both `mstatus.FS` and `vsstatus.FS` to `Dirty`.
 
@@ -3718,7 +3727,6 @@ register value is copied to the destination element.
 vfmerge.vfm vd, vs2, rs1, v0  # vd[i] = v0.mask[i] ? f[rs1] : vs2[i]
 ----
 
-[[sec-vector-float-move]]
 ==== Vector Floating-Point Move Instruction
 
 The vector floating-point move instruction __splats__ a floating-point
@@ -3942,7 +3950,7 @@ where each addition operates identically to the scalar floating-point
 instructions in terms of raising exception flags and generating or
 propagating special values.
 
-NOTE: The ordered reduction supports compiler autovectorization, while
+NOTE: The ordered reduction supports compiler auto-vectorization, while
 the unordered FP sum allows for faster implementations.
 
 When the operation is masked (`vm=0`), the masked-off elements do not
@@ -3951,7 +3959,7 @@ affect the result or the exception flags.
 NOTE: If no elements are active, no additions are performed, so the scalar in
 `vs1[0]` is simply copied to the destination register, without canonicalizing
 NaN values and without setting any exception flags.  This behavior preserves
-the handling of NaNs, exceptions, and rounding when autovectorizing a scalar
+the handling of NaNs, exceptions, and rounding when auto-vectorizing a scalar
 summation loop.
 
 ===== Vector Unordered Single-Width Floating-Point Sum Reduction
@@ -4157,7 +4165,7 @@ The `vcpop.m` instruction writes `x[rd]` even if `vl`=0 (with the
 value 0, since no mask elements are active).
 
 Traps on `vcpop.m` are always reported with a `vstart` of 0.  The
-`vcpop.m` instruction will raise an illegal instruction exception if
+`vcpop.m` instruction will raise an illegal-instruction exception if
 `vstart` is non-zero.
 
 ==== `vfirst` find-first-set mask bit
@@ -4179,7 +4187,7 @@ The `vfirst.m` instruction writes `x[rd]` even if `vl`=0 (with the
 value -1, since no mask elements are active).
 
 Traps on `vfirst` are always reported with a `vstart` of 0.  The
-`vfirst` instruction will raise an illegal instruction exception if
+`vfirst` instruction will raise an illegal-instruction exception if
 `vstart` is non-zero.
 
 ==== `vmsbf.m` set-before-first mask bit
@@ -4220,7 +4228,7 @@ The tail elements in the destination mask register are updated under a
 tail-agnostic policy.
 
 Traps on `vmsbf.m` are always reported with a `vstart` of 0.  The
-`vmsbf` instruction will raise an illegal instruction exception if
+`vmsbf` instruction will raise an illegal-instruction exception if
 `vstart` is non-zero.
 
 The destination register cannot overlap the source register
@@ -4256,7 +4264,7 @@ The tail elements in the destination mask register are updated under a
 tail-agnostic policy.
 
 Traps on `vmsif.m` are always reported with a `vstart` of 0.  The
-`vmsif` instruction will raise an illegal instruction exception if
+`vmsif` instruction will raise an illegal-instruction exception if
 `vstart` is non-zero.
 
 The destination register cannot overlap the source register
@@ -4293,7 +4301,7 @@ The tail elements in the destination mask register are updated under a
 tail-agnostic policy.
 
 Traps on `vmsof.m` are always reported with a `vstart` of 0.  The
-`vmsof` instruction will raise an illegal instruction exception if
+`vmsof` instruction will raise an illegal-instruction exception if
 `vstart` is non-zero.
 
 The destination register cannot overlap the source register
@@ -4345,7 +4353,7 @@ destination SEW, the least-significant SEW bits are retained.
 
 Traps on `viota.m` are always reported with a `vstart` of 0, and
 execution is always restarted from the beginning when resuming after a
-trap handler.  An illegal instruction exception is raised if `vstart`
+trap handler.  An illegal-instruction exception is raised if `vstart`
 is non-zero.
 
 The destination register group cannot overlap the source register
@@ -4360,7 +4368,6 @@ instructions (indexed stores) to perform vector compress functions.
 # size_t compact_non_zero(size_t n, const int* in, int* out)
 # {
 #   size_t i;
-#   size_t count = 0;
 #   int *p = out;
 #
 #   for (i=0; i<n; i++)
@@ -4458,6 +4465,7 @@ destination vector register group, regardless of `vstart`.
 The encodings corresponding to the masked versions (`vm=0`) of `vmv.x.s`
 and `vmv.s.x` are reserved.
 
+[[sec-vector-float-move]]
 ==== Floating-Point Scalar Move Instructions
 
 The floating-point scalar read/write instructions transfer a single
@@ -4512,7 +4520,7 @@ The slide instructions may be masked, with mask element _i_
 controlling whether _destination_ element _i_ is written.  The mask
 undisturbed/agnostic policy is followed for inactive elements.
 
-===== Vector Slideup Instructions
+===== Vector Slide-up Instructions
 
 ----
 vslideup.vx vd, vs2, rs1, vm        # vd[i+x[rs1]] = vs2[i]
@@ -4545,7 +4553,7 @@ NOTE: The non-overlap constraint avoids WAR hazards on the
 input vectors during execution, and enables restart with non-zero
 `vstart`.
 
-===== Vector Slidedown Instructions
+===== Vector Slide-down Instructions
 
 ----
 vslidedown.vx vd, vs2, rs1, vm       # vd[i] = vs2[i+x[rs1]]
@@ -4573,7 +4581,7 @@ vslidedown behavior for destination element i in slide (`vstart` < `vl`)
                 vl <= i < VLMAX          Follow tail policy
 ----
 
-===== Vector Slide1up
+===== Vector Slide-1-up
 
 Variants of slide are provided that only move by one element but which
 also allow a scalar integer value to be inserted at the vacated
@@ -4614,7 +4622,7 @@ register group does not overlap the source vector register group.
 Otherwise, the instruction encoding is reserved.
 
 [[sec-vfslide1up]]
-===== Vector Floating-Point Slide1up Instruction
+===== Vector Floating-Point Slide-1-up Instruction
 
 ----
 vfslide1up.vf vd, vs2, rs1, vm        # vd[0]=f[rs1], vd[i+1] = vs2[i]
@@ -4623,7 +4631,7 @@ vfslide1up.vf vd, vs2, rs1, vm        # vd[0]=f[rs1], vd[i+1] = vs2[i]
 The `vfslide1up` instruction is defined analogously to `vslide1up`,
 but sources its scalar argument from an `f` register.
 
-===== Vector Slide1down Instruction
+===== Vector Slide-1-down Instruction
 
 The `vslide1down` instruction copies the first `vl`-1 active elements
 values from index _i_+1 in the source vector register group to index
@@ -4662,7 +4670,7 @@ contents of a vector register, albeit slowly, with multiple repeated
 `vslide1down` invocations.
 
 [[sec-vfslide1down]]
-===== Vector Floating-Point Slide1down Instruction
+===== Vector Floating-Point Slide-1-down Instruction
 
 ----
 vfslide1down.vf vd, vs2, rs1, vm      # vd[i] = vs2[i+1], vd[vl-1]=f[rs1]
@@ -4759,7 +4767,7 @@ encoding is reserved.
 
 A trap on a `vcompress` instruction is always reported with a
 `vstart` of 0.  Executing a `vcompress` instruction with a non-zero
-`vstart` raises an illegal instruction exception.
+`vstart` raises an illegal-instruction exception.
 
 NOTE: Although possible, `vcompress` is one of the more difficult
 instructions to restart with a non-zero `vstart`, so assumption is
@@ -4866,7 +4874,7 @@ scheme in the IBM 3090 vector facility.  To ensure forward progress
 without the `vstart` CSR, implementations would have to guarantee an
 entire vector instruction can always complete atomically without
 generating a trap.  This is particularly difficult to ensure in the
-presence of strided or scatter/gather operations and demand-paged
+presence of constant-stride or scatter/gather operations and demand-paged
 virtual memory.
 
 ==== Precise vector traps
@@ -4988,10 +4996,6 @@ NOTE: Longer vector length extensions should follow the same pattern.
 NOTE: Every vector length extension effectively includes all shorter
 vector length extensions.
 
-NOTE: The syntax for extension names is being revised, and these names
-are subject to change.  The trailing "b" will be required to
-disambiguate numeric fields from version numbers.
-
 NOTE: Explicit use of the Zvl32b extension string is not required for
 any standard vector extension as they all effectively mandate at least
 this minimum, but the string can be useful when stating hardware
@@ -5095,13 +5099,13 @@ The V vector extension has precise traps.
 The V vector extension depends upon the Zvl128b and Zve64d extensions.
 
 NOTE: The value of 128 was chosen as a compromise for application
-processors. Providing a larger VLEN allows stripmining code to be
+processors. Providing a larger VLEN allows strip-mining code to be
 elided in some cases for short vectors, but also increases the size of
 the minimum implementation.  Note that larger LMUL can be used to
-avoid stripmining for longer known-size application vectors at the
+avoid strip mining for longer known-size application vectors at the
 cost of having fewer available vector register groups. For example, an
 LMUL of 8 allows vectors of up to sixteen 64-bit elements to be
-processed without stripmining using four vector register groups.
+processed without strip mining using four vector register groups.
 
 The V extension supports EEW of 8, 16, and 32, and 64.
 
@@ -5207,7 +5211,7 @@ straddling the individual vector registers in a vector register
 group. Non-POT EGS can also cause large increases in the
 lowest-common-multiple of element group sizes, which adds constraints
 to `vl` setting in order to avoid splitting an element group across
-stripmine iterations in vector-length-agnostic code.
+strip-mine iterations in vector-length-agnostic code.
 
 The element group size is statically encoded in the instruction, often
 implicitly as part of the opcode.
@@ -5245,7 +5249,7 @@ NOTE: As the base vector extension only has element group size of 1,
 this constraint is backwards-compatible.
 
 NOTE: This constraint prevents element groups being broken across
-stripmining iterations in vector-length-agnostic code when a
+strip-mining iterations in vector-length-agnostic code when a
 VLMAX-size vector would otherwise be able to accommodate a whole number
 of element groups.
 
@@ -5257,7 +5261,7 @@ instructions.
 NOTE: Additional constraints may be required for some element group
 instructions to ensure legal length values for all operands.
 
-==== Determining EEW 
+==== Determining EEW
 
 The `vtype` SEW can be used to indicate or calculate the effective
 element size (EEW) of one or more operands of an element group
@@ -5324,4 +5328,3 @@ the mask element group is set).
 === Vector Instruction Listing
 
 include::images/wavedrom/v-inst-table.edn[]
-
