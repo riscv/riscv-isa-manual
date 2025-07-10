@@ -93,12 +93,16 @@ BUILD_DIR := build
 DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
 DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
+DOCS_TAGS := $(addprefix $(BUILD_DIR)/, $(addsuffix .tags.json, $(DOCS)))
 
 ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
+
 ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
+ASCIIDOCTOR_TAGS := $(ENV) asciidoctor --backend tags --require=./docs-resources/converters/tags.rb
+
 OPTIONS := --trace \
            -a compress \
            -a mathematical-format=svg \
@@ -107,6 +111,8 @@ OPTIONS := --trace \
            $(WATERMARK_OPT) \
            -a revnumber='$(DATE)' \
            -a revremark='$(RELEASE_DESCRIPTION)' \
+           -a docinfo=shared \
+           -a tags-prefix=qx_ \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=ERROR
@@ -115,7 +121,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-lists \
             --require=asciidoctor-mathematical
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub submodule-check
+.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags submodule-check
 
 all: build
 
@@ -131,6 +137,7 @@ build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB)
 build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
+build-tags: $(DOCS_TAGS)
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
@@ -147,6 +154,11 @@ $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(WORKDIR_TEARDOWN)
+
+$(BUILD_DIR)/%.tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/converters/tags.rb
+	$(WORKDIR_SETUP)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 build: submodule-check
