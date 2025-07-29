@@ -112,7 +112,7 @@ OPTIONS := --trace \
            -a revnumber='$(DATE)' \
            -a revremark='$(RELEASE_DESCRIPTION)' \
            -a docinfo=shared \
-           -a tags-prefix=manual__ \
+           -a tags-prefix=norm: \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=ERROR
