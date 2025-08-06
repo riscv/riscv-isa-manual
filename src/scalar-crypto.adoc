@@ -1077,17 +1077,13 @@ Operation::
 [source,sail]
 --
 function clause execute (AES64KS1I(rnum, rs1, rd)) = {
-  if(unsigned(rnum) > 10) then {
-    handle_illegal();  RETIRE_SUCCESS
-  } else {
-    let tmp1 : bits(32) = X(rs1)[63..32];
-    let rc   : bits(32) = aes_decode_rcon(rnum); /* round number -> round constant */
-    let tmp2 : bits(32) = if (rnum ==0xA) then tmp1 else ror32(tmp1, 8);
-    let tmp3 : bits(32) = aes_subword_fwd(tmp2);
-    let result : bits(64) = (tmp3 ^ rc) @ (tmp3 ^ rc);
-    X(rd) = EXTZ(result);
-    RETIRE_SUCCESS
-  }
+  assert(xlen == 64);
+  let prev     : bits(32) = X(rs1)[63..32];
+  let subwords : bits(32) = aes_subword_fwd(prev);
+  let result   : bits(32) = if (rnum == 0xA) then subwords
+                            else (subwords >>> 8) ^ aes_decode_rcon(rnum);
+  X(rd) = result @ result;
+  RETIRE_SUCCESS
 }
 --
 
@@ -5382,7 +5378,6 @@ function aes_mixcolumn_inv(x) = {
    called in that case. */
 val aes_decode_rcon : bits(4) -> bits(32)
 function aes_decode_rcon(r) = {
-  assert(r <_u 0xA);
   match r {
     0x0 => 0x00000001,
     0x1 => 0x00000002,
@@ -5394,7 +5389,12 @@ function aes_decode_rcon(r) = {
     0x7 => 0x00000080,
     0x8 => 0x0000001b,
     0x9 => 0x00000036,
-    _   => internal_error(__FILE__, __LINE__, "Unexpected AES r") /* unreachable -- required to silence Sail warning */
+    0xA => 0x00000000,
+    0xB => 0x00000000,
+    0xC => 0x00000000,
+    0xD => 0x00000000,
+    0xE => 0x00000000,
+    0xF => 0x00000000
   }
 }
 
