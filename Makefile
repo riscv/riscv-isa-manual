@@ -109,7 +109,7 @@ OPTIONS := --trace \
            -a revremark='$(RELEASE_DESCRIPTION)' \
            $(XTRA_ADOC_OPTS) \
            -D build \
-           --failure-level=ERROR
+           --failure-level=WARN
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
