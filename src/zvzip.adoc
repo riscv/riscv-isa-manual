@@ -1,0 +1,126 @@
+== "Zvzip" Extension for Reordering Structured Data, Version 0.1
+
+This chapter describes the Zvzip standard extension for reordering structured
+data in vector registers. These instruction address usages such as packing and
+unpacking data structures such as color components of a pixel, real and
+imaginary components of complex numbers, transposing small matrices, among
+others.
+
+=== Vector Zip Instruction
+
+The vector zip instruction (VZIP) interleaves element at a given index
+in each source vector register group, in destination vector register group. This
+instruction operates with an effective vector length of 2*VL. The destination
+EMUL is 2xLMUL. The instruction is reserved when LMUL is 8.
+
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '111110', attr: ['VZIP']},
+]}
+....
+
+The destination vector register group may overlap the source vector register
+group if the overlap is in the highest-numbered part of the destination
+register group and the source EMUL is at least 1. If the overlap violates these
+constraints, the instruction encoding is reserved.
+
+----
+vzip.vv vd, vs2, vs1, vm   # for i in 0 to 2*VL
+                           #   vd[i] = (i % 2 == 0) ? vs2[i/2] : vs1[i/2]
+----
+
+=== Vector Unzip Even and Unzip Odd Instructions
+
+The vector unzip-even instruction (VNZIPE) extracts the VL number of
+even-indexed elements from the source vector register group into the destination
+vector register group.
+
+The vector unzip-odd instruction (VUNZIPO) extracts the VL number of
+odd-indexed elements from the source vector register group into the destination
+vector register group.
+
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'op', attr: ['01011','01111']},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010010', attr: ['VUNZIPE','VUNZIPO']},
+]}
+....
+
+These instructions access 2*VL number of elements in the source vector register
+group and the source EMUL is 2xLMUL. The instruction is reserved when LMUL is 8.
+
+The destination vector register group may overlap the source vector register
+group if the overlap is in the lowest-numbered part of the source register group.
+If the overlap violates these constraints, the instruction encoding is reserved.
+
+----
+vunzipe.v vd, vs2, vm  # vd[i] = vs2[(2 * i)]
+vunzipo.v vd, vs2, vm  # vd[i] = vs2[((2 * i) + 1)]
+----
+
+=== Vector Pair Even and Pair Odd Instructions
+
+The vector pair-even instruction (VPAIRE) interleaves the even-indexed
+elements of the source vector register groups into the destination vector
+register group.
+
+The vector pair-odd instruction (VPAIRO) interleaves the odd-indexed
+elements of the source vector register groups into the destination vector
+register group.
+
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'funct3', attr: ['OPIVV','OPMVV']},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001111', attr: ['VPAIRE','VPAIRO']},
+]}
+
+The destination register cannot overlap the source registers and, if masked,
+cannot overlap the mask register.
+
+----
+vpaire.vv vd, vs2, vs1, vm  # vd[i] = (i % 2) == 0 ? vs2[i + 0] : vs1[i - 1]
+vpairo.vv vd, vs2, vs1, vm  # vd[i] = (i % 2) == 0 ? vs2[i + 1] : vs1[i + 0]
+----
+
+[NOTE]
+====
+VPAIRO may read one element past VL in vs2 if VL is odd. The general policy for
+such cases is to return the value 0 when the index is greater than VLMAX in the
+source vector register group.
+
+The folloing example illustrates use of the vector pair-even and pair-odd to
+transpose vl/4 4x4 matrices.
+
+----
+vsetivli t0, zero, e32, m1, ta, ma
+vpaire.vv v5, v1, v2         # |a|b|c|d|A|B|C|D|..    |a|e|c|g|A|E|C|G|..
+vpairo.vv v6, v1, v2         # |e|f|g|h|E|F|G|H|.. -> |b|f|d|h|B|F|D|H|..
+vpaire.vv v7, v3, v4         # |i|j|k|l|I|J|K|L|..    |i|m|k|o|I|M|K|O|..
+vpairo.vv v8, v3, v4         # |m|n|o|p|M|N|O|P|..    |j|n|l|p|J|N|L|P|..
+vsetivli t0, zero, e64, m1, ta, ma
+vpaire.vv v1, v5, v7         # |a e|c g|A E|C G|..    |a e|i m|A E|I M|..
+vpaire.vv v2, v6, v8         # |b f|d h|B F|D H|.. -> |b f|j n|B F|J N|..
+vpairo.vv v3, v5, v7         # |i m|k o|I M|K O|..    |c g|k o|C G|K O|..
+vpairo.vv v4, v6, v8         # |j n|l p|J N|L P|..    |d h|l p|D H|L P|..
+----
+
+====
