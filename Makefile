@@ -21,11 +21,27 @@
 
 DOCS := riscv-privileged riscv-unprivileged
 
-DATE ?= $(shell date +%Y-%m-%d)
+RELEASE_TYPE ?= draft
+
+ifeq ($(RELEASE_TYPE), draft)
+  WATERMARK_OPT := -a draft-watermark
+  RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
+else ifeq ($(RELEASE_TYPE), intermediate)
+  WATERMARK_OPT :=
+  RELEASE_DESCRIPTION := Intermediate Release
+else ifeq ($(RELEASE_TYPE), official)
+  WATERMARK_OPT :=
+  RELEASE_DESCRIPTION := Official Release
+else
+  $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
+endif
+
+DATE ?= $(shell date +%Y%m%d)
+SKIP_DOCKER ?= $(shell if command -v docker >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
     DOCKER_IS_PODMAN = \
-        $(shell ! docker -v 2>&1 | grep podman >/dev/null ; echo $$?)
+        $(shell ! docker -v | grep podman >/dev/null ; echo $$?)
     ifeq "$(DOCKER_IS_PODMAN)" "1"
         # Modify the SELinux label for the host directory to indicate
         # that it can be shared with multiple containers. This is apparently
@@ -57,6 +73,10 @@ else
         cd $@.workdir &&
 endif
 
+ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
+WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../docs-resources $@.workdir/
+WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
+else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
     mkdir -p $@.workdir && \
@@ -65,6 +85,7 @@ WORKDIR_SETUP = \
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
     rm -rf $@.workdir
+endif
 
 SRC_DIR := src
 BUILD_DIR := build
@@ -83,22 +104,34 @@ OPTIONS := --trace \
            -a mathematical-format=svg \
            -a pdf-fontsdir=docs-resources/fonts \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
+           $(WATERMARK_OPT) \
+           -a revnumber='$(DATE)' \
+           -a revremark='$(RELEASE_DESCRIPTION)' \
            $(XTRA_ADOC_OPTS) \
            -D build \
-           --failure-level=ERROR
+           --failure-level=WARN
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
-            --require=asciidoctor-mathematical
+            --require=asciidoctor-mathematical \
+            --require=asciidoctor-sail
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub
+.PHONY: all build clean build-pdf build-html build-epub docker-pull-latest
 
 all: build
 
-build-docs: $(DOCS_PDF) $(DOCS_HTML) $(DOCS_EPUB)
+# Check if the docs-resources/global-config.adoc file exists. If not, the user forgot to check out submodules.
+ifeq ("$(wildcard docs-resources/global-config.adoc)","")
+  $(warning You must clone with --recurse-submodules to automatically populate the submodule 'docs-resources'.")
+  $(warning Checking out submodules for you via 'git submodule update --init --recurse'...)
+  $(shell git submodule update --init --recursive)
+endif
+
 build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
+
+build: build-pdf build-html build-epub
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
@@ -106,36 +139,19 @@ $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
+	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
+	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
 
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
-
-build:
-	@echo "Checking if Docker is available..."
-	@if command -v docker >/dev/null 2>&1 ; then \
-		echo "Docker is available, building inside Docker container..."; \
-		$(MAKE) build-container; \
-	else \
-		echo "Docker is not available, building without Docker..."; \
-		$(MAKE) build-no-container; \
-	fi
-
-build-container:
-	@echo "Starting build inside Docker container..."
-	$(MAKE) build-docs
-	@echo "Build completed successfully inside Docker container."
-
-build-no-container:
-	@echo "Starting build..."
-	$(MAKE) SKIP_DOCKER=true build-docs
-	@echo "Build completed successfully."
+	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
 
 # Update docker image to latest
 docker-pull-latest:

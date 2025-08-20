@@ -15,10 +15,10 @@ loop:
     vmseq.vi v0, v8, 0      # Flag zero bytes in src1
     vmsne.vv v1, v8, v16    # Flag if src1 != src2
     vmor.mm v0, v0, v1      # Combine exit conditions
-    
+
     vfirst.m a2, v0         # ==0 or != ?
     csrr t1, vl             # Get number of bytes fetched
-    
+
     bltz a2, loop           # Loop if all same and no zero byte
 
     add a0, a0, a2          # Get src1 element address
@@ -30,5 +30,3 @@ loop:
     sub a0, a3, a4          # Return value.
 
     ret
-
-

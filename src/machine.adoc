@@ -39,7 +39,7 @@ less-privileged modes.
 3
 |32 +
 64 +
-128
+_Reserved_
 |===
 
 The `misa` CSR is MXLEN bits wide.
@@ -53,16 +53,15 @@ knowing the register width (MXLEN) of the hart. The base width is
 given by __MXLEN=2^MXL+4^__.
 
 The base width can also be found if `misa` is zero, by placing the
-immediate 4 in a register, then shifting the register left by 31 bits at
-a time. If zero after one shift, then the hart is RV32. If zero after
-two shifts, then the hart is RV64, else RV128.
+immediate 2 in a register, then shifting the register left by 31 bits.
+If zero, the hart is RV32, else it is RV64.
 ====
 
 The Extensions field encodes the presence of the standard extensions,
 with a single bit per letter of the alphabet (bit 0 encodes presence of
 extension "A" , bit 1 encodes presence of extension "B", through to
-bit 25 which encodes "Z"). The "I" bit will be set for RV32I, RV64I,
-and RV128I base ISAs, and the "E" bit will be set for RV32E and RV64E. The
+bit 25 which encodes "Z"). The "I" bit will be set for the RV32I and RV64I
+base ISAs, and the "E" bit will be set for RV32E and RV64E. The
 Extensions field is a *WARL* field that can contain writable bits where the
 implementation allows the supported ISA to be modified. At reset, the
 Extensions field shall contain the maximal set of supported extensions,
@@ -163,7 +162,7 @@ RV32E/64E base ISA +
 Single-precision floating-point extension +
 _Reserved_ +
 Hypervisor extension +
-RV32I/64I/128I base ISA +
+RV32I/64I base ISA +
 _Reserved_ +
 _Reserved_ +
 _Reserved_ +
@@ -183,18 +182,24 @@ _Reserved_ +
 _Reserved_
 |===
 
-The design of the RV128I base ISA is not yet complete, and while much of
-the remainder of this specification is expected to apply to RV128, this
-version of the document focuses only on RV32 and RV64.
-
-The "U" and "S" bits will be set if there is support for user and
-supervisor modes respectively.
-
 The "X" bit will be set if there are any non-standard extensions.
 
-When "B" bit is 1, the implementation supports the instructions provided by the
-Zba, Zbb, and Zbs extensions. When "B" bit is 0, it indicates that the
-implementation may not support one or more of the Zba, Zbb, or Zbs extensions.
+When the "B" bit is 1, the implementation supports the instructions provided by the
+Zba, Zbb, and Zbs extensions. When the "B" bit is 0, it indicates that the
+implementation might not support one or more of the Zba, Zbb, or Zbs extensions.
+
+When the "M" bit is 1, the implementation supports all multiply and
+division instructions defined by the M extension. When the "M" bit
+is 0, it indicates that the implementation might not support those
+instructions. However if the Zmmul extension is supported then
+the multiply instructions it specifies are supported irrespective
+of the value of the "M" bit.
+
+When the "S" bit is 1, the implementation supports supervisor mode.
+When the "S" bit is 0, the implementation might not support supervisor mode.
+
+When the "U" bit is 1, the implementation supports user mode.
+When the "U" bit is 0, the implementation might not support user mode.
 
 [NOTE]
 ====
@@ -219,6 +224,8 @@ If an ISA feature _x_ depends on an ISA feature _y_, then attempting to
 enable feature _x_ but disable feature _y_ results in both features
 being disabled. For example, setting "F"=0 and "D"=1 results in both
 "F" and "D" being cleared.
+Similarly, setting "U"=0 and "S"=1" results in both "U" and "S" being
+cleared.
 
 An implementation may impose additional constraints on the collective
 setting of two or more `misa` fields, in which case they function
@@ -286,7 +293,7 @@ uniquely identify the type of hart microarchitecture that is
 implemented.
 
 .Machine Architecture ID (`marchid`) register
-include::../../images/bytefield/marchid.edn[]
+include::images/bytefield/marchid.edn[]
 
 Open-source project architecture IDs are allocated globally by RISC-V
 International, and have non-zero architecture IDs with a zero
@@ -297,7 +304,7 @@ cannot contain zero in the remaining MXLEN-1 bits.
 [NOTE]
 ====
 The intent is for the architecture ID to represent the microarchitecture
-associated with the repo around which development occurs rather than a
+associated with the project around which development occurs rather than a
 particular organization. Commercial fabrications of open-source designs
 should (and might be required by the license to) retain the original
 architecture ID. This will aid in reducing fragmentation and tool
@@ -324,7 +331,7 @@ field is not implemented. The Implementation value should reflect the
 design of the RISC-V processor itself and not any surrounding system.
 
 .Machine Implementation ID (`mimpid`) register
-include::../images/bytefield/mimpid.edn[]
+include::images/bytefield/mimpid.edn[]
 
 [NOTE]
 ====
@@ -346,7 +353,7 @@ must have a hart ID of zero. Hart IDs must be unique within the
 execution environment.
 
 .Hart ID (`mhartid`) register
-include::../images/bytefield/mhartid.edn[]
+include::images/bytefield/mhartid.edn[]
 
 [NOTE]
 ====
@@ -406,6 +413,7 @@ setting of the global __y__IE bit for the higher-privilege mode.
 Higher-privilege-level code can use separate per-interrupt enable bits
 to disable selected higher-privilege-mode interrupts before ceding
 control to a lower-privilege mode.
+If supervisor mode is not implemented, then SIE and SPIE are read-only 0.
 
 [NOTE]
 ====
@@ -595,7 +603,7 @@ destination register not all equal to bit XLEN-1, it is implementation-defined
 whether bits MXLEN..XLEN of the destination register are unchanged or are
 overwritten with copies of bit XLEN-1.
 
-NOTE: This definition allows implementations to elide register writeback for
+NOTE: This definition allows implementations to elide register write-back for
 some HINTs, while allowing them to execute other HINTs in the same manner as
 other integer computational instructions.
 The implementation choice is observable only by privilege modes with an XLEN
@@ -1044,8 +1052,7 @@ Dirty
 
 [width=75,align=center,float=center,cols="<,<,<,<,<"]
 |===
-5+^|Execute instruction that possibly modifies state, including
-configuration
+5+^|Execute instruction that possibly modifies state, including configuration
 
 |Action? +
 Next state
@@ -1128,7 +1135,7 @@ additional microarchitectural bits might be maintained in the extension
 to further reduce context save and restore overhead.
 
 The SD bit is read-only and is set when either the FS, VS, or XS bits
-encode a Dirty state (i.e., SD=((FS==11) OR (XS==11) OR (VS==11))). This
+encode a Dirty state (i.e., `SD=(FS==0b11 OR XS==0b11 OR VS==0b11)`). This
 allows privileged code to quickly determine when no additional context
 save is required beyond the integer register set and `pc`.
 
@@ -1177,6 +1184,9 @@ read-only value. If `mtvec` is writable, the set of values the register
 may hold can vary by implementation. The value in the BASE field must
 always be aligned on a 4-byte boundary, and the MODE setting may impose
 additional alignment constraints on the value in the BASE field.
+Note that the CSR contains only bits XLEN-1 through 2 of the address BASE.
+When used as an address, the lower two bits are filled with zeroes to obtain
+an XLEN-bit address that is always aligned on a 4-byte boundary.
 
 [NOTE]
 ====
@@ -1386,7 +1396,7 @@ The machine-level interrupt registers handle a few root interrupt
 sources which are assigned a fixed service priority for simplicity,
 while separate external interrupt controllers can implement a more
 complex prioritization scheme over a much larger set of interrupts that
-are then muxed into the machine-level interrupt sources.
+are then multiplexed into the machine-level interrupt sources.
 
 '''
 
@@ -1459,7 +1469,7 @@ software interrupts. SSIP is writable in `mip` and may also be set to 1
 by a platform-specific interrupt controller.
 
 If the Sscofpmf extension is implemented, bits `mip`.LCOFIP and `mie`.LCOFIE
-are the interrupt-pending and interrupt-enable bits for local counter-overflow
+are the interrupt-pending and interrupt-enable bits for local-counter-overflow
 interrupts.
 LCOFIP is read-write in `mip` and reflects the occurrence of a local
 counter-overflow overflow interrupt request resulting from any of the
@@ -1931,7 +1941,7 @@ instruction).
 
 ***
 
-Instruction address misaligned exceptions are raised by control-flow
+Instruction address-misaligned exceptions are raised by control-flow
 instructions with misaligned targets, rather than by the act of fetching
 an instruction. Therefore, these exceptions have lower priority than
 other instruction address exceptions.
@@ -1939,7 +1949,7 @@ other instruction address exceptions.
 
 [NOTE]
 ====
-A Software Check exception is a synchronous exception that is triggered when
+A software-check exception is a synchronous exception that is triggered when
 there are violations of checks and assertions defined by ISA extensions that
 aim to safeguard the integrity of software assets, including e.g. control-flow
 and memory-access constraints. When this exception is raised, the `__x__tval`
@@ -1948,14 +1958,14 @@ that stipulated the exception be raised.  The priority of this exception,
 relative to other synchronous exceptions, depends on the cause of this exception
 and is defined by the extension that stipulated the exception be raised.
 
-A Hardware Error exception is a synchronous exception triggered when corrupted or
+A hardware-error exception is a synchronous exception triggered when corrupted or
 uncorrectable data is accessed explicitly or implicitly by an instruction.  In
 this context, "data" encompasses all types of information used within a RISC-V
-hart. Upon a hardware error exception, the `__x__epc` register is set to the
+hart. Upon a hardware-error exception, the `__x__epc` register is set to the
 address of the instruction that attempted to access corrupted data, while the
 `__x__tval` register is set either to 0 or to the virtual address of an
 instruction fetch, load, or store that attempted to access corrupted data. The
-priority of Hardware Error exception is implementation-defined, but any given
+priority of hardware-error exception is implementation-defined, but any given
 occurrence is generally expected to be recognized at the point in the overall
 priority order at which the hardware error is discovered.
 ====
@@ -1975,9 +1985,18 @@ If the hardware platform specifies that no exceptions set `mtval`
 to a nonzero value, then `mtval` is read-only zero.
 
 If `mtval` is written with a nonzero value when a breakpoint,
-address-misaligned, access-fault, or page-fault exception occurs on an
+address-misaligned, access-fault, page-fault, or hardware-error exception
+occurs on an
 instruction fetch, load, or store, then `mtval` will contain the
 faulting virtual address.
+
+On a breakpoint exception raised by an EBREAK or C.EBREAK instruction, `mtval`
+is written with either zero or the virtual address of the instruction.
+
+NOTE: For breakpoint exceptions raised by [C.]EBREAK, the virtual address of
+the instruction is already recorded in `mepc`.
+Recording the same address in `mtval` is redundant; the option is provided for
+backwards compatibility.
 
 When page-based virtual memory is enabled, `mtval` is written with the
 faulting virtual address, even for physical-memory access-fault
@@ -1990,12 +2009,13 @@ include::../images/bytefield/mtvalreg.edn[]
 
 
 If `mtval` is written with a nonzero value when a misaligned load or
-store causes an access-fault or page-fault exception, then `mtval` will
+store causes an access-fault, page-fault, or hardware-error exception,
+then `mtval` will
 contain the virtual address of the portion of the access that caused the
 fault.
 
 If `mtval` is written with a nonzero value when an instruction
-access-fault or page-fault exception occurs on a hart with
+access-fault, page-fault, or hardware-error exception occurs on a hart with
 variable-length instructions, then `mtval` will contain the virtual
 address of the portion of the instruction that caused the fault, while
 `mepc` will point to the beginning of the instruction.
@@ -2038,7 +2058,7 @@ two cases (or alternatively, the system configuration information can be
 interrogated to install the appropriate trap handling before runtime).
 ====
 
-On a trap caused by a software check exception, the `mtval` register holds
+On a trap caused by a software-check exception, the `mtval` register holds
 the cause for the exception. The following encodings are defined:
 
 * 0 - No information provided.
@@ -2395,7 +2415,9 @@ also raise an illegal-instruction exception when TSR=1 in `mstatus`, as
 described in <<virt-control>>. An __x__RET instruction
 can be executed in privilege mode _x_ or higher, where executing a
 lower-privilege __x__RET instruction will pop the relevant lower-privilege
-interrupt enable and privilege mode stack. In addition to manipulating
+interrupt enable and privilege mode stack. Attempting to execute an __x__RET
+instruction in a mode less privileged than _x_ will raise an
+illegal-instruction exception. In addition to manipulating
 the privilege stack as described in <<privstack>>,
 __x__RET sets the `pc` to the value stored in the `__x__epc` register.
 
@@ -2466,7 +2488,7 @@ WFI if there was no actionable event.
 
 [NOTE]
 ====
-By allowing wakeup when interrupts are disabled, an alternate entry
+By allowing wake-up when interrupts are disabled, an alternate entry
 point to an interrupt handler can be called that does not require saving
 the current context, as the current context can be saved or discarded
 before the WFI is executed.
@@ -2530,7 +2552,7 @@ most complete reset.
 ====
 Some designs may have multiple causes of reset (e.g., power-on reset,
 external hard reset, brownout detected, watchdog timer elapse,
-sleep-mode wakeup), which machine-mode software and debuggers may wish
+sleep-mode wake-up), which machine-mode software and debuggers may wish
 to distinguish.
 
 `mcause` reset values may alias `mcause` values following synchronous
@@ -2822,7 +2844,9 @@ and I/O regions may be accessed with either _relaxed_ or _strong_
 ordering. Accesses to an I/O region with relaxed ordering are generally
 observed by other harts and bus mastering devices in a manner similar to
 the ordering of accesses to an RVWMO memory region, as discussed in
-Section A.4.2 in Volume I of this specification. By contrast, accesses
+the I/O Ordering section in the RVWMO Explanatory Material appendix
+of Volume I of this specification.
+By contrast, accesses
 to an I/O region with strong ordering are generally observed by other
 harts and bus mastering devices in program order.
 
@@ -3206,10 +3230,6 @@ back to NAPOT.
 ====
 Software may determine the PMP granularity by writing zero to `pmp0cfg`, then writing all ones to `pmpaddr0`, then reading back `pmpaddr0`. If _G_ is the index of the least-significant bit set, the PMP granularity is 2^G+2^ bytes.
 ====
-
-If the current XLEN is greater than MXLEN, the PMP address registers are
-zero-extended from MXLEN to XLEN bits for the purposes of address
-matching.
 
 ===== Locking and Privilege Mode
 
