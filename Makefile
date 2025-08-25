@@ -37,19 +37,21 @@ else
 endif
 
 DATE ?= $(shell date +%Y%m%d)
-SKIP_DOCKER ?= $(shell if command -v docker >/dev/null 2>&1 ; then echo false; else echo true; fi)
+DOCKER_BIN ?= docker
+SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
     DOCKER_IS_PODMAN = \
-        $(shell ! docker -v | grep podman >/dev/null ; echo $$?)
+        $(shell ! ${DOCKER_BIN}  -v | grep podman >/dev/null ; echo $$?)
     ifeq "$(DOCKER_IS_PODMAN)" "1"
         # Modify the SELinux label for the host directory to indicate
         # that it can be shared with multiple containers. This is apparently
         # only required for Podman, though it is also supported by Docker.
         DOCKER_VOL_SUFFIX = :z
+        DOCKER_EXTRA_VOL_SUFFIX = ,z
     else
         DOCKER_IS_ROOTLESS = \
-            $(shell ! docker info -f '{{println .SecurityOptions}}' | grep rootless >/dev/null ; echo $$?)
+            $(shell ! ${DOCKER_BIN} info -f '{{println .SecurityOptions}}' | grep rootless >/dev/null ; echo $$?)
         ifneq "$(DOCKER_IS_ROOTLESS)" "1"
             # Rooted Docker requires this flag so that the files it creates are
             # owned by the current user instead of root. Rootless docker does not
@@ -59,10 +61,10 @@ ifneq ($(SKIP_DOCKER),true)
     endif
 
     DOCKER_CMD = \
-        docker run --rm \
+        ${DOCKER_BIN} run --rm \
             -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
-            -v ${PWD}/src:/src:ro \
-            -v ${PWD}/docs-resources:/docs-resources:ro \
+            -v ${PWD}/src:/src:ro${DOCKER_EXTRA_VOL_SUFFIX} \
+            -v ${PWD}/docs-resources:/docs-resources:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -w /build \
             $(DOCKER_USER_ARG) \
             ${DOCKER_IMG} \
@@ -155,7 +157,7 @@ $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 
 # Update docker image to latest
 docker-pull-latest:
-	docker pull ${DOCKER_IMG}
+	${DOCKER_BIN} pull ${DOCKER_IMG}
 
 clean:
 	@echo "Cleaning up generated files..."
