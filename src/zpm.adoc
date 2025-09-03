@@ -15,6 +15,8 @@ While we describe the high-level concepts of pointer masking as if it was a sing
 
 === Background
 
+[[_definitions]]
+
 ==== Definitions
 
 We now define basic terms. Note that these rely on the definition of an “ignore” transformation, which is defined in <<sec-ignore-transform>>.
@@ -101,6 +103,8 @@ NVBITS[1111111]  VBITS[11111111111111111111111110001...000]
 
 If the address was a physical address rather than a virtual address with Sv57, the transformed address with PMLEN=7 would be 0x1FFFFFF12345678.
 
+[[_determining_the_value_of_pmlen]]
+
 ==== Determining the Value of PMLEN
 
 From an implementation perspective, ignoring bits is deeply connected to the maximum virtual and physical address space supported by the processor (e.g., Bare, Sv48, Sv57). In particular, applying the above transformation is cheap if it covers only bits that are not used by **any** supported address translation mode (as it is equivalent to switching off validity checks). Masking NVBITS beyond those bits is more expensive as it requires ignoring them in the TLB tag, and even more expensive if the masked bits extend into the VBITS portion of the address (as it requires performing the actual sign extension). Similarly, when running in Bare or M mode, it is common for implementations to not use a particular number of bits at the top of the physical address range and fix them to zero. Applying the ignore transformation to those bits is cheap as well, since it will result in a valid physical address with all the upper bits fixed to 0.
@@ -122,7 +126,7 @@ Note that the pointer masking setting that is applied only depends on the active
 ====
 Linux places kernel addresses in the upper half of the address space and user addresses in the lower half of the address space. As such, the MSB is often used to identify the type of a particular address. With pointer masking enabled, this role is now played by bit XLEN-PMLEN-1 and code that checks whether a pointer is a kernel or a user address needs to inspect this bit instead. For backward compatibility, it may be desirable that the MSB still indicates whether an address is a user or a kernel address. An operating system's ABI may mandate this, but it does not affect the pointer masking mechanism itself. For example, the Linux ABI may choose to mandate that the MSB is not used for tagging and replicates bit XLEN-PMLEN-1 bit (note that for such a mechanism to be secure, the kernel needs to check the MSB of any user mode-supplied address and ensure that this invariant holds before using it; alternatively, it can apply the transformation from Listing 1 or 2 to ensure that the MSB is set to the correct value).
 ====
-
+[[_memory_accesses_subject_to_pointer_masking]]
 ==== Memory Accesses Subject to Pointer Masking
 
 Pointer masking applies to all explicit memory accesses. Currently, in the Base and Privileged ISAs, these are:
@@ -184,6 +188,7 @@ For example, software is free to write a tagged or untagged address to `stvec`, 
 The rationale for this choice is that delivering the additional bits may add overheads in some hardware implementations. Further, pointer masking is configured per privilege mode, so all trap handlers in supervisor mode would need to be careful to configure pointer masking the same way as user mode or manually unmask (which is expensive).
 ====
 
+[[_pointer_masking_extensions]]
 ==== Pointer Masking Extensions
 
 Pointer masking refers to a number of separate extensions, all of which are privileged. This approach is used to capture optionality of pointer masking features. Profiles and implementations may choose to support an arbitrary subset of these extensions and must define valid ranges for their corresponding values of PMLEN.
@@ -210,9 +215,11 @@ Pointer masking only applies to RV64. In RV32, trying to enable pointer masking 
 Note that setting UXL/SXL/MXL to 1 and back to 0 does not preserve the previous values of the PMM bits. This includes the case of entering an RV32 virtual machine from an RV64 hypervisor and returning.
 ====
 
+[[_isa_extensions]]
+
 === ISA Extensions
 
-This section describes the pointer masking extensions `Smmpm`, `Smnpm` and `Ssnpm`. All of these extensions are privileged ISA extensions and do not add any new CSRs. For the definitions of `Sspm` and `Supm`, see <<_pointer_masking_extensions>>.
+This section describes the pointer masking extensions `Smmpm`, `Smnpm` and `Ssnpm`. All of these extensions are privileged ISA extensions and do not add any new CSRs. For the definitions of `Sspm` and `Supm`, see <<Zpm>>.
 
 [NOTE]
 ====
@@ -234,6 +241,8 @@ Each extension introduces a 2-bit WARL field (`PMM`) that may take on the follow
 |===
 
 All of these fields are read-only 0 on RV32 systems.
+
+[[_ssnpm]]
 
 ==== Ssnpm
 
