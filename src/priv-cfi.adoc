@@ -57,23 +57,26 @@ implemented or is not enabled.
 [[ZICFILP_FORWARD_TRAPS]]
 ==== Preserving Expected Landing Pad State on Traps
 
-A trap may need to be delivered to the same or to a higher privilege mode upon
+[#norm:zicflip_forward_traps]#A trap may need to be delivered to the same or to a higher privilege mode upon
 completion of `JALR`/`C.JALR`/`C.JR`, but before the instruction at the target
 of indirect call/jump was decoded, due to:
 
 * Asynchronous interrupts.
 * Synchronous exceptions with priority higher than that of a software-check
   exception with `__x__tval` set to "landing pad fault (code=2)" (See
-  <<exception-priority>> of Privileged Specification).
+  <<exception-priority>> of Privileged Specification).#
 
+[[norm:zicflip_exception_priority]]
 The software-check exception caused by Zicfilp has higher priority than an
 illegal-instruction exception but lower priority than instruction access-fault.
 
+[[norm:zicflip_lpad_priviledge]]
 The software-check exception due to the instruction not being an `LPAD`
 instruction when `ELP` is `LP_EXPECTED` or a software-check exception caused by
-the `LPAD` instruction itself leads to a trap being delivered
+the `LPAD` instruction itself (See <<LP_INST>>) leads to a trap being delivered
 to the same or to a higher privilege mode.
 
+[[norm:zicflip_elp_trap_state_storage]]
 In such cases, the `ELP` prior to the trap, the previous `ELP`, must be
 preserved by the trap delivery such that it can be restored on a return from the
 trap. To store the previous `ELP` state on trap delivery to M-mode, an `MPELP`
@@ -84,15 +87,18 @@ the previous `ELP` state on traps to VS-mode, a `SPELP` bit is defined in the
 `vsstatus` (VS-modes version of `sstatus`). To store the previous `ELP` state on
 transition to Debug Mode, a `pelp` bit is defined in the `dcsr` register.
 
+[[norm:zicflip_elp_trap]]
 When a trap is taken into privilege mode `x`, the `__x__PELP` is set to `ELP`
 and `ELP` is set to `NO_LP_EXPECTED`.
 
+[[norm:zicflip_elp_trap_return]]
 An `MRET` or `SRET` instruction is used to return from a trap in M-mode or
 S-mode, respectively.  When executing an `__x__RET` instruction, if the new
 privilege mode is `y`, then `ELP` is set to the value of `__x__PELP` if
 `__y__LPE` (see <<FCFIACT>>) is 1; otherwise, it is set to `NO_LP_EXPECTED`;
 `__x__PELP` is set to `NO_LP_EXPECTED`.
 
+[[norm:zicflip_debug_mode]]
 Upon entry into Debug Mode, the `pelp` bit in `dcsr` is updated with the `ELP`
 at the privilege level the hart was previously in, and the `ELP` is set to
 `NO_LP_EXPECTED`. When a hart resumes from Debug Mode, if the new privilege mode
@@ -127,6 +133,7 @@ Attempts to access the `ssp` CSR may result in either an illegal-instruction
 exception or a virtual-instruction  exception, contingent upon the state of the
 *__x__*`envcfg.SSE` fields. The conditions are specified as follows:
 
+[[norm:zicfiss_envcgf_see_control]]
 * If the privilege mode is less than M and `menvcfg.SSE` is 0, an
   illegal-instruction exception is raised.
 * Otherwise, if in U-mode and `senvcfg.SSE` is 0, an illegal-instruction
@@ -155,6 +162,7 @@ When S-mode is implemented, it is determined as follows:
 |  U or VU     | `senvcfg.SSE`
 |===
 
+[[norm:zicflip_smode_xsse]]
 When S-mode is not implemented, then `xSSE` is 0 at both M and U privilege modes.
 
 [NOTE]
@@ -206,11 +214,13 @@ encoding `R=0`, `W=1`, and `X=0`, is defined to represent an SS page. When
 `menvcfg.SSE=0`, this encoding remains reserved. Similarly, when `V=1` and
 `henvcfg.SSE=0`, this encoding remains reserved at `VS` and `VU` levels.
 
-If `satp.MODE` (or `vsatp.MODE` when `V=1`) is set to `Bare` and the effective
-privilege mode is less than M, shadow stack instructions raise a store/AMO
-access-fault exception. When the effective privilege mode is M, memory access
-by an `SSAMOSWAP.W/D` instruction results in a store/AMO access-fault exception.
+[#norm:satp_mode_bare]#If `satp.MODE` (or `vsatp.MODE` when `V=1`) is set to `Bare` and the effective
+privilege mode is below M, shadow stack memory accesses are prohibited, and
+shadow stack instructions will raise a store/AMO access-fault exception.# When
+the effective privilege mode is M, any memory access by an `SSAMOSWAP.W/D`
+instruction will result in a store/AMO access-fault exception.
 
+[[norm:memory_mapped_ss_page]]
 Memory mapped as an SS page cannot be written to by instructions other than
 `SSAMOSWAP.W/D`, `SSPUSH`, and `C.SSPUSH`. Attempts will raise a store/AMO
 access-fault exception. Access to a SS page using _cache-block operation_
@@ -304,6 +314,7 @@ the stack.
 
 <<<
 
+[[norm:ssp_xlen_aligned]]
 If the virtual address in `ssp` is not `XLEN` aligned, then the `SSPUSH`/
 `C.SSPUSH`/`SSPOPCHK`/`C.SSPOPCHK` instructions cause a store/AMO access-fault
 exception.
@@ -341,10 +352,10 @@ affect read access to a shadow stack page as the shadow stack page is always
 readable by all instructions that load from memory.
 
 The G-stage address translation and protections remain unaffected by the Zicfiss
-extension. The `xwr == 010b` encoding in the G-stage PTE remains reserved. When
+extension. The `xwr == 010b` encoding in the G-stage PTE remains reserved. [#norm:active_g_stage_pte]#When
 G-stage page tables are active, the shadow stack instructions that access memory
 require the G-stage page table to have read-write permission for the accessed
-memory; else a store/AMO guest-page-fault exception is raised.
+memory; else a store/AMO guest-page-fault exception is raised.#
 
 [NOTE]
 ====
@@ -357,9 +368,9 @@ Svpbmt and Svnapot extensions are supported for shadow stack pages.
 
 The PMA checks are extended to require memory referenced by shadow stack
 instructions to be idempotent. The PMP checks are extended to require read-write
-permission for memory accessed by shadow stack instructions. If the PMP does not
+permission for memory accessed by shadow stack instructions. [#norm:pmp_deny_read_write#]#If the PMP does not
 provide read-write permissions or if the accessed memory is not idempotent then
-a store/AMO access-fault exception is raised.
+a store/AMO access-fault exception is raised.#
 
 The `SSAMOSWAP.W/D` instructions require the PMA of the accessed memory range to
 provide AMOSwap level support.
