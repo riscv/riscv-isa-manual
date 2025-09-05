@@ -5,6 +5,56 @@ We use AsciiDoctor's anchor facility to tag normative text which is extracted by
 provided in the link:https://github.com/riscv/docs-resources[docs-resources GitHub repository]
 to create machine-readable and human-readable representations of normative rules.
 
+Normative rules should have unique, short names that are easy to put in testplans. They reference tags in the AsciiDoc source files. The tag name matches the rule name in simple 1-1 cases. The normative rules are curated on a per-document basis with a YAML file listing the rules, their tags, and a short summary. A tool in docs-resources ***give-name generates a JSON file containing all of the normative rules for the document with their tags, as well as a human-readable AsciiDoc table with the same information.
+
+=== Naming Normative Rules
+
+Names should be short, descriptive, and as consistent as possible.  Rules related to an instruction, CSR, or CSR field should start with the instruction, CSR, or filed name.  Dots in the instruction or CSR field are replaced with dashes to keep tools happy.
+
+.Normative Rule Schema
+[options="header"]
+|===
+|Scenario|Format|Example
+|Simple instruction|<instr>_op|add_op, c-add_op
+|Additional instruction rules|<instr>_<short-descriptor>|sll_op, sll_rv32_shamt, sll_rv64_shamt
+|CSR|<csr>_sz, <csr>_rw, <csr>_mode, <csr>_op|mscratch_sz, mscratch_rw, mscratch_mode
+|CSR bitfield|<csr>-field_sz, <csr>-field_writable, <csr>-field_op|mstatus-mpp_sz, mstatus-mpp_writable, mstatus-mpp_op
+|Parameters|<PARAM>|PMP_GRANULARITY
+|===
+
+*** do we actually have rules for extensions, bases, instruction encoding?
+
+
+There should be at least one normative rule per instruction, even if there is a single tag describing multiple instructions.
+
+Each CSR should have at least the following rules:
+
+* sz (size in bits)
+* rw or ro (read/write or read-only
+* mode (associated privilege mode)
+* op (operation, could be omitted for CSRs such as mstatus or mvendorid that do not affect system behavior)
+
+Each CSR with bitfields should have at least the following rules for each field:
+
+* sz (size in bits)
+* rw or ro (some fields like mstatus.SD may be read-only even if the overall CSR is read/write)
+* op
+
+Each parameter name should exaclty match the name in https://github.com/riscv-software-src/riscv-unified-db/tree/main/spec/std/isa/ext[UDB], including being in all caps.
+
+=== Naming Normative Rule Tags
+
+.Normative Rule Tag Schema
+[options="header"]
+|===
+|Scenario|Format|Example
+|1-1 rule to tag|norm:<rule-name>|norm:add_op
+|1-many rule to tags|norm:<rule-name>_<modifier> or as needed|norm:lw_rv64i_op, norm:subword_rv64i_load
+|many-1 rule to tag|norm:<rule1>_<rule2>... or as needed|norm:rv64_shamt or norm:rv64_sll_srl_sra_shamt
+|1-1 parameter to tag|norm:param:<udb_param_name>|norm:param:PMP_GRANULARITY
+|flush this out***||
+|===
+
 === Tagging Normative Rules in RISC-V International Standards
 
 First, read the link:https://github.com/riscv/docs-resources/blob/main/normative-rules.md[How to Tag Normative Rules in RISC-V International Standards] for information that applies to all RISC-V International standards. This document provides information such as:
@@ -132,3 +182,164 @@ Example `norm:params:mutable-misa-a_mutable-misa-b:operation`
 Example `norm:paramgrp:mtval-va-report:operation`
 | Named group of parameters
 |===
+
+=== Normative Rule Curation
+
+Every normative rule is associated with one ratified specification document, such as a chapter of an ISA manual or a profile.  The normative rule may relate to more than one document but it must always have one primary document.  The normative rule is curated in a YAML file associated with the primary document.
+
+Each specification AsciiDoc file has a corresponding YAML file listing ("curating") the normative rules primarily associated with that specification.  For example, the https://github.com/riscv/riscv-isa-manual/blob/main/src/rv64.adoc[rv64.adoc] chapter of the Unprivileged ISA Manual has a corresponding rv64.yaml file.
+
+The YAML file lists all of the normative rules contained in that document.  Each rule must have a rule name and a list of one or more tags.  It should have a short summary.  https://github.com/riscv-software-src/riscv-unified-db[UDB] contains additional metadata and a pointer to the normative rule name, so the rule does not attempt to duplicate complex metadata already captured in UDB.  The form of the YAML is:
+
+.rv64.yaml
+[source,yaml]
+----
+$schema: "normative_rules_schema.json#"
+
+normative_curations:
+  # 1-to-1 rule to tag
+  - name: rv64_xregwidth
+    summary: XLEN=64
+    tags: ["norm:rv64_xregwidth"]
+  # many-to-1 rules to tag
+  - name: sll_rv64_shamt
+    summary: sll rv64 6-bit shift amount
+    tags: norm:rv64_shamt
+  - name: srl_rv64_shamt
+    summary: srl rv64 6-bit shift amount
+    tags: norm:rv64_shamt
+  - name: sra_rv64_shamt
+    summary: sra rv64 6-bit shift amount
+    tags: norm:rv64_shamt
+  # 1-to-many rule to tags where multiple tags are needed to create a complete self-contained rule
+  - name: lh_rv64i_op
+    summary: lh 64-bit sign extension
+    tags:["norm:lw_rv64i_op", "norm:subword_rv64i_load"]
+  # another 1-to-many rule to tags where multiple tags are needed to create a complete self-contained rule
+  - name: lhu_rv64i_op
+    summary: lhu 64-bit zero extension
+    tags:["norm:lw_rv64i_op", "norm:lwu_rv64i_op", "norm:subword_rv64i_load"]
+----
+
+These rules reference the following tags in the AsciiDoc:
+
+.rv64.adoc
+[source,adoc]
+----
+[[norm:base:rv64i:xregwidth]]
+RV64I widens the integer registers and supported user address space to
+64 bits (XLEN=64 in <<gprs>>).
+
+SLL, SRL, and SRA perform logical left, logical right, and arithmetic
+right shifts on the value in register _rs1_ by the shift amount held in
+register _rs2_. [#norm:rv64_shamt]#In RV64I, only the low 6 bits of _rs2_ are considered
+for the shift amount.#
+
+[#norm:lw_rv64i_op]#The LW instruction loads a 32-bit value from memory and sign-extends
+this to 64 bits before storing it in register _rd_ for RV64I.#
+[#norm:lwu_rv64i_op]#The LWU instruction, on the other hand, zero-extends the 32-bit value from
+memory for RV64I.# [#norm:subword_rv64i_load]#LH and LHU are defined analogously for 16-bit values, as are LB and LBU for 8-bit values.#
+----
+
+From the normative curation, a tool ***name] in docs-resources generates a JSON file containing all of the normative rules for the document with their tags, as well as a human-readable AsciiDoc table with the same information.  For the example above, the files are:
+
+.rv64.json
+[source,json]
+----
+{"normative_curations": [
+    {"name": "rv64_xregwidth",
+     "summary": "XLEN=64",
+     "spec": ["https://github.com/riscv/riscv-isa-manual/blob/main/src/rv64.adoc[RV64I widens the integer registers and supported user address space to
+64 bits (XLEN=64 in <<gprs>>).]"]},
+    {"name": "sll_rv64_shamt",
+     "summary": "sll rv64 6-bit shift amount",
+     "spec": ["norm:rv64_shamt"]},
+    {"name": "srl_rv64_shamt",
+     "summary": "srl rv64 6-bit shift amount",
+     "spec": ["norm:rv64_shamt"]},
+    {"name": "sra_rv64_shamt",
+     "summary": "sra rv64 6-bit shift amount",
+     "spec": ["norm:rv64_shamt"]},
+    {"name": "lh_rv64i_op",
+     "summary": "lh 64-bit sign extension",
+     "spec": ["norm:lw_rv64i_op", "norm:subword_rv64i_load"]},
+    {"name": "lhu_rv64i_op",
+     "summary": "lhu 64-bit zero extension",
+     "spec": ["norm:lw_rv64i_op", "norm:lwu_rv64i_op", "norm:subword_rv64i_load"]},
+] }
+----
+
+.rv64-normative-rules.adoc
+[cols="1,1,3", options="header"]
+|===
+|Rule Name |Summary|Specification
+|rv64_xregwidth |XLEN=64|RV64I widens the integer registers and supported user address space to
+64 bits (XLEN=64 in gprs).
+
+|sll_rv64_shamt |sll rv64 6-bit shift amount|In RV64I, only the low 6 bits of _rs2_ are considered
+for the shift amount.
+
+|srl_rv64_shamt |srl rv64 6-bit shift amount|In RV64I, only the low 6 bits of _rs2_ are considered
+for the shift amount.
+
+|sra_rv64_shamt |sra rv64 6-bit shift amount|In RV64I, only the low 6 bits of _rs2_ are considered
+for the shift amount.
+
+|lh_rv64i_op |lh 64-bit sign extension|The LW instruction loads a 32-bit value from memory and sign-extends
+this to 64 bits before storing it in register _rd_ for RV64I.
+
+LH and LHU are defined analogously for 16-bit values, as are LB and LBU for 8-bit values.
+
+|lhu_rv64i_op |lhu 64-bit zero extension|The LW instruction loads a 32-bit value from memory and zero-extends
+this to 64 bits before storing it in register _rd_ for RV64I.
+
+The LWU instruction, on the other hand, zero-extends the 32-bit value from
+memory for RV64I.
+
+LH and LHU are defined analogously for 16-bit values, as are LB and LBU for 8-bit values.
+|===
+
+[NOTE]
+The JSON spec and AsciiDoc Specification column should contain a hyperlink to riscv-isa-manual section; *** add when available.
+*** also check JSON syntax
+
+The next snippets illustrate normative rules and tags for CSRs with bitfields.
+
+.Sm.yaml
+[source,yaml]
+----
+$schema: "normative_rules_schema.json#"
+
+normative_curations:
+  # 1-to-1 rule to tag
+  - name: misa_sz
+    summary: MXLEN
+    tags: ["norm:misa_sz"]
+  - name: misa_rw
+    summary: WARL
+    tags: ["norm:misa_rw"]
+  - name: misa_mode
+    summary: M-mode
+    tags: ["norm:misa_mode"]
+  - name: misa_op
+    summary: reports supported ISA
+    tags: ["norm:misa_op"]
+  - name: misa-mxl_sz
+    summary: 2
+    tags: ["norm:misa-mxl_sz"]
+  - name: misa-mxl_ro
+    summary: read-only
+    tags: ["norm:misa-mxl_ro"]
+  - name: misa-mxl_op
+    summary: encodes base integer ISA width
+    tags: ["norm:misa-mxl_op"]
+  - name: misa-b_sz
+    summary: 1
+    tags: ["norm:misa-b_sz"]
+  - name: misa-b_rw
+    summary: WARL
+    tags: ["norm:misa-b_rw"]
+  - name: misa-b_op
+    summary: Zba, Zbb, Zbs supported
+    tags: ["norm:misa-b_op"]
+----
