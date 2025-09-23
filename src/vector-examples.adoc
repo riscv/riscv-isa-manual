@@ -1,15 +1,15 @@
 [appendix]
-= Vector Assembly Code Examples
+== Vector Assembly Code Examples
 
 The following are provided as non-normative text to help explain the vector ISA.
 
-== Vector-vector add example
+=== Vector-vector add example
 
 ----
-include::{incexample}/vvaddint32.s[lines=4..-1]
+include::example/vvaddint32.s[lines=4..-1]
 ----
 
-== Example with mixed-width mask and compute.
+=== Example with mixed-width mask and compute.
 
 ----
 # Code using one width for predicate and different width for masked
@@ -35,13 +35,13 @@ include::{incexample}/vvaddint32.s[lines=4..-1]
       bnez a0, loop               # Any more?
 ----
 
-== Memcpy example
+=== Memcpy example
 
 ----
-include::{incexample}/memcpy.s[lines=4..-1]
+include::example/memcpy.s[lines=4..-1]
 ----
 
-== Conditional example
+=== Conditional example
 
 ----
 # (int16) z[i] = ((int8) x[i] < 5) ? (int16) a[i] : (int16) b[i];
@@ -64,62 +64,62 @@ loop:
       add a4, a4, t0        # z[i] bump pointer
       bnez a0, loop
 ----
-== SAXPY example
+=== SAXPY example
 
 ----
-include::{incexample}/saxpy.s[lines=4..-1]
+include::example/saxpy.s[lines=4..-1]
 ----
 
-== SGEMM example
+=== SGEMM example
 
 ----
-include::{incexample}/sgemm.S[lines=4..-1]
+include::example/sgemm.S[lines=4..-1]
 ----
 
-== Division approximation example
+=== Division approximation example
 
 ----
 # v1 = v1 / v2 to almost 23 bits of precision.
 
 vfrec7.v v3, v2             # Estimate 1/v2
-  li t0, 0x3f800000
-vmv.v.x v4, t0              # Splat 1.0
-vfnmsac.vv v4, v2, v3       # 1.0 - v2 * est(1/v2)
-vfmadd.vv v3, v4, v3        # Better estimate of 1/v2
-vmv.v.x v4, t0              # Splat 1.0
-vfnmsac.vv v4, v2, v3       # 1.0 - v2 * est(1/v2)
-vfmadd.vv v3, v4, v3        # Better estimate of 1/v2
+  li t0, 0x40000000
+vmv.v.x v4, t0              # Splat 2.0
+vfnmsac.vv v4, v2, v3       # 2.0 - v2 * est(1/v2)
+vfmul.vv v3, v3, v4         # Better estimate of 1/v2
+vmv.v.x v4, t0              # Splat 2.0
+vfnmsac.vv v4, v2, v3       # 2.0 - v2 * est(1/v2)
+vfmul.vv v3, v3, v4         # Better estimate of 1/v2
 vfmul.vv v1, v1, v3         # Estimate of v1/v2
 ----
 
-== Square root approximation example
+=== Square root approximation example
 
 ----
-# v1 = sqrt(v1) to more than 23 bits of precision.
+# v1 = sqrt(v1) to almost 23 bits of precision.
 
   fmv.w.x ft0, x0           # Mask off zero inputs
-vmfne.vf v0, v1, ft0        #   to avoid DZ exception
-vfrsqrt7.v v2, v1, v0.t     # Estimate r ~= 1/sqrt(v1)
-vmfne.vf v0, v2, ft0, v0.t  # Mask off +inf to avoid NV
-  li t0, 0x3f800000
-  fli.s ft0, 0.5
-vmv.v.x v5, t0              # Splat 1.0
-vfmul.vv v3, v1, v2, v0.t   # t = v1 r
-vfmul.vf v4, v2, ft0, v0.t  # 0.5 r
-vfmsub.vv v3, v2, v5, v0.t  # t r - 1
-vfnmsac.vv v2, v3, v4, v0.t # r - (0.5 r) (t r - 1)
-                            # Better estimate of 1/sqrt(v1)
-vfmul.vv v1, v1, v2, v0.t   # t = v1 r
-vfmsub.vv v2, v1, v5, v0.t  # t r - 1
-vfmul.vf v3, v1, ft0, v0.t  # 0.5 t
-vfnmsac.vv v1, v2, v3, v0.t # t - (0.5 t) (t r - 1)
-                            # ~ sqrt(v1) to about 23.3 bits
+vmfne.vf v0, v1, ft0        #   to avoid div by zero
+vfrsqrt7.v v2, v1, v0.t     # Estimate 1/sqrt(x)
+vmfne.vf v0, v2, ft0, v0.t  # Additionally mask off +inf inputs
+  li t0, 0x40400000
+vmv.v.x v4, t0              # Splat 3.0
+vfmul.vv v3, v1, v2, v0.t   # x * est
+vfnmsub.vv v3, v2, v4, v0.t # - x * est * est + 3
+vfmul.vv v3, v3, v2, v0.t   # est * (-x * est * est + 3)
+  li t0, 0x3f000000
+  fmv.w.x ft0, t0           # 0.5
+vfmul.vf v2, v3, ft0, v0.t  # Estimate to 14 bits
+vfmul.vv v3, v1, v2, v0.t   # x * est
+vfnmsub.vv v3, v2, v4, v0.t # - x * est * est + 3
+vfmul.vv v3, v3, v2, v0.t   # est * (-x * est * est + 3)
+vfmul.vf v2, v3, ft0, v0.t  # Estimate to 23 bits
+vfmul.vv v1, v2, v1, v0.t   # x * 1/sqrt(x)
 ----
 
-== C standard library strcmp example
+=== C standard library strcmp example
 
 ----
-include::{incexample}strcmp.s[lines=4..-1]
+include::example/strcmp.s[lines=4..-1]
 ----
 
-include::page$fraclmul.adoc[]
+include::fraclmul.adoc[]

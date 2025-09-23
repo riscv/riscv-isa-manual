@@ -1,0 +1,370 @@
+[[extending]]
+== Extending RISC-V
+
+In addition to supporting standard general-purpose software development,
+another goal of RISC-V is to provide a basis for more specialized
+instruction-set extensions or more customized accelerators. The
+instruction encoding spaces and optional variable-length instruction
+encoding are designed to make it easier to leverage software development
+effort for the standard ISA toolchain when building more customized
+processors. For example, the intent is to continue to provide full
+software support for implementations that only use the standard I base,
+perhaps together with many non-standard instruction-set extensions.
+
+This chapter describes various ways in which the base RISC-V ISA can be
+extended, together with the scheme for managing instruction-set
+extensions developed by independent groups. This volume only deals with
+the unprivileged ISA, although the same approach and terminology is used
+for supervisor-level extensions described in the second volume.
+
+=== Extension Terminology
+
+This section defines some standard terminology for describing RISC-V
+extensions.
+
+==== Standard versus Non-Standard Extension
+
+Any RISC-V processor implementation must support a base integer ISA
+(RV32I, RV32E, RV64I, RV64E, or RV128I). In addition, an implementation may
+support one or more extensions. We divide extensions into two broad
+categories: _standard_ versus _non-standard_.
+
+* A standard extension is one that is generally useful and that is
+designed to not conflict with any other standard extension. Currently,
+"MAFDQLCBTPV", described in other chapters of this manual, are either
+complete or planned standard extensions.
+* A non-standard extension may be highly specialized and may conflict
+with other standard or non-standard extensions. We anticipate a wide
+variety of non-standard extensions will be developed over time, with
+some eventually being promoted to standard extensions.
+
+==== Instruction Encoding Spaces and Prefixes
+
+An instruction encoding space is some number of instruction bits within
+which a base ISA or ISA extension is encoded. RISC-V supports varying
+instruction lengths, but even within a single instruction length, there
+are various sizes of encoding space available. For example, the base
+ISAs are defined within a 30-bit encoding space (bits 31-2 of the 32-bit
+instruction), while the atomic extension "A" fits within a 25-bit
+encoding space (bits 31-7).
+
+We use the term _prefix_ to refer to the bits to the _right_ of an
+instruction encoding space (since instruction fetch in RISC-V is
+little-endian, the bits to the right are stored at earlier memory
+addresses, hence form a prefix in instruction-fetch order). The prefix
+for the standard base ISA encoding is the two-bit "11" field held in
+bits 1-0 of the 32-bit word, while the prefix for the standard atomic
+extension "A" is the seven-bit "0101111" field held in bits 6-0 of
+the 32-bit word representing the AMO major opcode. A quirk of the
+encoding format is that the 3-bit funct3 field used to encode a minor
+opcode is not contiguous with the major opcode bits in the 32-bit
+instruction format, but is considered part of the prefix for 22-bit
+instruction spaces.
+
+Although an instruction encoding space could be of any size, adopting a
+smaller set of common sizes simplifies packing independently developed
+extensions into a single global encoding.
+<<encodingspaces>> gives the suggested sizes for RISC-V.
+
+[[encodingspaces]]
+.Suggested standard RISC-V instruction encoding space sizes.
+[%autowidth,float="center",align="center",cols="^,<,>,>,>,>", options="header"]
+|===
+|Size |Usage 
+4+^| # Available in standard instruction length
+| | |16-bit |32-bit |48-bit |64-bit
+
+6+|
+|14-bit |Quadrant of compressed 16-bit encoding |3 | | |
+
+6+|
+|22-bit |Minor opcode in base 32-bit encoding | |latexmath:[$2^{8}$]
+|latexmath:[$2^{20}$] |latexmath:[$2^{35}$]
+
+|25-bit |Major opcode in base 32-bit encoding | |32
+|latexmath:[$2^{17}$] |latexmath:[$2^{32}$]
+
+|30-bit |Quadrant of base 32-bit encoding | |1 |latexmath:[$2^{12}$]
+|latexmath:[$2^{27}$]
+
+6+|
+|32-bit |Minor opcode in 48-bit encoding | | |latexmath:[$2^{10}$]
+|latexmath:[$2^{25}$]
+
+|37-bit |Major opcode in 48-bit encoding | | |32 |latexmath:[$2^{20}$]
+
+|40-bit |Quadrant of 48-bit encoding | | |4 |latexmath:[$2^{17}$]
+
+6+|
+|45-bit |Sub-minor opcode in 64-bit encoding | | | |latexmath:[$2^{12}$]
+
+|48-bit |Minor opcode in 64-bit encoding | | | |latexmath:[$2^{9}$]
+
+|52-bit |Major opcode in 64-bit encoding | | | |32
+|===
+
+==== Greenfield versus Brownfield Extensions
+
+We use the term _greenfield extension_ to describe an extension that
+begins populating a new instruction encoding space, and hence can only
+cause encoding conflicts at the prefix level. We use the term
+_brownfield extension_ to describe an extension that fits around
+existing encodings in a previously defined instruction space. A
+brownfield extension is necessarily tied to a particular greenfield
+parent encoding, and there may be multiple brownfield extensions to the
+same greenfield parent encoding. For example, the base ISAs are
+greenfield encodings of a 30-bit instruction space, while the FDQ
+floating-point extensions are all brownfield extensions adding to the
+parent base ISA 30-bit encoding space.
+
+Note that we consider the standard A extension to have a greenfield
+encoding as it defines a new previously empty 25-bit encoding space in
+the leftmost bits of the full 32-bit base instruction encoding, even
+though its standard prefix locates it within the 30-bit encoding space
+of its parent base ISA. Changing only its single 7-bit prefix could move
+the A extension to a different 30-bit encoding space while only worrying
+about conflicts at the prefix level, not within the encoding space
+itself.
+
+[[exttax]]
+.Two-dimensional characterization of standard instruction-set extensions.
+[cols="^,^,^",options="header",]
+[%autowidth, float="center", align="center"]
+|===
+|           |Adds state           |No new state
+|Greenfield |RV32I(30), RV64I(30) |A(25)
+|Brownfield |F(I), D(F), Q(D)     |M(I)
+|===
+
+<<exttax>> shows the bases and standard extensions placed
+in a simple two-dimensional taxonomy. One axis is whether the extension
+is greenfield or brownfield, while the other axis is whether the
+extension adds architectural state. For greenfield extensions, the size
+of the instruction encoding space is given in parentheses. For
+brownfield extensions, the name of the extension (greenfield or
+brownfield) it builds upon is given in parentheses. Additional
+user-level architectural state usually implies changes to the
+supervisor-level system or possibly to the standard calling convention.
+
+Note that RV64I is not considered an extension of RV32I, but a different
+complete base encoding.
+
+==== Standard-Compatible Global Encodings
+
+A complete or _global_ encoding of an ISA for an actual RISC-V
+implementation must allocate a unique non-conflicting prefix for every
+included instruction encoding space. The bases and every standard
+extension have each had a standard prefix allocated to ensure they can
+all coexist in a global encoding.
+
+A _standard-compatible_ global encoding is one where the base and every
+included standard extension have their standard prefixes. A
+standard-compatible global encoding can include non-standard extensions
+that do not conflict with the included standard extensions. A
+standard-compatible global encoding can also use standard prefixes for
+non-standard extensions if the associated standard extensions are not
+included in the global encoding. In other words, a standard extension
+must use its standard prefix if included in a standard-compatible global
+encoding, but otherwise its prefix is free to be reallocated. These
+constraints allow a common toolchain to target the standard subset of
+any RISC-V standard-compatible global encoding.
+
+==== Guaranteed Non-Standard Encoding Space
+
+To support development of proprietary custom extensions, portions of the
+encoding space are guaranteed to never be used by standard extensions.
+
+=== RISC-V Extension Design Philosophy
+
+We intend to support a large number of independently developed
+extensions by encouraging extension developers to operate within
+instruction encoding spaces, and by providing tools to pack these into a
+standard-compatible global encoding by allocating unique prefixes. Some
+extensions are more naturally implemented as brownfield augmentations of
+existing extensions, and will share whatever prefix is allocated to
+their parent greenfield extension. The standard extension prefixes avoid
+spurious incompatibilities in the encoding of core functionality, while
+allowing custom packing of more esoteric extensions.
+
+This capability of repacking RISC-V extensions into different
+standard-compatible global encodings can be used in a number of ways.
+
+One use-case is developing highly specialized custom accelerators,
+designed to run kernels from important application domains. These might
+want to drop all but the base integer ISA and add in only the extensions
+that are required for the task in hand. The base ISAs have been designed
+to place minimal requirements on a hardware implementation, and has been
+encoded to use only a small fraction of a 32-bit instruction encoding
+space.
+
+Another use-case is to build a research prototype for a new type of
+instruction-set extension. The researchers might not want to expend the
+effort to implement a variable-length instruction-fetch unit, and so
+would like to prototype their extension using a simple 32-bit
+fixed-width instruction encoding. However, this new extension might be
+too large to coexist with standard extensions in the 32-bit space. If
+the research experiments do not need all of the standard extensions, a
+standard-compatible global encoding might drop the unused standard
+extensions and reuse their prefixes to place the proposed extension in a
+non-standard location to simplify engineering of the research prototype.
+Standard tools will still be able to target the base and any standard
+extensions that are present to reduce development time. Once the
+instruction-set extension has been evaluated and refined, it could then
+be made available for packing into a larger variable-length encoding
+space to avoid conflicts with all standard extensions.
+
+The following sections describe increasingly sophisticated strategies
+for developing implementations with new instruction-set extensions.
+These are mostly intended for use in highly customized, educational, or
+experimental architectures rather than for the main line of RISC-V ISA
+development.
+
+[[fix32b]]
+=== Extensions within fixed-width 32-bit instruction format
+
+In this section, we discuss adding extensions to implementations that
+only support the base fixed-width 32-bit instruction format.
+[NOTE]
+====
+We anticipate the simplest fixed-width 32-bit encoding will be popular
+for many restricted accelerators and research prototypes.
+====
+==== Available 30-bit instruction encoding spaces
+
+In the standard encoding, three of the available 30-bit instruction
+encoding spaces (those with 2-bit prefixes `00`, `01`, and `10`) are used to
+enable the optional compressed instruction extension. However, if the
+compressed instruction-set extension is not required, then these three
+further 30-bit encoding spaces become available. This quadruples the
+available encoding space within the 32-bit format.
+
+==== Available 25-bit instruction encoding spaces
+
+A 25-bit instruction encoding space corresponds to a major opcode in the
+base and standard extension encodings.
+
+There are four major opcodes expressly designated for custom extensions
+<<opcodemap>>, each of which represents a 25-bit
+encoding space. Two of these are reserved for eventual use in the RV128
+base encoding (will be OP-IMM-64 and OP-64), but can be used for
+non-standard extensions for RV32 and RV64.
+
+The two major opcodes reserved for RV64 (OP-IMM-32 and OP-32) can also
+be used for non-standard extensions to RV32 only.
+
+If an implementation does not require floating-point, then the seven
+major opcodes reserved for standard floating-point extensions (LOAD-FP,
+STORE-FP, MADD, MSUB, NMSUB, NMADD, OP-FP) can be reused for
+non-standard extensions. Similarly, the AMO major opcode can be reused
+if the standard atomic extensions are not required.
+
+If an implementation does not require instructions longer than 32-bits,
+then an additional four major opcodes are available (those marked in
+gray in <<opcodemap>>).
+
+The base RV32I encoding uses only 11 major opcodes plus 3 reserved
+opcodes, leaving up to 18 available for extensions. The base RV64I
+encoding uses only 13 major opcodes plus 3 reserved opcodes, leaving up
+to 16 available for extensions.
+
+==== Available 22-bit instruction encoding spaces
+
+A 22-bit encoding space corresponds to a funct3 minor opcode space in
+the base and standard extension encodings. Several major opcodes have a
+funct3 field minor opcode that is not completely occupied, leaving
+available several 22-bit encoding spaces.
+
+Usually a major opcode selects the format used to encode operands in the
+remaining bits of the instruction, and ideally, an extension should
+follow the operand format of the major opcode to simplify hardware
+decoding.
+
+==== Other spaces
+
+Smaller spaces are available under certain major opcodes, and not all
+minor opcodes are entirely filled.
+
+=== Adding aligned 64-bit instruction extensions
+
+The simplest approach to provide space for extensions that are too large
+for the base 32-bit fixed-width instruction format is to add naturally
+aligned 64-bit instructions. The implementation must still support the
+32-bit base instruction format, but can require that 64-bit instructions
+are aligned on 64-bit boundaries to simplify instruction fetch, with a
+32-bit NOP instruction used as alignment padding where necessary.
+
+To simplify use of standard tools, the 64-bit instructions should be
+encoded as described in <<instlengthcode, Table 1>>.
+However, an implementation might choose a non-standard
+instruction-length encoding for 64-bit instructions, while retaining the
+standard encoding for 32-bit instructions. For example, if compressed
+instructions are not required, then a 64-bit instruction could be
+encoded using one or more zero bits in the first two bits of an
+instruction.
+[NOTE]
+====
+We anticipate processor generators that produce instruction-fetch units
+capable of automatically handling any combination of supported
+variable-length instruction encodings.
+====
+=== Supporting VLIW encodings
+
+Although RISC-V was not designed as a base for a pure VLIW machine, VLIW
+encodings can be added as extensions using several alternative
+approaches. In all cases, the base 32-bit encoding has to be supported
+to allow use of any standard software tools.
+
+==== Fixed-size instruction group
+
+The simplest approach is to define a single large naturally aligned
+instruction format (e.g., 128 bits) within which VLIW operations are
+encoded. In a conventional VLIW, this approach would tend to waste
+instruction memory to hold NOPs, but a RISC-V-compatible implementation
+would have to also support the base 32-bit instructions, confining the
+VLIW code size expansion to VLIW-accelerated functions.
+
+==== Encoded-Length Groups
+
+Another approach is to use the standard length encoding from
+<<instlengthcode>> to encode parallel
+instruction groups, allowing NOPs to be compressed out of the VLIW
+instruction. For example, a 64-bit instruction could hold two 28-bit
+operations, while a 96-bit instruction could hold three 28-bit
+operations, and so on. Alternatively, a 48-bit instruction could hold
+one 42-bit operation, while a 96-bit instruction could hold two 42-bit
+operations, and so on.
+
+This approach has the advantage of retaining the base ISA encoding for
+instructions holding a single operation, but has the disadvantage of
+requiring a new 28-bit or 42-bit encoding for operations within the VLIW
+instructions, and misaligned instruction fetch for larger groups. One
+simplification is to not allow VLIW instructions to straddle certain
+microarchitecturally significant boundaries (e.g., cache lines or
+virtual memory pages).
+
+==== Fixed-Size Instruction Bundles
+
+Another approach, similar to Itanium, is to use a larger naturally
+aligned fixed instruction bundle size (e.g., 128 bits) across which
+parallel operation groups are encoded. This simplifies instruction
+fetch, but shifts the complexity to the group execution engine. To
+remain RISC-V compatible, the base 32-bit instruction would still have
+to be supported.
+
+==== End-of-Group bits in Prefix
+
+None of the above approaches retains the RISC-V encoding for the
+individual operations within a VLIW instruction. Yet another approach is
+to repurpose the two prefix bits in the fixed-width 32-bit encoding. One
+prefix bit can be used to signal "end-of-group" if set, while the
+second bit could indicate execution under a predicate if clear. Standard
+RISC-V 32-bit instructions generated by tools unaware of the VLIW
+extension would have both prefix bits set (11) and thus have the correct
+semantics, with each instruction at the end of a group and not
+predicated.
+
+The main disadvantage of this approach is that the base ISAs lack the
+complex predication support usually required in an aggressive VLIW
+system, and it is difficult to add space to specify more predicate
+registers in the standard 30-bit encoding space.
+

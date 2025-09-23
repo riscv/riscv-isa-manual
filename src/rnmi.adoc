@@ -1,5 +1,11 @@
 [[rnmi]]
-= "Smrnmi" Extension for Resumable Non-Maskable Interrupts, Version 1.0
+== "Smrnmi" Extension for Resumable Non-Maskable Interrupts, Version 0.5
+
+[WARNING]
+====
+*Warning! This frozen specification may change before being accepted as
+standard by RISC-V International.*
+====
 
 The base machine-level architecture supports only unresumable
 non-maskable interrupts (UNMIs), where the NMI jumps to a handler in
@@ -13,40 +19,37 @@ The Smrnmi extension adds support for resumable non-maskable interrupts
 `mnstatus`, and `mnscratch`) to hold the interrupted state, and one new
 instruction, MNRET, to resume from the RNMI handler.
 
-== RNMI Interrupt Signals
+=== RNMI Interrupt Signals
 
 The `rnmi` interrupt signals are inputs to the hart. These interrupts
 have higher priority than any other interrupt or exception on the hart
 and cannot be disabled by software. Specifically, they are not disabled
 by clearing the `mstatus`.MIE register.
 
-== RNMI Handler Addresses
+=== RNMI Handler Addresses
 
 The RNMI interrupt trap handler address is implementation-defined.
 
 RNMI also has an associated exception trap handler address, which is
 implementation defined.
 
-NOTE: For example, some implementations might use the address specified
-in `mtvec` as the RNMI exception trap handler.
+=== RNMI CSRs
 
-== RNMI CSRs
-
-This extension adds additional M-mode CSRs to enable a resumable
+This proposal adds additional M-mode CSRs to enable a resumable
 non-maskable interrupt (RNMI).
 
 .Resumable NMI scratch register `mnscratch`
-include::partial$bytefield/mnscratch.edn[]
+include::images/bytefield/mnscratch.adoc[]
 
 The `mnscratch` CSR holds an MXLEN-bit read-write register which enables
-the RNMI trap handler to save and restore the context that was
+the NMI trap handler to save and restore the context that was
 interrupted.
 
 .Resumable NMI program counter `mnepc`.
-include::partial$bytefield/mnepc.edn[]
+include::images/bytefield/mnepc.edn[]
 
 The `mnepc` CSR is an MXLEN-bit read-write register which on entry to
-the RNMI trap handler holds the PC of the instruction that took the
+the NMI trap handler holds the PC of the instruction that took the
 interrupt.
 
 The low bit of `mnepc` (`mnepc[0]`) is always zero. On implementations
@@ -56,7 +59,7 @@ zero.
 If an implementation allows IALIGN to be either 16 or 32 (by changing
 CSR `misa`, for example), then, whenever IALIGN=32, bit `mnepc[1]` is
 masked on reads so that it appears to be 0. This masking occurs also for
-the implicit read by the MNRET instruction. Though masked, `mnepc[1]`
+the implicit read by the MRET instruction. Though masked, `mnepc[1]`
 remains writable when IALIGN=32.
 
 `mnepc` is a *WARL* register that must be able to hold all valid virtual
@@ -66,12 +69,12 @@ invalid address into some other invalid address that `mnepc` is capable
 of holding.
 
 .Resumable NMI cause `mncause`.
-include::partial$bytefield/mncause.edn[]
+include::images/bytefield/mncause.edn[]
 
-The `mncause` CSR holds the reason for the RNMI.
-If the reason is an interrupt, bit MXLEN-1 is set to 1, and the RNMI
+The `mncause` CSR holds the reason for the NMI.
+If the reason is an interrupt, bit MXLEN-1 is set to 1, and the NMI
 cause is encoded in the least-significant bits.
-If the reason is an interrupt and RNMI causes are not supported, bit MXLEN-1 is
+If the reason is an interrupt and NMI causes are not supported, bit MXLEN-1 is
 set to 1, and zero is written to the least-significant bits.
 If the reason is an exception within M-mode that results in a double trap as
 specified in the Smdbltrp extension, bit MXLEN-1 is set to 0 and the
@@ -79,7 +82,7 @@ least-significant bits are set to the cause code corresponding to the
 exception that precipitated the double trap.
 
 .Resumable NMI status register `mnstatus`.
-include::partial$bytefield/mnstatus.edn[]
+include::images/bytefield/mnstatus.edn[]
 
 The `mnstatus` CSR holds a two-bit field, MNPP, which on entry to the
 RNMI trap handler holds the privilege mode of the interrupted context,
@@ -92,7 +95,7 @@ If the Zicfilp extension is implemented, `mnstatus` also holds the MNPELP
 field, which on entry to the RNMI trap handler holds the previous `ELP` state.
 When an RNMI trap is taken, MNPELP is set to `ELP` and `ELP` is set to 0.
 
-`mnstatus` also holds the NMIE bit. When NMIE=1, non-maskable interrupts
+`mnstatus` also holds the NMIE bit. When NMIE=1, nonmaskable interrupts
 are enabled. When NMIE=0, _all_ interrupts are disabled.
 
 When NMIE=0, the hart behaves as though `mstatus`.MPRV were clear,
@@ -132,16 +135,16 @@ of the WFI instruction.
 The other bits in `mnstatus` are _reserved_; software should write zeros
 and hardware implementations should return zeros.
 
-== MNRET Instruction
+=== MNRET Instruction
 
 MNRET is an M-mode-only instruction that uses the values in `mnepc` and
 `mnstatus` to return to the program counter, privilege mode, and
 virtualization mode of the interrupted context. This instruction also
 sets `mnstatus`.NMIE.  If MNRET changes the privilege mode to a mode less privileged than M, it also sets `mstatus`.MPRV to 0.
-If the Zicfilp extension is implemented, then if the new privileged mode
-is __y__, MNRET sets `ELP` to the logical AND of __y__LPE (see xref:priv-cfi.adoc#FCFIACT[Landing-Pad-Enabled (LPE) State]) and `mnstatus`.MNPELP.
+If the Zicfilp extension is implemented, then if `mnstatus`.MNPP holds the
+value __y__, MNRET sets `ELP` to the logical AND of __y__LPE and `mnstatus`.MNPELP.
 
-== RNMI Operation
+=== RNMI Operation
 
 When an RNMI interrupt is detected, the interrupted PC is written to the
 `mnepc` CSR, the type of RNMI to the `mncause` CSR, and the privilege
@@ -155,7 +158,7 @@ The RNMI handler can resume original execution using the new MNRET
 instruction, which restores the PC from `mnepc`, the privilege mode from
 `mnstatus`, and also sets `mnstatus`.NMIE, which re-enables interrupts.
 
-If the hart encounters an exception while executing in M-mode with the `mnstatus`.NMIE bit clear, the actions taken are the same as if the exception had occurred while `mnstatus`.NMIE were set, except that the program counter is set to the RNMI exception trap handler address.
+If the hart encounters an exception while executing in M-mode with the `mnstatus`.NMIE bit clear, the actions taken are the same as if the exception had occurred while `mnstatus`.NMIE were set, except that the program counter is set to the RNMI exception trap handler address (rather than the address specified by `mtvec`).
 
 [NOTE]
 ====
