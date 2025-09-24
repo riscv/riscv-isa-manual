@@ -743,7 +743,8 @@ characteristics of the U-mode execution environment.
   {bits:  2, name: 'CBIE'},
   {bits:  1, name: 'CBCFE'},
   {bits:  1, name: 'CBZE'},
-  {bits: 24, name: 'WPRI'},
+  {bits:  1, name: 'UKTE'},
+  {bits: 23, name: 'WPRI'},
   {bits:  2, name: 'PMM'},
   {bits: 30, name: 'WPRI'},
 ], config:{lanes: 4, hspace:1024}}
@@ -833,6 +834,14 @@ The definition of the CBZE field is furnished by the Zicboz extension.
 
 The definitions of the CBCFE and CBIE fields are furnished by the Zicbom
 extension.
+
+If the Svukte extension is implemented, the UKTE field affects the behavior of
+instruction fetches and explicit memory accesses.
+When UKTE=0, instruction fetches and explicit memory accesses proceed as
+though the Svukte extension were not implemented.
+When UKTE=1, instruction fetches and explicit memory accesses with effective
+privilege mode U or VU are Svukte-qualified, as described in <<sec:svukte>>.
+If Svukte is not implemented, UKTE is read-only zero.
 
 The definition of the PMM field is furnished by the Ssnpm extension.
 
@@ -2332,6 +2341,53 @@ auxiliary data structures. By default, Sv39 and Sv39x4 require a page fault and
 a guest-page fault exception, respectively, to be raised if bits 60–59 are not
 zero.
 ====
+
+[[sec:svukte]]
+== "Svukte" Extension for Address-Independent Latency of User-Mode Faults to Supervisor Addresses, Version 0.4
+
+The Svukte extension provides a means to make user-mode accesses to supervisor
+memory raise page faults with timing that is independent of the address-translation
+configuration and page-table contents, thereby mitigating attacks that attempt
+to discover the supervisor software's address-space layout.
+
+If the Svukte extension is implemented, the `senvcfg`.UKTE field is writable.
+If the hypervisor extension is additionally implemented, the `hstatus`.HUKTE
+field is also writable.
+See <<sec:senvcfg>> and <<sec:hstatus>> for the definitions of those fields.
+
+The Svukte extension depends on the Sv39 extension.
+
+NOTE: Svukte is not defined for Sv32 because the small address space limits the
+available entropy, reducing the effectiveness of address-space layout
+randomization.
+If an Sv32 variant were to be defined, it would need to account for the fact
+that it is more common to reserve only the upper 1 GiB of the virtual-address
+space for the operating system, leaving the lower 3 GiB for user
+processes.
+
+When `senvcfg`.UKTE=1 and the active `satp` register's MODE field is not Bare,
+an instruction fetch or explicit memory access whose
+effective privilege mode is U or VU is considered to be _Svukte-qualified_.
+For any Svukte-qualified memory access, virtual addresses {ge} 2^SXLEN-1^ are
+considered to be invalid; hence, an Svukte-qualified access to such an address
+raises a page-fault exception corresponding to the original access type.
+The timing of an instruction that raises an exception for this reason must be
+independent of the faulting virtual address.
+
+NOTE: An Svukte-qualified access to such an address raises an exception even
+if the underlying PTE would have otherwise allowed the access.
+Practical implementations of Svukte will raise these exceptions based upon the
+effective address, without accessing the page tables or address-translation
+caches.
+
+NOTE: Since whether an instruction is Svukte-qualified depends on the _effective_
+privilege mode of the access, even some instructions executed in HS-mode or M-mode
+(e.g. HLV with `hstatus`.SPVP=0, or LW with `mstatus`.MPRV=1 and
+`mstatus`.MPP=U) are Svukte-qualified.
+
+As described in <<sec:hstatus>>, the `hstatus`.HUKTE field, rather than the
+`senvcfg`.UKTE field, determines whether HLV, HLVX, and HSV instructions
+executed within U-mode are Svukte-qualified.
 
 [[ssqosid]]
 == "Ssqosid" Extension for Quality-of-Service (QoS) Identifiers, Version 1.0
