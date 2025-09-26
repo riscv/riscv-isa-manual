@@ -162,6 +162,7 @@ indirect call or an indirect jump. The `ELP` state can be one of:
 
 The `ELP` state is initialized to `NO_LP_EXPECTED` by the hart upon reset.
 
+[[norm:zicflip_lpad_expected]]
 The Zicfilp extension, when enabled, determines if an indirect call or an
 indirect jump must land on a landing pad, as specified in <<IND_CALL_JMP>>. If
 `is_lp_expected` is 1, then the hart updates the `ELP` to `LP_EXPECTED`.
@@ -171,8 +172,8 @@ indirect jump must land on a landing pad, as specified in <<IND_CALL_JMP>>. If
 [listing]
 ----
 
-[#norm:zicflip_lpad_expected]#  is_lp_expected = ( (JALR || C.JR || C.JALR) &&
-                     (rs1 != x1) && (rs1 != x5) && (rs1 != x7) ) ? 1 : 0;#
+  is_lp_expected = ( (JALR || C.JR || C.JALR) &&
+                     (rs1 != x1) && (rs1 != x5) && (rs1 != x7) ) ? 1 : 0;
 ----
 
 [[norm:indirect_branch_lpad]]
@@ -262,9 +263,8 @@ is a no-op. [#norm:zicflip_lp_enabled_exception]#If Zicfilp is enabled, the `LPA
 software-check exception with `__x__tval` set to "landing pad fault (code=2)"# if
 any of the following conditions are true:
 
-* The `pc` is not 4-byte aligned and `ELP` is `LP_EXPECTED`.
-* [The `ELP` is `LP_EXPECTED` and the `LPL` is not zero and the `LPL` does not
-  match the expected landing pad label in bits 31:12 of the `x7` register.
+* [#norm:zicflip_lpad_alignment_exception]#The `pc` is not 4-byte aligned and `ELP` is `LP_EXPECTED`.#
+* [#norm:zicflip_lpad_label_exception]#The `ELP` is `LP_EXPECTED` and the `LPL` is not zero and the `LPL` does not match the expected landing pad label in bits 31:12 of the `x7` register.#
 
 If a software-check exception is not caused then the `ELP` is updated to
 `NO_LP_EXPECTED`.
@@ -281,7 +281,6 @@ If a software-check exception is not caused then the `ELP` is updated to
 The operation of the `LPAD` instruction is as follows:
 
 .`LPAD` operation
-[#norm:zicflip_lpad_exceptions]#
 [listing]
 ----
 if (xLPE == 1 && ELP == LP_EXPECTED)
@@ -452,21 +451,21 @@ Only `x1` and `x5` registers are supported as `rs2` for `SSPUSH`. Zicfiss
 provides a 16-bit version of the `SSPUSH x1` instruction using the Zcmop
 defined `C.MOP.1` encoding. The `C.SSPUSH x1` expands to `SSPUSH x1`.
 
+[[norm:sspush_c-sspush_instr]]
 The `SSPUSH` instruction and its compressed form `C.SSPUSH` can be used to push
-a link register on the shadow stack. [#norm:sspush_c-sspush_instr]#The `SSPUSH` and `C.SSPUSH` instructions
+a link register on the shadow stack. The `SSPUSH` and `C.SSPUSH` instructions
 perform a store identically to the existing store instructions, with the
-difference that the base is implicitly `ssp` and the width is implicitly `XLEN`.#
+difference that the base is implicitly `ssp` and the width is implicitly `XLEN`.
 
 The operation of the `SSPUSH` and `C.SSPUSH` instructions is as follows:
 
 .`SSPUSH` and `C.SSPUSH` operation
 [listing]
 ----
-[#norm:sspush_c-sspush_op]#
 if (xSSE == 1)
     mem[ssp - (XLEN/8)] = X(src)  # Store src value to ssp - XLEN/8
     ssp = ssp - (XLEN/8)          # decrement ssp by XLEN/8
-endif#
+endif
 ----
 [[norm:sspush_c-sspush_decrement]]
 The `ssp` is decremented by `SSPUSH` and `C.SSPUSH` only if the store to the
@@ -577,6 +576,7 @@ not need to spill the link register. Consequently, the return value may be held
 in the link register itself for the duration of the leaf function's execution.
 ====
 
+[[norm:sspopchk-c_load_op]]
 The `C.SSPOPCHK`, and `SSPOPCHK` instructions perform a load identically to the
 existing load instructions, with the difference that the base is implicitly
 `ssp` and the width is implicitly `XLEN`.
@@ -586,7 +586,6 @@ The operation of the `SSPOPCHK` and `C.SSPOPCHK` instructions is as follows:
 .`SSPOPCHK` and `C.SSPOPCHK` operation
 [listing]
 ----
-[#norm:sspopchk-c_load_op]#
 if (xSSE == 1)
     temp = mem[ssp]            # Load temp from address in ssp and
     if temp != X(src)          # Compare temp to value in src and
@@ -597,7 +596,7 @@ if (xSSE == 1)
     else
        ssp = ssp + (XLEN/8)    # increment ssp by XLEN/8.
     endif
-endif#
+endif
 ----
 
 [[norm:sspop_exception]]
@@ -655,8 +654,9 @@ and thus may be used to transiently forward the data from such stores to
 [[SSP_READ]]
 ==== Read `ssp` into a Register
 
+[#norm:ssrdp_read]#
 The `SSRDP` instruction is provided to move the contents of `ssp` to a destination
-register.
+register.#
 
 [wavedrom, ,svg]
 ....
@@ -676,12 +676,11 @@ The operation of the `SSRDP` instructions is as follows:
 .`SSRDP` operation
 [listing]
 ----
-[#norm:ssrdp_read]#
 if (xSSE == 1)
     X(dst) = ssp
 else
     X(dst) = 0
-endif#
+endif
 ----
 
 [NOTE]
@@ -788,7 +787,6 @@ data values.
 .`SSAMOSWAP.W` for RV32 and `SSAMOSWAP.D` (RV64 only) operation
 [listing]
 ----
-[#norm:rv32_ssamoswap-w_rv64_ssamoswap-d_exceptions]#
   if privilege_mode != M && menvcfg.SSE == 0
       raise illegal-instruction exception
   else if S-mode not implemented
@@ -802,7 +800,7 @@ data values.
   else
       X(rd) = mem[X(rs1)]
       mem[X(rs1)] = X(rs2)
-  endif#
+  endif
 ----
 
 [[norm:rv64_ssamoswap-w_op]]
@@ -814,7 +812,6 @@ address in `rs1`.
 .`SSAMOSWAP.W` for RV64
 [listing]
 ----
-[#norm:rv64_ssamoswap-w_exceptions]#
   if privilege_mode != M && menvcfg.SSE == 0
       raise illegal-instruction exception
   else if S-mode not implemented
@@ -829,7 +826,7 @@ address in `rs1`.
       temp[31:0] = mem[X(rs1)]
       X(rd) = SignExtend(temp[31:0])
       mem[X(rs1)] = X(rs2)[31:0]
-  endif#
+  endif
 ----
 
 [[norm:ssamoswap_address]]
