@@ -30,25 +30,28 @@ allows for using these hints and conventions to support return address
 prediction (See <<rashints>>).
 
 The RVC standard extension for compressed instructions provides unconditional
-jump and conditional branch instructions. [#norm:c-j_c-jal_enc#]#The `C.J` and `C.JAL` instructions
+jump and conditional branch instructions. The `C.J` and `C.JAL` instructions
 encode an offset in the immediate field of the instruction and thus are not
-susceptible to control-flow subversion.# [#norm:c_jr_jalr#]#The `C.JR` and `C.JALR` RVC instructions
-perform an unconditional control transfer to the address in register `rs1`.# [#norm:c_jalr#]#The
+susceptible to control-flow subversion. The `C.JR` and `C.JALR` RVC instructions
+perform an unconditional control transfer to the address in register `rs1`. The
 `C.JALR` additionally writes the address of the instruction following the jump
-(`pc+2`) to the link register `x1` and is a procedure call.# [#norm:c_jr#]#The `C.JR` is a
+(`pc+2`) to the link register `x1` and is a procedure call. The `C.JR` is a
 return from procedure if `rs1` is a conventional link register (i.e. `x1` or
-`x5`); else it is an indirect jump.#
+`x5`); else it is an indirect jump.
 
+[[norm_call_term]]
 The term _call_ is used to refer to a `JAL` or `JALR` instruction with a link
 register as destination, i.e., _rd_≠`x0`. Conventionally, the link register is
 `x1` or `x5`. A _call_ using `JAL` or `C.JAL` is termed a direct call. A
 `C.JALR` expands to `JALR x1, 0(rs1)` and is a _call_. A _call_ using `JALR` or
 `C.JALR` is termed an _indirect-call_.
 
+[[norm_return_term]]
 The term _return_ is used to refer to a `JALR` instruction with _rd_=`x0` and
-with _rs1_=`x1` or _rs1_=`x5`. [#norm:c_jr_expand#]#A `C.JR` instruction expands to
-`JALR x0, 0(rs1)` and is a _return_ if _rs1_=`x1` or _rs1_=`x5`.#
+with _rs1_=`x1` or _rs1_=`x5`. A `C.JR` instruction expands to
+`JALR x0, 0(rs1)` and is a _return_ if _rs1_=`x1` or _rs1_=`x5`.
 
+[[norm_indirect-jump_term]]
 The term _indirect-jump_ is used to refer to a `JALR` instruction with _rd_=`x0`
 and where the _rs1_ is not `x1` or `x5` (i.e., not a return). A `C.JR`
 instruction where _rs1_ is not `x1` or `x5` (i.e., not a return) is an
@@ -67,7 +70,7 @@ Privileged ISA specification.
 
 To enforce forward-edge control-flow integrity, the Zicfilp extension introduces
 a landing pad (`LPAD`) instruction. The `LPAD` instruction must be placed at the
-program locations that are valid targets of indirect jumps or calls. [#norm:lpad_encode#]#The `LPAD`
+program locations that are valid targets of indirect jumps or calls. [#norm:lpad_enc]#The `LPAD`
 instruction (See <<LP_INST>>) is encoded using the `AUIPC` major opcode with
 _rd_=`x0`.#
 
@@ -123,8 +126,8 @@ landing pads that are only valid targets of an indirect jump (and not an
 indirect call).
 
 The `LPAD` instruction uses the code points defined as HINTs for the `AUIPC`
-opcode. [#norm:zicflip_inactive#]#When Zicfilp is not active at a privilege level or when the extension
-is not implemented, the landing pad instruction executes as a no-op.# A program
+opcode. When Zicfilp is not active at a privilege level or when the extension
+is not implemented, the landing pad instruction executes as a no-op. A program
 that is built with `LPAD` instructions can thus continue to operate correctly,
 but without forward-edge control-flow integrity, on processors that do not
 support the Zicfilp extension or if the Zicfilp extension is not active.
@@ -159,7 +162,7 @@ indirect call or an indirect jump. The `ELP` state can be one of:
 
 The `ELP` state is initialized to `NO_LP_EXPECTED` by the hart upon reset.
 
-[[norm:zicflip_lp_expected]]
+[[norm:zicflip_lpad_expected]]
 The Zicfilp extension, when enabled, determines if an indirect call or an
 indirect jump must land on a landing pad, as specified in <<IND_CALL_JMP>>. If
 `is_lp_expected` is 1, then the hart updates the `ELP` to `LP_EXPECTED`.
@@ -168,6 +171,7 @@ indirect jump must land on a landing pad, as specified in <<IND_CALL_JMP>>. If
 .Landing pad expected determination
 [listing]
 ----
+
   is_lp_expected = ( (JALR || C.JR || C.JALR) &&
                      (rs1 != x1) && (rs1 != x5) && (rs1 != x7) ) ? 1 : 0;
 ----
@@ -209,16 +213,16 @@ performing bounds checking on the index into the table, etc.).
 ====
 
 The landing pad may be labeled. Zicfilp extension designates the register `x7`
-for use as the landing pad label register. [#norm:zicflip_landing_pad_x7#]#To support labeled landing pads, the
+for use as the landing pad label register. To support labeled landing pads, the
 indirect call/jump sites establish an expected landing pad label (e.g., using
-the `LUI` instruction) in the bits 31:12 of the `x7` register.# [#norm:zicflip_lp_encoding#]#The `LPAD`
+the `LUI` instruction) in the bits 31:12 of the `x7` register. [#norm:lpad_imm_enc]#The `LPAD`
 instruction is encoded with a 20-bit immediate value called the landing-pad-label
 (`LPL`) that is matched to the expected landing pad label. When `LPL` is encoded
 as zero, the `LPAD` instruction does not perform the label check and in programs
 built with this single label mode of operation the indirect call/jump sites do
 not need to establish an expected landing pad label value in `x7`.#
 
-[[norm:elp_lp_expected]]
+[[norm:elp_lpad_expected]]
 When `ELP` is set to `LP_EXPECTED`, if the next instruction in the instruction
 stream is not 4-byte aligned, or is not `LPAD`, or if the landing pad label
 encoded in `LPAD` is not zero and does not match the expected landing pad label
@@ -255,13 +259,12 @@ the accidental landing pad.
 
 When Zicfilp is enabled, `LPAD` is the only instruction allowed to execute when
 the `ELP` state is `LP_EXPECTED`. If Zicfilp is not enabled then the instruction
-is a no-op. [#norm:zicflip_lp_enabled_exception#]#If Zicfilp is enabled, the `LPAD` instruction causes a
+is a no-op. [#norm:zicflip_lp_enabled_exception]#If Zicfilp is enabled, the `LPAD` instruction causes a
 software-check exception with `__x__tval` set to "landing pad fault (code=2)"# if
 any of the following conditions are true:
 
-* [#norm:zicflip_lp_enabled_misaligned#]#The `pc` is not 4-byte aligned and `ELP` is `LP_EXPECTED`.#
-* [#norm:zicflip_lp_enabled_x7_bits#]#The `ELP` is `LP_EXPECTED` and the `LPL` is not zero and the `LPL` does not
-  match the expected landing pad label in bits 31:12 of the `x7` register.#
+* [#norm:zicflip_lpad_alignment_exception]#The `pc` is not 4-byte aligned and `ELP` is `LP_EXPECTED`.#
+* [#norm:zicflip_lpad_label_exception]#The `ELP` is `LP_EXPECTED` and the `LPL` is not zero and the `LPL` does not match the expected landing pad label in bits 31:12 of the `x7` register.#
 
 If a software-check exception is not caused then the `ELP` is updated to
 `NO_LP_EXPECTED`.
@@ -293,7 +296,7 @@ else
     no-op
 endif
 ----
-
+#
 <<<
 
 [[unpriv-backward]]
@@ -329,12 +332,12 @@ to/from the shadow stack and to check the integrity of the return address. The
 extension provides instructions to support common stack maintenance operations
 such as stack unwinding and stack switching.
 
-When Zicfiss is enabled, each function that needs to spill the link register,
+[#norm:zicfiss_link_reg_func_enter]#When Zicfiss is enabled, each function that needs to spill the link register,
 typically non-leaf functions, store the link register value to the regular stack
 and a shadow copy of the link register value to the shadow stack when the
-function is entered (the prologue). When such a function returns (the
+function is entered (the prologue).# [#norm:zicfiss_link_reg_func_return]#When such a function returns (the
 epilogue), the function loads the link register from the regular stack and
-the shadow copy of the link register from the shadow stack. [#norm:zicfiss_stack_compare#]#Then, the link
+the shadow copy of the link register from the shadow stack.# [#norm:zicfiss_stack_compare]#Then, the link
 register value from the regular stack and the shadow link register value from
 the shadow stack are compared. A mismatch of the two values is indicative of a
 subversion of the return address control variable and causes a software-check
@@ -382,17 +385,17 @@ requires S-mode to be implemented. Use of Zicfiss in M-mode is not supported.
 The Zicfiss extension introduces the following instructions:
 
 * Push to the shadow stack (See <<SS_PUSH>>)#
-** [#norm:zicfiss_sspush_enc#]#`SSPUSH x1` and `SSPUSH x5` - encoded using `MOP.RR.7`#
-** [#norm:zicfiss_c-sspush#]#`C.SSPUSH x1` - encoded using `C.MOP.1`#
+** [#norm:sspush_enc]#`SSPUSH x1` and `SSPUSH x5` - encoded using `MOP.RR.7`#
+** [#norm:c-sspush_enc]#`C.SSPUSH x1` - encoded using `C.MOP.1`#
 
 * Pop from the shadow stack (See <<SS_POP>>)
-** [#norm:zicfiss_sspopchk_x1#]#`SSPOPCHK x1` and `SSPOPCHK x5` - encoded using `MOP.R.28`#
-** [#norm:zicfiss_sspopchk_x5#]#`C.SSPOPCHK x5` - encoded using `C.MOP.5`#
+** [#norm:sspopchk_enc]#`SSPOPCHK x1` and `SSPOPCHK x5` - encoded using `MOP.R.28`#
+** [#norm:c-sspopchk_enc]#`C.SSPOPCHK x5` - encoded using `C.MOP.5`#
 
 * Read the value of `ssp` into a register (See <<SSP_READ>>)
-** [#norm:zicfiss_ssrdp#]#`SSRDP` - encoded using `MOP.R.28`#
+** [#norm:ssrdp_enc]#`SSRDP` - encoded using `MOP.R.28`#
 
-* Perform an atomic swap from a shadow stack location (See <<SSAMOSWAP>>)
+* [#norm:atomic_swap]#Perform an atomic swap from a shadow stack location (See <<SSAMOSWAP>>)#
 ** `SSAMOSWAP.W` and `SSAMOSWAP.D`
 
 Zicfiss does not use all encodings of `MOP.RR.7` or `MOP.R.28`. When a
@@ -402,10 +405,10 @@ redefined by another extension.
 
 ==== Shadow Stack Pointer (`ssp`)
 
-The `ssp` CSR is an unprivileged read-write (URW) CSR that reads and writes
-`XLEN` low order bits of the shadow stack pointer (`ssp`). The CSR address is
-0x011. [#norm:ssp_width#]#There is no high CSR defined as the `ssp` is always as wide as the `XLEN`
-of the current privilege mode.# [#norm:ssp_read_only_bits#]#The bits 1:0 of `ssp` are read-only zero. If the
+[#norm:ssp_op]#The `ssp` CSR is an unprivileged read-write (URW) CSR that reads and writes
+`XLEN` low order bits of the shadow stack pointer (`ssp`).# [#norm:ssp_addr]#The CSR address is
+0x011.# [#norm:ssp_sz]#There is no high CSR defined as the `ssp` is always as wide as the `XLEN`
+of the current privilege mode.# [#norm:ssp-field_1_0]#The bits 1:0 of `ssp` are read-only zero. If the
 UXLEN or SXLEN may never be 32, then the bit 2 is also read-only zero.#
 
 <<<
@@ -414,7 +417,7 @@ UXLEN or SXLEN may never be 32, then the bit 2 is also read-only zero.#
 
 [[SS_PUSH]]
 ==== Push to the Shadow Stack
-[[norm:shadow_stack_push]]
+[[norm:ss_push]]
 A shadow stack push operation is defined as decrement of the `ssp` by `XLEN/8`
 followed by a store of the value in the link register to memory at the new top
 of the shadow stack.
@@ -444,14 +447,15 @@ of the shadow stack.
 ], config:{lanes: 1, hspace:1024}}
 ....
 
-[#norm:zicfiss_sspush_x1_x5#]#Only `x1` and `x5` registers are supported as `rs2` for `SSPUSH`.# [#norm:zicfiss_16_bit_push#]#Zicfiss
+Only `x1` and `x5` registers are supported as `rs2` for `SSPUSH`. Zicfiss
 provides a 16-bit version of the `SSPUSH x1` instruction using the Zcmop
-defined `C.MOP.1` encoding. The `C.SSPUSH x1` expands to `SSPUSH x1`.#
+defined `C.MOP.1` encoding. The `C.SSPUSH x1` expands to `SSPUSH x1`.
 
+[[norm:sspush_c-sspush_instr]]
 The `SSPUSH` instruction and its compressed form `C.SSPUSH` can be used to push
-a link register on the shadow stack. [#norm:sspush_c-sspush#]#The `SSPUSH` and `C.SSPUSH` instructions
+a link register on the shadow stack. The `SSPUSH` and `C.SSPUSH` instructions
 perform a store identically to the existing store instructions, with the
-difference that the base is implicitly `ssp` and the width is implicitly `XLEN`.#
+difference that the base is implicitly `ssp` and the width is implicitly `XLEN`.
 
 The operation of the `SSPUSH` and `C.SSPUSH` instructions is as follows:
 
@@ -471,7 +475,7 @@ shadow stack completes successfully.
 
 [[SS_POP]]
 ==== Pop from the Shadow Stack
-[[norm:shadow_stack_pop]]
+[[norm:ss_pop]]
 A shadow stack pop operation is defined as an `XLEN` wide read from the
 current top of the shadow stack followed by an increment of the `ssp` by
 `XLEN/8`.
@@ -500,9 +504,9 @@ current top of the shadow stack followed by an increment of the `ssp` by
 ], config:{lanes: 1, hspace:1024}}
 ....
 
-[#norm:zicfiss_sspop_x1_x5#]#Only `x1` and `x5` registers are supported as `rs1` for `SSPOPCHK`.# [#norm:zicfiss_16_bit_sspop#]#Zicfiss
+Only `x1` and `x5` registers are supported as `rs1` for `SSPOPCHK`. Zicfiss
 provides a 16-bit version of the `SSPOPCHK x5` using the Zcmop defined `C.MOP.5`
-encoding. The `C.SSPOPCHK x5` expands to `SSPOPCHK x5`.#
+encoding. The `C.SSPOPCHK x5` expands to `SSPOPCHK x5`.
 
 Programs with a shadow stack push the return address onto the regular stack as
 well as the shadow stack in the prologue of non-leaf functions. When returning
@@ -572,7 +576,7 @@ not need to spill the link register. Consequently, the return value may be held
 in the link register itself for the duration of the leaf function's execution.
 ====
 
-[[norm:sspopchk-c_load]]
+[[norm:sspopchk-c_load_op]]
 The `C.SSPOPCHK`, and `SSPOPCHK` instructions perform a load identically to the
 existing load instructions, with the difference that the base is implicitly
 `ssp` and the width is implicitly `XLEN`.
@@ -595,13 +599,13 @@ if (xSSE == 1)
 endif
 ----
 
-[[norm:ssp_pop_exception]]
+[[norm:sspop_exception]]
 If the value loaded from the address in `ssp` does not match the value in `rs1`,
 a software-check exception (cause=18) is raised with `__x__tval` set to "shadow
 stack fault (code=3)". The software-check exception caused by `SSPOPCHK`/
 `C.SSPOPCHK` is lower in priority than a load/store/AMO access-fault exception.
 
-[[norm:ssp_ppop_increment]]
+[[norm:sspop_increment]]
 The `ssp` is incremented by `SSPOPCHK` and `C.SSPOPCHK` only if the load from
 the shadow stack completes successfully and no software-check exception is
 raised.
@@ -650,7 +654,7 @@ and thus may be used to transiently forward the data from such stores to
 [[SSP_READ]]
 ==== Read `ssp` into a Register
 
-[[norm:ssp_read]]
+[[norm:ssrdp_read]]
 The `SSRDP` instruction is provided to move the contents of `ssp` to a destination
 register.
 
@@ -773,7 +777,7 @@ back_cfi_not_active:
 ], config:{lanes: 1, hspace:1024}}
 ....
 
-[[norm:rv32_ssamoswap-w]]
+[[norm:rv32_ssamoswap-w_op]]
 For RV32, `SSAMOSWAP.W` atomically loads a 32-bit data value from address of a
 shadow stack location in `rs1`, puts the loaded value into register `rd`, and
 stores the 32-bit value held in `rs2` to the original address in `rs1`.
@@ -799,7 +803,7 @@ data values.
   endif
 ----
 
-[[norm:rv64_ssamoswap-w]]
+[[norm:rv64_ssamoswap-w_op]]
 For RV64, `SSAMOSWAP.W` atomically loads a 32-bit data value from address of a
 shadow stack location in `rs1`, sign-extends the loaded value and puts it in
 `rd`, and stores the lower 32 bits of the value held in `rs2` to the original
