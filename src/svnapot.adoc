@@ -1,0 +1,166 @@
+[[svnapot]]
+== "Svnapot" Extension for NAPOT Translation Contiguity, Version 1.0
+
+In Sv39, Sv48, and Sv57, when a PTE has N=1, the PTE represents a
+translation that is part of a range of contiguous virtual-to-physical
+translations with the same values for PTE bits 5–0. Such ranges must be
+of a naturally aligned power-of-2 (NAPOT) granularity larger than the
+base page size.
+
+The Svnapot extension depends on the Sv39 extension.
+
+[[ptenapot]]
+.Page table entry encodings when __pte__.N=1
+[%autowidth,float="center",align="center",cols="^,^,<,^",options="header"]
+|===
+|i |_pte_._ppn_[_i_] |Description |_pte_.__napot_bits__
+|0 +
+0 +
+0 +
+0 +
+0 +
+&#8805;1
+|`x xxxx xxx1` +
+`x xxxx xx1x` +
+`x xxxx x1xx` +
+`x xxxx 1000` +
+`x xxxx 0xxx` +
+`x xxxx xxxx`
+|_Reserved_ +
+_Reserved_ +
+_Reserved_ +
+64 KiB contiguous region +
+_Reserved_ +
+_Reserved_
+| - +
+- +
+- +
+4 +
+- +
+-
+|===
+
+NAPOT PTEs behave identically to non-NAPOT PTEs within the
+address-translation algorithm in <<sv32algorithm>>,
+except that:
+
+* If the encoding in _pte_ is valid according to
+<<ptenapot>>, then instead of returning the original
+value of _pte_, implicit reads of a NAPOT PTE return a copy
+of _pte_ in which __pte__.__ppn__[__i__][__pte__.__napot_bits__-1:0] is replaced by
+__vpn__[__i__][__pte__.__napot_bits__-1:0]. If the encoding in _pte_ is reserved according to
+<<ptenapot>>, then a page-fault exception must be raised.
+* Implicit reads of NAPOT page table entries may create
+address-translation cache entries mapping
+_a_ + _j_×PTESIZE to a copy of _pte_ in which _pte_._ppn_[_i_][_pte_.__napot_bits__-1:0]
+is replaced by _vpn[i][pte.napot_bits_-1:0], for any or all _j_ such that
+__j__ >> __napot_bits__ = __vpn__[__i__] >> __napot_bits__, all for the address space identified in _satp_ as loaded by step 1.
+
+[NOTE]
+====
+The motivation for a NAPOT PTE is that it can be cached in a TLB as one
+or more entries representing the contiguous region as if it were a
+single (large) page covered by a single translation. This compaction can
+help relieve TLB pressure in some scenarios. The encoding is designed to
+fit within the pre-existing Sv39, Sv48, and Sv57 PTE formats so as not
+to disrupt existing implementations or designs that choose not to
+implement the scheme. It is also designed so as not to complicate the
+definition of the address-translation algorithm.
+
+The address translation cache abstraction captures the behavior that
+would result from the creation of a single TLB entry covering the entire
+NAPOT region. It is also designed to be consistent with implementations
+that support NAPOT PTEs by splitting the NAPOT region into TLB entries
+covering any smaller power-of-two region sizes. For example, a 64 KiB
+NAPOT PTE might trigger the creation of 16 standard 4 KiB TLB entries,
+all with contents generated from the NAPOT PTE (even if the PTEs for the
+other 4 KiB regions have different contents).
+
+In typical usage scenarios, NAPOT PTEs in the same region will have the
+same attributes, same PPNs, and same values for bits 5-0. RSW remains
+reserved for supervisor software control. It is the responsibility of
+the OS and/or hypervisor to configure the page tables in such a way that
+there are no inconsistencies between NAPOT PTEs and other NAPOT or
+non-NAPOT PTEs that overlap the same address range. If an update needs
+to be made, the OS generally should first mark all of the PTEs invalid,
+then issue SFENCE.VMA instruction(s) covering all 4 KiB regions within
+the range (either via a single SFENCE.VMA with _rs1_=`x0`, or with
+multiple SFENCE.VMA instructions with _rs1_≠`x0`), then update the PTE(s), as described in <<sfence.vma>>, unless any inconsistencies are known to be benign. If any inconsistencies do exist, then the effect is the same as when SFENCE.VMA
+is used incorrectly: one of the translations will be chosen, but the
+choice is unpredictable.
+
+If an implementation chooses to use a NAPOT PTE (or cached version
+thereof), it might not consult the PTE directly specified by the
+algorithm in <<sv32algorithm>> at all. Therefore, the D
+and A bits may not be identical across all mappings of the same address
+range even in typical use cases The operating system must query all
+NAPOT aliases of a page to determine whether that page has been accessed
+and/or is dirty. If the OS manually sets the A and/or D bits for a page,
+it is recommended that the OS also set the A and/or D bits for other
+NAPOT aliases as appropriate in order to avoid unnecessary traps.
+
+Just as with normal PTEs, TLBs are permitted to cache NAPOT PTEs whose V
+(Valid) bit is clear.
+
+Depending on need, the NAPOT scheme may be extended to other
+intermediate page sizes and/or to other levels of the page table in the
+future. The encoding is designed to accommodate other NAPOT sizes should
+that need arise. For example:
+
+__
+
+[%autowidth,float="center",align="center",cols="^,^,<,^",options="header"]
+|===
+|i |_pte_._ppn_[_i_] |Description |_pte_.__napot_bits__
+|0 +
+0 +
+0 +
+0 +
+0 +
+... +
+1 +
+1 +
+...
+|`x xxxx xxx1` +
+`x xxxx xx10` +
+`x xxxx x100` +
+`x xxxx 1000` +
+`x xxx1 0000` +
+... +
+`x xxxx xxx1` +
+`x xxxx xx10` +
+...
+|8 KiB contiguous region +
+16 KiB contiguous region +
+32 KiB contiguous region +
+64 KiB contiguous region +
+128 KiB contiguous region +
+... +
+4 MiB contiguous region +
+8 MiB contiguous region +
+...
+| 1 +
+2 +
+3 +
+4 +
+5 +
+... +
+1 +
+2 +
+...
+|===
+
+In such a case, an implementation may or may not support all options.
+The discoverability mechanism for this extension would be extended to
+allow system software to determine which sizes are supported.
+
+Other sizes may remain deliberately excluded, so that PPN bits not being
+used to indicate a valid NAPOT region size (e.g., the least-significant
+bit of _pte_._ppn_[_i_]) may be repurposed for other uses in the
+future.
+
+However, in case finer-grained intermediate page size support proves not
+to be useful, we have chosen to standardize only 64 KiB support as a
+first step.
+====
+  
