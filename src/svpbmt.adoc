@@ -1,0 +1,127 @@
+[[svpbmt]]
+== "Svpbmt" Extension for Page-Based Memory Types, Version 1.0
+
+In Sv39, Sv48, and Sv57, bits 62-61 of a leaf page table entry indicate
+the use of page-based memory types that override the PMA(s) for the
+associated memory pages. The encoding for the PBMT bits is captured in
+<<pbmt>>.
+
+The Svpbmt extension depends on the Sv39 extension.
+
+[[pbmt]]
+.Encodings for PBMT field in Sv39, Sv48, and Sv57 PTEs.
+[%autowidth,float="center",align="center",cols="^,^,<",options="header"]
+|===
+|Mode |Value |Requested Memory Attributes
+|PMA +
+NC +
+IO +
+-
+|0 +
+1 +
+2 +
+3
+|None +
+Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory +
+Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O +
+_Reserved for future standard use_
+|===
+
+Implementations may override additional PMAs not explicitly listed in
+<<pbmt>>.
+For example, to be consistent with the characteristics of a typical I/O region,
+a misaligned memory access to a page with PBMT=IO might raise an exception,
+even if the underlying region were main memory and the same access would have
+succeeded for PBMT=PMA.
+
+[NOTE]
+====
+Future extensions may provide more and/or finer-grained control over
+which PMAs can be overridden.
+====
+
+For non-leaf PTEs, bits 62-61 are reserved for future standard use.
+Until their use is defined by a standard extension, they must be cleared
+by software for forward compatibility, or else a page-fault exception is
+raised.
+
+For leaf PTEs, setting bits 62-61 to the value 3 is reserved for future
+standard use. Until this value is defined by a standard extension, using
+this reserved value in a leaf PTE raises a page-fault exception.
+
+When PBMT settings override a main memory page into I/O or vice versa,
+memory accesses to such pages obey the memory ordering rules of the
+final effective attribute, as follows.
+
+If the underlying physical memory attribute for a page is I/O, and the
+page has PBMT=NC, then accesses to that page obey RVWMO. However,
+accesses to such pages are considered to be _both_ I/O and main memory
+accesses for the purposes of FENCE, _.aq_, and _.rl_.
+
+If the underlying physical memory attribute for a page is main memory,
+and the page has PBMT=IO, then accesses to that page obey strong channel
+0 I/O ordering rules.
+However, accesses to
+such pages are considered to be _both_ I/O and main memory accesses for
+the purposes of FENCE, _.aq_, and _.rl_.
+
+[NOTE]
+====
+A device driver written to rely on I/O strong ordering rules will not
+operate correctly if the address range is mapped with PBMT=NC. As such,
+this configuration is discouraged.
+
+It will often still be useful to map physical I/O regions using PBMT=NC
+so that write combining and speculative accesses can be performed. Such
+optimizations will likely improve performance when applied with adequate
+care.
+====
+
+When Svpbmt is used with non-zero PBMT encodings, it is possible for
+multiple virtual aliases of the same physical page to exist
+simultaneously with different memory attributes. It is also possible for
+a U-mode or S-mode mapping through a PTE with Svpbmt enabled to observe
+different memory attributes for a given region of physical memory than a
+concurrent access to the same page performed by M-mode or when
+MODE=Bare. In such cases, the behaviors dictated by the attributes
+(including coherence, which is otherwise unaffected) may be violated.
+
+Accessing the same location using different attributes that are both
+non-cacheable (e.g., NC and IO) does not cause loss of coherence, but
+might result in weaker memory ordering than the stricter attribute
+ordinarily guarantees. Executing a `fence iorw, iorw` instruction
+between such accesses suffices to prevent loss of memory ordering.
+
+Accessing the same location using different cacheability attributes may
+cause loss of coherence. Executing the following sequence between such
+accesses prevents both loss of coherence and loss of memory ordering:
+`fence iorw, iorw`, followed by `cbo.flush` to an address of that
+location, followed by a `fence iorw, iorw`.
+
+[NOTE]
+====
+It follows that, if the same location might later be referenced using
+the original attributes, then this sequence must be repeated beforehand.
+
+***
+
+In certain cases, a weaker sequence might suffice to prevent loss of
+coherence. These situations will be detailed following the forthcoming
+formalization of the interaction of the RVWMO memory model with the
+instructions in the Zicbom extension.
+====
+
+When two-stage address translation is enabled within the H extension,
+the page-based memory types are also applied in two stages. First, if
+`hgatp`.MODE is not equal to zero, non-zero G-stage PTE PBMT bits
+override the attributes in the PMA to produce an intermediate set of
+attributes. Otherwise, the PMAs serve as the intermediate attributes.
+Second, if `vsatp`.MODE is not equal to zero, non-zero VS-stage PTE PBMT
+bits override the intermediate attributes to produce the final set of
+attributes used by accesses to the page in question. Otherwise, the
+intermediate attributes are used as the final set of attributes.
+
+NOTE: These final attributes apply to implicit and explicit accesses that
+are subject to both stages of address translation.
+For accesses that are not subject to the first stage of address translation,
+e.g. VS-stage page-table accesses, the intermediate attributes apply instead.
