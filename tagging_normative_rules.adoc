@@ -5,9 +5,60 @@ We use AsciiDoctor's anchor facility to tag normative text which is extracted by
 provided in the link:https://github.com/riscv/docs-resources[docs-resources GitHub repository]
 to create machine-readable and human-readable representations of normative rules.
 
+Normative rules should have unique, short names that are easy to put in testplans. They reference tags in the AsciiDoc source files. The tag name matches the rule name in simple 1-1 cases. The normative rules are curated on a per-document basis with a YAML file listing the rules, their tags, and a short summary. A tool in docs-resources ***give-name generates a JSON file containing all of the normative rules for the document with their tags, as well as a human-readable AsciiDoc table with the same information.
+
+=== Naming Normative Rules
+
+Names should be short, descriptive, and as consistent as possible.  Rules related to an instruction, CSR, or CSR field should start with the instruction, CSR, or filed name.  Dots in the instruction or CSR field are replaced with dashes to keep tools happy.
+
+.Normative Rule Schema
+[options="header"]
+|===
+|Scenario|Format|Example
+|Simple instruction|<instr>_op, <inst>_enc|add_op, c-add_op, add_enc
+|Additional instruction rules|<instr>_<short-descriptor>|sll_op, sll_shamt_rv32, sll_shamt_rv64
+|CSR|<csr_name>_sz, <csr_name>_acc, <csr_name>_mode, <csr_name>_op|mscratch_sz, mscratch_acc, mscratch_mode
+|CSR bitfield|<csr_name>-<field_name>_sz, <csr_name>-<field_name>_acc, <csr_name>-<field_name>_op|mstatus-mpp_sz, mstatus-mpp_acc, mstatus-mpp_op
+|Parameters|<param>_param|pmp_granularity_param
+|Categories|<category>_<short_description>|br_targ, ldst_ea, R-type_operands
+|Extension|<ext>_<short-description>|Sv_bare, Sv48_gigapage, Sv57_terapage, pmp_addr_match
+|===
+
+
+There should be at least two normative rule (op & enc) per instruction, even if there is a single tag describing multiple instructions. inst_enc defines instruction type and op/func fields.
+
+Each CSR typically has at least the following rules, with text from the spec defining the size, access type, privilege mode, and operation.
+
+* sz (size in bits)
+* acc (relates to rw, ro, ro-h, rw-r, rw-rh from UDB)
+* mode (associated privilege mode)
+* op (operation, optional for CSRs such as mscratch that do not affect system behavior)
+
+Each CSR with bitfields should have at least the following rules for each field:
+
+* sz (size in bits)
+* acc (some fields like mstatus.SD may be read-only even if the overall CSR is read/write)
+* op
+
+Reserved instructions, CSR fields, etc. use _rsv suffix.
+
+Each parameter name should exactly match the name in https://github.com/riscv-software-src/riscv-unified-db/tree/main/spec/std/isa/ext[UDB], except that the name is lower case instead of all caps, and is followed by a _param suffix.
+
+=== Naming Normative Rule Tags
+
+.Normative Rule Tag Schema
+[options="header"]
+|===
+|Scenario|Format|Example
+|1-1 rule to tag|norm:<rule-name>|norm:add_op
+|1-many rule to tags|norm:<rule-name>_<modifier> or as needed|norm:lw_op_rv64i, ***
+|many-1 rule to tag|norm:<rule1>_<rule2>... or as needed|norm:shamt_rv64
+|1-1 parameter to tag|norm:<udb_param_name>|norm:PMP_GRANULARITY
+|===
+
 === Tagging Normative Rules in RISC-V International Standards
 
-First, please read the link:https://github.com/riscv/docs-resources/blob/main/normative-rules.md[How to Tag Normative Rules in RISC-V International Standards] for information that applies to all RISC-V International standards. This document provides information such as:
+First, read the link:https://github.com/riscv/docs-resources/blob/main/normative-rules.md[How to Tag Normative Rules in RISC-V International Standards] for information that applies to all RISC-V International standards. This document provides information such as:
 
 * What exactly is a "normative rule"?
 * How does one add normative rule tags to the AsciiDoc files using the AsciiDoc anchor facility?
@@ -19,116 +70,57 @@ First, please read the link:https://github.com/riscv/docs-resources/blob/main/no
 Now that you've read link:https://github.com/riscv/docs-resources/blob/normative-rules.md[How to Tag Normative Rules in RISC-V International Standards], here's some information specific to tagging normative rules
 in the ISA manuals.
 
-The ISA manual builds upon the anchor naming convention of a "norm:" prefix by following it with
-an enum identifying the ISA manual object type, another colon,
-one or more names describing the object(s) related to the tag,
-another colon and finally an ID that identifies the associated behavior.
-It looks like this (where `<>` delimit names, `[]` indicates optional, `*` means 0 or more, and
-`_` is used to separate multiple object names if needed):
+The ISA manual builds upon the anchor naming convention of a "norm:" prefix by following it with a name.  If there is a 1:1 relationship between the rule and the tag (the common case), then the name is simply the rule name.  If there is a many:1 or 1:many relationship, then see examples below.
 
-[source]
-norm:<object-type>:<object-name>[_<object-name>]*:<id>
+=== Normative Rule Curation
 
-There are some cases (e.g., CSR field names) where there is a hierachy of object names and so there
-are additional colon-separated object-names.
-Here's what it looks like with 2 hiearchy levels with a parent/child relationship:
+Every normative rule is associated with one ratified specification document, such as a chapter of an ISA manual or a profile.  The normative rule may relate to more than one document but it must always have one primary document.  The normative rule is curated in a YAML file associated with the primary document.
 
-[source]
-norm:<object-type>:<parent-object-name>[_<parent-object-name>]*:<child-object-name>[_child-<object-name>]*:<id>
+Each specification AsciiDoc file has a corresponding YAML file listing ("curating") the normative rules primarily associated with that specification.  For example, the https://github.com/riscv/riscv-isa-manual/blob/main/src/rv64.adoc[rv64.adoc] chapter of the Unprivileged ISA Manual has a corresponding rv64.yaml file in normative_rules.
 
-[NOTE]
-We aren't too worried about having long tag names since they are invisible unless viewing the
-raw AsciiDoc source so don't clutter the ISA manual output formats like PDFs. So, we've leaned
-in the direction of having longer names that provide information about what is being tagged.
+The YAML file lists all of the normative rules contained in that document.  Each rule must have a rule name and a list of one or more tags.  It should have a short summary.  https://github.com/riscv-software-src/riscv-unified-db[UDB] contains additional metadata and a pointer to the normative rule name, so the rule does not attempt to duplicate complex metadata already captured in UDB.  The form of the YAML is:
 
-The justification for this naming convention is:
+.rv64.yaml
+[source,yaml]
+----
+$schema: "normative_rules_schema.json#"
 
-* Encourages consistency and regularity in names
-* Helps ensure anchor names are unique across both ISA manuals (they are in one global namespace)
-* Provides some information about which ISA objects (e.g., instructions, extensions, CSRs) are related to the tagged text
+normative_curations:
+  # 1-to-1 rule to tag
+  - name: rv64_x_sz
+    summary: XLEN=64
+    tags: ["norm:rv64_x_sz"]
+  # many-to-1 rules to tag
+  - names: [sll_shamt_rv64, srl_shamt_rv64, sra_shamt_rv64]
+    tags: norm:shamt_rv64
+  # 1-to-many rule to tags where multiple tags are needed to create a complete self-contained rule
+  - name: lh_rv64i_op
+    summary: lh 64-bit sign extension
+    tags:["norm:lw_rv64i_op", "norm:subword_rv64i_load"]
+  # another 1-to-many rule to tags where multiple tags are needed to create a complete self-contained rule
+  - name: lhu_rv64i_op
+    summary: lhu 64-bit zero extension
+    tags:["norm:lw_rv64i_op", "norm:lwu_rv64i_op", "norm:subword_rv64i_load"]
+----
 
-=== Naming Convention Details
+These rules reference the following tags in the AsciiDoc:
 
-The following table shows the supported ISA object types, the naming convention for them,
-and examples for each.
+.rv64.adoc
+[source,adoc]
+----
+[[norm:rv64_x_sz]]
+RV64I widens the integer registers and supported user address space to
+64 bits (XLEN=64 in <<gprs>>).
 
-[%autowidth]
-|===
-| Format | Description
+SLL, SRL, and SRA perform logical left, logical right, and arithmetic
+right shifts on the value in register _rs1_ by the shift amount held in
+register _rs2_. [#norm:shamt_rv64]#In RV64I, only the low 6 bits of _rs2_ are considered
+for the shift amount.#
 
-| Format `norm:base:<base-name>:<id>` +
-Example `norm:base:rv32i:xregsz`
-| One base ISA (rv32i/rv32e/rv64i)
+[#norm:lw_rv64i_op]#The LW instruction loads a 32-bit value from memory and sign-extends
+this to 64 bits before storing it in register _rd_ for RV64I.#
+[#norm:lwu_rv64i_op]#The LWU instruction, on the other hand, zero-extends the 32-bit value from
+memory for RV64I.# [#norm:subword_rv64i_load]#LH and LHU are defined analogously for 16-bit values, as are LB and LBU for 8-bit values.#
+----
 
-| Format `norm:bases:<base-name>[_<base-name>]+:<id>` +
-Example `norm:bases:rv32i_rv64i:num-xregs`
-| List of bases
-
-| Format `norm:basegrp:<group-name>:<id>` +
-Example `norm:base:all:x0eq0`
-| Named group of bases (e.g., rv32, all)
-
-| Format `norm:ext:<ext-name>:<id>` +
-Example `norm:Zilsd_reg_pairs`
-| Single extension
-
-| Format `norm:exts:<ext-name>[_<ext-name>]:<id>` +
-Example `norm:exts:F_D:num-fregs`
-| List of extensions
-
-| Format `norm:extgrp:<group-name>:<id>` +
-Example `norm:extgrp:security:attacks`
-| Named group of extensions
-
-| Format `norm:enc:insttable:<inst-name>` +
-Example `norm:enc:insttable:add`
-| Table cell for instruction encoding
-
-| Format `norm:inst:<inst-name>:<id>` +
-Example `norm:add_op`
-| Single instruction
-
-| Format `norm:insts:<inst-name>[_<inst-name>]+:<id>` +
-Example `norm:add_sub_overflow`
-| List of instructions
-
-| Format `norm:instgrp:<group-name>:<id>` +
-Example `norm:instgrp:division:div_by_zero`
-| Named group of insts (e.g., branch, load)
-
-| Format `norm:csr:<csr-name>:<id>` +
-Example `norm:misa_sz`
-| Single CSR
-
-| Format `norm:csrs:<csr-name>[_<csr-name>]+:<id>` +
-Example `norm:csrs:mstatus_sstatus:sz`
-| List of CSRs
-
-| Format `norm:csrgrp:<group-name>:<id>` +
-Example `norm:csrgrp:status:sz`
-| Named group of CSRs
-
-| Format `norm:csrfld:<csr-name>:<field-name>:<id>` +
-Example `norm:misa_mxl_base_int_sz`
-| Single CSR field
-
-| Format `norm:csrflds:<csr-name>:<field-name>[_<field-name>]+:<id>` +
-Example `norm:csrflds:hip:vseip_vseie:ro`
-| List of fields in the same CSR
-
-| Format `norm:csrsfld:<csr-name>[_<csr-name>]+:<field-name>:<id>` +
-Example `norm:csrsfld:vsip_vsie:ssi:operation`
-| Same field in the listed CSRs
-
-| Format `norm:param:<param-name>:<id>` +
-Example `norm:endianness_little_or_big`
-| Single parameter
-
-| Format `norm:params:<param-name>[_<param-name>]+:<id>` +
-Example `norm:params:mutable-misa-a_mutable-misa-b:operation`
-| List of parameters
-
-| Format `norm:paramgrp:<group-name>:<id>` +
-Example `norm:paramgrp:mtval-va-report:operation`
-| Named group of parameters
-|===
+From the normative curation, a tool ***name] in docs-resources generates a JSON file containing all of the normative rules for the document with their tags, as well as a human-readable AsciiDoc table with the same information.
