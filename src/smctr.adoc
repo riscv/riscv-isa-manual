@@ -229,15 +229,37 @@ _The value in configurable depth lies in supporting VM migration.  It is expecte
 
 The 32-bit `sctrstatus` register grants access to CTR status information and is updated by the hardware whenever CTR is active.  CTR is active when the current privilege mode is enabled for recording and CTR is not frozen.
 
-.Supervisor Control Transfer Records Status Register Format
+.Virtual Supervisor Control Transfer Records Control Register Format
 [%unbreakable]
 [wavedrom, , svg]
 ....
 {reg: [
-    {bits:  8, name: 'WRPTR'},
-    {bits:  23, name: '<i>WPRI</i>'},
-    {bits:  1, name: 'FROZEN'},
-], config:{lanes: 2, hspace:1024}}
+    {bits:  1, name: 'U'},
+    {bits:  1, name: 'S'},
+    {bits:  5, name: '<i>WPRI</i>'},
+    {bits:  1, name: 'RASEMU'},
+    {bits:  1, name: 'STE'},
+    {bits:  2, name: '<i>WPRI</i>'},
+    {bits:  1, name: 'BPFRZ'},
+    {bits:  1, name: 'LCOFIFRZ'},
+    {bits:  20, name: '<i>WPRI</i>'},
+    {bits:  1, name: 'EXCINH'},
+    {bits:  1, name: 'INTRINH'},
+    {bits:  1, name: 'TRETINH'},
+    {bits:  1, name: 'NTBREN'},
+    {bits:  1, name: 'TKBRINH'},
+    {bits:  2, name: '<i>WPRI</i>'},
+    {bits:  1, name: 'INDCALLINH'},
+    {bits:  1, name: 'DIRCALLINH'},
+    {bits:  1, name: 'INDJMPINH'},
+    {bits:  1, name: 'DIRJMPINH'},
+    {bits:  1, name: 'CORSWAPINH'},
+    {bits:  1, name: 'RETINH'},
+    {bits:  1, name: 'INDLJMPINH'},
+    {bits:  1, name: 'DIRLJMPINH'},
+    {bits:  12, name: '<i>WPRI</i>'},
+    {bits:  4, name: 'Custom'},
+], config:{lanes: 8, hspace:1024}}
 ....
 
 .Supervisor Control Transfer Records Status Register Field Definitions
@@ -365,12 +387,12 @@ CC[15:12]) and Cycle Count Mantissa (CCM, in CC[11:0]). See
 <<Cycle Counting>>. |WARL
 |===
 
-Undefined bits in `ctrdata` are WPRI. Undefined bits must be implemented as read-only 0, unless a <<_custom_extensions, custom extension>> is implemented and enabled.
+Undefined bits in `ctrdata` are WPRI. Undefined bits must be implemented as read-only 0, unless a <<Custom Extensions, _custom _extension>> is implemented and enabled.
 
 [NOTE]
 [%unbreakable]
 ====
-_Like the <<_transfer_type_filtering, Transfer Type Filtering>> bits in `mctrctl`, the `ctrdata`.TYPE bits leverage the E-trace itype encodings._
+_Like the <<Transfer Type Filtering, _transfer _type _filtering>> bits in `mctrctl`, the `ctrdata`.TYPE bits leverage the E-trace itype encodings._
 ====
 
 == Instructions
@@ -379,17 +401,17 @@ _Like the <<_transfer_type_filtering, Transfer Type Filtering>> bits in `mctrctl
 [wavedrom, ,svg]
 ....
 {reg: [
-  {bits: 7,  name: 'opcode',    attr: ['7', 'SYSTEM'], type: 8},
-  {bits: 5,  name: 'rd',    attr: ['5', '0'], type: 2},
-  {bits: 3,  name: 'funct3', attr: ['3', '0'], type: 8},
-  {bits: 5,  name: 'rs1',   attr: ['5', '0'], type: 4},
-  {bits: 12, name: 'func12', attr: ['12', 'SCTRCLR (0x104)'], type: 8},
+  {bits: 7,  name: 'opcode',    attr: ['7', 'SYSTEM']},
+  {bits: 5,  name: 'rd',    attr: ['5', '0']},
+  {bits: 3,  name: 'funct3', attr: ['3', '0']},
+  {bits: 5,  name: 'rs1',   attr: ['5', '0']},
+  {bits: 12, name: 'func12', attr: ['12', 'SCTRCLR (0x104)']},
 ]}
 ....
 
 The SCTRCLR instruction performs the following operations:
 
-* Zeroes all  CTR <<_entry_registers, Entry Registers>>, for all DEPTH values
+* Zeroes all  CTR <<Entry Registers, _entry _registers>>, for all DEPTH values
 * Zeroes the CTR cycle counter and CCV (see <<Cycle Counting>>)
 
 Any read of `ctrsource`, `ctrtarget`, or `ctrdata` that follows SCTRCLR, such that it precedes the next qualified control transfer, will return the value 0.  Further, the first recorded transfer following SCTRCLR will have `ctrdata`.CCV=0.
@@ -421,7 +443,7 @@ When `hstateen0`.CTR=0, qualified control transfers executed while V=1 will cont
 [NOTE]
 [%unbreakable]
 ====
-_See <<indirect-csr>> for how bit 60 in `mstateen0` and `hstateen0` can also restrict access to `sireg*`/`siselect` and `vsireg*`/`vsiselect` from privilege modes less privileged than M-mode._
+_See xref:indirectcsr.adoc[Chapter 5] for how bit 60 in `mstateen0` and `hstateen0` can also restrict access to `sireg*`/`siselect` and `vsireg*`/`vsiselect` from privilege modes less privileged than M-mode._
 ====
 
 [NOTE]
@@ -439,7 +461,7 @@ CTR records qualified control transfers.  Control transfers are qualified if the
 * `sctrstatus`.FROZEN is not set
 * The transfer completes/retires
 
-Such qualified transfers update the <<_entry_registers, Entry Registers>> at logical entry 0.  As a result, older entries are pushed down the stack; the record previously in logical entry 0 moves to logical entry 1, the record in logical entry 1 moves to logical entry 2, and so on.  If the CTR buffer is full, the oldest recorded entry (previously at entry depth-1) is lost.
+Such qualified transfers update the <<Entry Registers, _entry _registers>> at logical entry 0.  As a result, older entries are pushed down the stack; the record previously in logical entry 0 moves to logical entry 1, the record in logical entry 1 moves to logical entry 2, and so on.  If the CTR buffer is full, the oldest recorded entry (previously at entry depth-1) is lost.
 
 Recorded transfers will set the `ctrsource`.V bit to 1, and will update all implemented record fields.
 
@@ -495,7 +517,7 @@ Transitions between VS/VU-mode and M/HS-mode are unique in that they effect a ch
 
 [NOTE]
 ====
-_Consider an exception that traps from VU-mode to HS-mode, with `vsctrctl`.U=1 and `sctrctl`.S=1.  Because both the source mode and target mode are enabled for recording, whether the trap is recorded then depends on the CTR configuration (e.g., the <<_transfer_type_filtering, transfer type filter>> bits) in `vsctrctl`, not in `sctrctl`._
+_Consider an exception that traps from VU-mode to HS-mode, with `vsctrctl`.U=1 and `sctrctl`.S=1.  Because both the source mode and target mode are enabled for recording, whether the trap is recorded then depends on the CTR configuration (e.g., the <<transfer type filter, _transfer _type _filtering>> bits) in `vsctrctl`, not in `sctrctl`._
 ====
 
 ==== External Traps
@@ -756,4 +778,4 @@ _When a guest uses the SBI Supervisor Software Events (SSE) extension, the LCOFI
 
 == Custom Extensions
 
-Any custom CTR extension must be associated with a non-zero value within the designated custom bits in `__x__ctrctl`.  When the custom bits hold a non-zero value that enables a custom extension, the extension may alter standard CTR behavior, and may define new custom status fields within `sctrstatus` or the CTR <<_entry_registers, Entry Registers>>.  All custom status fields, and standard status fields whose behavior is altered by the custom extension, must revert to standard behavior when the custom bits hold zero.  This includes read-only 0 behavior for any bits undefined by any implemented standard extensions.
+Any custom CTR extension must be associated with a non-zero value within the designated custom bits in `__x__ctrctl`.  When the custom bits hold a non-zero value that enables a custom extension, the extension may alter standard CTR behavior, and may define new custom status fields within `sctrstatus` or the CTR <<Entry Registers, _entry _registers>>.  All custom status fields, and standard status fields whose behavior is altered by the custom extension, must revert to standard behavior when the custom bits hold zero.  This includes read-only 0 behavior for any bits undefined by any implemented standard extensions.
