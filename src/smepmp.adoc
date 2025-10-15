@@ -4,7 +4,13 @@
 
 Being able to access the memory of a process running at a high privileged execution mode, such as the Supervisor or Machine mode, from a lower privileged mode such as the User mode, introduces an obvious attack vector since it allows for an attacker to perform privilege escalation, and tamper with the code and/or data of that process. A less obvious attack vector exists when the reverse happens, in which case an attacker instead of tampering with code and/or data that belong to a high-privileged process, can tamper with the memory of an unprivileged / less-privileged process and trick the high-privileged process to use or execute it.
 
-To prevent this attack vector, two mechanisms known as Supervisor Memory Access Prevention (SMAP) and Supervisor Memory Execution Prevention (SMEP) were introduced in recent systems. The first one prevents the OS from accessing the memory of an unprivileged process unless a specific code path is followed, and the second one prevents the OS from executing the memory of an unprivileged process at all times. RISC-V already includes support for SMAP, through the ``sstatus.SUM`` bit, and for SMEP by always denying execution of virtual memory pages marked with the U bit, with Supervisor mode (OS) privileges, as mandated on the Privilege Spec.
+Two mechanisms combine to prevent this attack vector.
+The first one prevents the OS from accessing the memory of an unprivileged
+process unless a specific code path is followed, and the second one prevents
+the OS from executing the memory of an unprivileged process at all times.
+RISC-V already includes support for the former through the ``sstatus.SUM`` bit,
+and for the latter by always denying supervisor execution of virtual memory
+pages marked with the U bit.
 
 
 [NOTE]
@@ -24,12 +30,12 @@ Terms:
 
 However, there are no such mechanisms available on Machine mode in the current (v1.11) Privileged Spec. It is not possible for a PMP rule to be *enforced* only on non-Machine modes and *denied* on Machine mode, to only allow access to a memory region by less-privileged modes. It is only possible to have a *locked* rule that will be *enforced* on all modes, or a rule that will be *enforced* on non-Machine modes and be *ignored* by Machine mode. So for any physical memory region which is not protected with a Locked rule, Machine mode has unlimited access, including the ability to execute it.
 
-Without being able to protect less-privileged modes from Machine mode, it is not possible to prevent the mentioned attack vector. This becomes even more important for RISC-V than on other architectures, since implementations are allowed where a hart only has Machine and User modes available, so the whole OS will run on Machine mode instead of the non-existent Supervisor mode. In such implementations the attack surface is greatly increased, and the same kind of attacks performed on Supervisor mode and mitigated through SMAP/SMEP, can be performed on Machine mode without any available mitigations. Even on implementations with Supervisor mode present attacks are still possible against the Firmware and/or the Secure Monitor running on Machine mode.
+Without being able to protect less-privileged modes from Machine mode, it is not possible to prevent the mentioned attack vector. This becomes even more important for RISC-V than on other architectures, since implementations are allowed where a hart only has Machine and User modes available, so the whole OS will run on Machine mode instead of the non-existent Supervisor mode. In such implementations the attack surface is greatly increased, and the same kind of attacks performed on Supervisor mode and mitigated through the virtual-memory system, can be performed on Machine mode without any available mitigations. Even on implementations with Supervisor mode present attacks are still possible against the Firmware and/or the Secure Monitor running on Machine mode.
 
-[[proposal]]
-=== Proposal
+[[mseccfg_csr]]
+=== mseccfg CSR
 
-. *Machine Security Configuration (mseccfg)* is a new RW Machine mode CSR, used for configuring various security mechanisms present on the hart, and only accessible to Machine mode. It is 64 bits wide, and is at address *0x747 on RV64* and *0x747 (low 32bits), 0x757 (high 32bits) on RV32*. All mseccfg fields defined on this proposal are WARL, and the remaining bits are reserved for future standard use and should always read zero. The reset value of mseccfg is implementation-specific, otherwise if backwards compatibility is a requirement it should reset to zero on hard reset.
+. *Machine Security Configuration (mseccfg)* is a new RW Machine mode CSR, used for configuring various security mechanisms present on the hart, and only accessible to Machine mode. It is 64 bits wide, and is at address *0x747 on RV64* and *0x747 (low 32bits), 0x757 (high 32bits) on RV32*. All mseccfg fields defined on this extension are WARL, and the remaining bits are reserved for future standard use and should always read zero. The reset value of mseccfg is implementation-specific, otherwise if backwards compatibility is a requirement it should reset to zero on hard reset.
 
 . On ``mseccfg`` we introduce a field on bit 2 called *Rule Locking Bypass (mseccfg.RLB)* with the following functionality:
 +
@@ -94,18 +100,18 @@ A _Shared-Region_ rule is *enforced* on all modes, with restrictions depending o
 
 *: *Locked* rules cannot be removed or modified until a *PMP reset*, unless ``mseccfg.RLB`` is set.
 
-==== Visual representation of the proposal
+==== Visual representation
 
 image::smepmp-visual-representation.png[]
 
 === Smepmp software discovery
 
-Since all fields defined on ``mseccfg`` as part of this proposal are locked when set (``MMWP``/``MML``) or locked when cleared (``RLB``), software can't poll them for determining the presence of Smepmp. It is expected that BootROM will set ``mseccfg.MMWP`` and/or ``mseccfg.MML`` during early boot, before jumping to the firmware, so that the firmware will be able to determine the presence of Smepmp by reading ``mseccfg`` and checking the state of ``mseccfg.MMWP`` and ``mseccfg.MML``.
+Since all fields defined on ``mseccfg`` as part of this extension are locked when set (``MMWP``/``MML``) or locked when cleared (``RLB``), software can't poll them for determining the presence of Smepmp. It is expected that BootROM will set ``mseccfg.MMWP`` and/or ``mseccfg.MML`` during early boot, before jumping to the firmware, so that the firmware will be able to determine the presence of Smepmp by reading ``mseccfg`` and checking the state of ``mseccfg.MMWP`` and ``mseccfg.MML``.
 
 [[rationale]]
 === Rationale
 
-. Since a CSR for security and / or global PMP behavior settings is not available with the current spec, we needed to define a new one. This new CSR will allow us to add further security configuration options in the future and also allow developers to verify the existence of the new mechanisms defined on this proposal.
+. Since a CSR for security and / or global PMP behavior settings is not available with the current spec, we needed to define a new one. This new CSR will allow us to add further security configuration options in the future and also allow developers to verify the existence of the new mechanisms defined on this extension.
 
 . There are use cases where developers want to enforce PMP rules in M-mode during the boot process, that are also able to modify, merge, and / or remove later on. Since a rule that is enforced in M-mode also needs to be locked (or else badly written or malicious M-mode software can remove it at any time), the only way for developers to approach this is to keep adding PMP rules to the chain and rely on rule priority. This is a waste of PMP rules and since it’s only needed during boot, ``mseccfg.RLB`` is a simple workaround that can be used temporarily and then disabled and locked down.
 +
@@ -145,7 +151,7 @@ In order to support zero-copy transfers between M-mode and S/U-mode we need to e
 Although it’s possible to use ``mstatus.MPRV`` in M-mode to read/write data on an _S/U-mode-only_ region using general purpose registers for copying, this will happen with S/U-mode permissions, honoring any MMU restrictions put in place by S-mode. Of course it’s still possible for M-mode to tamper with the page tables and / or add _S/U-mode-only_ rules and bypass the protections put in place by S-mode but if an attacker has managed to compromise M-mode to such extent, no security guarantees are possible in any way. *Also note that the threat model we present here assumes buggy software in M-mode, not compromised software*. We considered disabling ``mstatus.MPRV`` but it seemed too much and out of scope.
 ====
 +
-_Shared-region_ rules can be used both for zero-copy data transfers and for sharing code segments. The latter may be used for example to allow S/U-mode to execute code by the vendor, that makes use of some vendor-specific ISA extension, without having to go through the firmware with an ecall. This is similar to the vDSO approach followed on Linux, that allows userspace code to execute kernel code without having to perform a system call.
+_Shared-region_ rules can be used both for zero-copy data transfers and for sharing code segments. The latter may be used for example to allow S/U-mode to execute code by the vendor, that makes use of some vendor-specific ISA extension, without having to go through the firmware with an ecall. This is similar to the vDSO approach followed on Linux, that allows user space code to execute kernel code without having to perform a system call.
 +
 To make sure that shared data regions can’t be executed and shared code regions can’t be modified, the encoding changes the meaning of the ``pmpcfg.X bit``. In case of shared data regions, with the exception of the ``pmpcfg.LRWX=1111`` encoding, the ``pmpcfg.X`` bit marks the capability of S/U-mode to write to that region, so it’s not possible to encode an executable shared data region. In case of shared code regions, the ``pmpcfg.X`` bit marks the capability of M-mode to read from that region, and since ``pmpcfg.RW=01`` is used for encoding the shared region, it’s not possible to encode a shared writable code region.
 +

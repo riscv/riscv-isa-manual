@@ -157,7 +157,7 @@ destination register not all equal to bit XLEN-1, it is implementation-defined
 whether bits SXLEN..XLEN of the destination register are unchanged or are
 overwritten with copies of bit XLEN-1.
 
-NOTE: This definition allows implementations to elide register writeback for
+NOTE: This definition allows implementations to elide register write-back for
 some HINTs, while allowing them to execute other HINTs in the same manner as
 other integer computational instructions.
 The implementation choice is observable only by S-mode with SXLEN > UXLEN; it
@@ -603,6 +603,9 @@ _Designated for platform use_
 0 +
 0 +
 0 +
+0 +
+0 +
+0 +
 0
 |0 +
 1 +
@@ -665,21 +668,26 @@ exhibit either behavior, depending on the underlying event that caused the
 exception.
 
 If `stval` is written with a nonzero value when a breakpoint,
-address-misaligned, access-fault, or page-fault exception occurs on an
+address-misaligned, access-fault, page-fault, or hardware-error exception
+occurs on an
 instruction fetch, load, or store, then `stval` will contain the
 faulting virtual address.
+
+On a breakpoint exception raised by an EBREAK or C.EBREAK instruction, `stval`
+is written with either zero or the virtual address of the instruction.
 
 [[stvalreg]]
 .Supervisor Trap Value register.
 include::images/bytefield/stvalreg.edn[]
 
 If `stval` is written with a nonzero value when a misaligned load or
-store causes an access-fault or page-fault exception, then `stval` will
+store causes an access-fault, page-fault, or hardware-error exception,
+then `stval` will
 contain the virtual address of the portion of the access that caused the
 fault.
 
 If `stval` is written with a nonzero value when an instruction
-access-fault or page-fault exception occurs on a system with
+access-fault, page-fault, or hardware-error exception occurs on a hart with
 variable-length instructions, then `stval` will contain the virtual
 address of the portion of the instruction that caused the fault, while
 `sepc` will point to the beginning of the instruction.
@@ -1147,10 +1155,25 @@ loads or stores to the same address.
 ====
 A consequence of this specification is that an implementation may use
 any translation for an address that was valid at any time since the most
-recent SFENCE.VMA that subsumes that address. In particular, if a leaf
-PTE is modified but a subsuming SFENCE.VMA is not executed, either the
-old translation or the new translation will be used, but the choice is
-unpredictable. The behavior is otherwise well-defined.
+recent SFENCE.VMA that subsumes that address.
+
+For example, if a leaf PTE is modified and the corresponding virtual address
+is accessed without a subsuming SFENCE.VMA having been executed in between,
+then either the new translation or any older translation since the last
+subsuming SFENCE.VMA was executed will be used.
+It is unpredictable which translation will be chosen from that set, and
+subsequent accesses to the same virtual address might use different
+translations from that set.
+But the behavior of such accesses is otherwise well defined.
+
+This property applies even if the virtual-address width for that translation
+differs from the width currently specified by `satp`.MODE.
+For a given virtual address and ASID, any translation since the last subsuming
+SFENCE.VMA might be used, even if that translation used a virtual address of a
+different width.
+Similarly, for a given virtual address, any global translation since the
+last subsuming SFENCE.VMA might be used, regardless of both ASID and
+virtual-address width.
 
 In a conventional TLB design, it is possible for multiple entries to
 match a single address if, for example, a page is upgraded to a
@@ -1437,7 +1460,7 @@ Two schemes to manage the A and D bits are defined:
   accesses.                                                             +
                                                                         +
   The PTE update must be atomic with respect to other accesses to the
-  PTE, and must atomically perform all tablewalk checks for that leaf
+  PTE, and must atomically perform all page-table walk checks for that leaf
   PTE as part of, and before, conditionally updating the PTE value.
   Updates of the A bit may be performed as a result of speculation, even
   if the associated memory access ultimately is not performed
@@ -1554,13 +1577,13 @@ __a__=__pte__.__ppn__×PAGESIZE and go to step 2.
 . If _pte_._a_=0, or if the original memory access is a store and _pte_._d_=0:
 
 * If the Svade extension is implemented, stop and raise a page-fault exception corresponding to the original access type.
-* If a store to _pte_ would violate a PMA or PMP check,
+* If a store to the PTE at address __a__+__va.vpn__[__i__]×PTESIZE would violate a PMA or PMP check,
 raise an access-fault exception corresponding to the original access
 type.
 * Perform the following steps atomically:
 ** Compare _pte_ to the value of the PTE at address __a__+__va.vpn__[__i__]×PTESIZE.
 ** If the values match, set _pte_._a_ to 1 and, if the
-original memory access is a store, also set _pte_._d_ to 1.
+original memory access is a store, also set _pte_._d_ to 1. Then store _pte_ to the PTE at address __a__+__va.vpn__[__i__]×PTESIZE.
 ** If the comparison fails, return to step 2.
 
 . The translation is successful. The translated physical address is
@@ -1575,7 +1598,7 @@ algorithm are performed using width PTESIZE.
 [NOTE]
 ====
 This implies, for example, that an Sv48 implementation may not use two
-separate 4B reads to non-atomically access a single 8B PTE, and that A/D
+separate 4{nbsp}B reads to non-atomically access a single 8{nbsp}B PTE, and that A/D
 bit updates performed by the implementation are treated as atomically
 updating the entire PTE, rather than just the A and/or D bit alone (even
 though the PTE value does not otherwise change).
@@ -1652,7 +1675,7 @@ Although it would be uncommon to place page tables in non-idempotent
 memory, there is no explicit prohibition against doing so. Since the
 algorithm may only touch page tables reachable from the root page table
 indicated in `satp`, the range of addresses that an implementation's
-page table walker will touch is fully under supervisor control.
+page-table walker will touch is fully under supervisor control.
 
 ***
 
@@ -1794,8 +1817,8 @@ include::images/bytefield/sv48pte.edn[]
 
 The PTE format for Sv48 is shown in <<sv48pte>>.
 Bits 63-54 and 9-0 have the same meaning as for Sv39. Any level of PTE
-may be a leaf PTE, so in addition to pages, Sv48 supports _megapages_,
-_gigapages_, and _terapages_, each of which must be virtually and
+may be a leaf PTE, so in addition to 4 KiB pages, Sv48 supports 2 MiB _megapages_,
+1 GiB _gigapages_, and 512 GiB _terapages_, each of which must be virtually and
 physically aligned to a boundary equal to its size. A page-fault
 exception is raised if the physical address is insufficiently aligned.
 
@@ -1847,8 +1870,8 @@ include::images/bytefield/sv57pte.edn[]
 
 The PTE format for Sv57 is shown in <<sv57pte>>.
 Bits 63–54 and 9–0 have the same meaning as for Sv39. Any level of PTE
-may be a leaf PTE, so in addition to pages, Sv57 supports _megapages_,
-_gigapages_, _terapages_, and _petapages_, each of which must be
+may be a leaf PTE, so in addition to 4 KiB pages, Sv57 supports 2 MiB _megapages_,
+1 GiB _gigapages_, 512 GiB _terapages_, and 256 TiB _petapages_, each of which must be
 virtually and physically aligned to a boundary equal to its size. A
 page-fault exception is raised if the physical address is insufficiently
 aligned.
@@ -2285,6 +2308,29 @@ implementation of Svvptc include: not having any address-translation caches, not
 storing Invalid PTEs in the address-translation caches, automatically evicting
 Invalid PTEs using a bounded timer, or making address-translation caches
 coherent with store instructions that modify PTEs.
+====
+
+[[sec:svrsw60t59b]]
+== "Svrsw60t59b" Extension for PTE Reserved-for-Software Bits 60-59, Version 1.0
+
+If the Svrsw60t59b extension is implemented, then bits 60-59 of the page table
+entries (PTEs) are reserved for use by supervisor software and are ignored by
+the implementation.
+
+If the Hypervisor (H) extension is also implemented, then bits 60-59 of the
+G-stage PTEs are reserved for use by supervisor software and are ignored by the
+implementation.
+
+The Svrsw60t59b extension depends on Sv39.
+
+[NOTE]
+====
+Operating systems frequently use reserved bits within PTEs to store metadata for
+advanced memory management features. Embedding these metadata bits directly within
+the PTEs allows for fast access with minimal overhead, avoiding costly lookups in
+auxiliary data structures. By default, Sv39 and Sv39x4 require a page fault and
+a guest-page fault exception, respectively, to be raised if bits 60–59 are not
+zero.
 ====
 
 [[ssqosid]]
