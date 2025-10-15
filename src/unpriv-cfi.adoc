@@ -39,16 +39,19 @@ perform an unconditional control transfer to the address in register `rs1`. The
 return from procedure if `rs1` is a conventional link register (i.e. `x1` or
 `x5`); else it is an indirect jump.
 
+[[norm:cfi_call_term]]
 The term _call_ is used to refer to a `JAL` or `JALR` instruction with a link
 register as destination, i.e., _rd_≠`x0`. Conventionally, the link register is
 `x1` or `x5`. A _call_ using `JAL` or `C.JAL` is termed a direct call. A
 `C.JALR` expands to `JALR x1, 0(rs1)` and is a _call_. A _call_ using `JALR` or
 `C.JALR` is termed an _indirect-call_.
 
+[[norm:cfi_return_term]]
 The term _return_ is used to refer to a `JALR` instruction with _rd_=`x0` and
 with _rs1_=`x1` or _rs1_=`x5`. A `C.JR` instruction expands to
 `JALR x0, 0(rs1)` and is a _return_ if _rs1_=`x1` or _rs1_=`x5`.
 
+[[norm:cfi_indirect-jump_term]]
 The term _indirect-jump_ is used to refer to a `JALR` instruction with _rd_=`x0`
 and where the _rs1_ is not `x1` or `x5` (i.e., not a return). A `C.JR`
 instruction where _rs1_ is not `x1` or `x5` (i.e., not a return) is an
@@ -67,7 +70,7 @@ Privileged ISA specification.
 
 To enforce forward-edge control-flow integrity, the Zicfilp extension introduces
 a landing pad (`LPAD`) instruction. The `LPAD` instruction must be placed at the
-program locations that are valid targets of indirect jumps or calls. The `LPAD`
+program locations that are valid targets of indirect jumps or calls. [#norm:zicflip_lpad_enc]#The `LPAD`
 instruction (See <<LP_INST>>) is encoded using the `AUIPC` major opcode with
 _rd_=`x0`.
 
@@ -171,6 +174,7 @@ indirect jump must land on a landing pad, as specified in <<IND_CALL_JMP>>. If
                      (rs1 != x1) && (rs1 != x5) && (rs1 != x7) ) ? 1 : 0;
 ----
 
+[[norm:zicflip_indirect_branch_lpad]]
 An indirect branch using `JALR`, `C.JALR`, or `C.JR` with `rs1` as `x7` is
 termed a software guarded branch. Such branches do not need to land on a
 `LPAD` instruction and thus do not set `ELP` to `LP_EXPECTED`.
@@ -207,15 +211,16 @@ performing bounds checking on the index into the table, etc.).
 ====
 
 The landing pad may be labeled. Zicfilp extension designates the register `x7`
-for use as the landing pad label register. To support labeled landing pads, the
+for use as the landing pad label register. [#norm:zicflip_lpad_label]#To support labeled landing pads, the
 indirect call/jump sites establish an expected landing pad label (e.g., using
-the `LUI` instruction) in the bits 31:12 of the `x7` register. The `LPAD`
+the `LUI` instruction) in the bits 31:12 of the `x7` register.# [#norm:zicflip_lpad_imm_enc]#The `LPAD`
 instruction is encoded with a 20-bit immediate value called the landing-pad-label
 (`LPL`) that is matched to the expected landing pad label. When `LPL` is encoded
 as zero, the `LPAD` instruction does not perform the label check and in programs
 built with this single label mode of operation the indirect call/jump sites do
 not need to establish an expected landing pad label value in `x7`.
 
+[[norm:zicflip_elp_lpad_expected]]
 When `ELP` is set to `LP_EXPECTED`, if the next instruction in the instruction
 stream is not 4-byte aligned, or is not `LPAD`, or if the landing pad label
 encoded in `LPAD` is not zero and does not match the expected landing pad label
@@ -250,16 +255,17 @@ the accidental landing pad.
 [[LP_INST]]
 ==== Landing Pad Instruction
 
-When Zicfilp is enabled, `LPAD` is the only instruction allowed to execute when
+[#norm:zicflip_lpad_enabled_instr_allowed]#When Zicfilp is enabled, `LPAD` is the only instruction allowed to execute when
 the `ELP` state is `LP_EXPECTED`. If Zicfilp is not enabled then the instruction
-is a no-op. If Zicfilp is enabled, the `LPAD` instruction causes a
-software-check exception with `__x__tval` set to "landing pad fault (code=2)" if
+is a no-op.# [#norm:zicflip_lpad_enabled_exception]#If Zicfilp is enabled, the `LPAD` instruction causes a
+software-check exception with `__x__tval` set to "landing pad fault (code=2)"# if
 any of the following conditions are true:
 
 * The `pc` is not 4-byte aligned and `ELP` is `LP_EXPECTED`.
 * The `ELP` is `LP_EXPECTED` and the `LPL` is not zero and the `LPL` does not
   match the expected landing pad label in bits 31:12 of the `x7` register.
 
+[[norm:zicflip_lpad_no_sw_exception]]
 If a software-check exception is not caused then the `ELP` is updated to
 `NO_LP_EXPECTED`.
 
@@ -337,8 +343,8 @@ the shadow stack are compared. A mismatch of the two values is indicative of a
 subversion of the return address control variable and causes a software-check
 exception.
 
-The Zicfiss instructions, except `SSAMOSWAP.W/D`, are encoded using a subset of
-May-Be-Operation instructions defined by the Zimop and Zcmop extensions.
+[#norm:zicfiss_enc]#The Zicfiss instructions, except `SSAMOSWAP.W/D`, are encoded using a subset of
+May-Be-Operation instructions defined by the Zimop and Zcmop extensions.#
 This subset of instructions revert to their Zimop/Zcmop defined behavior when
 the Zicfiss extension is not implemented or if the extension has not been
 activated. A program that is built with Zicfiss instructions can thus continue
@@ -378,18 +384,18 @@ requires S-mode to be implemented. Use of Zicfiss in M-mode is not supported.
 
 The Zicfiss extension introduces the following instructions:
 
-* Push to the shadow stack (See <<SS_PUSH>>)
-** `SSPUSH x1` and `SSPUSH x5` - encoded using `MOP.RR.7`
-** `C.SSPUSH x1` - encoded using `C.MOP.1`
+* Push to the shadow stack (See <<SS_PUSH>>)#
+** [#norm:zicfiss_sspush_enc]#`SSPUSH x1` and `SSPUSH x5` - encoded using `MOP.RR.7`#
+** [#norm:zicfiss_c-sspush_enc]#`C.SSPUSH x1` - encoded using `C.MOP.1`#
 
 * Pop from the shadow stack (See <<SS_POP>>)
-** `SSPOPCHK x1` and `SSPOPCHK x5` - encoded using `MOP.R.28`
-** `C.SSPOPCHK x5` - encoded using `C.MOP.5`
+** [#norm:zicfiss_sspopchk_enc]#`SSPOPCHK x1` and `SSPOPCHK x5` - encoded using `MOP.R.28`#
+** [#norm:zicfiss_c-sspopchk_enc]#`C.SSPOPCHK x5` - encoded using `C.MOP.5`#
 
 * Read the value of `ssp` into a register (See <<SSP_READ>>)
-** `SSRDP` - encoded using `MOP.R.28`
+** [#norm:zicfiss_ssrdp_enc]#`SSRDP` - encoded using `MOP.R.28`#
 
-* Perform an atomic swap from a shadow stack location (See <<SSAMOSWAP>>)
+* [#norm:zicfiss_atomic_swap]#Perform an atomic swap from a shadow stack location (See <<SSAMOSWAP>>)#
 ** `SSAMOSWAP.W` and `SSAMOSWAP.D`
 
 Zicfiss does not use all encodings of `MOP.RR.7` or `MOP.R.28`. When a

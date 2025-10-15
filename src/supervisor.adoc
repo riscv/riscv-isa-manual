@@ -38,6 +38,7 @@ supervisor-level CSR descriptions.
 [[sstatus]]
 ==== Supervisor Status (`sstatus`) Register
 
+[[norm:sstatus]]
 The `sstatus` register is an SXLEN-bit read/write register formatted as
 shown in <<sstatusreg-rv32>> when SXLEN=32
 and <<sstatusreg>> when SXLEN=64. The `sstatus`
@@ -99,6 +100,7 @@ register keeps track of the processor's current operating state.
 ], config:{lanes: 4, hspace:1024}}
 ....
 
+[[norm:sstatus-spp]]
 The SPP bit indicates the privilege level at which a hart was executing
 before entering supervisor mode. When a trap is taken, SPP is set to 0
 if the trap originated from user mode, or 1 otherwise. When an SRET
@@ -107,12 +109,14 @@ return from the trap handler, the privilege level is set to user mode if
 the SPP bit is 0, or supervisor mode if the SPP bit is 1; SPP is then
 set to 0.
 
+[[norm:sstatus-sie]]
 The SIE bit enables or disables all interrupts in supervisor mode. When
 SIE is clear, interrupts are not taken while in supervisor mode. When
 the hart is running in user-mode, the value in SIE is ignored, and
 supervisor-level interrupts are enabled. The supervisor can disable
 individual interrupt sources using the `sie` CSR.
 
+[[norm:sstatus-spie]]
 The SPIE bit indicates whether supervisor interrupts were enabled prior
 to trapping into supervisor mode. When a trap is taken into supervisor
 mode, SPIE is set to SIE, and SIE is set to 0. When an SRET instruction
@@ -129,16 +133,19 @@ In a straightforward implementation, reading or writing any field in
 
 ===== Base ISA Control in `sstatus` Register
 
+[[norm:sstatus-uxl]]
 The UXL field controls the value of XLEN for U-mode, termed _UXLEN_,
 which may differ from the value of XLEN for S-mode, termed _SXLEN_. The
 encoding of UXL is the same as that of the MXL field of `misa`, shown in
 <<misabase>>.
 
+[[norm:sstatus-uxl_sz]]
 When SXLEN=32, the UXL field does not exist, and UXLEN=32. When
 SXLEN=64, it is a *WARL* field that encodes the current value of UXLEN. In
 particular, an implementation may make UXL be a read-only field whose
 value always ensures that UXLEN=SXLEN.
 
+[[norm:sstatus-uxl_behavior]]
 If UXLEN≠SXLEN, instructions executed in the narrower
 mode must ignore source register operand bits above the configured XLEN,
 and must sign-extend results to fill the widest supported XLEN in the
@@ -149,6 +156,7 @@ and load and store effective addresses are taken modulo
 latexmath:[$2^{\text{UXLEN}}$]. For example, when UXLEN=32 and SXLEN=64,
 user-mode memory accesses reference the lowest 4 GiB of the address space.
 
+[[norm:hint_op]]
 Some HINT instructions are encoded as integer computational instructions that
 overwrite their destination register with its current value, e.g.,
 `c.addi x8, 0`.
@@ -166,6 +174,7 @@ is invisible to U-mode.
 [[sum]]
 ===== Memory Privilege in `sstatus` Register
 
+[[norm:sstatus-mxr]]
 The MXR (Make eXecutable Readable) bit modifies the privilege with which
 loads access virtual memory. When MXR=0, only loads from pages marked
 readable (R=1 in <<sv32pte>>) will succeed. When
@@ -173,6 +182,7 @@ MXR=1, loads from pages marked either readable or executable (R=1 or
 X=1) will succeed. MXR has no effect when page-based virtual memory is
 not in effect.
 
+[[norm:sstatus-sum]]
 The SUM (permit Supervisor User Memory access) bit modifies the
 privilege with which S-mode loads and stores access virtual memory. When
 SUM=0, S-mode memory accesses to pages that are accessible by U-mode
@@ -182,6 +192,7 @@ is not in effect, nor when executing in U-mode. Note that S-mode can
 never execute instructions from user pages, regardless of the state of
 SUM.
 
+[[norm:sstatus-sum_satp-mode]]
 SUM is read-only 0 if `satp`.MODE is read-only 0.
 
 [NOTE]
@@ -210,6 +221,7 @@ the alternate mapping.
 
 ===== Endianness Control in `sstatus` Register
 
+[[norm:sstatus-ube]]
 The UBE bit is a *WARL* field that controls the endianness of explicit memory
 accesses made from U-mode, which may differ from the endianness of
 memory accesses in S-mode. An implementation may make UBE be a read-only
@@ -218,6 +230,7 @@ field that always specifies the same endianness as for S-mode.
 UBE controls whether explicit load and store memory accesses made from
 U-mode are little-endian (UBE=0) or big-endian (UBE=1).
 
+[[norm:sstatus-ube_implicit]]
 UBE has no effect on instruction fetches, which are _implicit_ memory
 accesses that are always little-endian.
 
@@ -236,6 +249,7 @@ endianness.
 
 ===== Previous Expected Landing Pad (ELP) State in `sstatus` Register
 
+[[norm:sstatus-spelp]]
 Access to the `SPELP` field, added by Zicfilp, accesses the homonymous
 fields of `mstatus` when `V=0`, and the homonymous fields of `vsstatus`
 when `V=1`.
@@ -243,16 +257,19 @@ when `V=1`.
 [[supv-double-trap]]
 ===== Double Trap Control in `sstatus` Register
 
+[[norm:sstatus-sdt]]
 The S-mode-disable-trap (`SDT`) bit is a WARL field introduced by the Ssdbltrp
 extension to address double trap (See <<machine-double-trap>>) at privilege
 modes lower than M.
 
+[[norm:sstatus-sdt_sstatus-sie_overwrite]]
 When the `SDT` bit is set to 1 by an explicit CSR write, the `SIE` (Supervisor
 Interrupt Enable) bit is cleared to 0. This clearing occurs regardless of the
 value written, if any, to the `SIE` bit by the same write. The `SIE` bit can
 only be set to 1 by an explicit CSR write if the `SDT` bit is being set to 0 by
 the same write or is already 0.
 
+[[norm:sstatus-sdt_trap]]
 When a trap is to be taken into S-mode, if the `SDT` bit is currently 0,
 it is then set to 1, and the trap is delivered as expected. However, if `SDT` is
 already set to 1, then this is an _unexpected trap_. In the event of an
@@ -263,6 +280,7 @@ taken into M-mode. The `mtval2` register is then set to what would be otherwise
 written into the `mcause` register by the _unexpected trap_. The `mcause`
 register is set to 16, the double-trap exception code.
 
+[[norm:sstatus-sdt_sret]]
 An `SRET` instruction sets the `SDT` bit to 0.
 
 [NOTE]
@@ -299,6 +317,7 @@ optional measure to aid in the recovery from such critical errors.
 
 ==== Supervisor Trap Vector Base Address (`stvec`)  Register
 
+[[norm:stvec]]
 The `stvec` register is an SXLEN-bit read/write register that holds trap
 vector configuration, consisting of a vector base address (BASE) and a
 vector mode (MODE).
@@ -306,11 +325,13 @@ vector mode (MODE).
 .Supervisor trap vector base address (`stvec`) register.
 include::images/bytefield/stvec.edn[]
 
-The BASE field in `stvec` is a  field that can hold any valid virtual or
+[[norm:stvec_op]]
+The BASE field in `stvec` is a  field that can hold any valid virtual or
 physical address, subject to the following alignment constraints: the
 address must be 4-byte aligned, and MODE settings other than Direct
 might impose additional alignment constraints on the value in the BASE
 field.
+[[norm:stvec_sz_base]]
 Note that the CSR contains only bits XLEN-1 through 2 of the address BASE.
 When used as an address, the lower two bits are filled with zeroes to obtain
 an XLEN-bit address that is always aligned on a 4-byte boundary.
@@ -343,11 +364,12 @@ impose a stricter alignment constraint on BASE.
 
 ==== Supervisor Interrupt (`sip` and `sie`) Registers
 
+[[norm:sip_sie]]
 The `sip` register is an SXLEN-bit read/write register containing
 information on pending interrupts, while `sie` is the corresponding
 SXLEN-bit read/write register containing interrupt enable bits.
 Interrupt cause number _i_ (as reported in CSR `scause`,
-<<scause>>) corresponds with bit _i_ in both `sip` and
+<<scause>>) corresponds with bit _i_ in both `sip` and
 `sie`. Bits 15:0 are allocated to standard interrupt causes only, while
 bits 16 and above are designated for platform use.
 
@@ -357,11 +379,13 @@ include::images/bytefield/sip.edn[]
 .Supervisor interrupt-enable register (`sie`).
 include::images/bytefield/sie.edn[]
 
+[[norm:sie_sip_supervisor_strap]]
 An interrupt _i_ will trap to S-mode if both of the following are true:
 (a) either the current privilege mode is S and the SIE bit in the
 `sstatus` register is set, or the current privilege mode has less
 privilege than S-mode; and (b) bit _i_ is set in both `sip` and `sie`.
 
+[[norm:sie_sip_strap_time_constraint]]
 These conditions for an interrupt trap to occur must be evaluated in a
 bounded amount of time from when an interrupt becomes, or ceases to be,
 pending in `sip`, and must also be evaluated immediately following the
@@ -369,19 +393,21 @@ execution of an SRET instruction or an explicit write to a CSR on which
 these interrupt trap conditions expressly depend (including `sip`, `sie`
 and `sstatus`).
 
+[[norm:s_interrupt_priority]]
 Interrupts to S-mode take priority over any interrupts to lower
 privilege modes.
 
-Each individual bit in register `sip` may be writable or may be
-read-only. When bit _i_ in `sip` is writable, a pending interrupt _i_
+[#norm:sip_acc]#Each individual bit in register `sip` may be writable or may be
+read-only.# [#norm:sip_op]#When bit _i_ in `sip` is writable, a pending interrupt _i_
 can be cleared by writing 0 to this bit. If interrupt _i_ can become
 pending but bit _i_ in `sip` is read-only, the implementation must
 provide some other mechanism for clearing the pending interrupt (which
-may involve a call to the execution environment).
+may involve a call to the execution environment).#
 
-A bit in `sie` must be writable if the corresponding interrupt can ever
-become pending. Bits of `sie` that are not writable are read-only zero.
+[#norm:sie_acc]#A bit in `sie` must be writable if the corresponding interrupt can ever
+become pending. Bits of `sie` that are not writable are read-only zero.#
 
+[[norm:sip_sie_bits_sz]]
 The standard portions (bits 15:0) of registers `sip` and `sie` are
 formatted as shown in Figures <<sipreg-standard>>
 and <<siereg-standard>> respectively.
@@ -395,22 +421,26 @@ include::images/bytefield/sipreg-standard.edn[]
 include::images/bytefield/siereg-standard.edn[]
 
 
+[[norm:sip-seip_sie-seie]]
 Bits `sip`.SEIP and `sie`.SEIE are the interrupt-pending and
 interrupt-enable bits for supervisor-level external interrupts. If
 implemented, SEIP is read-only in `sip`, and is set and cleared by the
 execution environment, typically through a platform-specific interrupt
 controller.
 
+[[norm:sip-stip_sie-stie]]
 Bits `sip`.STIP and `sie`.STIE are the interrupt-pending and
 interrupt-enable bits for supervisor-level timer interrupts. If
 implemented, STIP is read-only in `sip`, and is set and cleared by the
 execution environment.
 
+[[norm:sip-ssip_sie-ssie]]
 Bits `sip`.SSIP and `sie`.SSIE are the interrupt-pending and
 interrupt-enable bits for supervisor-level software interrupts. If
 implemented, SSIP is writable in `sip` and may also be set to 1 by a
 platform-specific interrupt controller.
 
+[[norm:sip_sie_Sscofpmf]]
 If the Sscofpmf extension is implemented, bits `sip`.LCOFIP and `sie`.LCOFIE
 are the interrupt-pending and interrupt-enable bits for local-counter-overflow
 interrupts.
@@ -427,6 +457,7 @@ implementation-specific means, which will ultimately cause the SSIP bit
 to be set in the recipient hart’s `sip` register.
 ====
 
+[[norm:sip_sie_unimpl]]
 Each standard interrupt type (SEI, STI, SSI, or LCOFI) may not be implemented,
 in which case the corresponding interrupt-pending and interrupt-enable
 bits are read-only zeros. All bits in `sip` and `sie` are *WARL* fields. The
@@ -447,6 +478,7 @@ M-mode to S-mode, they are shown as 0 in
 <<sipreg-standard>> and <<siereg-standard>>.
 ====
 
+[[norm:sip_sie_priority_bit_order]]
 Multiple simultaneous interrupts destined for supervisor mode are
 handled in the following decreasing priority order: SEI, SSI, STI, LCOFI.
 
@@ -457,6 +489,7 @@ facility as user-mode software, including the `time`, `cycle`, and
 `instret` CSRs. The implementation should provide a mechanism to modify
 the counter values.
 
+[[norm:supervisor_timer_scheduling]]
 The implementation must provide a facility for scheduling timer
 interrupts in terms of the real-time counter, `time`.
 
@@ -465,16 +498,19 @@ interrupts in terms of the real-time counter, `time`.
 .Counter-enable (`scounteren`) register
 include::images/bytefield/scounteren.edn[]
 
+[[norm:scounteren]]
 The counter-enable (`scounteren`) CSR is a 32-bit register that
 controls the availability of the hardware performance monitoring
 counters to U-mode.
 
+[[norm:scounteren_op]]
 When the CY, TM, IR, or HPM__n__ bit in the `scounteren` register is
 clear, attempts to read the `cycle`, `time`, `instret`, or `hpmcountern`
 register while executing in U-mode will cause an illegal-instruction
 exception. When one of these bits is set, access to the corresponding
 register is permitted.
 
+[[norm:scounteren_acc]]
 `scounteren` must be implemented. However, any of the bits may be
 read-only zero, indicating reads to the corresponding counter will cause
 an exception when executing in U-mode. Hence, they are effectively
@@ -490,6 +526,7 @@ access a counter if the corresponding bits in `scounteren` and
 
 ==== Supervisor Scratch (`sscratch`) Register
 
+[[norm:sscratch]]
 The `sscratch` CSR is an SXLEN-bit read/write register, dedicated
 for use by the supervisor. Typically, `sscratch` is used to hold a
 pointer to the hart-local supervisor context while the hart is executing
@@ -503,21 +540,25 @@ include::images/bytefield/sscratch.edn[]
 
 ==== Supervisor Exception Program Counter (`sepc`) Register
 
+[[norm:sepc]]
 `sepc` is an SXLEN-bit read/write CSR formatted as shown in
 <<epcreg>>. The low bit of `sepc` (`sepc[0]`) is always zero. On implementations that support only IALIGN=32, the two low bits (`sepc[1:0]`) are always zero.
 
+[[norm:sepc_op_mask_ialign32]]
 If an implementation allows IALIGN to be either 16 or 32 (by changing
 CSR `misa`, for example), then, whenever IALIGN=32, bit `sepc[1]` is
 masked on reads so that it appears to be 0. This masking occurs also for
 the implicit read by the SRET instruction. Though masked, `sepc[1]`
 remains writable when IALIGN=32.
 
+[[norm:sepc_acc_invalid_addr]]
 `sepc` is a *WARL* register that must be able to hold all valid virtual
 addresses. It need not be capable of holding all possible invalid
 addresses. Prior to writing `sepc`, implementations may convert an
 invalid address into some other invalid address that `sepc` is capable
 of holding.
 
+[[norm:sepc_op_trap_write]]
 When a trap is taken into S-mode, `sepc` is written with the virtual
 address of the instruction that was interrupted or that encountered the
 exception. Otherwise, `sepc` is never written by the implementation,
@@ -530,19 +571,21 @@ include::images/bytefield/epcreg.edn[]
 [[scause]]
 ==== Supervisor Cause (`scause`) Register
 
+[[norm:scause]]
 The `scause` CSR is an SXLEN-bit read-write register formatted as
-shown in <<scausereg>>. When a trap is taken into
+shown in <<scausereg>>. [#norm:scause_op]#When a trap is taken into
 S-mode, `scause` is written with a code indicating the event that
 caused the trap. Otherwise, `scause` is never written by the
-implementation, though it may be explicitly written by software.
+implementation, though it may be explicitly written by software.#
 
+[[norm:scause-interrupt]]
 The Interrupt bit in the `scause` register is set if the trap was caused
 by an interrupt. The Exception Code field contains a code identifying
 the last exception or interrupt. <<scauses>> lists
-the possible exception codes for the current supervisor ISAs. The
-Exception Code is a *WLRL* field. It is required to hold the values 0–31
+the possible exception codes for the current supervisor ISAs. [#norm:scause-exception_code_acc]#The
+Exception Code is a *WLRL* field.# [#norm:scause-exception_code_sz]#It is required to hold the values 0–31
 (i.e., bits 4–0 must be implemented), but otherwise it is only
-guaranteed to hold supported exception codes.
+guaranteed to hold supported exception codes.#
 
 [[scausereg]]
 .Supervisor Cause (`scause`) register.
@@ -657,6 +700,7 @@ _Reserved_
 
 ==== Supervisor Trap Value (`stval`) Register
 
+[[norm:stval]]
 The `stval` CSR is an SXLEN-bit read-write register formatted as
 shown in <<stvalreg>>. When a trap is taken into
 S-mode, `stval` is written with exception-specific information to assist
@@ -667,12 +711,14 @@ informatively, which may unconditionally set it to zero, and which may
 exhibit either behavior, depending on the underlying event that caused the
 exception.
 
+[[norm:stval_op_faulting_addr]]
 If `stval` is written with a nonzero value when a breakpoint,
 address-misaligned, access-fault, page-fault, or hardware-error exception
 occurs on an
 instruction fetch, load, or store, then `stval` will contain the
 faulting virtual address.
 
+[[norm:stval_op_breakpoint]]
 On a breakpoint exception raised by an EBREAK or C.EBREAK instruction, `stval`
 is written with either zero or the virtual address of the instruction.
 
@@ -680,18 +726,21 @@ is written with either zero or the virtual address of the instruction.
 .Supervisor Trap Value register.
 include::images/bytefield/stvalreg.edn[]
 
+[[norm:stval_op_load_store_fault]]
 If `stval` is written with a nonzero value when a misaligned load or
 store causes an access-fault, page-fault, or hardware-error exception,
 then `stval` will
 contain the virtual address of the portion of the access that caused the
 fault.
 
+[[norm:stval_faulting_address_variable_instr]]
 If `stval` is written with a nonzero value when an instruction
 access-fault, page-fault, or hardware-error exception occurs on a hart with
 variable-length instructions, then `stval` will contain the virtual
 address of the portion of the instruction that caused the fault, while
 `sepc` will point to the beginning of the instruction.
 
+[[norm:stval_op_illegal_instr]]
 The `stval` register can optionally also be used to return the faulting
 instruction bits on an illegal-instruction exception (`sepc` points to
 the faulting instruction in memory). If `stval` is written with a
@@ -702,9 +751,11 @@ will contain the shortest of:
 * the first ILEN bits of the faulting instruction
 * the first SXLEN bits of the faulting instruction
 
+[[norm:stval_op_illegal_instr_format]]
 The value loaded into `stval` on an illegal-instruction exception is
 right-justified and all unused upper bits are cleared to zero.
 
+[[norm:stval_exception_info]]
 On a trap caused by a software-check exception, the `stval` register holds the
 cause for the exception. The following encodings are defined:
 
@@ -712,9 +763,11 @@ cause for the exception. The following encodings are defined:
 * 2 - Landing Pad Fault. Defined by the Zicfilp extension (<<priv-forward>>).
 * 3 - Shadow Stack Fault. Defined by the Zicfiss extension (<<priv-backward>>).
 
+[[norm:stval_op_other_traps]]
 For other traps, `stval` is set to zero, but a future standard may
 redefine `stval`’s setting for other traps.
 
+[[norm:stval_acc]]
 `stval` is a *WARL* register that must be able to hold all valid virtual
 addresses and the value 0. It need not be capable of holding all
 possible invalid addresses. Prior to writing `stval`, implementations
@@ -727,6 +780,7 @@ of SXLEN and ILEN.
 [[sec:senvcfg]]
 ==== Supervisor Environment Configuration (`senvcfg`) Register
 
+[[norm:senvcfg]]
 The `senvcfg` CSR is an SXLEN-bit read/write register, formatted as
 shown in <<senvcfg>>, that controls certain
 characteristics of the U-mode execution environment.
@@ -764,6 +818,7 @@ characteristics of the U-mode execution environment.
 ], config:{lanes: 2, hspace:1024}}
 ....
 
+[[norm:senvcfg-fiom]]
 If bit FIOM (Fence of I/O implies Memory) is set to one in `senvcfg`,
 FENCE instructions executed in U-mode are modified so the requirement to
 order accesses to device I/O implies also the requirement to order main
@@ -771,11 +826,13 @@ memory accesses. <<senvcfg-FIOM>> details the modified
 interpretation of FENCE instruction bits PI, PO, SI, and SO in U-mode
 when FIOM=1.
 
+[[norm:senvcfg-fiom_op_atomic]]
 Similarly, for U-mode when FIOM=1, if an atomic instruction that
 accesses a region ordered as device I/O has its _aq_ and/or _rl_ bit
 set, then that instruction is ordered as though it accesses both device
 I/O and memory.
 
+[[norm:senvcfg-fiom_acc]]
 If `satp`.MODE is read-only zero (always Bare), the implementation may
 make FIOM read-only zero.
 
@@ -829,13 +886,17 @@ to implement that we consider it worth supporting even if only rarely
 enabled.
 ====
 
+[[norm:senvcfg-cbze_Zicboz]]
 The definition of the CBZE field is furnished by the Zicboz extension.
 
+[[norm:senvcfg-cbcfe-cbie_Zicbom]]
 The definitions of the CBCFE and CBIE fields are furnished by the Zicbom
 extension.
 
+[[norm:senvcfg-pmm_Ssnpm]]
 The definition of the PMM field is furnished by the Ssnpm extension.
 
+[[norm:senvcfg-lpe_Zicfilp]]
 The Zicfilp extension adds the `LPE` field in `senvcfg`. When the `LPE` field is
 set to 1, the Zicfilp extension is enabled in VU/U-mode. When the `LPE` field is
 0, the Zicfilp extension is not enabled in VU/U-mode and the following rules
@@ -844,6 +905,7 @@ apply to VU/U-mode:
 * The hart does not update the `ELP` state; it remains as `NO_LP_EXPECTED`.
 * The `LPAD` instruction operates as a no-op.
 
+[[norm:senvcfg-sse_Zicfilp]]
 The Zicfiss extension adds the `SSE` field in `senvcfg`. When the `SSE` field is
 set to 1, the Zicfiss extension is activated in VU/U-mode. When the `SSE` field
 is 0, the Zicfiss extension remains inactive in VU/U-mode, and the following
@@ -857,6 +919,7 @@ rules apply:
 [[satp]]
 ==== Supervisor Address Translation and Protection (`satp`) Register
 
+[[norm:satp]]
 The `satp` CSR is an SXLEN-bit read/write register, formatted as
 shown in <<rv32satp>> for SXLEN=32 and
 <<rv64satp>> for SXLEN=64, which controls
@@ -896,6 +959,7 @@ translations, or vice-versa. This approach also slightly reduces the
 cost of a context switch.
 ====
 
+[[norm:satp-mode]]
 <<satp-mode>> shows the encodings of the MODE field when
 SXLEN=32 and SXLEN=64. When MODE=Bare, supervisor virtual addresses are
 equal to supervisor physical addresses, and there is no additional
@@ -922,9 +986,11 @@ particularly in RV32, for which all patterns of the existing MODE field
 have already been allocated.
 ====
 
+[[norm:satp-mode_sxlen32]]
 When SXLEN=32, the only other valid setting for MODE is Sv32, a paged
 virtual-memory scheme described in <<sv32>>.
 
+[[norm:satp-mode_sxlen64]]
 When SXLEN=64, three paged virtual-memory schemes are defined: Sv39,
 Sv48, and Sv57, described in <<sv39>>, <<sv48>>,
 and <<sv57>>, respectively. One additional scheme, Sv64, will be
@@ -932,10 +998,12 @@ defined in a later version of this specification. The remaining MODE
 settings are reserved for future use and may define different
 interpretations of the other fields in `satp`.
 
+[[norm:satp-mode_op_unsupported]]
 Implementations are not required to support all MODE settings, and if
 `satp` is written with an unsupported MODE, the entire write has no
 effect; no fields in `satp` are modified.
 
+[[norm:satp-asid]]
 The number of ASID bits is UNSPECIFIED and may be zero. The number of implemented
 ASID bits, termed _ASIDLEN_, may be determined by writing one to every
 bit position in the ASID field, then reading back the value in `satp` to
@@ -1004,6 +1072,7 @@ inexpensive relative to the multi-level cache hierarchies whose address
 space they map.
 ====
 
+[[norm:satp_op_active]]
 The `satp` CSR is considered _active_ when the effective privilege
 mode is S-mode or U-mode. Executions of the address-translation
 algorithm may only begin using a given value of `satp` when `satp` is
@@ -1019,6 +1088,7 @@ address-translation data structures are observed by subsequent implicit
 reads to those structures by a hart.
 ====
 
+[[norm:satp_op_sfence]]
 Note that writing `satp` does not imply any ordering constraints between
 page-table updates and subsequent address translations, nor does it
 imply any invalidation of address-translation caches. If the new address
@@ -1043,18 +1113,19 @@ In addition to the SRET instruction defined in <<otherpriv>>, one new supervisor
 include::images/wavedrom/sfencevma.edn[]
 
 
+[[norm:sfence-vma_op]]
 The supervisor memory-management fence instruction SFENCE.VMA is used to
 synchronize updates to in-memory memory-management data structures with
 current execution. Instruction execution causes implicit reads and
 writes to these data structures; however, these implicit references are
 ordinarily not ordered with respect to explicit loads and stores.
-Executing an SFENCE.VMA instruction guarantees that any previous stores
+[#norm:sfence-vma_ordering]#Executing an SFENCE.VMA instruction guarantees that any previous stores
 already visible to the current RISC-V hart are ordered before certain
 implicit references by subsequent instructions in that hart to the
 memory-management data structures. The specific set of operations
 ordered by SFENCE.VMA is determined by _rs1_ and _rs2_, as described
-below. SFENCE.VMA is also used to invalidate entries in the
-address-translation cache associated with a hart (see <<sv32algorithm>>). Further details on the behavior of this instruction are described in <<virt-control>> and <<pmp-vmem>>.
+below. [#norm:sfence-vma_invalidation]#SFENCE.VMA is also used to invalidate entries in the
+address-translation cache associated with a hart (see <<sv32algorithm>>).# Further details on the behavior of this instruction are described in <<virt-control>> and <<pmp-vmem>>.
 
 [NOTE]
 ====
@@ -1089,10 +1160,12 @@ case that the translation data structures have only been modified for a
 single address-space identifier, _rs2_ can specify the address space.
 The behavior of SFENCE.VMA depends on _rs1_ and _rs2_ as follows:
 
+[[norm:sfence-vma_all_asid_va]]
 * If __rs1__=`x0` and __rs2__=`x0`, the fence orders all reads and writes
 made to any level of the page tables, for all address spaces. The fence
 also invalidates all address-translation cache entries, for all address
 spaces.
+[[norm:sfence-vma_asid_only]]
 * If __rs1__=`x0` and __rs2__&#8800;``x0``, the fence orders all
 reads and writes made to any level of the page tables, but only for the
 address space identified by integer register _rs2_. Accesses to _global_
@@ -1100,12 +1173,14 @@ mappings (see <<translation>>) are not ordered. The
 fence also invalidates all address-translation cache entries matching
 the address space identified by integer register _rs2_, except for
 entries containing global mappings.
+[[norm:sfence-vma_va_all_asid]]
 * If __rs1__&#8800;``x0`` and __rs2__=`x0`, the fence orders only
 reads and writes made to leaf page table entries corresponding to the
 virtual address in __rs1__, for all address spaces. The fence also
 invalidates all address-translation cache entries that contain leaf page
 table entries corresponding to the virtual address in _rs1_, for all
 address spaces.
+[[norm:sfence-vma_va_asid]]
 * If __rs1__&#8800;``x0`` and __rs2__&#8800;``x0``, the
 fence orders only reads and writes made to leaf page table entries
 corresponding to the virtual address in _rs1_, for the address space
@@ -1115,6 +1190,7 @@ entries that contain leaf page table entries corresponding to the
 virtual address in _rs1_ and that match the address space identified by
 integer register _rs2_, except for entries containing global mappings.
 
+[[norm:sfence-vma_invalid_va]]
 If the value held in _rs1_ is not a valid virtual address, then the
 SFENCE.VMA instruction has no effect. No exception is raised in this
 case.
@@ -1130,6 +1206,7 @@ choice not to raise an exception when an invalid virtual address is held
 in _rs1_ facilitates this type of simplification.
 ====
 
+[[norm:sfence-vma_rs2_bits]]
 When __rs2__&#8800;``x0``, bits SXLEN-1:ASIDMAX of the value held
 in _rs2_ are reserved for future standard use. Until their use is
 defined by a standard extension, they should be zeroed by software and
@@ -1137,6 +1214,7 @@ ignored by current implementations. Furthermore, if
 ASIDLEN<ASIDMAX, the implementation shall ignore bits
 ASIDMAX-1:ASIDLEN of the value held in _rs2_.
 
+[[norm:sfence-vma_ordering_semantics]]
 An implicit read of the memory-management data structures may return any
 translation for an address that was valid at any time since the most
 recent SFENCE.VMA that subsumes that address. The ordering implied by
@@ -1195,17 +1273,19 @@ but implementers are reminded that eagerly caching invalid PTEs will
 reduce performance by causing additional page faults.
 ====
 
+[[norm:sfence-vma_implicit_access]]
 Implementations must only perform implicit reads of the translation data
 structures pointed to by the current contents of the `satp` register or
 a subsequent valid (V=1) translation data structure entry, and must only
 raise exceptions for implicit accesses that are generated as a result of
 instruction execution, not those that are performed speculatively.
 
-Changes to the `sstatus` fields SUM and MXR take effect immediately,
-without the need to execute an SFENCE.VMA instruction. Changing
+[#norm:sfence-vma-sum-mxr_effect]#Changes to the `sstatus` fields SUM and MXR take effect immediately,
+without the need to execute an SFENCE.VMA instruction.#
+[#norm:sfence-vma-mode_effect]#Changing
 `satp`.MODE from Bare to other modes and vice versa also takes effect
-immediately, without the need to execute an SFENCE.VMA instruction.
-Likewise, changes to `satp`.ASID take effect immediately.
+immediately, without the need to execute an SFENCE.VMA instruction.#
+[#norm:sfence-vma-asid_effect]#Likewise, changes to `satp`.ASID take effect immediately.#
 
 [NOTE]
 ====
@@ -1241,6 +1321,7 @@ latter case, a page-fault exception might occur, at which point software
 should execute SFENCE.VMA in accordance with the previous bullet point.
 ====
 
+[[norm:asid_hart_private]]
 If a hart employs an address-translation cache, that cache must appear
 to be private to that hart. In particular, the meaning of an ASID is
 local to a hart; software may choose to use the same ASID to refer to
@@ -1321,6 +1402,7 @@ address.
 [[sv32va]]
 .Sv32 virtual address.
 include::images/bytefield/sv32va.edn[]
+
 
 Sv32 page tables consist of 2^10^ page-table entries
 (PTEs), each of four bytes. A page table is exactly the size of a page
@@ -1446,7 +1528,7 @@ Two schemes to manage the A and D bits are defined:
   raised.
 
 * When the Svade extension is not implemented, the following scheme applies. +
-                                                                             +
+                                                                          +
   When a virtual page is accessed and the A bit is clear, the PTE is
   updated to set the A bit.  When the virtual page is written and the D
   bit is clear, the PTE is updated to set the D bit. When G-stage address
@@ -1458,7 +1540,7 @@ Two schemes to manage the A and D bits are defined:
   cause both VS-stage and G-stage PTEs to be updated. The following rules
   apply to all PTE updates caused by an explicit or an implicit memory
   accesses.                                                             +
-                                                                        +
+                                                                   +
   The PTE update must be atomic with respect to other accesses to the
   PTE, and must atomically perform all page-table walk checks for that leaf
   PTE as part of, and before, conditionally updating the PTE value.
