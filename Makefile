@@ -99,7 +99,8 @@ DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
 DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
 DOCS_NORM_TAGS := $(addprefix $(BUILD_DIR)/, $(addsuffix $(DOC_NORM_TAG_SUFFIX), $(DOCS)))
-NORM_RULES := $(BUILD_DIR)/norm-rules.json
+NORM_RULES_JSON := $(BUILD_DIR)/norm-rules.json
+NORM_RULES_XLSX := $(BUILD_DIR)/norm-rules.xlsx
 
 ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
@@ -143,7 +144,7 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
-build-norm-rules: $(NORM_RULES)
+build-norm-rules: $(NORM_RULES_JSON) $(NORM_RULES_XLSX)
 build: build-pdf build-html build-epub build-tags build-norm-rules
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
@@ -180,11 +181,18 @@ $(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/conv
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
-$(NORM_RULES): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES)
+$(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES)
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_TOOL) $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_TOOL) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
+	$(WORKDIR_TEARDOWN)
+
+$(NORM_RULES_XLSX): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES)
+	$(WORKDIR_SETUP)
+	cp -f $(DOCS_NORM_TAGS) $@.workdir
+	mkdir -p $@.workdir/build
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_TOOL) -x $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 # Update docker image to latest
