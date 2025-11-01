@@ -303,13 +303,14 @@ all other `SEW` values are _reserved_.#
 | Instructions
 | Required SEW
 
-| vaes*          | 32
-| Zvknha: vsha2* | 32
-| Zvknhb: vsha2* | 32 or 64
-| vclmul[h]      | 64
-| vg*            | 32
-| vsm3*          | 32
-| vsm4*          | 32
+| vaes*               | 32
+| Zvknha: vsha2*      | 32
+| Zvknhb: vsha2*      | 32 or 64
+| vclmul[h] (Zvbc)    | 64
+| vclmul[h] (Zvbc32e) | 8, 16, 32
+| vg*                 | 32
+| vsm3*               | 32
+| vsm4*               | 32
 
 
 |===
@@ -491,14 +492,14 @@ Note: If `Zve32x` is supported then `Zvkb` or `Zvbb` provide support for EEW of 
 
 
 All _cryptography-specific_ instructions defined in this Vector Crypto specification (i.e., those
-in <<zvkned>>, <<zvknh,Zvknh[ab]>>, <<Zvkg>>, <<Zvksed>> and <<zvksh>> but _not_ <<zvbb>>,<<zvkb>>, or <<zvbc>>) shall
+in <<zvkned>>, <<zvknh,Zvknh[ab]>>, <<Zvkg>>, <<Zvksed>> and <<zvksh>> but _not_ <<zvbb>>, <<zvkb>>, <<zvbc>> or <<zvbc,Zvbc32e>>) shall
 be executed with data-independent execution latency as defined in the
 <<#crypto_scalar_instructions,RISC-V Scalar Cryptography Extensions specification>>.
 [#norm:veccrypto_indepZkt]#It is important to note that the Vector Crypto instructions are independent of the
 implementation of the `Zkt` extension and do not require that `Zkt` is implemented.#
 
 This specification includes a <<Zvkt>> extension that, when implemented, requires certain vector instructions
-(including <<zvbb>>, <<zvkb>>, and <<zvbc>>) to be executed with data-independent execution latency.
+(including <<zvbb>>, <<zvkb>>, <<zvbc,Zvbc>> and <<zvbc,Zvbc32e>>) to be executed with data-independent execution latency.
 
 Detection of individual cryptography extensions uses the
 unified software-based RISC-V discovery method.
@@ -541,12 +542,16 @@ This extension is a superset of the <<Zvkb>> extension.
 <<<
 
 [[zvbc,Zvbc]]
-==== `Zvbc` - Vector Carry-less Multiplication
+==== `Zvbc` and `Zvbc32e` - Vector Carryless Multiplication
 
 General purpose carry-less multiplication instructions which are commonly used in cryptography
 and hashing (e.g., Elliptic curve cryptography, GHASH, CRC).
 
-[#norm:Zvbc_sew64only]#These instructions are only defined for `SEW`=64.#
+[#norm:Zvbc_sew64only]#These instructions are defined for `SEW`=64. (Zvbc)#
+[#norm:Zvbc32e_sew32168only]#These instructions are defined for `SEW`=8, 16, 32. (Zvbc32e)#
+
+Note:: Zvbc and Zvbc32e can be implemented independently.
+
 
 [%autowidth]
 [%header,cols="^2,4"]
@@ -1057,7 +1062,7 @@ All <<Zvkb>> instructions are also covered by DIEL as they are a
 proper subset of <<Zvbb>>
 ====
 
-===== All <<Zvbc>> instructions
+===== All <<Zvbc>> and Zvbc32e instructions
 - vclmul[h].v[vx]
 
 ===== add/sub
@@ -2214,7 +2219,9 @@ Encoding (Vector-Scalar)::
 ]}
 ....
 Reserved Encodings::
-* [#norm:vclmul_sewn64_rsv]#`SEW` is any value other than 64#
+* [#norm:vclmul_sewn64_rsv]#`SEW` is any value other than 64 (Zvbc) #
+* `SEW` is any value other than 8, 16 or 32 (Zvbc32e)
+
 
 Arguments::
 
@@ -2231,22 +2238,20 @@ Arguments::
 |===
 
 Description::
-Produces the low half of 128-bit carry-less product.
+Produces the low half of `2*SEW`-bit carry-less product.
 
-[#norm:vclmul_op]#Each 64-bit element in the `vs2` vector register is carry-less multiplied by
-either each 64-bit element in `vs1` (vector-vector), or the 64-bit value
+[#norm:vclmul_op]#Each `SEW`-bit element in the `vs2` vector register is carry-less multiplied by
+either each `SEW`-bit element in `vs1` (vector-vector), or the `SEW`-bit value
 from integer register `rs1` (vector-scalar). The result is the least
-significant 64 bits of the carry-less product.#
+significant `SEW` bits of the carry-less product.#
 
 [NOTE]
 ====
-The 64-bit carry-less multiply instructions can be used for implementing GCM in the absence of the `zvkg` extension.
-We do not make these instructions exclusive as the 64-bit carry-less multiply is readily derived from the
+The carryless multiply instructions can be used for implementing GCM in the absence of the `zvkg` extension.
+We do not make these instructions exclusive as the carryless multiply is readily derived from the
 instructions in the `zvkg` extension and can have utility in other areas.
-Likewise, we treat other SEW values as reserved so as not to preclude
-future extensions from using this opcode with different element widths.
-For example, a future extension might define an `SEW`=32 version of this instruction to enable `Zve32*` implementations to have
-vector carry-less multiplication instructions.
+
+Zvbc32e allows Zve32x implementations to support vector carryless multiplication.
 ====
 
 Operation::
@@ -2257,10 +2262,10 @@ Operation::
 function clause execute (VCLMUL(vs2, vs1, vd, suffix)) = {
 
   foreach (i from vstart to vl-1) {
-    let op1 : bits (64) = if suffix =="vv" then get_velem(vs1,i)
+    let op1 : bits (SEW) = if suffix == "vv" then get_velem(vs1, i)
                           else zext_or_truncate_to_sew(X(vs1));
-    let op2 : bits (64) = get_velem(vs2,i);
-    let product : bits (64) = clmul(op1,op2,SEW);
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmul(op1, op2, SEW);
     set_velem(vd, i, product);
   }
   RETIRE_SUCCESS
@@ -2273,10 +2278,12 @@ function clmul(x, y, width) = {
   }
   result
 }
+
+
 --
 
 Included in::
-<<zvbc>>, <<zvknc>>, <<zvksc>>
+<<zvbc>>, <<zvbc,Zvbc32e>>, <<zvknc>>, <<zvksc>>
 
 <<<
 
@@ -2318,7 +2325,8 @@ Encoding (Vector-Scalar)::
 ]}
 ....
 Reserved Encodings::
-* [#norm:vclmulh_sewn64_rsv]#`SEW` is any value other than 64#
+* [#norm:vclmulh_sewn64_rsv]#`SEW` is any value other than 64 (Zvbc)#
+* `SEW` is any value other than 8, 16 or 32 (Zvbc32e)
 
 Arguments::
 
@@ -2335,12 +2343,12 @@ Arguments::
 |===
 
 Description::
-Produces the high half of 128-bit carry-less product.
+Produces the high half of `2*SEW`-bit carry-less product.
 
-[#norm:vclmulh_op]#Each 64-bit element in the `vs2` vector register is carry-less multiplied by
-either each 64-bit element in `vs1` (vector-vector), or the 64-bit value
+[#norm:vclmulh_op]#Each `SEW`-bit element in the `vs2` vector register is carry-less multiplied by
+either each `SEW`-bit element in `vs1` (vector-vector), or the `SEW`-bit value
 from integer register `rs1` (vector-scalar). The result is the most
-significant 64 bits of the carry-less product.#
+significant `SEW` bits of the carry-less product.#
 
 // This instruction must always be implemented such that its execution latency does not depend
 // on the data being operated upon.
@@ -2349,12 +2357,11 @@ Operation::
 [source,sail]
 --
 function clause execute (VCLMULH(vs2, vs1, vd, suffix)) = {
-
   foreach (i from vstart to vl-1) {
-    let op1 : bits (64) = if suffix =="vv" then get_velem(vs1,i)
+    let op1 : bits (SEW) = if suffix == "vv" then get_velem(vs1,i)
                           else zext_or_truncate_to_sew(X(vs1));
-    let op2 : bits (64) = get_velem(vs2, i);
-    let product : bits (64) = clmulh(op1, op2, SEW);
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmulh(op1, op2, SEW);
     set_velem(vd, i, product);
   }
   RETIRE_SUCCESS
@@ -2367,11 +2374,10 @@ function clmulh(x, y, width) = {
   }
   result
 }
-
 --
 
 Included in::
-<<zvbc>>, <<zvknc>>, <<zvksc>>
+<<zvbc>>, <<zvbc,Zvbc32e>>, <<zvknc>>, <<zvksc>>
 
 <<<
 
