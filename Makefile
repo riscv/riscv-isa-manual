@@ -109,7 +109,8 @@ ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
 ASCIIDOCTOR_TAGS := $(ENV) asciidoctor --backend tags --require=./docs-resources/converters/tags.rb
-CREATE_NORM_RULE_TOOL := ruby docs-resources/tools/create_normative_rules.rb
+CREATE_NORM_RULE_TOOL := docs-resources/tools/create_normative_rules.rb
+CREATE_NORM_RULE_RUBY := ruby $(CREATE_NORM_RULE_TOOL)
 
 OPTIONS := --trace \
            -a compress \
@@ -149,14 +150,17 @@ build: build-pdf build-html build-epub build-tags build-norm-rules
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
-# All normative rule definition input YAML files tracked under Git (ensure you at least stage new files).
-NORM_RULE_DEF_FILES := $(shell git ls-files '$(NORM_RULE_DEF_DIR)/*.yaml')
+# All normative rule definition input YAML files.
+NORM_RULE_DEF_FILES := $(wildcard $(NORM_RULE_DEF_DIR)/*.yaml)
 
 # Add -t to each normative tag input filename and add prefix of "/" to make into absolute pathname.
 NORM_TAG_FILE_ARGS := $(foreach relative_pname,$(DOCS_NORM_TAGS),-t /$(relative_pname))
 
 # Add -d to each normative rule definition filename
 NORM_RULE_DEF_ARGS := $(foreach relative_pname,$(NORM_RULE_DEF_FILES),-d $(relative_pname))
+
+# Temporarily make errors warnings. Don't check this in uncommented.
+# NORM_RULE_DEF_ARGS := $(NORM_RULE_DEF_ARGS) -w
 
 $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS) $(BUILD_DIR)/%-norm-tags.json
 	$(WORKDIR_SETUP)
@@ -181,18 +185,18 @@ $(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/conv
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
-$(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES)
+$(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL)
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_TOOL) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
-$(NORM_RULES_XLSX): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES)
+$(NORM_RULES_XLSX): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL)
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_TOOL) -x $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -x $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 # Update docker image to latest
