@@ -57,18 +57,20 @@ implemented or is not enabled.
 [[ZICFILP_FORWARD_TRAPS]]
 ==== Preserving Expected Landing Pad State on Traps
 
-A trap may need to be delivered to the same or to a higher privilege mode upon
+[#norm:zicflip_forward_traps]#A trap may need to be delivered to the same or to a higher privilege mode upon
 completion of `JALR`/`C.JALR`/`C.JR`, but before the instruction at the target
-of indirect call/jump was decoded, due to:
+of indirect call/jump was decoded#, due to:
 
-* Asynchronous interrupts.
-* Synchronous exceptions with priority higher than that of a software-check
+* [#norm:zicflip_forward_trap_async_interrupt]#Asynchronous interrupts.#
+* [#norm:zicflip_forward_trap_async_exception]#Synchronous exceptions with priority higher than that of a software-check
   exception with `__x__tval` set to "landing pad fault (code=2)" (See
-  <<exception-priority>> of Privileged Specification).
+  <<exception-priority>> of Privileged Specification).#
 
+[[norm:zicflip_exception_priority]]
 The software-check exception caused by Zicfilp has higher priority than an
 illegal-instruction exception but lower priority than instruction access-fault.
 
+[[norm:lpad_sw_exception]]
 The software-check exception due to the instruction not being an `LPAD`
 instruction when `ELP` is `LP_EXPECTED` or a software-check exception caused by
 the `LPAD` instruction itself leads to a trap being delivered
@@ -76,23 +78,26 @@ to the same or to a higher privilege mode.
 
 In such cases, the `ELP` prior to the trap, the previous `ELP`, must be
 preserved by the trap delivery such that it can be restored on a return from the
-trap. To store the previous `ELP` state on trap delivery to M-mode, an `MPELP`
-bit is provided in the `mstatus` CSR. To store the previous `ELP` state on trap
-delivery to S/HS-mode, an `SPELP` bit is provided in the `mstatus` CSR. The
-`SPELP` bit in `mstatus` can be accessed through the `sstatus` CSR. To store
+trap. [#norm:mstatus-mpelp_op]#To store the previous `ELP` state on trap delivery to M-mode, an `MPELP`
+bit is provided in the `mstatus` CSR.# [#norm:mstatus-spelp_op]#To store the previous `ELP` state on trap
+delivery to S/HS-mode, an `SPELP` bit is provided in the `mstatus` CSR.# [#norm:sstatus-spelp_op]#The
+`SPELP` bit in `mstatus` can be accessed through the `sstatus` CSR.# [#norm:vsstatus-spelp_op2]#To store
 the previous `ELP` state on traps to VS-mode, a `SPELP` bit is defined in the
-`vsstatus` (VS-modes version of `sstatus`). To store the previous `ELP` state on
-transition to Debug Mode, a `pelp` bit is defined in the `dcsr` register.
+`vsstatus` (VS-modes version of `sstatus`).# [#norm:dcsr-pelp_op]#To store the previous `ELP` state on
+transition to Debug Mode, a `pelp` bit is defined in the `dcsr` register.#
 
+[[norm:zicflip_pelp_trap]]
 When a trap is taken into privilege mode `x`, the `__x__PELP` is set to `ELP`
 and `ELP` is set to `NO_LP_EXPECTED`.
 
+[[norm:zicflip_pelp_trap_return]]
 An `MRET` or `SRET` instruction is used to return from a trap in M-mode or
 S-mode, respectively.  When executing an `__x__RET` instruction, if the new
 privilege mode is `y`, then `ELP` is set to the value of `__x__PELP` if
 `__y__LPE` (see <<FCFIACT>>) is 1; otherwise, it is set to `NO_LP_EXPECTED`;
 `__x__PELP` is set to `NO_LP_EXPECTED`.
 
+[[norm:zicflip_pelp_debug_mode]]
 Upon entry into Debug Mode, the `pelp` bit in `dcsr` is updated with the `ELP`
 at the privilege level the hart was previously in, and the `ELP` is set to
 `NO_LP_EXPECTED`. When a hart resumes from Debug Mode, if the new privilege mode
@@ -123,19 +128,20 @@ This section specifies the Privileged ISA for the Zicfiss extension.
 
 ==== Shadow Stack Pointer (`ssp`) CSR access control
 
+[[norm:zicfiss_ssp_csr]]
 Attempts to access the `ssp` CSR may result in either an illegal-instruction
 exception or a virtual-instruction  exception, contingent upon the state of the
 *__x__*`envcfg.SSE` fields. The conditions are specified as follows:
 
-* If the privilege mode is less than M and `menvcfg.SSE` is 0, an
-  illegal-instruction exception is raised.
-* Otherwise, if in U-mode and `senvcfg.SSE` is 0, an illegal-instruction
-  exception is raised.
-* Otherwise, if in VS-mode and `henvcfg.SSE` is 0, a virtual-instruction
-  exception is raised.
-* Otherwise, if in VU-mode and either `henvcfg.SSE` or `senvcfg.SSE` is 0,
-  a virtual-instruction  exception is raised.
-* Otherwise, the access is allowed.
+* [#norm:zicfiss_m_menvcfg-sse]#If the privilege mode is less than M and `menvcfg.SSE` is 0, an
+  illegal-instruction exception is raised.#
+* [#norm:zicfiss_u_senvcfg-sse]#Otherwise, if in U-mode and `senvcfg.SSE` is 0, an illegal-instruction
+  exception is raised.#
+* [#norm:zicfiss_vs_henvcfg-sse]#Otherwise, if in VS-mode and `henvcfg.SSE` is 0, a virtual-instruction
+  exception is raised.#
+* [#norm:zicfiss_vu_henvcfg_senvcfg-sse]#Otherwise, if in VU-mode and either `henvcfg.SSE` or `senvcfg.SSE` is 0,
+  a virtual-instruction  exception is raised.#
+* [#norm:zicfiss_sse_access]#Otherwise, the access is allowed.#
 
 ==== Shadow-Stack-Enabled (SSE) State
 
@@ -155,6 +161,7 @@ When S-mode is implemented, it is determined as follows:
 |  U or VU     | `senvcfg.SSE`
 |===
 
+[[norm:zicfiss_smode-xsse]]
 When S-mode is not implemented, then `xSSE` is 0 at both M and U privilege modes.
 
 [NOTE]
@@ -201,24 +208,25 @@ instructions.
 ==== Shadow Stack Memory Protection
 
 To protect shadow stack memory, the memory is associated with a new page type –
-the Shadow Stack (SS) page – in the single-stage and VS-stage page tables. The
-encoding `R=0`, `W=1`, and `X=0`, is defined to represent an SS page. When
-`menvcfg.SSE=0`, this encoding remains reserved. Similarly, when `V=1` and
-`henvcfg.SSE=0`, this encoding remains reserved at `VS` and `VU` levels.
+the Shadow Stack (SS) page – in the single-stage and VS-stage page tables. [#norm:ss_page_enc]#The
+encoding `R=0`, `W=1`, and `X=0`, is defined to represent an SS page.# [#norm:ssmp_menvcfg-sse]#When
+`menvcfg.SSE=0`, this encoding remains reserved.# [#norm:ssmp_henvcfg-sse]#Similarly, when `V=1` and
+`henvcfg.SSE=0`, this encoding remains reserved at `VS` and `VU` levels.#
 
-If `satp.MODE` (or `vsatp.MODE` when `V=1`) is set to `Bare` and the effective
-privilege mode is less than M, shadow stack instructions raise a store/AMO
-access-fault exception. When the effective privilege mode is M, memory access
-by an `SSAMOSWAP.W/D` instruction results in a store/AMO access-fault exception.
+[#norm:satp-mode_bare]#If `satp.MODE` (or `vsatp.MODE` when `V=1`) is set to `Bare` and the effective
+privilege mode is below M, shadow stack memory accesses are prohibited, and
+shadow stack instructions will raise a store/AMO access-fault exception.# [#norm:ssmp_ssamoswap]#When
+the effective privilege mode is M, any memory access by an `SSAMOSWAP.W/D`
+instruction will result in a store/AMO access-fault exception.#
 
-Memory mapped as an SS page cannot be written to by instructions other than
+[#norm:ssmp_ss_page_access_fault]#Memory mapped as an SS page cannot be written to by instructions other than
 `SSAMOSWAP.W/D`, `SSPUSH`, and `C.SSPUSH`. Attempts will raise a store/AMO
-access-fault exception. Access to a SS page using _cache-block operation_
+access-fault exception.# [#norm:ssmp_ss_cache_block_access_fault]#Access to a SS page using _cache-block operation_
 (`CBO.*`) instructions is not permitted. Such accesses will raise a store/AMO
-access-fault exception. Implicit accesses, including instruction fetches to an
+access-fault exception.# [#norm:ssmp_ss_implicit_access_fault]#Implicit accesses, including instruction fetches to an
 SS page, are not permitted. Such accesses will raise an access-fault exception
-appropriate to the access type. However, the shadow stack is readable by all
-instructions that only load from memory.
+appropriate to the access type.# [#norm:ssmp_ss_load]#However, the shadow stack is readable by all
+instructions that only load from memory.#
 
 [NOTE]
 ====
@@ -252,11 +260,11 @@ As of the drafting of this specification, instruction fetches are the sole type
 of implicit access subjected to single- or VS-stage address translation.
 ====
 
-If a shadow stack (SS) instruction raises an access-fault, page-fault, or
+[#norm:ss_fault_exception_code]#If a shadow stack (SS) instruction raises an access-fault, page-fault, or
 guest-page-fault exception that is supposed to indicate the original instruction
 type (load or store/AMO), then the reported exception cause is respectively a
 store/AMO access fault (code 7), a store/AMO page fault (code 15), or a
-store/AMO guest-page fault (code 23). For shadow stack instructions, the
+store/AMO guest-page fault (code 23).# For shadow stack instructions, the
 reported instruction type is always as though it were a store or AMO, even for
 instructions `SSPOPCHK` and `C.SSPOPCHK` that only read from memory and do not
 write to it.
@@ -269,11 +277,11 @@ either a store, an AMO, or a shadow stack instruction.
 ====
 
 Shadow stack instructions are restricted to accessing shadow stack
-(`pte.xwr=010b`) pages. Should a shadow stack instruction access a page that is
+(`pte.xwr=010b`) pages. [#norm:ssmp_ss_page_illegeal_access]#Should a shadow stack instruction access a page that is
 not designated as a shadow stack page and is not marked as read-only
-(`pte.xwr=001`), a store/AMO access-fault exception will be invoked. Conversely,
+(`pte.xwr=001`), a store/AMO access-fault exception will be invoked.# [#norm:ssmp_ss_read_only_page]#Conversely,
 if the page being accessed by a shadow stack instruction is a read-only page, a
-store/AMO page-fault exception will be triggered.
+store/AMO page-fault exception will be triggered.#
 
 
 [NOTE]
@@ -304,6 +312,7 @@ the stack.
 
 <<<
 
+[[norm:ssp_xlen_aligned]]
 If the virtual address in `ssp` is not `XLEN` aligned, then the `SSPUSH`/
 `C.SSPUSH`/`SSPOPCHK`/`C.SSPOPCHK` instructions cause a store/AMO access-fault
 exception.
@@ -317,9 +326,9 @@ that the instruction must not be emulated by a trap handler.
 ====
 
 Correct execution of shadow stack instructions that access memory requires the
-the accessed memory to be idempotent. If the memory referenced by
+the accessed memory to be idempotent. [#norm:ssmp_ss_idempotent_memory]#If the memory referenced by
 `SSPUSH`/`C.SSPUSH`/`SSPOPCHK`/`C.SSPOPCHK`/`SSAMOSWAP.W/D` instructions is not
-idempotent, then the instructions cause a store/AMO access-fault exception.
+idempotent, then the instructions cause a store/AMO access-fault exception.#
 
 [NOTE]
 ====
@@ -341,10 +350,10 @@ affect read access to a shadow stack page as the shadow stack page is always
 readable by all instructions that load from memory.
 
 The G-stage address translation and protections remain unaffected by the Zicfiss
-extension. The `xwr == 010b` encoding in the G-stage PTE remains reserved. When
+extension. The `xwr == 010b` encoding in the G-stage PTE remains reserved.[#norm:active_g_stage_pte]#When
 G-stage page tables are active, the shadow stack instructions that access memory
 require the G-stage page table to have read-write permission for the accessed
-memory; else a store/AMO guest-page-fault exception is raised.
+memory; else a store/AMO guest-page-fault exception is raised.#
 
 [NOTE]
 ====
