@@ -128,7 +128,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-mathematical \
             --require=asciidoctor-sail
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags build-norm-rules submodule-check
+.PHONY: all build clean build-docs build-pdf build-html build-epub build-tags build-norm-rules docker-pull-latest
 
 all: build
 
