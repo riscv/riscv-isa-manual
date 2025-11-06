@@ -152,7 +152,7 @@ build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-xlsx: $(NORM_RULES_XLSX)
 build-norm-rules-html: $(NORM_RULES_HTML)
 build-norm-rules: build-norm-rules-json
-build: build-pdf build-html build-epub build-tags build-norm-rules
+build: build-pdf build-html build-epub build-tags build-norm-rules-html
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
