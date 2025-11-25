@@ -20,20 +20,20 @@ In addition to the machine-level CSRs described in this section,
 
 [#norm:misa_acc]#The `misa` CSR is a *WARL* read-write register# reporting the ISA supported by the hart.
 [#norm:misa_always_rd]#This register must be readable in any implementation#,
-but [#norm:MISA_CSR_IMPLEMENTED]#a value of zero can be returned to indicate the `misa` register has not been implemented#, requiring that CPU capabilities be determined through a separate non-standard mechanism.
+but [#norm:misa_csr_implemented]#a value of zero can be returned to indicate the `misa` register has not been implemented#, requiring that CPU capabilities be determined through a separate non-standard mechanism.
 
 .Machine ISA register (misa)
 include::images/bytefield/misareg.edn[]
 
 [#norm:misa_mxl_op_isa]#The MXL (Machine XLEN) field encodes the native base integer ISA width as
-shown in <<misabase>>.#
+shown in <<norm:misa_mxl_enc>>.#
 [#norm:misa_mxl_acc]#The MXL field is read-only.#
 [#norm:misa_mxl_op_nz]#If `misa` is nonzero, the
 MXL field indicates the effective XLEN in M-mode, a constant termed _MXLEN_.#
-XLEN is never greater than MXLEN, but XLEN might be smaller than MXLEN in
-less-privileged modes.
+[#norm:xlen_le_mxlen]#XLEN is never greater than MXLEN, but XLEN might be smaller than MXLEN in
+less-privileged modes.#
 
-[[misabase]]
+[[norm:misa_mxl_enc]]
 .Encoding of MXL field in `misa`
 [%autowidth,float="center",align="center",cols=">,>",options="header",]
 |===
@@ -61,7 +61,7 @@ immediate 2 in a register, then shifting the register left by 31 bits.
 If zero, the hart is RV32, else it is RV64.
 ====
 
-[#norm:misa_extensions_enc]#The Extensions field encodes the presence of the standard extensions,
+[#norm:misa_extensions_enc_txt]#The Extensions field encodes the presence of the standard extensions,
 with a single bit per letter of the alphabet (bit 0 encodes presence of
 extension "A" , bit 1 encodes presence of extension "B", through to
 bit 25 which encodes "Z").#
@@ -109,6 +109,7 @@ the same vein, "implemented and enabled" is redundant here;
 
 [#norm:misa_extensions_rsv_ret_0]#All bits that are reserved for future use must return zero when read.#
 
+[[norm:misa_extensions_enc_tbl]]
 .Encoding of Extensions field in `misa`.
 [%autowidth,float="center",align="center",cols=">,>,<",options="header",]
 |===
@@ -282,7 +283,6 @@ the parity bit.# For example, the JEDEC manufacturer ID
 
 [NOTE]
 ====
-[[norm:mvendorid_bank_1_less_than_JEDEC]]
 In JEDEC's parlance, the bank number is one greater than the number of
 continuation codes; hence, the `mvendorid` Bank field encodes a value
 that is one less than the JEDEC bank number.
@@ -358,10 +358,9 @@ boundaries to ease human readability.
 [#norm:mhartid_sz_acc_op]#The `mhartid` CSR is an MXLEN-bit read-only register containing the
 integer ID of the hardware thread running the code.#
 [#norm:mhartid_always_rd]#This register must be readable in any implementation.#
-Hart IDs might not necessarily be
-numbered contiguously in a multiprocessor system, but at least one hart
-must have a hart ID of zero. Hart IDs must be unique within the
-execution environment.
+Hart IDs might not necessarily be numbered contiguously in a multiprocessor system, but
+[#norm:mhartid_one_is_zero]#at least one hart must have a hart ID of zero.#
+[#norm:mhartid_unique]#Hart IDs must be unique within the execution environment.#
 
 .Hart ID (`mhartid`) register
 include::images/bytefield/mhartid.edn[]
@@ -400,10 +399,9 @@ include::images/wavedrom/mstatushreg.edn[]
 [[privstack]]
 ===== Privilege and Global Interrupt-Enable Stack in `mstatus` register
 
-Global interrupt-enable bits, MIE and SIE, are provided for M-mode and
-S-mode respectively. These bits are primarily used to guarantee
-atomicity with respect to interrupt handlers in the current privilege
-mode.
+[#norm:mstatus_mie_sie_op1]#Global interrupt-enable bits, MIE and SIE, are provided for M-mode and
+S-mode respectively.# These bits are primarily used to guarantee
+atomicity with respect to interrupt handlers in the current privilege mode.
 
 [NOTE]
 ====
@@ -412,17 +410,17 @@ allowing them to be atomically set or cleared with a single CSR
 instruction.
 ====
 
-When a hart is executing in privilege mode _x_, interrupts are globally
-enabled when __x__IE=1 and globally disabled when __x__IE=0. Interrupts for
-lower-privilege modes, __w__<__x__, are always globally
-disabled regardless of the setting of any global __w__IE bit for the
-lower-privilege mode. Interrupts for higher-privilege modes,
-__y__>__x__, are always globally enabled regardless of the
-setting of the global __y__IE bit for the higher-privilege mode.
+[#norm:mstatus_mie_sie_op2]#When a hart is executing in privilege mode _x_, interrupts are globally
+enabled when __x__IE=1 and globally disabled when __x__IE=0.#
+[#norm:mstatus_xie_intr_en_dis]#Interrupts for lower-privilege modes, __w__<__x__,
+are always globally disabled regardless of the setting of any global __w__IE bit for the
+lower-privilege mode.  Interrupts for higher-privilege modes, __y__>__x__,
+are always globally enabled regardless of the
+setting of the global __y__IE bit for the higher-privilege mode.#
 Higher-privilege-level code can use separate per-interrupt enable bits
 to disable selected higher-privilege-mode interrupts before ceding
 control to a lower-privilege mode.
-If supervisor mode is not implemented, then SIE and SPIE are read-only 0.
+[#norm:mstatus_sie_spie_rdonly0]#If supervisor mode is not implemented, then SIE and SPIE are read-only 0.#
 
 [NOTE]
 ====
@@ -432,12 +430,13 @@ would leave only a synchronous trap, non-maskable interrupt, or reset as
 means to regain control of the hart.
 ====
 
-To support nested traps, each privilege mode _x_ that can respond to
-interrupts has a two-level stack of interrupt-enable bits and privilege
-modes. __x__PIE holds the value of the interrupt-enable bit active prior
-to the trap, and __x__PP holds the previous privilege mode. The __x__PP
-fields can only hold privilege modes up to _x_, so MPP is two bits wide
-and SPP is one bit wide. When a trap is taken from privilege mode _y_
+[#norm:mstatus_xpie_xpp_op]#To support nested traps, each privilege mode _x_ that can respond to
+interrupts has a two-level stack of interrupt-enable bits and privilege modes.
+__x__PIE holds the value of the interrupt-enable bit active prior
+to the trap, and __x__PP holds the previous privilege mode.#
+[#norm:mstatus_xpp_enc]#The __x__PP fields can only hold privilege modes up to _x_#, so
+[#norm:mstatus_mpp_sz]#MPP is two bits wide# and [#norm:mstatus_spp_sz]#SPP is one bit wide.#
+When a trap is taken from privilege mode _y_
 into privilege mode _x_, __x__PIE is set to the value of __x__IE; __x__IE is
 set to 0; and __x__PP is set to _y_.
 
@@ -566,7 +565,7 @@ also set to 0. Additionally, if it is VU, then `vsstatus.SDT` is also set to 0.
 For RV64 harts, the SXL and UXL fields are *WARL* fields that control the
 value of XLEN for S-mode and U-mode, respectively. The encoding of these
 fields is the same as the MXL field of `misa`, shown in
-<<misabase>>. The effective XLEN in S-mode and
+<<norm:misa_mxl_enc>>. The effective XLEN in S-mode and
 U-mode are termed _SXLEN_ and _UXLEN_, respectively.
 
 When MXLEN=32, the SXL and UXL fields do not exist, and SXLEN=32 and
