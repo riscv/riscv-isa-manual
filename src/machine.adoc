@@ -430,15 +430,15 @@ would leave only a synchronous trap, non-maskable interrupt, or reset as
 means to regain control of the hart.
 ====
 
-[#norm:mstatus_xpie_xpp_op]#To support nested traps, each privilege mode _x_ that can respond to
+To support nested traps, [#norm:mstatus_xpie_xpp_op]#each privilege mode _x_ that can respond to
 interrupts has a two-level stack of interrupt-enable bits and privilege modes.
 __x__PIE holds the value of the interrupt-enable bit active prior
 to the trap, and __x__PP holds the previous privilege mode.#
 [#norm:mstatus_xpp_enc]#The __x__PP fields can only hold privilege modes up to _x_#, so
 [#norm:mstatus_mpp_sz]#MPP is two bits wide# and [#norm:mstatus_spp_sz]#SPP is one bit wide.#
-When a trap is taken from privilege mode _y_
+[#norm:mstatus_xpie_xie_xpp_trap_op]#When a trap is taken from privilege mode _y_
 into privilege mode _x_, __x__PIE is set to the value of __x__IE; __x__IE is
-set to 0; and __x__PP is set to _y_.
+set to 0; and __x__PP is set to _y_.#
 
 [NOTE]
 ====
@@ -450,12 +450,12 @@ to the interrupted context, will save the privilege stack before
 re-enabling interrupts, so only one entry per stack is required.
 ====
 
-An MRET or SRET instruction is used to return from a trap in M-mode or
-S-mode respectively. When executing an __x__RET instruction, supposing
+An MRET or SRET instruction is used to return from a trap in M-mode or S-mode respectively.
+[#norm:mstatus_xret_op]#When executing an __x__RET instruction, supposing
 __x__PP holds the value _y_, __x__IE is set to __x__PIE; the privilege mode is
 changed to _y_; __x__PIE is set to 1; and __x__PP is set to the
 least-privileged supported mode (U if U-mode is implemented, else M). If
-__y__{ne}M, __x__RET also sets MPRV=0.
+__y__{ne}M, __x__RET also sets MPRV=0.#
 
 [NOTE]
 ====
@@ -475,7 +475,8 @@ traps. To prevent this, trap handlers must be meticulously designed to identify
 and safely manage exceptions within their operational flow.
 ====
 
-__x__PP fields are *WARL* fields that can hold only privilege mode _x_ and any implemented privilege mode lower than _x_. If privilege mode _x_ is not implemented, then __x__PP must be read-only 0.
+[#norm:mstatus_xpp_warl]#__x__PP fields are *WARL* fields that can hold only privilege mode _x_ and any implemented privilege mode lower than _x_.#
+[#norm:mstatus_xpp_rdonly0]#If privilege mode _x_ is not implemented, then __x__PP must be read-only 0.#
 
 [NOTE]
 ====
@@ -503,31 +504,33 @@ However, managing Hardware-Error exceptions,  which may occur unpredictably,
 presents significant challenges in trap handler implementation due to the
 potential risk of a double trap.
 
-The M-mode-disable-trap (`MDT`) bit is a WARL field introduced by the Smdbltrp
-extension. Upon reset, the `MDT` field is set to 1. When the `MDT` bit is set to
-1 by an explicit CSR write, the `MIE` (Machine Interrupt Enable) bit is cleared
-to 0. For RV64, this clearing occurs regardless of the value written, if any, to
-the `MIE` bit by the same write. The `MIE` bit can only be set to 1 by an
-explicit CSR write if the `MDT` bit is already 0 or, for RV64, is being set to 0
-by the same write (For RV32, the `MDT` bit is in `mstatush` and the `MIE` bit in
-`mstatus` register).
+[#norm:mstatus_mdt_sz_warl]#The M-mode-disable-trap (`MDT`) bit is a WARL field introduced by the Smdbltrp extension.#
+[#norm:mstatus_mdt_rst]#Upon reset, the `MDT` field is set to 1.#
+[#norm:mstatus_mie_clr_by_mdt]#When the `MDT` bit is set to 1 by an explicit CSR write,
+the `MIE` (Machine Interrupt Enable) bit is cleared to 0.#
+[#norm:mstatus_mie_clr_by_mdt_rv64]#For RV64, this clearing occurs regardless of the value written, if any, to the `MIE` bit by the same write.#
+[#norm:mstatus_mie_set_mdt_0]#The `MIE` bit can only be set to 1 by an
+explicit CSR write if the `MDT` bit is already 0#
+[#norm:mstatus_mie_set_mdt_0_rv64]#or, for RV64, is being set to 0 by the same write#
+(For RV32, the `MDT` bit is in `mstatush` and the `MIE` bit in `mstatus` register).
 
-When a trap is to be taken into M-mode, if the `MDT` bit is currently 0, it is
-then set to 1, and the trap is delivered as expected. However, if `MDT` is
-already set to 1, then this is an _unexpected trap_. When the Smrnmi extension
+[#norm:trap_exp]#When a trap is to be taken into M-mode, if the `MDT` bit is currently 0, it is then set to 1, and the trap is delivered as expected.#
+[#norm:trap_unexp_mdt_1]#However, if `MDT` is already set to 1, then this is an _unexpected trap_.#
+[#norm:trap_unexp_rnmi]#When the Smrnmi extension
 is implemented, a trap caused by an RNMI is not considered an _unexpected trap_
-irrespective of the state of the `MDT` bit. A trap caused by an RNMI does not
-set the `MDT` bit. However, a trap that occurs when executing in M-mode with
-`mnstatus.NMIE` set to 0 is an _unexpected trap_.
+irrespective of the state of the `MDT` bit.#
+[#norm:mstatus_mdt_not_set_rnmi]#A trap caused by an RNMI does not set the `MDT` bit.# However,
+[#norm:trap_unexp_mnstatus_nmie_0]#a trap that occurs when executing in M-mode with
+`mnstatus.NMIE` set to 0 is an _unexpected trap_.#
 
-In the event of a _unexpected trap_, the handling is as follows:
+[#norm:trap_unexp_hndl_lead-in]#In the event of a _unexpected trap_, the handling is as follows:#
 
-* When the Smrnmi extension is implemented and `mnstatus.NMIE` is 1, the hart
+* [#norm:trap_unexp_hndl_rnmi]#When the Smrnmi extension is implemented and `mnstatus.NMIE` is 1, the hart
   traps to the RNMI handler. To deliver this trap, the `mnepc` and `mncause`
   registers are written with the values that the _unexpected trap_ would have
   written to the `mepc` and `mcause` registers respectively. The privilege
   mode information fields in the `mnstatus` register are written to indicate
-  M-mode and its `NMIE` field is set to 0.
+  M-mode and its `NMIE` field is set to 0.#
 
 [NOTE]
 ====
@@ -538,57 +541,58 @@ by the RNMI handler by decoding the instruction at the address in `mnepc` and
 examining its source register contents.
 ====
 
-* When the Smrnmi extension is not implemented, or if the Smrnmi extension is
+* [#norm:trap_unexp_hndl_no_rnmi]#When the Smrnmi extension is not implemented, or if the Smrnmi extension is
   implemented and `mnstatus.NMIE` is 0, the hart enters a critical-error state
   without updating any architectural state, including the `pc`. This state
   involves ceasing execution, disabling all interrupts (including NMIs), and
-  asserting a `critical-error` signal to the platform.
+  asserting a `critical-error` signal to the platform.#
 
 [NOTE]
 ====
-The actions performed by the platform when a hart asserts a `critical-error` signal
+[#norm:critical-error]#The actions performed by the platform when a hart asserts a `critical-error` signal
 are platform-specific. The range of possible actions include restarting
-the affected hart or restarting the entire platform, among others.
+the affected hart or restarting the entire platform, among others.#
 ====
 
-The `MRET` and `SRET` instructions, when executed in M-mode, set the `MDT` bit
-to 0. If the new privilege mode is U, VS, or VU, then `sstatus.SDT` is also set
-to 0. Additionally, if it is VU, then `vsstatus.SDT` is also set to 0.
+[#norm:mstatus_mdt_clr_mret_sret]#The `MRET` and `SRET` instructions, when executed in M-mode, set the `MDT` bit to 0.#
+[#norm:sstatus_sdt_clr_mret_sret]#If the new privilege mode is U, VS, or VU, then `sstatus.SDT` is also set to 0.#
+[#norm:vsstatus_sdt_clr_mret_sret]#Additionally, if it is VU, then `vsstatus.SDT` is also set to 0.#
 
-The `MNRET` instruction, provided by the Smrnmi extension, sets the `MDT` bit to
-0 if the new privilege mode is not M. If it is U, VS, or VU, then `sstatus.SDT` is
-also set to 0. Additionally, if it is VU, then `vsstatus.SDT` is also set to 0.
+[#norm:mstatus_mdt_clr_mnret]#The `MNRET` instruction, provided by the Smrnmi extension, sets the `MDT` bit to 0 if the new privilege mode is not M.#
+[#norm:sstatus_sdt_clr_mnret]#If it is U, VS, or VU, then `sstatus.SDT` is also set to 0.#
+[#norm:vsstatus_sdt_clr_mnret]#Additionally, if it is VU, then `vsstatus.SDT` is also set to 0.#
 
 [[xlen-control]]
 ===== Base ISA Control in `mstatus` Register
 
-For RV64 harts, the SXL and UXL fields are *WARL* fields that control the
-value of XLEN for S-mode and U-mode, respectively. The encoding of these
-fields is the same as the MXL field of `misa`, shown in
-<<norm:misa_mxl_enc>>. The effective XLEN in S-mode and
-U-mode are termed _SXLEN_ and _UXLEN_, respectively.
+[#norm:mstatus_sxl_uxl_warl_op]#For RV64 harts, the SXL and UXL fields are *WARL* fields that control the
+value of XLEN for S-mode and U-mode, respectively.#
+[#norm:mstatus_sxl_uxl_enc]#The encoding of these fields is the same as the MXL field of `misa`, shown in <<norm:misa_mxl_enc>>.#
+[#norm:sxlen_uxlen]#The effective XLEN in S-mode and U-mode are termed _SXLEN_ and _UXLEN_, respectively.#
 
-When MXLEN=32, the SXL and UXL fields do not exist, and SXLEN=32 and
-UXLEN=32.
+[[norm:mstatus_sxl_uxl_sxlen_uxlen_mxlen32]]
+When MXLEN=32, the SXL and UXL fields do not exist, and SXLEN=32 and UXLEN=32.
 
-When MXLEN=64, if S-mode is not supported, then SXL is read-only
-zero. Otherwise, it is a *WARL* field that encodes the current value of SXLEN.
-In particular, an implementation may make SXL be a read-only field whose
-value always ensures that SXLEN=MXLEN.
+[#norm:mstatus_sxl_acc_mxlen64]#When MXLEN=64, if S-mode is not supported, then SXL is read-only zero.
+Otherwise, it is a *WARL* field that encodes the current value of SXLEN.#
+In particular, [#norm:mstatus_sxl_rdonly_mxlen64]#an implementation may make SXL be a read-only field whose
+value always ensures that SXLEN=MXLEN.#
 
-When MXLEN=64, if U-mode is not supported, then UXL is read-only
-zero. Otherwise, it is a *WARL* field that encodes the current value of UXLEN.
-In particular, an implementation may make UXL be a read-only field whose
-value always ensures that UXLEN=MXLEN or UXLEN=SXLEN.
+[#norm:mstatus_uxl_acc_mxlen64]#When MXLEN=64, if U-mode is not supported, then UXL is read-only zero.
+Otherwise, it is a *WARL* field that encodes the current value of UXLEN.#
+In particular, [#norm:mstatus_uxl_rdonly_mxlen64]#an implementation may make UXL be a read-only field whose
+value always ensures that UXLEN=MXLEN or UXLEN=SXLEN.#
 
+[[norm:mstatus_uxl_legal_vals_smode]]
 If S-mode is implemented, the set of legal values that the UXL field may
 assume excludes those that would cause UXLEN to be greater than SXLEN.
 
+[[norm:xlen_reduction_op]]
 Whenever XLEN in any mode is set to a value less than the widest
 supported XLEN, all operations must ignore source operand register bits
 above the configured XLEN, and must sign-extend results to fill the
-entire widest supported XLEN in the destination register. Similarly,
-`pc` bits above XLEN are ignored, and when the `pc` is written, it is
+entire widest supported XLEN in the destination register.
+Similarly, `pc` bits above XLEN are ignored, and when the `pc` is written, it is
 sign-extended to fill the widest supported XLEN.
 
 [NOTE]
@@ -603,6 +607,7 @@ always be a software bug, but machine operation is well-defined even in
 this case.
 ====
 
+[[norm:xlen_reduction_hint_op1]]
 Some HINT instructions are encoded as integer computational instructions that
 overwrite their destination register with its current value, e.g.,
 `c.addi x8, 0`.
@@ -611,6 +616,7 @@ destination register not all equal to bit XLEN-1, it is implementation-defined
 whether bits MXLEN..XLEN of the destination register are unchanged or are
 overwritten with copies of bit XLEN-1.
 
+[[norm:xlen_reduction_hint_op2]]
 NOTE: This definition allows implementations to elide register write-back for
 some HINTs, while allowing them to execute other HINTs in the same manner as
 other integer computational instructions.
@@ -621,23 +627,23 @@ privilege mode.
 ===== Memory Privilege in `mstatus` Register
 
 The MPRV (Modify PRiVilege) bit modifies the _effective privilege mode_,
-i.e., the privilege level at which loads and stores execute. When
-MPRV=0, loads and stores behave as normal, using the translation and
+i.e., the privilege level at which loads and stores execute.
+[#norm:mstatus_mprv_ldst_op]#When MPRV=0, loads and stores behave as normal, using the translation and
 protection mechanisms of the current privilege mode. When MPRV=1, load
 and store memory addresses are translated and protected, and endianness
-is applied, as though the current privilege mode were set to MPP.
-Instruction address-translation and protection are unaffected by the
-setting of MPRV. MPRV is read-only 0 if U-mode is not supported.
+is applied, as though the current privilege mode were set to MPP.#
+[#norm:mstatus_mprv_inst_xlat_op]#Instruction address-translation and protection are unaffected by the
+setting of MPRV.#
+[#norm:mstatus_mprv_rdonly0_no_umode]#MPRV is read-only 0 if U-mode is not supported.#
 
-An MRET or SRET instruction that changes the privilege mode to a mode
-less privileged than M also sets MPRV=0.
+[#norm:mstatus_mprv_clr_mret_sret_less_priv]#An MRET or SRET instruction that changes the privilege mode to a mode
+less privileged than M also sets MPRV=0.#
 
-The MXR (Make eXecutable Readable) bit modifies the privilege with which
-loads access virtual memory. When MXR=0, only loads from pages marked
-readable (R=1 in <<sv32pte>>) will succeed. When
-MXR=1, loads from pages marked either readable or executable (R=1 or
-X=1) will succeed. MXR has no effect when page-based virtual memory is
-not in effect. MXR is read-only 0 if S-mode is not supported.
+The MXR (Make eXecutable Readable) bit modifies the privilege with which loads access virtual memory.
+[#norm:mstatus_mxr_op]#When MXR=0, only loads from pages marked readable (R=1 in <<sv32pte>>) will succeed.
+When MXR=1, loads from pages marked either readable or executable (R=1 or
+X=1) will succeed.  MXR has no effect when page-based virtual memory is not in effect.#
+[#norm:mstatus_mxr_rdonly0_no_smode]#MXR is read-only 0 if S-mode is not supported.#
 
 [NOTE]
 ====
@@ -653,14 +659,15 @@ addresses are treated as though the current XLEN were set to MPP’s XLEN,
 following the rules in <<xlen-control>>.
 ====
 The SUM (permit Supervisor User Memory access) bit modifies the
-privilege with which S-mode loads and stores access virtual memory. When
-SUM=0, S-mode memory accesses to pages that are accessible by U-mode
-(U=1 in <<sv32pte>>) will fault. When SUM=1, these
-accesses are permitted. SUM has no effect when page-based virtual memory
-is not in effect. Note that, while SUM is ordinarily ignored when not
-executing in S-mode, it _is_ in effect when MPRV=1 and MPP=S. SUM is
-read-only 0 if S-mode is not supported or if `satp`.MODE is read-only 0.
+privilege with which S-mode loads and stores access virtual memory.
+[#norm:mstatus_sum_op]#When SUM=0, S-mode memory accesses to pages that are accessible by U-mode
+(U=1 in <<sv32pte>>) will fault. When SUM=1, these accesses are permitted.#
+[#norm:mstatus_sum_op_no-vm]#SUM has no effect when page-based virtual memory is not in effect.#
+Note that, [#norm:mstatus_sum_op_mprv_mpp]#while SUM is ordinarily ignored when not
+executing in S-mode, it _is_ in effect when MPRV=1 and MPP=S.#
+[#norm:mstatus_sum_rdonly0]#SUM is read-only 0 if S-mode is not supported or if `satp`.MODE is read-only 0.#
 
+[[norm:mstatus_mxr_sum_op_acc_fault]]
 The MXR and SUM mechanisms only affect the interpretation of permissions
 encoded in page-table entries. In particular, they have no impact on
 whether access-fault exceptions are raised due to PMAs or PMP.
