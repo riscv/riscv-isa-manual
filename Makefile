@@ -16,182 +16,176 @@
 # Building with a preinstalled docker container is recommended.
 # Install by running:
 #
-#   docker pull riscvintl/riscv-docs-base-container-image:latest
-#
+#   docker pull riscvintl/riscv-docs-base-container-image:small
 
+
+# --- Configuration & Defaults ---
 DOCS := riscv-privileged riscv-unprivileged
-
 RELEASE_TYPE ?= draft
-
-ifeq ($(RELEASE_TYPE), draft)
-  WATERMARK_OPT := -a draft-watermark
-  RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
-else ifeq ($(RELEASE_TYPE), intermediate)
-  WATERMARK_OPT :=
-  RELEASE_DESCRIPTION := Intermediate Release
-else ifeq ($(RELEASE_TYPE), official)
-  WATERMARK_OPT :=
-  RELEASE_DESCRIPTION := Official Release
-else
-  $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
-endif
-
 DATE ?= $(shell date +%Y%m%d)
-DOCKER_BIN ?= docker
-SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
-DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
-ifneq ($(SKIP_DOCKER),true)
-    DOCKER_IS_PODMAN = \
-        $(shell ! ${DOCKER_BIN}  -v | grep podman >/dev/null ; echo $$?)
-    ifeq "$(DOCKER_IS_PODMAN)" "1"
-        # Modify the SELinux label for the host directory to indicate
-        # that it can be shared with multiple containers. This is apparently
-        # only required for Podman, though it is also supported by Docker.
-        DOCKER_VOL_SUFFIX = :z
-        DOCKER_EXTRA_VOL_SUFFIX = ,z
-    else
-        DOCKER_IS_ROOTLESS = \
-            $(shell ! ${DOCKER_BIN} info -f '{{println .SecurityOptions}}' | grep rootless >/dev/null ; echo $$?)
-        ifneq "$(DOCKER_IS_ROOTLESS)" "1"
-            # Rooted Docker requires this flag so that the files it creates are
-            # owned by the current user instead of root. Rootless docker does not
-            # require it, and Podman doesn't either since it is always rootless.
-            DOCKER_USER_ARG := --user $(shell id -u)
-        endif
-    endif
 
-    DOCKER_CMD = \
-        ${DOCKER_BIN} run --rm \
-            -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
-            -v ${PWD}/src:/src:ro${DOCKER_EXTRA_VOL_SUFFIX} \
-            -v ${PWD}/normative_rule_defs:/normative_rule_defs:ro${DOCKER_EXTRA_VOL_SUFFIX} \
-            -v ${PWD}/docs-resources:/docs-resources:ro${DOCKER_EXTRA_VOL_SUFFIX} \
-            -w /build \
-            $(DOCKER_USER_ARG) \
-            ${DOCKER_IMG} \
-            /bin/sh -c
-    DOCKER_QUOTE := "
-else
-    DOCKER_CMD = \
-        cd $@.workdir &&
-endif
+# Build tuning:
+#   FAST=1, only build PDFs (for tight dev loop)
+#   DEBUG=1, keep --timings and --trace
+FAST ?= 0
+DEBUG ?= 0
 
-ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
-WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
-WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
-else
-WORKDIR_SETUP = \
-    rm -rf $@.workdir && \
-    mkdir -p $@.workdir && \
-    ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
-
-WORKDIR_TEARDOWN = \
-    mv $@.workdir/$@ $@ && \
-    rm -rf $@.workdir
-endif
-
-SRC_DIR := src
+# Output Directory
 BUILD_DIR := build
-NORM_RULE_DEF_DIR := normative_rule_defs
-DOC_NORM_TAG_SUFFIX := -norm-tags.json
+SRC_DIR   := src
 
-DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
-DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
-DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
-DOCS_NORM_TAGS := $(addprefix $(BUILD_DIR)/, $(addsuffix $(DOC_NORM_TAG_SUFFIX), $(DOCS)))
-NORM_RULES := $(BUILD_DIR)/norm-rules.json
+# Container Runtime (Auto-detect Podman or use Docker)
+DOCKER_BIN ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+DOCKER_IMG := riscvintl/riscv-docs-base-container-image:small
 
-ENV := LANG=C.utf8
-XTRA_ADOC_OPTS :=
+# --- Release Watermarking ---
+ifeq ($(RELEASE_TYPE), draft)
+    WATERMARK_OPT := -a draft-watermark
+    RELEASE_DESC  := DRAFT---NOT AN OFFICIAL RELEASE
+else ifeq ($(RELEASE_TYPE), intermediate)
+    WATERMARK_OPT :=
+    RELEASE_DESC  := Intermediate Release
+else ifeq ($(RELEASE_TYPE), official)
+    WATERMARK_OPT :=
+    RELEASE_DESC  := Official Release
+else
+    $(error Unknown RELEASE_TYPE. Use: draft, intermediate, or official)
+endif
 
-ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
-ASCIIDOCTOR_HTML := $(ENV) asciidoctor
-ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
-ASCIIDOCTOR_TAGS := $(ENV) asciidoctor --backend tags --require=./docs-resources/converters/tags.rb
-CREATE_NORM_RULE_TOOL := ruby docs-resources/tools/create_normative_rules.rb
+# --- Docker/Container Flags ---
+DOCKER_USER_ARG :=
+ifneq ($(shell id -u),0)
+    ifeq ($(notdir $(DOCKER_BIN)),docker)
+        DOCKER_USER_ARG := --user $(shell id -u):$(shell id -g)
+    endif
+endif
 
-OPTIONS := --trace \
-           -a compress \
-           -a mathematical-format=svg \
-           -a pdf-fontsdir=docs-resources/fonts \
-           -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
-           $(WATERMARK_OPT) \
-           -a revnumber='$(DATE)' \
-           -a revremark='$(RELEASE_DESCRIPTION)' \
-           -a docinfo=shared \
-           $(XTRA_ADOC_OPTS) \
-           -D build \
-           --failure-level=WARN
+VOL_SUFFIX := :z
+
+DOCKER_RUN_CMD := $(DOCKER_BIN) run --rm \
+    $(DOCKER_USER_ARG) \
+    -v "$(PWD)":/build$(VOL_SUFFIX) \
+    -w /build \
+    $(DOCKER_IMG)
+
+# --- Asciidoctor Configuration ---
+
+# Only pay for timings/trace when debugging
+ADOC_DEBUG_OPTS :=
+ifeq ($(DEBUG),1)
+    ADOC_DEBUG_OPTS := --timings --trace
+endif
+
+ENV_VARS := LANG=C.utf8
+COMMON_OPTS := $(ADOC_DEBUG_OPTS) \
+    -a compress \
+    -a mathematical-format=svg \
+    -a pdf-fontsdir=docs-resources/fonts \
+    -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
+    $(WATERMARK_OPT) \
+    -a revnumber='$(DATE)' \
+    -a revremark='$(RELEASE_DESC)' \
+    -a docinfo=shared \
+    -D $(BUILD_DIR) \
+    --failure-level=WARN
+
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
-            --require=asciidoctor-mathematical \
             --require=asciidoctor-sail
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags build-norm-rules submodule-check
+# --- File Lists ---
+DOCS_PDF  := $(DOCS:%=$(BUILD_DIR)/%.pdf)
+DOCS_HTML := $(DOCS:%=$(BUILD_DIR)/%.html)
+DOCS_EPUB := $(DOCS:%=$(BUILD_DIR)/%.epub)
+DOCS_TAGS := $(DOCS:%=$(BUILD_DIR)/%-norm-tags.json)
+
+NORM_RULES_JSON := $(BUILD_DIR)/norm-rules.json
+NORM_RULES_HTML := $(BUILD_DIR)/norm-rules.html
+NORM_RULE_DEFS  := $(wildcard normative_rule_defs/*.yaml)
+RUBY_TOOL       := docs-resources/tools/create_normative_rules.rb
+
+# Decide what "build" means:
+#   FAST=1  -> PDFs only
+#   FAST=0  -> full pipeline
+ifeq ($(FAST),1)
+    BUILD_TARGETS := build-pdf
+else
+    BUILD_TARGETS := build-pdf build-html build-epub build-norm-rules
+endif
+
+# --- Targets ---
+
+.PHONY: all build clean help docker-pull
+.PHONY: build-pdf build-html build-epub build-norm-rules
 
 all: build
 
-# Check if the docs-resources/global-config.adoc file exists. If not, the user forgot to check out submodules.
-ifeq ("$(wildcard docs-resources/global-config.adoc)","")
-  $(warning You must clone with --recurse-submodules to automatically populate the submodule 'docs-resources'.")
-  $(warning Checking out submodules for you via 'git submodule update --init --recursive'...)
-  $(shell git submodule update --init --recursive)
-endif
+build: $(BUILD_TARGETS) ## Build selected formats (controlled by FAST)
 
-build-pdf: $(DOCS_PDF)
-build-html: $(DOCS_HTML)
-build-epub: $(DOCS_EPUB)
-build-tags: $(DOCS_NORM_TAGS)
-build-norm-rules: $(NORM_RULES)
-build: build-pdf build-html build-epub build-tags build-norm-rules
+help: ## Show this help message
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m [FAST=1] [DEBUG=1]\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-ALL_SRCS := $(shell git ls-files $(SRC_DIR))
+build-pdf: $(DOCS_PDF)        ## Build PDFs
+build-html: $(DOCS_HTML)      ## Build HTML
+build-epub: $(DOCS_EPUB)      ## Build EPUB
+build-norm-rules: $(NORM_RULES_JSON) $(NORM_RULES_HTML) ## Build normative rule artefacts
 
-# All normative rule definition input YAML files tracked under Git (ensure you at least stage new files).
-NORM_RULE_DEF_FILES := $(shell git ls-files '$(NORM_RULE_DEF_DIR)/*.yaml')
+# Ensure resources submodule is present
+docs-resources/global-config.adoc:
+	@echo "Checking out submodules..."
+	git submodule update --init --recursive
 
-# Add -t to each normative tag input filename and add prefix of "/" to make into absolute pathname.
-NORM_TAG_FILE_ARGS := $(foreach relative_pname,$(DOCS_NORM_TAGS),-t /$(relative_pname))
+# --- Build Macros ---
+# Usage: $(call run-asciidoctor, backend-format, source-file)
+define run-asciidoctor
+	@mkdir -p $(BUILD_DIR)
+	@echo "Building $(2) -> $@"
+	$(DOCKER_RUN_CMD) /bin/sh -c "$(ENV_VARS) asciidoctor$(if $(filter pdf,$(1)),-pdf,$(if $(filter epub3,$(1)),-epub3,)) \
+	    $(COMMON_OPTS) $(REQUIRES) -b $(1) $(2)"
+endef
 
-# Add -d to each normative rule definition filename
-NORM_RULE_DEF_ARGS := $(foreach relative_pname,$(NORM_RULE_DEF_FILES),-d $(relative_pname))
+# --- Pattern Rules ---
 
-$(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
-	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+$(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc docs-resources/global-config.adoc
+	$(call run-asciidoctor,pdf,$<)
 
-$(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
-	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+$(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc docs-resources/global-config.adoc
+	$(call run-asciidoctor,html5,$<)
 
-$(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
-	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+$(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc docs-resources/global-config.adoc
+	$(call run-asciidoctor,epub3,$<)
 
-$(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/converters/tags.rb
-	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(REQUIRES) $< $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
+# Normative Tags Extraction
+$(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc docs-resources/global-config.adoc
+	@mkdir -p $(BUILD_DIR)
+	$(DOCKER_RUN_CMD) /bin/sh -c "$(ENV_VARS) asciidoctor \
+	    $(COMMON_OPTS) $(REQUIRES) --backend tags \
+	    --require=./docs-resources/converters/tags.rb \
+	    -a tags-match-prefix='norm:' \
+	    -a tags-output-suffix='-norm-tags.json' $<"
 
-$(NORM_RULES): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES)
-	$(WORKDIR_SETUP)
-	cp -f $(DOCS_NORM_TAGS) $@.workdir
-	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_TOOL) $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $@ $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
+# Normative Rules Aggregation
+$(NORM_RULES_JSON): $(DOCS_TAGS) $(NORM_RULE_DEFS)
+	@echo "Generating Normative Rules JSON..."
+	$(DOCKER_RUN_CMD) ruby $(RUBY_TOOL) \
+	    -j $(foreach t,$(DOCS_TAGS),-t $(t)) \
+	    $(foreach d,$(NORM_RULE_DEFS),-d $(d)) \
+	    $(foreach doc,$(DOCS),-tag2url $(BUILD_DIR)/$(doc)-norm-tags.json $(doc).html) \
+	    $@
 
-# Update docker image to latest
-docker-pull-latest:
-	${DOCKER_BIN} pull ${DOCKER_IMG}
+$(NORM_RULES_HTML): $(DOCS_TAGS) $(NORM_RULE_DEFS) $(DOCS_HTML)
+	@echo "Generating Normative Rules HTML..."
+	$(DOCKER_RUN_CMD) ruby $(RUBY_TOOL) \
+	    -h $(foreach t,$(DOCS_TAGS),-t $(t)) \
+	    $(foreach d,$(NORM_RULE_DEFS),-d $(d)) \
+	    $(foreach doc,$(DOCS),-tag2url $(BUILD_DIR)/$(doc)-norm-tags.json $(doc).html) \
+	    $@
 
-clean:
-	@echo "Cleaning up generated files..."
+# --- Utilities ---
+
+docker-pull: ## Update the docker image
+	$(DOCKER_BIN) pull $(DOCKER_IMG)
+
+clean: ## Clean build artifacts
 	rm -rf $(BUILD_DIR)
-	@echo "Cleanup completed."
