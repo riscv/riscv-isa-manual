@@ -456,7 +456,7 @@ S-mode respectively. When executing an __x__RET instruction, supposing
 __x__PP holds the value _y_, __x__IE is set to __x__PIE; the privilege mode is
 changed to _y_; __x__PIE is set to 1; and __x__PP is set to the
 least-privileged supported mode (U if U-mode is implemented, else M). If
-__y__&#8800;M, __x__RET also sets MPRV=0.
+__y__{ne}M, __x__RET also sets MPRV=0.
 
 [NOTE]
 ====
@@ -622,8 +622,8 @@ privilege mode.
 ===== Memory Privilege in `mstatus` Register
 
 The MPRV (Modify PRiVilege) bit modifies the _effective privilege mode_,
-i.e., the privilege level at which loads and stores execute. When
-MPRV=0, loads and stores behave as normal, using the translation and
+i.e., the privilege level at which explicit memory accesses execute. When
+MPRV=0, explicit memory accesses behave as normal, using the translation and
 protection mechanisms of the current privilege mode. When MPRV=1, load
 and store memory addresses are translated and protected, and endianness
 is applied, as though the current privilege mode were set to MPP.
@@ -1212,12 +1212,12 @@ hand, we wish to allow flexibility for larger systems.
 |Value |Name |Description
 |0 +
 1 +
-&#8805;2
+{ge}2
 |Direct +
 Vectored +
 ---
 |All traps set `pc` to BASE. +
-Asynchronous interrupts set `pc` to BASE+4&#215;cause. +
+Asynchronous interrupts set `pc` to BASE+4{times}cause. +
 _Reserved_
 |===
 
@@ -1426,9 +1426,13 @@ compare register.
 Bits `mip`.MSIP and `mie`.MSIE are the interrupt-pending and
 interrupt-enable bits for machine-level software interrupts. MSIP is
 read-only in `mip`, and is written by accesses to memory-mapped control
-registers, which are used by remote harts to provide machine-level
-interprocessor interrupts. A hart can write its own MSIP bit using the
-same memory-mapped control register. If a system has only one hart, or
+registers, which are used to provide machine-level
+interprocessor interrupts.
+A hart's memory-mapped `msip` register is a 32-bit read/write register,
+where bits 31--1 read as zero and bit 0 contains the MSIP bit.
+When the memory-mapped `msip` register changes, it is guaranteed to be
+reflected in `mip`.MSIP eventually, but not necessarily immediately.
+If a system has only one hart, or
 if a platform standard supports the delivery of machine-level
 interprocessor interrupts through external interrupts (MEI) instead,
 then `mip`.MSIP and `mie`.MSIE may both be read-only zeros.
@@ -1626,7 +1630,7 @@ of this register.
 
 When the CY, IR, or HPM__n__ bit in the `mcountinhibit` register is clear,
 the `mcycle`, `minstret`, or `mhpmcountern` register increments as usual.
-When the CY, IR, or HPM_n_ bit is set, the corresponding counter does
+When the CY, IR, or HPM__n__ bit is set, the corresponding counter does
 not increment.
 
 The `mcycle` CSR may be shared between harts on the same core, in which
@@ -1806,7 +1810,7 @@ Machine external interrupt
 |12 +
 13 +
 14-15 +
-&#8805;16
+{ge}16
 |_Reserved_ +
 Counter-overflow interrupt +
 _Reserved_ +
@@ -1860,7 +1864,7 @@ _Designated for platform use_
 24-31 +
 32-47 +
 48-63 +
-&#8805;64
+{ge}64
 |Instruction address misaligned +
 Instruction access fault +
 Illegal instruction +
@@ -2101,7 +2105,7 @@ include::images/bytefield/mconfigptrreg.edn[]
 
 The pointer alignment in bits must be no smaller than MXLEN:
 i.e., if MXLEN is
-latexmath:[$8\times n$], then `mconfigptr`[latexmath:[$\log_2n$]-1:0]
+8{times}__n__, then `mconfigptr`[log~2n~-1:0]
 must be zero.
 
 The `mconfigptr` register must be implemented, but it may be zero to indicate the
@@ -2202,6 +2206,12 @@ S-mode and G-stage address translation.
 If Svadu is not implemented, ADUE is read-only zero.
 Furthermore, for implementations with the hypervisor extension, `henvcfg`.ADUE
 is read-only zero if `menvcfg`.ADUE is zero.
+
+After changing `menvcfg`.ADUE, executing an SFENCE.VMA instruction with
+_rs1_=`x0` and _rs2_=`x0` suffices to synchronize address-translation caches
+with respect to the altered interpretation of page-table entries' A/D bits.
+See <<hyp-mm-fences>> for additional synchronization requirements when the
+hypervisor extension is implemented.
 
 NOTE: The Svade extension requires page-fault exceptions be raised when PTE
 A/D bits need be set, hence Svade is implemented when ADUE=0.
@@ -2813,7 +2823,7 @@ MAG16 indicates the misaligned atomicity granule is at least 16 bytes.
 
 The misaligned atomicity granule PMA applies only to AMOs, loads and stores
 defined in the base ISAs, and loads and stores of no more than XLEN bits
-defined in the F, D, and Q extensions.
+defined in the F, D, and Q extensions, and compressed encodings thereof.
 For an instruction in that set, if all accessed bytes lie within the same
 misaligned atomicity granule, the instruction will not raise an exception for
 reasons of address alignment, and the instruction will give rise to only one
@@ -3009,7 +3019,7 @@ implicit read. Furthermore, when a non-speculative instruction fetch is
 performed, an implementation is permitted to additionally read any of
 the bytes within the _next_ naturally aligned power-of-2 region of the
 same size (with the address of the region taken modulo
-2^XLEN^. The results of these additional reads
+2^XLEN^). The results of these additional reads
 may be used to satisfy subsequent early or speculative implicit reads.
 The size of these naturally aligned power-of-2 regions is
 implementation-defined, but, for systems with page-based virtual memory,
@@ -3164,7 +3174,7 @@ NAPOT
 |Null region (disabled) +
 Top of range +
 Naturally aligned four-byte region +
-Naturally aligned power-of-two region, &#8805;8
+Naturally aligned power-of-two region, {ge}8
 bytes
 |===
 
@@ -3209,30 +3219,41 @@ NAPOT
 If TOR is selected, the associated address register forms the top of the
 address range, and the preceding PMP address register forms the bottom
 of the address range. If PMP entry __i__'s A field is set to
-TOR, the entry matches any address _y_ such that `pmpaddr~i-1~`&#8804;__y__<``pmpaddr~i~`` (irrespective of the value of `pmpcfg~i-1~`). If PMP entry 0's A field is set to TOR, zero is used for the lower bound, and so it matches
+TOR, the entry matches any address _y_ such that `pmpaddr~i-1~`{le}__y__<``pmpaddr~i~`` (irrespective of the value of `pmpcfg~i-1~`). If PMP entry 0's A field is set to TOR, zero is used for the lower bound, and so it matches
 any address `y<pmpaddr~0~`.
 
 [NOTE]
 ====
-If  `pmpaddr~i-1~&#8805;``pmpaddr~i~``` and `pmpcfg~i~.A`=TOR, then PMP entry _i_ matches no addresses.
+If  `pmpaddr~i-1~{ge}``pmpaddr~i~``` and `pmpcfg~i~.A`=TOR, then PMP entry _i_ matches no addresses.
+====
+
+[NOTE]
+====
+It is not possible to represent the address 2^XLEN+2^ as the top of a range,
+so, for example, in an RV32 system with 34-bit physical addresses, a TOR PMP
+cannot be used to give less-privileged modes access to the uppermost word of
+memory.
+Either a NAPOT PMP can be used, or that memory can be left inaccessible to
+less-privileged modes.
+If the supervisor manages memory at base-page granularity, just 0.00002% of
+the 16{nbsp}GiB address space is lost.
 ====
 
 Although the PMP mechanism supports regions as small as four bytes,
 platforms may specify coarser PMP regions. In general, the PMP grain is
-latexmath:[$2^{G+2}$] bytes and must be the same across all PMP regions.
-When latexmath:[$G \geq 1$], the NA4 mode is not selectable. When
-latexmath:[$G \geq 2$] and latexmath:[${\tt pmpcfg}_i$].A[1] is set,
-i.e. the mode is NAPOT, then bits latexmath:[${\tt pmpaddr}_i$][G-2:0]
-read as all ones. When latexmath:[$G \geq 1$] and
-latexmath:[${\tt pmpcfg}_i$].A[1] is clear, i.e. the mode is OFF or TOR,
-then bits latexmath:[${\tt pmpaddr}_i$][G-1:0] read as all zeros. Bits
-latexmath:[${\tt
-pmpaddr}_i$][G-1:0] do not affect the TOR address-matching logic.
-Although changing latexmath:[${\tt pmpcfg}_i$].A[1] affects the value
-read from latexmath:[${\tt pmpaddr}_i$], it does not affect the
+2^G+2^ bytes and must be the same across all PMP regions.
+When G {ge} 1, the NA4 mode is not selectable. When
+G {ge} 2 and pmpcfg~i~.A[1] is set,
+i.e. the mode is NAPOT, then bits pmpaddr~i~[G-2:0]
+read as all ones. When G {ge} 1 and
+pmpcfg~i~.A[1] is clear, i.e. the mode is OFF or TOR,
+then bits pmpaddr~i~[G-1:0] read as all zeros. Bits
+pmpaddr~i~[G-1:0] do not affect the TOR address-matching logic.
+Although changing pmpcfg~i~.A[1] affects the value
+read from pmpaddr~i~, it does not affect the
 underlying value stored in that register—in particular,
-latexmath:[${\tt pmpaddr}_i$][G-1] retains its original value when
-latexmath:[${\tt pmpcfg}_i$].A is changed from NAPOT to TOR/OFF then
+pmpaddr~i~[G-1] retains its original value when
+pmpcfg~i~.A is changed from NAPOT to TOR/OFF then
 back to NAPOT.
 
 [NOTE]
@@ -3264,25 +3285,34 @@ R/W/X permissions apply only to S and U modes.
 
 ===== Priority and Matching Logic
 
+On some implementations, misaligned loads, stores, and instruction
+fetches may be decomposed into multiple memory operations, some of which may
+succeed before an access-fault exception occurs, as described in the RVWMO
+specification. PMP checking is performed on each memory operation independently.
+In particular, a portion of a misaligned store that passes
+the PMP check may become visible, even if another portion fails the PMP check.
+The same behavior may manifest for stores wider than XLEN bits (e.g., the
+FSD instruction in RV32D), even when the store address is naturally aligned.
+
 PMP entries are statically prioritized. The lowest-numbered PMP entry
-that matches any byte of an access determines whether that access
-succeeds or fails. The matching PMP entry must match all bytes of an
-access, or the access fails, irrespective of the L, R, W, and X bits.
+that matches any byte of a memory operation determines whether that operation
+succeeds or fails. The matching PMP entry must match all bytes of a memory
+operation, or the operation fails, irrespective of the L, R, W, and X bits.
 For example, if a PMP entry is configured to match the four-byte range
 `0xC`–`0xF`, then an 8-byte access to the range `0x8`–`0xF` will fail,
 assuming that PMP entry is the highest-priority entry that matches those
 addresses.
 
-If a PMP entry matches all bytes of an access, then the L, R, W, and X
-bits determine whether the access succeeds or fails. If the L bit is
-clear and the privilege mode of the access is M, the access succeeds.
+If a PMP entry matches all bytes of a memory operation, then the L, R, W, and X
+bits determine whether the operation succeeds or fails. If the L bit is
+clear and the privilege mode of the access is M, the operation succeeds.
 Otherwise, if the L bit is set or the privilege mode of the access is S
-or U, then the access succeeds only if the R, W, or X bit corresponding
+or U, then the operation succeeds only if the R, W, or X bit corresponding
 to the access type is set.
 
-If no PMP entry matches an M-mode access, the access succeeds. If no PMP
-entry matches an S-mode or U-mode access, but at least one PMP entry is
-implemented, the access fails.
+If no PMP entry matches an M-mode memory operation, the operation succeeds.
+If no PMP entry matches an S-mode or U-mode memory operation, but at least
+one PMP entry is implemented, the operation fails.
 
 [NOTE]
 ====
@@ -3290,21 +3320,14 @@ If at least one PMP entry is implemented, but all PMP entries’ A fields
 are set to OFF, then all S-mode and U-mode memory accesses will fail.
 ====
 
-Failed accesses generate an instruction, load, or store access-fault
+Failed memory operations generate an instruction, load, or store access-fault
 exception. Note that a single instruction may generate multiple
-accesses, which may not be mutually atomic. An access-fault exception is
-generated if at least one access generated by an instruction fails,
-though other accesses generated by that instruction may succeed with
+memory operations, which may not be mutually atomic. An access-fault exception
+is generated if at least one memory operation generated by an instruction fails,
+though other memory operations generated by that instruction may succeed with
 visible side effects. Notably, instructions that reference virtual
-memory are decomposed into multiple accesses.
+memory are decomposed into multiple memory operations.
 
-On some implementations, misaligned loads, stores, and instruction
-fetches may also be decomposed into multiple accesses, some of which may
-succeed before an access-fault exception occurs. In particular, a
-portion of a misaligned store that passes the PMP check may become
-visible, even if another portion fails the PMP check. The same behavior
-may manifest for stores wider than XLEN bits (e.g., the FSD instruction
-in RV32D), even when the store address is naturally aligned.
 
 [[pmp-vmem]]
 ==== Physical Memory Protection and Paging
