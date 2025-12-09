@@ -1,4 +1,3 @@
-[[atomics]]
 == "A" Extension for Atomic Instructions, Version 2.1
 
 The atomic-instruction extension, named "A", contains
@@ -66,8 +65,14 @@ if the reservation is still valid and the reservation set contains the
 bytes being written. If the SC.W succeeds, the instruction writes the
 word in _rs2_ to memory, and it writes zero to _rd_. If the SC.W fails,
 the instruction does not write to memory, and it writes a nonzero value
-to _rd_.  For the purposes of memory protection, a failed SC.W may be
-treated like a store.  Regardless of success or failure, executing an
+to _rd_.
+No SC.W instruction shall retire unless it passes memory permission checks,
+but it is UNSPECIFIED whether any side effects of implicit address translation
+and protection memory accesses (such as setting a page-table entry D bit)
+occur on a failed SC.W.
+For the purposes of memory protection, a failed SC.W may be
+treated like a store.
+Regardless of success or failure, executing an
 SC.W instruction invalidates any reservation held by this hart. LR.D and
 SC.D act analogously on doublewords and are only available on RV64. For
 RV64, LR.W and SC.W sign-extend the value placed in _rd_.
@@ -113,7 +118,7 @@ assume the failure code will be non-zero.
 [NOTE]
 ====
 We reserve a failure code of 1 to mean ''unspecified'' so that simple
-implementations may return this value using the existing mux required
+implementations may return this value using the existing multiplexer required
 for the SLT/SLTU instructions. More specific failure codes might be
 defined in future versions or extensions to the ISA.
 ====
@@ -227,8 +232,8 @@ instruction unless the _rl_ bit is also set. LR._rl_ and SC._aq_
 instructions are not guaranteed to provide any stronger ordering than
 those with both bits clear, but may result in lower performance.
 
-<<<
-
+[NOTE]
+====
 [[cas]]
 [source,asm]
 .Sample code for compare-and-swap function using LR/SC.
@@ -250,6 +255,7 @@ those with both bits clear, but may result in lower performance.
 LR/SC can be used to construct lock-free data structures. An example
 using LR/SC to implement a compare-and-swap function is shown in
 <<cas>>. If inlined, compare-and-swap functionality need only take four instructions.
+====
 
 [[sec:lrscseq]]
 === Eventual Success of Store-Conditional Instructions
@@ -264,9 +270,9 @@ instructions placed sequentially in memory.
 instruction. The dynamic code executed between the LR and SC
 instructions can only contain instructions from the base ''I''
 instruction set, excluding loads, stores, backward jumps, taken backward
-branches, JALR, FENCE, and SYSTEM instructions. If the ''C'' extension
-is supported, then compressed forms of the aforementioned ''I''
-instructions are also permitted.
+branches, JALR, FENCE, and SYSTEM instructions.
+Compressed forms of the aforementioned ''I'' instructions in the
+C (hence Zca) and Zcb extensions are also permitted.
 * The code to retry a failing LR/SC sequence can contain backwards jumps
 and/or branches to repeat the LR/SC sequence, but otherwise has the same
 constraint as the code between the LR and SC.
@@ -434,14 +440,14 @@ both imply additional unnecessary ordering as compared to AMOs with the
 corresponding _aq_ or _rl_ bit set.
 ====
 
+[NOTE]
+====
 An example code sequence for a critical section guarded by a
 test-and-test-and-set spinlock is shown in
 Example <<critical>>. Note the first AMO is marked _aq_ to
 order the lock acquisition before the critical section, and the second
 AMO is marked _rl_ to order the critical section before the lock
 relinquishment.
-
-<<<
 
 [[critical]]
 [source,asm]
@@ -457,9 +463,7 @@ relinquishment.
         # ...
         amoswap.w.rl x0, x0, (a0) # Release lock by storing 0.
 
-[NOTE]
-====
-We recommend the use of the AMO Swap idiom shown above for both lock
+We recommend the use of the AMO Swap idiom shown in <<critical>> for both lock
 acquire and release to simplify the implementation of speculative lock
 elision. cite:[Rajwar:2001:SLE]
 ====

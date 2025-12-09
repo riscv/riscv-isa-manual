@@ -51,7 +51,7 @@ sgemm_nn:
     sd s1, OFFSET(sp)
     sd s2, OFFSET(sp)
 
-    # Check for zero size matrices        
+    # Check for zero size matrices
     beqz n, exit
     beqz m, exit
     beqz k, exit
@@ -78,7 +78,7 @@ c_col_loop: # Loop across one row of C blocks
     mv akp, ap   # reset pointer into A to beginning
     mv bkp, bnp # step to next column in B matrix
 
-    # Initalize current C submatrix block from memory.
+    # Initialize current C submatrix block from memory.
     vle32.v  v0, (cnp); add ccp, cnp, cstride;
     vle32.v  v1, (ccp); add ccp, ccp, cstride;
     vle32.v  v2, (ccp); add ccp, ccp, cstride;
@@ -169,7 +169,7 @@ c_col_loop: # Loop across one row of C blocks
     j k_loop
 
 1:  vfmacc.vf v15, ft15, v16
-    
+
     # Save C matrix block back to memory
     vse32.v  v0, (cnp); add ccp, cnp, cstride;
     vse32.v  v1, (ccp); add ccp, ccp, cstride;
@@ -204,7 +204,7 @@ c_col_loop: # Loop across one row of C blocks
     add ap, ap, t6         # Move A matrix pointer down 16 rows
     slli t6, cstride, 4  # Multiply cstride by 16
     add cp, cp, t6         # Move C matrix pointer down 16 rows
-    
+
     slti t6, m, 16
     beqz t6, c_row_loop
 

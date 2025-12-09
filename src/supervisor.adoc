@@ -36,7 +36,7 @@ supervisor-level CSR descriptions.
 ====
 
 [[sstatus]]
-==== Supervisor Status (`sstatus`) Register 
+==== Supervisor Status (`sstatus`) Register
 
 The `sstatus` register is an SXLEN-bit read/write register formatted as
 shown in <<sstatusreg-rv32>> when SXLEN=32
@@ -144,9 +144,9 @@ mode must ignore source register operand bits above the configured XLEN,
 and must sign-extend results to fill the widest supported XLEN in the
 destination register.
 
-If UXLEN latexmath:[$<$] SXLEN, user-mode instruction-fetch addresses
+If UXLEN < SXLEN, user-mode instruction-fetch addresses
 and load and store effective addresses are taken modulo
-latexmath:[$2^{\text{UXLEN}}$]. For example, when UXLEN=32 and SXLEN=64,
+2^UXLEN^. For example, when UXLEN=32 and SXLEN=64,
 user-mode memory accesses reference the lowest 4 GiB of the address space.
 
 Some HINT instructions are encoded as integer computational instructions that
@@ -157,7 +157,7 @@ destination register not all equal to bit XLEN-1, it is implementation-defined
 whether bits SXLEN..XLEN of the destination register are unchanged or are
 overwritten with copies of bit XLEN-1.
 
-NOTE: This definition allows implementations to elide register writeback for
+NOTE: This definition allows implementations to elide register write-back for
 some HINTs, while allowing them to execute other HINTs in the same manner as
 other integer computational instructions.
 The implementation choice is observable only by S-mode with SXLEN > UXLEN; it
@@ -192,7 +192,7 @@ code with SUM clear; the few code segments that should access user
 memory can temporarily set SUM.
 
 The SUM mechanism does not avail S-mode software of permission to
-execute instructions in user code pages. Legitimate uses cases for
+execute instructions in user code pages. Legitimate use cases for
 execution from user memory in supervisor context are rare in general and
 nonexistent in POSIX environments. However, bugs in supervisors that
 lead to arbitrary code execution are much easier to exploit if the
@@ -276,10 +276,10 @@ trap that may occur during the tail phase, where it restores critical state
 to return from a trap.
 
 The consequence of this specification is that if a critical error condition was
-caused by a guest page-fault, then the GPA will not be available in `mtval2`
+caused by a guest-page fault, then the GPA will not be available in `mtval2`
 when the double trap is delivered to M-mode. This condition arises if the
 HS-mode invokes a hypervisor virtual-machine load or store instruction when
-`SDT` is 1 and the instruction raises a guest page-fault. The use of such an
+`SDT` is 1 and the instruction raises a guest-page fault. The use of such an
 instruction in this phase of trap handling is not common. However, not recording
 the GPA is considered benign because, if required, it can still be obtained
 -- albeit with added effort -- through the process of walking the page tables.
@@ -297,7 +297,7 @@ Additionally, the implementation of an SSE protocol can be considered as an
 optional measure to aid in the recovery from such critical errors.
 ====
 
-==== Supervisor Trap Vector Base Address (`stvec`)  Register 
+==== Supervisor Trap Vector Base Address (`stvec`)  Register
 
 The `stvec` register is an SXLEN-bit read/write register that holds trap
 vector configuration, consisting of a vector base address (BASE) and a
@@ -311,6 +311,9 @@ physical address, subject to the following alignment constraints: the
 address must be 4-byte aligned, and MODE settings other than Direct
 might impose additional alignment constraints on the value in the BASE
 field.
+Note that the CSR contains only bits XLEN-1 through 2 of the address BASE.
+When used as an address, the lower two bits are filled with zeroes to obtain
+an XLEN-bit address that is always aligned on a 4-byte boundary.
 
 [[stvec-mode]]
 .Encoding of `stvec` MODE field.
@@ -319,11 +322,11 @@ field.
 |Value |Name |Description
 |0 +
 1 +
-&#8805;2 
+{ge}2
 |Direct +
 Vectored
 |All exceptions set `pc` to BASE. +
-Asynchronous interrupts set `pc` to BASE+4&#215;cause. +
+Asynchronous interrupts set `pc` to BASE+4{times}cause. +
 _Reserved_
 |===
 
@@ -338,7 +341,7 @@ supervisor-mode timer interrupt (see <<scauses>>)
 causes the `pc` to be set to BASE+`0x14`. Setting MODE=Vectored may
 impose a stricter alignment constraint on BASE.
 
-==== Supervisor Interrupt (`sip` and `sie`) Registers 
+==== Supervisor Interrupt (`sip` and `sie`) Registers
 
 The `sip` register is an SXLEN-bit read/write register containing
 information on pending interrupts, while `sie` is the corresponding
@@ -409,7 +412,7 @@ implemented, SSIP is writable in `sip` and may also be set to 1 by a
 platform-specific interrupt controller.
 
 If the Sscofpmf extension is implemented, bits `sip`.LCOFIP and `sie`.LCOFIE
-are the interrupt-pending and interrupt-enable bits for local counter-overflow
+are the interrupt-pending and interrupt-enable bits for local-counter-overflow
 interrupts.
 LCOFIP is read-write in `sip` and reflects the occurrence of a local
 counter-overflow overflow interrupt request resulting from any of the
@@ -457,7 +460,7 @@ the counter values.
 The implementation must provide a facility for scheduling timer
 interrupts in terms of the real-time counter, `time`.
 
-==== Counter-Enable (`scounteren`) Register 
+==== Counter-Enable (`scounteren`) Register
 
 .Counter-enable (`scounteren`) register
 include::images/bytefield/scounteren.edn[]
@@ -485,13 +488,15 @@ access a counter if the corresponding bits in `scounteren` and
 `mcounteren` are both set.
 ====
 
-==== Supervisor Scratch (`sscratch`) Register 
+==== Supervisor Scratch (`sscratch`) Register
 
 The `sscratch` CSR is an SXLEN-bit read/write register, dedicated
 for use by the supervisor. Typically, `sscratch` is used to hold a
 pointer to the hart-local supervisor context while the hart is executing
-user code. At the beginning of a trap handler, `sscratch` is swapped
-with a user register to provide an initial working register.
+user code.
+At the beginning of a trap handler, software normally uses a CSRRW
+instruction to swap `sscratch` with an integer register to obtain an
+initial working register.
 
 .Supervisor Scratch Register
 include::images/bytefield/sscratch.edn[]
@@ -523,7 +528,7 @@ though it may be explicitly written by software.
 include::images/bytefield/epcreg.edn[]
 
 [[scause]]
-==== Supervisor Cause (`scause`) Register 
+==== Supervisor Cause (`scause`) Register
 
 The `scause` CSR is an SXLEN-bit read-write register formatted as
 shown in <<scausereg>>. When a trap is taken into
@@ -567,7 +572,7 @@ include::images/bytefield/scausereg.edn[]
 10-12 +
 13 +
 14-15 +
-&#8805;16
+{ge}16
 |_Reserved_ +
 Supervisor software interrupt +
 _Reserved_ +
@@ -577,9 +582,12 @@ Supervisor external interrupt +
 _Reserved_ +
 Counter-overflow interrupt +
 _Reserved_ +
-_Designated for platform use_ 
+_Designated for platform use_
 
 |0 +
+0 +
+0 +
+0 +
 0 +
 0 +
 0 +
@@ -621,7 +629,7 @@ _Designated for platform use_
 24-31 +
 32-47 +
 48-63 +
-&#8805;64
+{ge}64
 |Instruction address misaligned +
 Instruction access fault +
 Illegal instruction +
@@ -644,7 +652,7 @@ _Reserved_ +
 _Designated for custom use_ +
 _Reserved_ +
 _Designated for custom use_ +
-_Reserved_ 
+_Reserved_
 |===
 
 ==== Supervisor Trap Value (`stval`) Register
@@ -660,21 +668,26 @@ exhibit either behavior, depending on the underlying event that caused the
 exception.
 
 If `stval` is written with a nonzero value when a breakpoint,
-address-misaligned, access-fault, or page-fault exception occurs on an
+address-misaligned, access-fault, page-fault, or hardware-error exception
+occurs on an
 instruction fetch, load, or store, then `stval` will contain the
 faulting virtual address.
+
+On a breakpoint exception raised by an EBREAK or C.EBREAK instruction, `stval`
+is written with either zero or the virtual address of the instruction.
 
 [[stvalreg]]
 .Supervisor Trap Value register.
 include::images/bytefield/stvalreg.edn[]
 
 If `stval` is written with a nonzero value when a misaligned load or
-store causes an access-fault or page-fault exception, then `stval` will
+store causes an access-fault, page-fault, or hardware-error exception,
+then `stval` will
 contain the virtual address of the portion of the access that caused the
 fault.
 
 If `stval` is written with a nonzero value when an instruction
-access-fault or page-fault exception occurs on a system with
+access-fault, page-fault, or hardware-error exception occurs on a hart with
 variable-length instructions, then `stval` will contain the virtual
 address of the portion of the instruction that caused the fault, while
 `sepc` will point to the beginning of the instruction.
@@ -692,7 +705,7 @@ will contain the shortest of:
 The value loaded into `stval` on an illegal-instruction exception is
 right-justified and all unused upper bits are cleared to zero.
 
-On a trap caused by a software check exception, the `stval` register holds the
+On a trap caused by a software-check exception, the `stval` register holds the
 cause for the exception. The following encodings are defined:
 
 * 0 - No information provided.
@@ -708,11 +721,11 @@ possible invalid addresses. Prior to writing `stval`, implementations
 may convert an invalid address into some other invalid address that
 `stval` is capable of holding. If the feature to return the faulting
 instruction bits is implemented, `stval` must also be able to hold all
-values less than latexmath:[$2^N$], where latexmath:[$N$] is the smaller
+values less than 2^_N_^, where _N_ is the smaller
 of SXLEN and ILEN.
 
 [[sec:senvcfg]]
-==== Supervisor Environment Configuration (`senvcfg`) Register 
+==== Supervisor Environment Configuration (`senvcfg`) Register
 
 The `senvcfg` CSR is an SXLEN-bit read/write register, formatted as
 shown in <<senvcfg>>, that controls certain
@@ -743,7 +756,7 @@ characteristics of the U-mode execution environment.
   {bits:  1, name: 'FIOM'},
   {bits:  1, name: 'WPRI'},
   {bits:  1, name: 'LPE'},
-  {bits:  1, name: 'WPRI'},
+  {bits:  1, name: 'SSE'},
   {bits:  2, name: 'CBIE'},
   {bits:  1, name: 'CBCFE'},
   {bits:  1, name: 'CBZE'},
@@ -816,17 +829,12 @@ to implement that we consider it worth supporting even if only rarely
 enabled.
 ====
 
-The definition of the CBZE field will be furnished by the forthcoming
-Zicboz extension. Its allocation within `senvcfg` may change prior to
-the ratification of that extension.
+The definition of the CBZE field is furnished by the Zicboz extension.
 
-The definitions of the CBCFE and CBIE fields will be furnished by the
-forthcoming Zicbom extension. Their allocations within `senvcfg` may
-change prior to the ratification of that extension.
+The definitions of the CBCFE and CBIE fields are furnished by the Zicbom
+extension.
 
-The definition of the PMM field will be furnished by the forthcoming
-Ssnpm extension. Its allocation within `senvcfg` may change prior to the
-ratification of that extension.
+The definition of the PMM field is furnished by the Ssnpm extension.
 
 The Zicfilp extension adds the `LPE` field in `senvcfg`. When the `LPE` field is
 set to 1, the Zicfilp extension is enabled in VU/U-mode. When the `LPE` field is
@@ -844,7 +852,7 @@ rules apply:
 * 32-bit Zicfiss instructions will revert to their behavior as defined by Zimop.
 * 16-bit Zicfiss instructions will revert to their behavior as defined by Zcmop.
 * When `menvcfg.SSE` is one, `SSAMOSWAP.W/D` raises an illegal-instruction
-  exception in U-mode and a virtual instruction exception in VU-mode.
+  exception in U-mode and a virtual-instruction  exception in VU-mode.
 
 [[satp]]
 ==== Supervisor Address Translation and Protection (`satp`) Register
@@ -933,7 +941,7 @@ ASID bits, termed _ASIDLEN_, may be determined by writing one to every
 bit position in the ASID field, then reading back the value in `satp` to
 see which bit positions in the ASID field hold a one. The
 least-significant bits of ASID are implemented first: that is, if
-ASIDLEN latexmath:[$>$] 0, ASID[ASIDLEN-1:0] is writable. The maximal
+ASIDLEN > 0, ASID[ASIDLEN-1:0] is writable. The maximal
 value of ASIDLEN, termed ASIDMAX, is 9 for Sv32 or 16 for Sv39, Sv48,
 and Sv57.
 
@@ -1085,20 +1093,20 @@ The behavior of SFENCE.VMA depends on _rs1_ and _rs2_ as follows:
 made to any level of the page tables, for all address spaces. The fence
 also invalidates all address-translation cache entries, for all address
 spaces.
-* If __rs1__=`x0` and __rs2__&#8800;``x0``, the fence orders all
+* If __rs1__=`x0` and __rs2__{ne}``x0``, the fence orders all
 reads and writes made to any level of the page tables, but only for the
 address space identified by integer register _rs2_. Accesses to _global_
 mappings (see <<translation>>) are not ordered. The
 fence also invalidates all address-translation cache entries matching
 the address space identified by integer register _rs2_, except for
 entries containing global mappings.
-* If __rs1__&#8800;``x0`` and __rs2__=`x0`, the fence orders only
+* If __rs1__{ne}``x0`` and __rs2__=`x0`, the fence orders only
 reads and writes made to leaf page table entries corresponding to the
 virtual address in __rs1__, for all address spaces. The fence also
 invalidates all address-translation cache entries that contain leaf page
 table entries corresponding to the virtual address in _rs1_, for all
 address spaces.
-* If __rs1__&#8800;``x0`` and __rs2__&#8800;``x0``, the
+* If __rs1__{ne}``x0`` and __rs2__{ne}``x0``, the
 fence orders only reads and writes made to leaf page table entries
 corresponding to the virtual address in _rs1_, for the address space
 identified by integer register _rs2_. Accesses to global mappings are
@@ -1122,7 +1130,7 @@ choice not to raise an exception when an invalid virtual address is held
 in _rs1_ facilitates this type of simplification.
 ====
 
-When __rs2__&#8800;``x0``, bits SXLEN-1:ASIDMAX of the value held
+When __rs2__{ne}``x0``, bits SXLEN-1:ASIDMAX of the value held
 in _rs2_ are reserved for future standard use. Until their use is
 defined by a standard extension, they should be zeroed by software and
 ignored by current implementations. Furthermore, if
@@ -1147,10 +1155,25 @@ loads or stores to the same address.
 ====
 A consequence of this specification is that an implementation may use
 any translation for an address that was valid at any time since the most
-recent SFENCE.VMA that subsumes that address. In particular, if a leaf
-PTE is modified but a subsuming SFENCE.VMA is not executed, either the
-old translation or the new translation will be used, but the choice is
-unpredictable. The behavior is otherwise well-defined.
+recent SFENCE.VMA that subsumes that address.
+
+For example, if a leaf PTE is modified and the corresponding virtual address
+is accessed without a subsuming SFENCE.VMA having been executed in between,
+then either the new translation or any older translation since the last
+subsuming SFENCE.VMA was executed will be used.
+It is unpredictable which translation will be chosen from that set, and
+subsequent accesses to the same virtual address might use different
+translations from that set.
+But the behavior of such accesses is otherwise well defined.
+
+This property applies even if the virtual-address width for that translation
+differs from the width currently specified by `satp`.MODE.
+For a given virtual address and ASID, any translation since the last subsuming
+SFENCE.VMA might be used, even if that translation used a virtual address of a
+different width.
+Similarly, for a given virtual address, any global translation since the
+last subsuming SFENCE.VMA might be used, regardless of both ASID and
+virtual-address width.
 
 In a conventional TLB design, it is possible for multiple entries to
 match a single address if, for example, a page is upgraded to a
@@ -1405,7 +1428,7 @@ either mapping being used.
 Global mappings need not be stored redundantly in address-translation
 caches for multiple ASIDs. Additionally, they need not be flushed from
 local address-translation caches when an SFENCE.VMA instruction is
-executed with __rs2__&#8800;``x0``.
+executed with __rs2__{ne}``x0``.
 ====
 
 The RSW field is reserved for use by supervisor software; the
@@ -1437,15 +1460,16 @@ Two schemes to manage the A and D bits are defined:
   accesses.                                                             +
                                                                         +
   The PTE update must be atomic with respect to other accesses to the
-  PTE, and must atomically perform all tablewalk checks for that leaf
+  PTE, and must atomically perform all page-table walk checks for that leaf
   PTE as part of, and before, conditionally updating the PTE value.
   Updates of the A bit may be performed as a result of speculation, even
   if the associated memory access ultimately is not performed
   architecturally. However, updates to the D bit, resulting from an
   explicit store, must be exact (i.e., non-speculative), and observed in
   program order by the local hart. When two-stage address translation is
-  active, updates of the D bit in G-stage PTEs may be performed as a
-  result of speculative updates of the A bit in VS-stage PTEs.          +
+  active, updates to the D bit in G-stage PTEs may be performed by an
+  implicit access to a VS-stage PTE, if the G-stage PTE provides write
+  permission, before any speculative access to the VS-stage PTE.        +
                                                                         +
   The PTE update must appear in the global memory order before the
   memory access that caused the PTE update and before any subsequent
@@ -1534,23 +1558,34 @@ A virtual address _va_ is translated into a physical address _pa_ as follows:
 
 . Let _a_ be ``satp``.__ppn__×PAGESIZE, and let __i__=LEVELS-1. (For Sv32, PAGESIZE=2^12^ and LEVELS=2.) The `satp` register must be
 _active_, i.e., the effective privilege mode must be S-mode or U-mode.
+
 . Let _pte_ be the value of the PTE at address __a__+__va__.__vpn__[__i__]×PTESIZE. (For Sv32, PTESIZE=4.)  If accessing _pte_ violates a PMA or PMP check, raise an access-fault exception corresponding to the original access type.
+
 . If _pte_._v_=0, or if _pte_._r_=0 and _pte_._w_=1, or if any bits or encodings that are reserved for future standard use are set within _pte_, stop and raise a page-fault exception corresponding to the original access type.
+
 . Otherwise, the PTE is valid. If __pte__.__r__=1 or __pte__.__x__=1, go to step 5. Otherwise, this PTE is a pointer to the next level of the page table. Let __i=i__-1. If __i__<0, stop and raise a page-fault exception corresponding to the original access type. Otherwise, let
 __a__=__pte__.__ppn__×PAGESIZE and go to step 2.
-. A leaf PTE has been found. Determine if the requested memory access is
-allowed by the _pte_._r_, _pte_._w_, _pte_._x_, and _pte_._u_ bits, given the current privilege mode and the value of the SUM and MXR fields of the `mstatus` register. If not, stop and raise a page-fault exception corresponding to the original access type.
-. If _i>0_ and _pte_._ppn_[__i__-1:0] ≠ 0, this is a misaligned superpage; stop and raise a page-fault exception corresponding to the original access type.
+
+. A leaf PTE has been reached. If _i>0_ and _pte_._ppn_[__i__-1:0] ≠ 0, this is a misaligned superpage; stop and raise a page-fault exception corresponding to the original access type.
+
+. Determine if the requested memory access is allowed by the _pte_._u_ bit, given the current privilege mode and the value of the SUM and MXR fields of the *mstatus* register. If not, stop and raise a page-fault exception corresponding to the original access type.
+
+. Determine if the requested memory access is allowed by the _pte_._r_, _pte_._w_, and _pte_._x_ bits, given the Shadow Stack Memory Protection rules. If not, stop and raise an access-fault exception.
+
+. Determine if the requested memory access is allowed by the _pte_._r_, _pte_._w_, and _pte_._x_ bits. If not, stop and raise a page-fault exception corresponding to the original access type.
+
 . If _pte_._a_=0, or if the original memory access is a store and _pte_._d_=0:
+
 * If the Svade extension is implemented, stop and raise a page-fault exception corresponding to the original access type.
-* If a store to _pte_ would violate a PMA or PMP check,
+* If a store to the PTE at address __a__+__va.vpn__[__i__]×PTESIZE would violate a PMA or PMP check,
 raise an access-fault exception corresponding to the original access
 type.
 * Perform the following steps atomically:
 ** Compare _pte_ to the value of the PTE at address __a__+__va.vpn__[__i__]×PTESIZE.
 ** If the values match, set _pte_._a_ to 1 and, if the
-original memory access is a store, also set _pte_._d_ to 1.
+original memory access is a store, also set _pte_._d_ to 1. Then store _pte_ to the PTE at address __a__+__va.vpn__[__i__]×PTESIZE.
 ** If the comparison fails, return to step 2.
+
 . The translation is successful. The translated physical address is
 given as follows:
 * _pa.pgoff_ = _va.pgoff_.
@@ -1563,7 +1598,7 @@ algorithm are performed using width PTESIZE.
 [NOTE]
 ====
 This implies, for example, that an Sv48 implementation may not use two
-separate 4B reads to non-atomically access a single 8B PTE, and that A/D
+separate 4{nbsp}B reads to non-atomically access a single 8{nbsp}B PTE, and that A/D
 bit updates performed by the implementation are treated as atomically
 updating the entire PTE, rather than just the A and/or D bit alone (even
 though the PTE value does not otherwise change).
@@ -1580,7 +1615,7 @@ _global_ mapping. To ensure that implicit reads observe writes to the
 same memory locations, an SFENCE.VMA instruction must be executed after
 the writes to flush the relevant cached translations.
 
-The address-translation cache cannot be used in step 7; accessed and
+The address-translation cache cannot be used in step 9; accessed and
 dirty bits may only be updated in memory directly.
 [NOTE]
 ====
@@ -1640,7 +1675,7 @@ Although it would be uncommon to place page tables in non-idempotent
 memory, there is no explicit prohibition against doing so. Since the
 algorithm may only touch page tables reachable from the root page table
 indicated in `satp`, the range of addresses that an implementation's
-page table walker will touch is fully under supervisor control.
+page-table walker will touch is fully under supervisor control.
 
 ***
 
@@ -1782,8 +1817,8 @@ include::images/bytefield/sv48pte.edn[]
 
 The PTE format for Sv48 is shown in <<sv48pte>>.
 Bits 63-54 and 9-0 have the same meaning as for Sv39. Any level of PTE
-may be a leaf PTE, so in addition to pages, Sv48 supports _megapages_,
-_gigapages_, and _terapages_, each of which must be virtually and
+may be a leaf PTE, so in addition to 4 KiB pages, Sv48 supports 2 MiB _megapages_,
+1 GiB _gigapages_, and 512 GiB _terapages_, each of which must be virtually and
 physically aligned to a boundary equal to its size. A page-fault
 exception is raised if the physical address is insufficiently aligned.
 
@@ -1835,8 +1870,8 @@ include::images/bytefield/sv57pte.edn[]
 
 The PTE format for Sv57 is shown in <<sv57pte>>.
 Bits 63–54 and 9–0 have the same meaning as for Sv39. Any level of PTE
-may be a leaf PTE, so in addition to pages, Sv57 supports _megapages_,
-_gigapages_, _terapages_, and _petapages_, each of which must be
+may be a leaf PTE, so in addition to 4 KiB pages, Sv57 supports 2 MiB _megapages_,
+1 GiB _gigapages_, 512 GiB _terapages_, and 256 TiB _petapages_, each of which must be
 virtually and physically aligned to a boundary equal to its size. A
 page-fault exception is raised if the physical address is insufficiently
 aligned.
@@ -1854,7 +1889,7 @@ translations with the same values for PTE bits 5–0. Such ranges must be
 of a naturally aligned power-of-2 (NAPOT) granularity larger than the
 base page size.
 
-The Svnapot extension depends on Sv39.
+The Svnapot extension depends on the Sv39 extension.
 
 [[ptenapot]]
 .Page table entry encodings when __pte__.N=1
@@ -1866,7 +1901,7 @@ The Svnapot extension depends on Sv39.
 0 +
 0 +
 0 +
-&#8805;1
+{ge}1
 |`x xxxx xxx1` +
 `x xxxx xx1x` +
 `x xxxx x1xx` +
@@ -1899,7 +1934,7 @@ __vpn__[__i__][__pte__.__napot_bits__-1:0]. If the encoding in _pte_ is reserved
 <<ptenapot>>, then a page-fault exception must be raised.
 * Implicit reads of NAPOT page table entries may create
 address-translation cache entries mapping
-_a_ + _j_×PTESIZE to a copy of _pte_ in which _pte_._ppn_[_i_][_pte_.__napot_bits__-1:0] 
+_a_ + _j_×PTESIZE to a copy of _pte_ in which _pte_._ppn_[_i_][_pte_.__napot_bits__-1:0]
 is replaced by _vpn[i][pte.napot_bits_-1:0], for any or all _j_ such that
 __j__ >> __napot_bits__ = __vpn__[__i__] >> __napot_bits__, all for the address space identified in _satp_ as loaded by step 1.
 
@@ -1995,7 +2030,7 @@ __
 1 +
 2 +
 ...
-|=== 
+|===
 
 In such a case, an implementation may or may not support all options.
 The discoverability mechanism for this extension would be extended to
@@ -2019,7 +2054,7 @@ the use of page-based memory types that override the PMA(s) for the
 associated memory pages. The encoding for the PBMT bits is captured in
 <<pbmt>>.
 
-The Svpbmt extension depends on Sv39.
+The Svpbmt extension depends on the Sv39 extension.
 
 [[pbmt]]
 .Encodings for PBMT field in Sv39, Sv48, and Sv57 PTEs.
@@ -2134,6 +2169,11 @@ bits override the intermediate attributes to produce the final set of
 attributes used by accesses to the page in question. Otherwise, the
 intermediate attributes are used as the final set of attributes.
 
+NOTE: These final attributes apply to implicit and explicit accesses that
+are subject to both stages of address translation.
+For accesses that are not subject to the first stage of address translation,
+e.g. VS-stage page-table accesses, the intermediate attributes apply instead.
+
 [[svinval]]
 == "Svinval" Extension for Fine-Grained Address-Translation Cache Invalidation, Version 1.0
 
@@ -2192,7 +2232,7 @@ or HS-mode when `mstatus`.TVM=1 also raises an illegal-instruction
 exception. An attempt to execute HINVAL.VVMA or HINVAL.GVMA in VS-mode
 or VU-mode, or to execute SINVAL.VMA in VU-mode, raises a
 virtual-instruction exception. When `hstatus`.VTVM=1, an attempt to execute
-SINVAL.VMA in VS-mode also raises a virtual instruction exception.
+SINVAL.VMA in VS-mode also raises a virtual-instruction  exception.
 
 Attempting to execute SFENCE.W.INVAL or SFENCE.INVAL.IR in U-mode
 raises an illegal-instruction exception.
@@ -2270,8 +2310,30 @@ Invalid PTEs using a bounded timer, or making address-translation caches
 coherent with store instructions that modify PTEs.
 ====
 
-////
-[[sec:ssqosid]]
+[[sec:svrsw60t59b]]
+== "Svrsw60t59b" Extension for PTE Reserved-for-Software Bits 60-59, Version 1.0
+
+If the Svrsw60t59b extension is implemented, then bits 60-59 of the page table
+entries (PTEs) are reserved for use by supervisor software and are ignored by
+the implementation.
+
+If the Hypervisor (H) extension is also implemented, then bits 60-59 of the
+G-stage PTEs are reserved for use by supervisor software and are ignored by the
+implementation.
+
+The Svrsw60t59b extension depends on Sv39.
+
+[NOTE]
+====
+Operating systems frequently use reserved bits within PTEs to store metadata for
+advanced memory management features. Embedding these metadata bits directly within
+the PTEs allows for fast access with minimal overhead, avoiding costly lookups in
+auxiliary data structures. By default, Sv39 and Sv39x4 require a page fault and
+a guest-page fault exception, respectively, to be raised if bits 60–59 are not
+zero.
+====
+
+[[ssqosid]]
 == "Ssqosid" Extension for Quality-of-Service (QoS) Identifiers, Version 1.0
 
 Quality of Service (QoS) is defined as the minimal end-to-end performance
@@ -2353,11 +2415,11 @@ modes of software execution on that hart by default, but this behavior may be
 overridden by future extensions.
 
 If extension Smstateen is implemented together with Ssqosid, then Ssqosid also
-requires the bit 55 in `mstateen0` introduced by Priv 1.14 to be implemented. If
-bit 55 of `mstateen0` is 0, attempts to access `srmcfg` in privilege modes less
-privileged than M-mode raise an illegal-instruction exception. If bit 55 of
-`mstateen0` is 1 or if extension Smstateen is not implemented, attempts to
-access `srmcfg` when `V=1` raise a virtual-instruction exception.
+requires the SRMCFG bit in `mstateen0` to be implemented.
+If `mstateen0`.SRMCFG is 0, attempts to access `srmcfg` in privilege modes
+less privileged than M-mode raise an illegal-instruction exception.
+If `mstateen0`.SRMCFG is 1 or if extension Smstateen is not implemented,
+attempts to access `srmcfg` when `V=1` raise a virtual-instruction exception.
 
 [NOTE]
 ====
@@ -2393,4 +2455,3 @@ the new context, it switches to the new VM's `srmcfg`. The supervisor can also
 use a separate configuration for execution not to be attributed to either
 contexts.
 ====
-////
