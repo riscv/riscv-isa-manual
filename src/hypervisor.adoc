@@ -158,7 +158,8 @@ In this chapter, we use the term _HSXLEN_ to refer to the effective XLEN
 when executing in HS-mode, and _VSXLEN_ to refer to the effective XLEN
 when executing in VS-mode.
 
-==== Hypervisor Status (`hstatus`) Register 
+[[sec:hstatus]]
+==== Hypervisor Status (`hstatus`) Register
 
 The `hstatus` register is an HSXLEN-bit read/write register formatted as
 shown in <<hstatusreg-rv32>> when HSXLEN=32
@@ -167,19 +168,56 @@ register provides facilities analogous to the `mstatus` register for
 tracking and controlling the exception behavior of a VS-mode guest.
 
 [[hstatusreg-rv32]]
-.Hypervisor status register (`hstatus`) when HSLEN=32
-include::images/bytefield/hstatusreg-rv32.edn[]
+.Hypervisor status register (`hstatus`) when HSXLEN=32
+[wavedrom,, svg]
+....
+{reg: [
+  {bits:  5, name: 'WPRI'},
+  {bits:  1, name: 'VSBE'},
+  {bits:  1, name: 'GVA'},
+  {bits:  1, name: 'SPV'},
+  {bits:  1, name: 'SPVP'},
+  {bits:  1, name: 'HU'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  6, name: 'VGEIN'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  1, name: 'VTVM'},
+  {bits:  1, name: 'VTW'},
+  {bits:  1, name: 'VTSR'},
+  {bits:  9, name: 'WPRI'},
+], config:{lanes: 2, hspace:1024}}
+....
 
 [[hstatusreg]]
 .Hypervisor status register (`hstatus`) when HSXLEN=64.
-include::images/bytefield/hstatusreg.edn[]
-
+[wavedrom,, svg]
+....
+{reg: [
+  {bits:  5, name: 'WPRI'},
+  {bits:  1, name: 'VSBE'},
+  {bits:  1, name: 'GVA'},
+  {bits:  1, name: 'SPV'},
+  {bits:  1, name: 'SPVP'},
+  {bits:  1, name: 'HU'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  6, name: 'VGEIN'},
+  {bits:  2, name: 'WPRI'},
+  {bits:  1, name: 'VTVM'},
+  {bits:  1, name: 'VTW'},
+  {bits:  1, name: 'VTSR'},
+  {bits:  9, name: 'WPRI'},
+  {bits:  2, name: 'VSXL'},
+  {bits: 14, name: 'WPRI'},
+  {bits:  2, name: 'HUPMM'},
+  {bits: 14, name: 'WPRI'},
+], config:{lanes: 4, hspace:1024}}
+....
 
 The VSXL field controls the effective XLEN for VS-mode (known as
 VSXLEN), which may differ from the XLEN for HS-mode (HSXLEN). When
 HSXLEN=32, the VSXL field does not exist, and VSXLEN=32. When HSXLEN=64,
 VSXL is a *WARL* field that is encoded the same as the MXL field of `misa`,
-shown in <<misabase>> on page <<misabase, 19>>. In particular, an
+shown in <<misabase>>. In particular, an
 implementation may make VSXL be a read-only field whose value always
 ensures that VSXLEN=HSXLEN.
 
@@ -270,7 +308,7 @@ to VS-level memory management data structures, such as page tables. An
 implementation may make VSBE a read-only field that always specifies the
 same endianness as HS-mode.
 
-==== Hypervisor Trap Delegation (`hedeleg` and `hideleg`) Registers 
+==== Hypervisor Trap Delegation (`hedeleg` and `hideleg`) Registers
 
 Register `hedeleg` is a 64-bit read/write register, formatted as shown in
 <<hedelegreg>>.
@@ -287,7 +325,7 @@ to a VS-mode guest; their layout is the same as `medeleg` and `mideleg`.
 include::images/bytefield/hedelegreg.edn[]
 
 [[hidelegreg]]
-.Hypervisor exception delegation register (`hideleg`).
+.Hypervisor interrupt delegation register (`hideleg`).
 include::images/bytefield/hidelegreg.edn[]
 
 A synchronous trap that has been delegated to HS-mode (using `medeleg`)
@@ -296,7 +334,7 @@ corresponding `hedeleg` bit is set. Each bit of `hedeleg` shall be
 either writable or read-only zero. Many bits of `hedeleg` are required
 specifically to be writable or zero, as enumerated in
 <<hedeleg-bits>>. Bit 0, corresponding to
-instruction address misaligned exceptions, must be writable if
+instruction address-misaligned exceptions, must be writable if
 IALIGN=32.
 
 [NOTE]
@@ -399,7 +437,7 @@ Store/AMO guest-page fault
 |===
 
 [[hinterruptregs]]
-==== Hypervisor Interrupt (`hvip`, `hip`, and `hie`) Registers 
+==== Hypervisor Interrupt (`hvip`, `hip`, and `hie`) Registers
 
 Register `hvip` is an HSXLEN-bit read/write register that a hypervisor
 can write to indicate virtual interrupts intended for VS-mode. Bits of
@@ -501,7 +539,7 @@ is an alias (writable) of the same bit in `hvip`.
 
 Multiple simultaneous interrupts destined for HS-mode are handled in the
 following decreasing priority order: SEI, SSI, STI, SGEI, VSEI, VSSI,
-VSTI.
+VSTI, LCOFI.
 
 [[hgeinterruptregs]]
 ==== Hypervisor Guest External Interrupt Registers (`hgeip` and `hgeie`)
@@ -651,9 +689,7 @@ The definition of the CBZE field is furnished by the Zicboz extension.
 
 The definitions of the CBCFE and CBIE fields are furnished by the Zicbom extension.
 
-The definition of the PMM field will be furnished by the forthcoming
-Ssnpm extension. Its allocation within `henvcfg` may change prior to the
-ratification of that extension.
+The definition of the PMM field is furnished by the Ssnpm extension.
 
 The Zicfilp extension adds the `LPE` field in `henvcfg`. When the `LPE` field
 is set to 1, the Zicfilp extension is enabled in VS-mode. When the `LPE` field
@@ -666,13 +702,13 @@ apply to VS-mode:
 The Zicfiss extension adds the `SSE` field in `henvcfg`. If the `SSE` field is
 set to 1, the Zicfiss extension is activated in VS-mode. When the `SSE` field is
 0, the Zicfiss extension remains inactive in VS-mode, and the following rules
-apply when `V=1`: 
+apply when `V=1`:
 
 * 32-bit Zicfiss instructions will revert to their behavior as defined by Zimop.
 * 16-bit Zicfiss instructions will revert to their behavior as defined by Zcmop.
 * The `pte.xwr=010b` encoding in VS-stage page tables becomes reserved.
 * The `senvcfg.SSE` field will read as zero and is read-only.
-* When `menvcfg.SSE` is one, `SSAMOSWAP.W/D` raises a virtual instruction
+* When `menvcfg.SSE` is one, `SSAMOSWAP.W/D` raises a virtual-instruction
   exception.
 
 The Ssdbltrp extension adds the double-trap-enable (`DTE`) field in `henvcfg`.
@@ -684,7 +720,7 @@ When XLEN=32, `henvcfgh` is a
 of `henvcfg`. Register `henvcfgh` does not exist when
 XLEN=64.
 
-==== Hypervisor Counter-Enable (`hcounteren`) Register 
+==== Hypervisor Counter-Enable (`hcounteren`) Register
 
 The counter-enable register `hcounteren` is a 32-bit register that
 controls the availability of the hardware performance monitoring
@@ -693,7 +729,7 @@ counters to the guest virtual machine.
 .Hypervisor counter-enable register (`hcounteren`).
 include::images/bytefield/hcounterenreg.edn[]
 
-When the CY, TM, IR, or HPM_n_ bit in the `hcounteren` register is
+When the CY, TM, IR, or HPM__n__ bit in the `hcounteren` register is
 clear, attempts to read the `cycle`, `time`, `instret`, or
 `hpmcounter` _n_ register while V=1 will cause a virtual-instruction
 exception if the same bit in `mcounteren` is 1. When one of these bits
@@ -706,7 +742,7 @@ readable unless the applicable bits are set in both `hcounteren` and
 read-only zero, indicating reads to the corresponding counter will cause
 an exception when V=1. Hence, they are effectively *WARL* fields.
 
-==== Hypervisor Time Delta (`htimedelta`) Register 
+==== Hypervisor Time Delta (`htimedelta`) Register
 
 The `htimedelta` CSR is a 64-bit read/write register that contains the delta
 between the value of the `time` CSR and the value returned in VS-mode or
@@ -729,7 +765,7 @@ Register `htimedeltah` does not exist when XLEN=64.
 If the `time` CSR is implemented, `htimedelta` (and `htimedeltah` for XLEN=32)
 must be implemented.
 
-==== Hypervisor Trap Value (`htval`) Register 
+==== Hypervisor Trap Value (`htval`) Register
 
 The `htval` register is an HSXLEN-bit read/write register formatted as
 shown in <<htvalreg>>. When a trap is taken into
@@ -790,7 +826,7 @@ software that writes a value to `htval` should read back from `htval` to
 confirm the stored value.
 ====
 
-==== Hypervisor Trap Instruction (`htinst`) Register 
+==== Hypervisor Trap Instruction (`htinst`) Register
 
 The `htinst` register is an HSXLEN-bit read/write register formatted as
 shown in <<htinstreg>>. When a trap is taken into
@@ -807,7 +843,7 @@ include::images/bytefield/htinstreg.edn[]
 the implementation may automatically write to it on a trap.
 
 [[hgatp]]
-==== Hypervisor Guest Address Translation and Protection (`hgatp`) Register 
+==== Hypervisor Guest Address Translation and Protection (`hgatp`) Register
 
 The `hgatp` register is an HSXLEN-bit read/write register, formatted as
 shown in <<rv32hgatp>> for HSXLEN=32 and
@@ -827,7 +863,7 @@ executing in HS-mode will raise an illegal-instruction exception.
 include::images/bytefield/rv32hgatp.edn[]
 
 [[rv64hgatp]]
-.Hypervisor guest address translation and protection register `hgatp` when HSXLEN=64 for MODE values Bare, Sv39x4, and Sv57x4.
+.Hypervisor guest address translation and protection register `hgatp` when HSXLEN=64 for MODE values Bare, Sv39x4, Sv48x4, and Sv57x4.
 include::images/bytefield/rv64hgatp.edn[]
 
 <<hgatp-mode>> shows the encodings of the MODE field when
@@ -835,7 +871,10 @@ HSXLEN=32 and HSXLEN=64. When MODE=Bare, guest physical addresses are
 equal to supervisor physical addresses, and there is no further memory
 protection for a guest virtual machine beyond the physical memory
 protection scheme described in <<pmp>>. In this
-case, the remaining fields in `hgatp` must be set to zeros.
+case, software must write zero to the remaining fields in `hgatp`.
+Attempting to select MODE=Bare with a nonzero pattern in the remaining fields
+has an UNSPECIFIED effect on the value that the remaining fields assume and an
+UNSPECIFIED effect on G-stage address translation and protection behavior.
 
 When HSXLEN=32, the only other valid setting for MODE is Sv32x4, which
 is a modification of the usual Sv32 paged virtual-memory scheme,
@@ -928,7 +967,7 @@ HFENCE.GVMA instruction (see <<hfence.vma>>) before or
 after writing `hgatp`.
 
 [[vsstatus]]
-==== Virtual Supervisor Status (`vsstatus`) Register 
+==== Virtual Supervisor Status (`vsstatus`) Register
 
 The `vsstatus` register is a VSXLEN-bit read/write register that is
 VS-mode’s version of supervisor register `sstatus`, formatted as shown
@@ -1048,7 +1087,7 @@ encoded as follows:
 The Ssdbltrp adds an S-mode-disable-trap (`SDT`) field extension to address
 double trap (See <<supv-double-trap>>) in VS-mode.
 
-==== Virtual Supervisor Interrupt (`vsip` and `vsie`) Registers 
+==== Virtual Supervisor Interrupt (`vsip` and `vsie`) Registers
 
 The `vsip` and `vsie` registers are VSXLEN-bit read/write registers that
 are VS-mode’s versions of supervisor CSRs `sip` and `sie`, formatted as
@@ -1201,7 +1240,7 @@ execution, unless the effective privilege mode is VS or VU.
 [NOTE]
 ====
 In particular, virtual-machine load/store (HLV, HLVX, or HSV)
-instructions that are misspeculatively executed must not cause VS-stage
+instructions that are mispredicted must not cause VS-stage
 A bits to be set.
 ====
 
@@ -1226,14 +1265,12 @@ include::images/wavedrom/hypv-virt-load-and-store.edn[]
 
 The hypervisor virtual-machine load and store instructions are valid
 only in M-mode or HS-mode, or in U-mode when `hstatus`.HU=1. Each
-instruction performs an explicit memory access as though V=1; i.e., with
-the address translation and protection, and the endianness, that apply
-to memory accesses in either VS-mode or VU-mode. Field SPVP of `hstatus`
-controls the privilege level of the access. The explicit memory access
-is done as though in VU-mode when SPVP=0, and as though in VS-mode when
-SPVP=1. As usual when V=1, two-stage address translation is applied, and
+instruction performs an explicit memory access with an effective privilege mode
+of VS or VU. The effective privilege mode of the explicit memory access is VU
+when `hstatus`.SPVP=0, and VS when `hstatus`.SPVP=1. As usual for VS-mode and
+VU-mode, two-stage address translation is applied, and
 the HS-level `sstatus`.SUM is ignored. HS-level `sstatus`.MXR makes
-execute-only pages readable for both stages of address translation
+execute-only pages readable by explicit loads for both stages of address translation
 (VS-stage and G-stage), whereas `vsstatus`.MXR affects only the first
 translation stage (VS-stage).
 
@@ -1601,7 +1638,7 @@ there is no option to disable two-stage address translation when V=1,
 either stage of translation can be effectively disabled by zeroing the
 corresponding `vsatp` or `hgatp` register.
 
-The `vsstatus` field MXR, which makes execute-only pages readable, only
+The `vsstatus` field MXR, which makes execute-only pages readable by explicit loads, only
 overrides VS-stage page protection. Setting MXR at VS-level does not
 override guest-physical page protections. Setting MXR at HS-level,
 however, overrides both VS-stage and G-stage execute-only permissions.
@@ -1732,7 +1769,7 @@ load or store, not for the original access type. However, any exception
 is always reported for the original access type (instruction, load, or
 store/AMO).
 
-The G bit in all G-stage PTEs is reserved for future standard use. Until
+The G bit in all G-stage PTEs is currently not used. Until
 its use is defined by a standard extension, it should be cleared by
 software for forward compatibility, and must be ignored by hardware.
 
@@ -1808,21 +1845,21 @@ address-translation cache entries that have cached PMP settings
 corresponding to the final translated supervisor physical address. An
 HFENCE.VVMA instruction is not required.
 
-Similarly, if the setting of the PBMTE bit in `menvcfg` is changed, an
+Similarly, if the setting of the PBMTE or ADUE bits in `menvcfg` are changed, an
 HFENCE.GVMA instruction with _rs1_=`x0` and _rs2_=`x0` suffices to synchronize
 with respect to the altered interpretation of G-stage and VS-stage PTEs' PBMT
-fields.
+and A/D bit fields, respectively.
 
-By contrast, if the PBMTE bit in `henvcfg` is changed, executing an
+By contrast, if the PBMTE or ADUE bits in `henvcfg` are changed, executing an
 HFENCE.VVMA with _rs1_=`x0` and _rs2_=`x0` suffices to synchronize with
-respect to the altered interpretation of VS-stage PTEs' PBMT fields for the
-currently active VMID.
+respect to the altered interpretation of VS-stage PTEs' PBMT and A/D bit fields
+for the currently active VMID.
 
 NOTE: No mechanism is provided to atomically change `vsatp` and `hgatp`
 together.  Hence, to prevent speculative execution causing one guest's
 VS-stage translations to be cached under another guest's VMID, world-switch
 code should zero `vsatp`, then swap `hgatp`, then finally write the new
-`vsatp` value.  Similarly, if `henvcfg`.PBMTE need be world-switched, it
+`vsatp` value.  Similarly, if `henvcfg`.PBMTE/ADUE need be world-switched, they
 should be switched after zeroing `vsatp` but before writing the new `vsatp`
 value, obviating the need to execute an HFENCE.VVMA instruction.
 
@@ -1845,7 +1882,7 @@ usual.
 .Machine and supervisor cause register (`mcause` and `scause`) values when the hypervisor extension is implemented.
 [%autowidth,float="center",align="center",cols=">,>,<",options="header"]
 |===
-|Interrupt |Exception Code |Description 
+|Interrupt |Exception Code |Description
 |1 +
 1 +
 1 +
@@ -1869,7 +1906,7 @@ Machine software interrupt
 |_Reserved_ +
 Supervisor timer interrupt +
 Virtual supervisor timer interrupt +
-Machine timer interrupt 
+Machine timer interrupt
 |1 +
 1 +
 1 +
@@ -1881,7 +1918,7 @@ Machine timer interrupt
 |_Reserved_ +
 Supervisor external interrupt +
 Virtual supervisor external interrupt +
-Machine external interrupt 
+Machine external interrupt
 |1 +
 1 +
 1 +
@@ -1889,12 +1926,15 @@ Machine external interrupt
 |12 +
 13 +
 14-15 +
-&#8805;16
+{ge}16
 |Supervisor guest external interrupt +
 _Reserved for counter-overflow interrupt_ +
 _Reserved_ +
 _Designated for platform use_
 |0 +
+0 +
+0 +
+0 +
 0 +
 0 +
 0 +
@@ -1935,7 +1975,10 @@ _Designated for platform use_
 13 +
 14 +
 15 +
-16-19 +
+16 +
+17 +
+18 +
+19 +
 20 +
 21 +
 22 +
@@ -1943,7 +1986,7 @@ _Designated for platform use_
 24-31 +
 32-47 +
 48-63 +
-&#8805;64
+{ge}64
 |Instruction address misaligned +
 Instruction access fault  +
 Illegal instruction  +
@@ -1960,7 +2003,10 @@ Instruction page fault +
 Load page fault +
 _Reserved_ +
 Store/AMO page fault +
+Double trap +
 _Reserved_  +
+Software check +
+Hardware error +
 Instruction guest-page fault +
 Load guest-page fault +
 Virtual instruction +
@@ -1968,7 +2014,7 @@ Store/AMO guest-page fault +
 _Designated for custom use_ +
 _Reserved_ +
 _Designated for custom use_ +
-_Reserved_ 
+_Reserved_
 |===
 
 HS-mode and VS-mode ECALLs use different cause values so they can be
@@ -2087,11 +2133,11 @@ compatibility for software.
 |_Highest_ |3 |Instruction address breakpoint
 
 | .>|12, 20, 1 |During instruction address translation: +
-&#160;&#160;&#160;First encountered page fault, guest-page fault, or access
+{nbsp}{nbsp}{nbsp}First encountered page fault, guest-page fault, or access
 fault
 
 | .>|1 |With physical address for instruction: +
-&#160;&#160;&#160;Instruction access fault
+{nbsp}{nbsp}{nbsp}Instruction access fault
 
 | |2 +
 22 +
@@ -2103,20 +2149,20 @@ Virtual instruction +
 Instruction address misaligned +
 Environment call +
 Environment break +
-&#160;&#160;&#160;Load/store/AMO address breakpoint
+{nbsp}{nbsp}{nbsp}Load/store/AMO address breakpoint
 
 | .>|4,6 |Optionally: +
-&#160;&#160;&#160;Load/store/AMO address misaligned
+{nbsp}{nbsp}{nbsp}Load/store/AMO address misaligned
 
 | .>|13, 15, 21, 23, 5, 7 |During address translation for an explicit memory access: +
-&#160;&#160;&#160;First encountered page fault, guest-page fault,
+{nbsp}{nbsp}{nbsp}First encountered page fault, guest-page fault,
 or access fault
 
 | .>|5, 7 |With physical address for an explicit memory access: +
-&#160;&#160;&#160;Load/store/AMO access fault
+{nbsp}{nbsp}{nbsp}Load/store/AMO access fault
 
-.>|_Lowest_ .>|4, 6 |If not higher priority: + 
-&#160;&#160;&#160;Load/store/AMO address misaligned
+.>|_Lowest_ .>|4, 6 |If not higher priority: +
+{nbsp}{nbsp}{nbsp}Load/store/AMO address misaligned
 |===
 
 If an instruction may raise multiple synchronous exceptions, the
@@ -2143,7 +2189,7 @@ MPIE, and MIE in `mstatus`/`mstatush` and writes CSRs `mepc`, `mcause`,
 [%autowidth,float="center",align="center",cols="<,^,^",options="header"]
 |===
 |Previous Mode |MPV |MPP
-|U-mode + 
+|U-mode +
 HS-mode +
 M-mode|0 +
 0 +
@@ -2394,7 +2440,7 @@ transformed instruction has the format shown in
 <<transformedloadinst>>.
 
 [[transformedloadinst]]
-.Transformed noncompressed load instruction (LB, LBU, LH, LHU, LW, LWU, LD, FLW, FLD, FLQ, or FLH). Fields funct3, rd, and opcode are the same as the trapping load instruction.
+.Transformed load instruction (LB, LBU, LH, LHU, LW, LWU, LD, FLW, FLD, FLQ, or FLH). Fields funct3, rd, and opcode are the same as the trapping load instruction.
 include::images/wavedrom/transformedloadinst.edn[]
 
 For a standard store instruction that is not a compressed instruction
@@ -2403,13 +2449,13 @@ instruction has the format shown in
 <<transformedstoreinst>>.
 
 [[transformedstoreinst]]
-.Transformed noncompressed store instruction (SB, SH, SW, SD, FSW, FSD, FSQ, or FSH). Fields rs2, funct3, and opcode are the same as the trapping store instruction.
+.Transformed store instruction (SB, SH, SW, SD, FSW, FSD, FSQ, or FSH). Fields rs2, funct3, and opcode are the same as the trapping store instruction.
 include::images/wavedrom/transformedstoreinst.edn[]
 
 For a standard atomic instruction (load-reserved, store-conditional, or AMO instruction), the transformed instruction has the format shown in <<transformedatomicinst>>.
 
 [[transformedatomicinst]]
-.Transformed atomic instruction (load-reserved, store-conditional, or AMO instruc-tion). All fields are the same as the trapping instruction except bits 19:15, Addr. Offset.
+.Transformed atomic instruction (load-reserved, store-conditional, or AMO instruction). All fields are the same as the trapping instruction except bits 19:15, Addr. Offset.
 include::images/wavedrom/transformedatomicinst.edn[]
 
 For a standard virtual-machine load/store instruction (HLV, HLVX, or HSV), the transformed instruction has the format shown in <<transformedvmaccessinst>>.
@@ -2481,7 +2527,7 @@ with the encodings of basic loads and stores, as illustrated by
 <<pseudoinsts-basis>>.
 
 [[pseudoinsts-basis]]
-.Standard instructions corresponding to the special psudoinstructions of <<pseudoinsts>>.
+.Standard instructions corresponding to the special pseudoinstructions of <<pseudoinsts>>.
 [%autowidth,float="center",align="center",cols="<,<",options="header"]
 |===
 |Encoding |Instruction

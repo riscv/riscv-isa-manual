@@ -2,19 +2,22 @@
 
 [![RISC-V ISA Build](https://github.com/riscv/riscv-isa-manual/actions/workflows/isa-build.yml/badge.svg)](https://github.com/riscv/riscv-isa-manual/actions/workflows/isa-build.yml)
 
-This repository contains the source files for the RISC-V Instruction Set Manual, which consists of the Privileged RISC-V Instruction Set Manual (LaTeX) and the Unprivileged RISC-V Instruction Set Manual (AsciiDoc). The preface of each document indicates the version of each standard that has been formally ratified by RISC-V International.
+This repository contains the source files for the RISC-V Instruction Set Manual, which consists of the Unprivileged and Privileged volumes. The preface of each document indicates the version of each standard that has been formally ratified by RISC-V International.
 
 This work is licensed under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/). See the [LICENSE](LICENSE) file for details.
 
 The RISC-V Instruction Set Manual is organized into the following volumes:
 
-- Volume I: User-Level ISA
+- Volume I: Unprivileged Architecture
 - Volume II: Privileged Architecture
 
 ## Official and Draft Versions
 
 - **Official versions** of the specifications are available at the [RISC-V International website](https://riscv.org/specifications/).
 - **Compiled versions of the most recent drafts** of the specifications can be found on the [GitHub releases page](https://github.com/riscv/riscv-isa-manual/releases/latest).
+- **HTML snapshots of the latest commit** can be viewed at the following locations:
+  - [Unprivileged spec](https://riscv.github.io/riscv-isa-manual/snapshot/unprivileged/)
+  - [Privileged spec](https://riscv.github.io/riscv-isa-manual/snapshot/privileged/)
 - **Older official versions** of the specifications are archived at the [GitHub releases archive](https://github.com/riscv/riscv-isa-manual/releases/tag/archive).
 
 The canonical list of **open-source RISC-V implementations' marchid CSR values** is available in the [marchid.md file](https://github.com/riscv/riscv-isa-manual/blob/main/marchid.md).
