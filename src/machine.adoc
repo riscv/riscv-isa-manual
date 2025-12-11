@@ -68,10 +68,9 @@ extension "A" , bit 1 encodes presence of extension "B", through to
 bit 25 which encodes "Z").#
 [#norm:misa_i_op]#The "I" bit will be set for the RV32I and RV64I base ISAs#,
 and [#norm:misa_e_op]#the "E" bit will be set for RV32E and RV64E.#
-[#norm:misa_extensions_op]#The Extensions field is a *WARL* field that can contain writable bits where the
+[#norm:misa_extensions_warl_op]#The Extensions field is a *WARL* field that can contain writable bits where the
 implementation allows the supported ISA to be modified.#
-[#norm:misa_extensions_rst]#At reset,
-the Extensions field shall contain the maximal set of supported extensions,
+[#norm:misa_extensions_rst]#At reset, the Extensions field shall contain the maximal set of supported extensions,
 and "I" shall be selected over "E" if both are available.#
 
 [[norm:misa_extensions_disabling]]
@@ -850,7 +849,7 @@ floating-point unit state, including the floating-point registers
 [#norm:mstatus_vs_op]#The VS field encodes the status of the
 vector extension state, including the vector
 registers `v0`–`v31` and the CSRs `vcsr`, `vxrm`, `vxsat`, `vstart`,
-`vl`, `vtype`, and `vlenb`.
+`vl`, `vtype`, and `vlenb`.#
 [#norm:mstatus_xs_op]#The XS field encodes the status of
 additional user-mode extensions and associated state.#
 These fields can be checked by a context switch routine to quickly determine whether a
@@ -914,8 +913,9 @@ VS may optionally be read-only zero.#
 
 [#norm:mstatus_xs_acc]#In harts without additional user extensions requiring new state, the
 XS field is read-only zero.#
-[#norm:mstatus_xs_op]#Every additional extension with state
-provides a CSR field that encodes the equivalent of the XS states. The
+[#norm:mstatus_xs_equiv]#Every additional extension with state
+provides a CSR field that encodes the equivalent of the XS states.#
+The
 XS field represents a summary of all extensions' status as shown in
 <<norm:mstatus_fs_vs_xs_enc>>.#
 
@@ -926,19 +926,22 @@ user-extension status fields, though individual extensions can use a
 different encoding than XS.
 ====
 
-The SD bit is a read-only bit that summarizes whether either the FS, VS,
+[#norm:mstatus_sd_acc]#The SD bit is a read-only bit# that
+[#norm:mstatus_sd_op]#summarizes whether either the FS, VS,
 or XS fields signal the presence of some dirty state that will require
-saving extended user context to memory. If FS, XS, and VS are all
-read-only zero, then SD is also always zero.
+saving extended user context to memory.#
+[#norm:mstatus_sd_rdonly0]#If FS, XS, and VS are all read-only zero, then SD is also always zero.#
 
-When an extension's status is set to Off, any instruction that attempts
+[#norm:mstatus_fs_vs_xs_off_op]#When an extension's status is set to Off, any instruction that attempts
 to read or write the corresponding state will cause an
-illegal-instruction exception. When the status is Initial, the corresponding
-state should have an initial constant value. When the status is Clean,
+illegal-instruction exception.#
+[#norm:mstatus_fs_vs_xs_initial_op]#When the status is Initial, the corresponding
+state should have an initial constant value.#
+[#norm:mstatus_fs_vs_xs_clean_op]#When the status is Clean,
 the corresponding state is potentially different from the initial value,
-but matches the last value stored on a context swap. When the status is
-Dirty, the corresponding state has potentially been modified since the
-last context save.
+but matches the last value stored on a context swap.#
+[#norm:mstatus_fs_vs_xs_dirty_op]#When the status is Dirty,
+the corresponding state has potentially been modified since the last context save.#
 
 During a context save, the responsible privileged code need only write
 out the corresponding state if its status is Dirty, and can then reset
@@ -953,9 +956,9 @@ floating-point registers can all be initialized to the immediate value
 The FS and XS fields are read by the privileged code before saving the
 context. The FS field is set directly by privileged code when resuming a
 user context, while the XS field is set indirectly by writing to the
-status register of the individual extensions. The status fields will
-also be updated during execution of instructions, regardless of
-privilege mode.
+status register of the individual extensions.
+[#norm:mstatus_fs_vs_xs_update_indep_priv]#The status fields will
+also be updated during execution of instructions, regardless of privilege mode.#
 
 Extensions to the user-mode ISA often include additional user-mode
 state, and this state can be considerably larger than the base integer
@@ -982,21 +985,23 @@ back on. A user-mode instruction to turn a unit on must also ensure the
 unit's state is properly initialized, as the unit might have been used
 by another context meantime.
 
-Changing the setting of FS has no effect on the contents of the
+[#norm:mstatus_fs_wr]#Changing the setting of FS has no effect on the contents of the
 floating-point register state. In particular, setting FS=Off does not
-destroy the state, nor does setting FS=Initial clear the contents.
-Similarly, the setting of VS has no effect on the contents of the vector
-register state. Other extensions, however, might not preserve state when
-set to Off.
+destroy the state, nor does setting FS=Initial clear the contents.# Similarly,
+[#norm:mstatus_vs_wr]#the setting of VS has no effect on the contents of the vector
+register state.#
+Other extensions, however, might not preserve state when set to Off.
 
-Implementations may choose to track the dirtiness of the floating-point
+[#norm:mstatus_fs_imprecise]#Implementations may choose to track the dirtiness of the floating-point
 register state imprecisely by reporting the state to be dirty even when
-it has not been modified. On some implementations, some instructions
+it has not been modified.
+On some implementations, some instructions
 that do not mutate the floating-point state may cause the state to
-transition from Initial or Clean to Dirty. On other implementations,
-dirtiness might not be tracked at all, in which case the valid FS states
+transition from Initial or Clean to Dirty.#
+On other implementations,
+[#norm:mstatus_fs_no_dirty_track]#dirtiness might not be tracked at all, in which case the valid FS states
 are Off and Dirty, and an attempt to set FS to Initial or Clean causes
-it to be set to Dirty.
+it to be set to Dirty.#
 
 [NOTE]
 ====
@@ -1005,17 +1010,17 @@ of errant speculation. Some platforms may choose to disallow
 speculatively writing FS to close a potential side channel.
 ====
 
-If an instruction explicitly or implicitly writes a floating-point
+[#norm:mstatus_fs_no_change_dirty]#If an instruction explicitly or implicitly writes a floating-point
 register or the `fcsr` but does not alter its contents, and FS=Initial
 or FS=Clean, it is implementation-defined whether FS transitions to
-Dirty.
+Dirty.#
 
-Implementations may choose to track the dirtiness of the vector register
+[#norm:mstatus_vs_imprecise]#Implementations may choose to track the dirtiness of the vector register
 state in an analogous imprecise fashion, including possibly setting VS
-to Dirty when software attempts to set VS=Initial or VS=Clean. When
-VS=Initial or VS=Clean, it is implementation-defined whether an
+to Dirty when software attempts to set VS=Initial or VS=Clean.#
+[#norm:mstatus_vs_no_change_dirty]#When VS=Initial or VS=Clean, it is implementation-defined whether an
 instruction that writes a vector register or vector CSR but does not
-alter its contents causes VS to transition to Dirty.
+alter its contents causes VS to transition to Dirty.#
 
 <<fsxsstates>> shows all the possible state
 transitions for the FS, VS, or XS status bits. Note that the standard
@@ -1192,12 +1197,13 @@ interrupts, unless the interrupt results in a user-level context swap.
 
 ===== Previous Expected Landing Pad (ELP) State in `mstatus` Register
 
-The Zicfilp extension adds the `SPELP` and `MPELP` fields that hold the previous
-`ELP`, and are updated as specified in <<ZICFILP_FORWARD_TRAPS>>. The
-*__x__*`PELP` fields are encoded as follows:
+[#norm:mstatus_spelp_mpelp_op]#The Zicfilp extension adds the `SPELP` and `MPELP` fields that hold the previous
+`ELP`, and are updated as specified in <<ZICFILP_FORWARD_TRAPS>>.#
+[#norm:mstatus_spelp_mpelp_enc_lead-in]#The *__x__*`PELP` fields are encoded as follows:#
 
-* 0 - `NO_LP_EXPECTED` - no landing pad instruction expected.
-* 1 - `LP_EXPECTED` - a landing pad instruction is expected.
+[[norm:mstatus_spelp_mpelp_enc_list]]
+* `NO_LP_EXPECTED` - no landing pad instruction expected.
+* `LP_EXPECTED` - a landing pad instruction is expected.
 
 ==== Machine Trap-Vector Base-Address (`mtvec`) Register
 
