@@ -262,6 +262,24 @@ greater protection against software bugs, while still retaining access
 to a virtual machine’s memory.
 ====
 
+When Ssnpm extension is implemented, the `HUPMM` field enables or disables
+pointer masking (see <<Zpm>>) for `HLV.\*` and `HSV.*` instructions in U-mode,
+according to the values in <<henvcfg-pmm-values>>, when their explicit memory
+access is performed as though in VU-mode. In HS- and M-modes, pointer masking
+for these instructions is enabled or disabled by `senvcfg.PMM`, when their
+explicit memory access is performed as though in VU-mode. Setting `henvcfg.PMM`
+enables or disables pointer masking for `HLV.\*` and `HSV.*` when their
+explicit memory access is performed as though in VS-mode. When the Ssnpm
+extension is not implemented, the `HUPMM` field is read-only zero. The `HUPMM`
+field is read-only zero for RV32.
+
+[NOTE]
+====
+The hypervisor should copy the value written to `senvcfg.PMM` by the guest to
+the `hstatus.HUPMM` field prior to invoking `HLV.\*` or `HSV.*` instructions in
+U-mode.
+====
+
 The SPV bit (Supervisor Previous Virtualization mode) is written by the
 implementation whenever a trap is taken into HS-mode. Just as the SPP
 bit in `sstatus` is set to the (nominal) privilege mode at the time of
@@ -689,7 +707,22 @@ The definition of the CBZE field is furnished by the Zicboz extension.
 
 The definitions of the CBCFE and CBIE fields are furnished by the Zicbom extension.
 
-The definition of the PMM field is furnished by the Ssnpm extension.
+If the Ssnpm extension is implemented, the `PMM` field enables or disables
+pointer masking (see <<Zpm>>) for VS-mode, according to the values in
+<<henvcfg-pmm-values>>. When the Ssnpm extension is not implemented, the `PMM`
+field is read-only zero. The `PMM` field is read-only zero for RV32.
+
+[[henvcfg-pmm-values]]
+
+[%header, cols="25%,75%", options="header"]
+.Legal values of `PMM` WARL field
+|===
+|Value|Description
+|00|Pointer masking is disabled (PMLEN = 0)
+|01|Reserved
+|10|Pointer masking is enabled with PMLEN = XLEN - 57 (PMLEN = 7 on RV64)
+|11|Pointer masking is enabled with PMLEN = XLEN - 48 (PMLEN = 16 on RV64)
+|===
 
 The Zicfilp extension adds the `LPE` field in `henvcfg`. When the `LPE` field
 is set to 1, the Zicfilp extension is enabled in VS-mode. When the `LPE` field
@@ -1307,6 +1340,17 @@ HLVX.WU is valid for RV32, even though LWU and HLV.WU are not. (For
 RV32, HLVX.WU can be considered a variant of HLV.W, as sign extension is
 irrelevant for 32-bit values.)
 
+The memory accesses performed by the `HLVX.*` instructions are not subject to
+pointer masking (see <<Zpm>>).
+
+[NOTE]
+====
+`HLVX.*` instructions, designed for emulating implicit access to fetch
+instructions from guest memory, perform memory accesses that are exempt from
+pointer masking to facilitate this emulation. For the same reason, pointer
+masking does not apply when MXR is set.
+====
+
 Attempts to execute a virtual-machine load/store instruction (HLV, HLVX,
 or HSV) when V=1 cause a virtual-instruction exception. Attempts to execute
 one of these same instructions from U-mode when `hstatus`.HU=0 cause an
@@ -1862,6 +1906,41 @@ code should zero `vsatp`, then swap `hgatp`, then finally write the new
 `vsatp` value.  Similarly, if `henvcfg`.PBMTE/ADUE need be world-switched, they
 should be switched after zeroing `vsatp` but before writing the new `vsatp`
 value, obviating the need to execute an HFENCE.VVMA instruction.
+
+==== Interaction with Pointer Masking
+
+Guest physical addresses (GPAs) are 2 bits wider than the corresponding virtual
+address translation modes, resulting in additional address translation schemes
+Sv32x4, Sv39x4, Sv48x4, and Sv57x4 for translating guest physical addresses to
+supervisor physical addresses. When running with virtualization in VS/VU mode
+with `vsatp.MODE` = Bare, this means that those two bits may be subject to
+pointer masking, depending on `hgatp.MODE` and `senvcfg.PMM`/`henvcfg.PMM` (for
+VU/VS mode). If `vsatp.MODE` != BARE, this issue does *not* apply.
+
+[NOTE]
+====
+An implementation could mask those two bits on the TLB access path, but this can
+have a significant timing impact. Alternatively, an implementation may choose to
+"waste" TLB capacity by having up to 4 duplicate entries for each page. In this
+case, the pointer masking operation can be applied on the TLB refill path, where
+it is unlikely to affect timing. To support this approach, some TLB entries need
+to be flushed when PMLEN changes in a way that may affect these duplicate
+entries.
+====
+
+To support implementations where (XLEN-PMLEN) can be less than the GPA width
+supported by `hgatp.MODE`, hypervisors should execute an `HFENCE.GVMA` with
+_rs1_=`x0` if the `henvcfg.PMM` is changed from or to a value where (XLEN-PMLEN)
+is less than GPA width supported by the `hgatp` translation mode of that guest.
+Specifically, these cases are:
+
+* `PMLEN=7` and `hgatp.MODE=sv57x4`
+* `PMLEN=16` and `hgatp.MODE=sv57x4`
+* `PMLEN=16` and `hgatp.MODE=sv48x4`
+
+Implementation of an address-specific `HFENCE.GVMA` should either ignore the
+address argument, or should ignore the top masked GPA bits of entries when
+comparing for an address match.
 
 === Traps
 
