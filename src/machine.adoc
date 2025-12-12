@@ -1207,11 +1207,11 @@ interrupts, unless the interrupt results in a user-level context swap.
 
 ==== Machine Trap-Vector Base-Address (`mtvec`) Register
 
-[#norm:mtvec_enc_txt]#The `mtvec` register is an MXLEN-bit *WARL* read/write register that holds
+[#norm:mtvec_sz_warl_acc]#The `mtvec` register is an MXLEN-bit *WARL* read/write register that holds
 trap vector configuration, consisting of a vector base address (BASE)
 and a vector mode (MODE).#
 
-[[norm:mtvec_enc_img]]
+[[norm:mtvec_enc]]
 .Machine Trap-Vector Base-Address (`mtvec`) register.
 include::images/bytefield/mtvec.edn[]
 
@@ -1279,15 +1279,15 @@ implemented without a hardware adder circuit.
 [#norm:trap_def_M-mode]#By default, all traps at any privilege level are handled in machine
 mode#, though a machine-mode handler can redirect traps back to the
 appropriate level with the MRET instruction (<<otherpriv>>). To increase performance,
-[#norm:medeleg_mideleg_op]#implementations can provide individual read/write bits within `medeleg`
+[#norm:medeleg_mideleg_op1]#implementations can provide individual read/write bits within `medeleg`
 and `mideleg` to indicate that certain exceptions and interrupts should
 be processed directly by a lower privilege level.#
-[#norm:medeleg_acc]#The machine exception delegation register (`medeleg`) is a 64-bit read/write register.#
-[#norm:mideleg_acc]#The machine interrupt delegation (`mideleg`) register is an MXLEN-bit
+[#norm:medeleg_sz_acc]#The machine exception delegation register (`medeleg`) is a 64-bit read/write register.#
+[#norm:mideleg_sz_acc]#The machine interrupt delegation (`mideleg`) register is an MXLEN-bit
 read/write register.#
 
 [#norm:medeleg_mideleg_mandatory_S-mode]#In harts with S-mode, the `medeleg` and `mideleg` registers must
-exist#, and [#norm:medeleg_mideleg_op]#setting a bit in `medeleg` or `mideleg` will delegate the
+exist#, and [#norm:medeleg_mideleg_op2]#setting a bit in `medeleg` or `mideleg` will delegate the
 corresponding trap, when occurring in S-mode or U-mode, to the S-mode
 trap handler.#
 [#norm:medeleg_mideleg_omit_wo_S-mode]#In harts without S-mode, the `medeleg` and `mideleg` registers should not exist.#
@@ -1355,7 +1355,7 @@ bit position equal to the value returned in the `mcause` register#
 (i.e., setting bit 8 allows user-mode environment calls to be delegated to a
 lower-privilege trap handler).
 
-[#norm:medelegh_enc_xlen32]#When XLEN=32, `medelegh` is a 32-bit read/write register
+[#norm:medelegh_sz_acc_enc_xlen32]#When XLEN=32, `medelegh` is a 32-bit read/write register
 that aliases bits 63:32 of `medeleg`.#
 [#norm:medelegh_omit_xlen64]#The `medelegh` register does not exist when XLEN=64.#
 
@@ -1375,58 +1375,59 @@ corresponding `medeleg` bits should be read-only zero. In particular,
 
 ==== Machine Interrupt (`mip` and `mie`) Registers
 
-The `mip` register is an MXLEN-bit read/write register containing
-information on pending interrupts, while `mie` is the corresponding
-MXLEN-bit read/write register containing interrupt enable bits.
-Interrupt cause number _i_ (as reported in CSR `mcause`,
-<<mcause>>) corresponds with bit _i_ in both `mip` and
-`mie`. Bits 15:0 are allocated to standard interrupt causes only, while
-bits 16 and above are designated for platform use.
+[#norm:mip_sz_acc]#The `mip` register is an MXLEN-bit read/write register containing
+information on pending interrupts#, while [#norm:mie_sz_acc]#`mie` is the corresponding
+MXLEN-bit read/write register containing interrupt enable bits.#
+[#norm:mip_mie_enc_txt]#Interrupt cause number _i_ (as reported in CSR `mcause`,
+<<mcause>>) corresponds with bit _i_ in both `mip` and `mie`.
+Bits 15:0 are allocated to standard interrupt causes only, while
+bits 16 and above are designated for platform use.#
 
 NOTE: Interrupts designated for platform use may be designated for custom use
 at the platform's discretion.
 
+[[norm:mip_enc_img]]
 .Machine Interrupt-Pending (`mip`) register.
 include::images/bytefield/mideleg.edn[]
 
+[[norm:mie_enc_img]]
 .Machine Interrupt-Enable (`mie`) register
 include::images/bytefield/mideleg.edn[]
 
-An interrupt _i_ will trap to M-mode (causing the privilege mode to
+[#norm:intr_mip_mie_op]#An interrupt _i_ will trap to M-mode (causing the privilege mode to
 change to M-mode) if all of the following are true: (a) either the
 current privilege mode is M and the MIE bit in the `mstatus` register is
 set, or the current privilege mode has less privilege than M-mode;
 (b) bit _i_ is set in both `mip` and `mie`; and (c) if register
-`mideleg` exists, bit _i_ is not set in `mideleg`.
+`mideleg` exists, bit _i_ is not set in `mideleg`.#
 
-These conditions for an interrupt trap to occur must be evaluated in a
+[#norm:intr_mip_mie_bounded_time]#These conditions for an interrupt trap to occur must be evaluated in a
 bounded amount of time from when an interrupt becomes, or ceases to be,
-pending in `mip`, and must also be evaluated immediately following the
+pending in `mip`,# and must also [#norm:intr_mip_mie_xret_csrwr]#be evaluated immediately following the
 execution of an __x__RET instruction or an explicit write to a CSR on
 which these interrupt trap conditions expressly depend (including `mip`,
-`mie`, `mstatus`, and `mideleg`).
+`mie`, `mstatus`, and `mideleg`).#
 
-Interrupts to M-mode take priority over any interrupts to lower
-privilege modes.
+[[norm:intr_M-mode_highest_pri]]
+Interrupts to M-mode take priority over any interrupts to lower privilege modes.
 
-Each individual bit in register `mip` may be writable or may be
-read-only. When bit _i_ in `mip` is writable, a pending interrupt _i_
-can be cleared by writing 0 to this bit. If interrupt _i_ can become
-pending but bit _i_ in `mip` is read-only, the implementation must
-provide some other mechanism for clearing the pending interrupt.
+[#norm:mip_bits_wr_or_rdonly]#Each individual bit in register `mip` may be writable or may be read-only.#
+[#norm:mip_bits_wr_op]#When bit _i_ in `mip` is writable, a pending interrupt _i_
+can be cleared by writing 0 to this bit.#
+[#norm:mip_bits_rdonly_op]#If interrupt _i_ can become pending but bit _i_ in `mip` is read-only, the implementation must
+provide some other mechanism for clearing the pending interrupt.#
 
-A bit in `mie` must be writable if the corresponding interrupt can ever
-become pending. Bits of `mie` that are not writable must be read-only
-zero.
+[#norm:mie_bits_wr]#A bit in `mie` must be writable if the corresponding interrupt can ever become pending.#
+[#norm:mie_bits_rdonly0]#Bits of `mie` that are not writable must be read-only zero.#
 
-The standard portions (bits 15:0) of the `mip` and `mie` registers are
-formatted as shown in <<mipreg-standard>> and <<miereg-standard>> respectively.
+[#norm:mip_mie_std_enc_txt]#The standard portions (bits 15:0) of the `mip` and `mie` registers are
+formatted as shown in <<norm:mip_std_enc_img>> and <<norm:mie_std_enc_img>> respectively.#
 
-[[mipreg-standard]]
+[[norm:mip_std_enc_img]]
 .Standard portion (bits 15:0) of `mip`.
 include::images/bytefield/mipreg-standard.edn[]
 
-[[miereg-standard]]
+[[norm:mie_std_enc_img]]
 .Standard portion (bits 15:0) of `mie`.
 include::images/bytefield/miereg-standard.edn[]
 
@@ -1444,10 +1445,10 @@ The non-maskable interrupt is not made visible via the `mip` register as
 its presence is implicitly known when executing the NMI trap handler.
 ====
 
-Bits `mip`.MEIP and `mie`.MEIE are the interrupt-pending and
-interrupt-enable bits for machine-level external interrupts. MEIP is
-read-only in `mip`, and is set and cleared by a platform-specific
-interrupt controller.
+[#norm:mip_meip_mie_meie_op]#Bits `mip`.MEIP and `mie`.MEIE are the interrupt-pending and
+interrupt-enable bits for machine-level external interrupts.#
+[#norm:mip_meip_rdonly]#MEIP is read-only in `mip`, and is set and cleared by a platform-specific
+interrupt controller.#
 
 Bits `mip`.MTIP and `mie`.MTIE are the interrupt-pending and
 interrupt-enable bits for machine timer interrupts. MTIP is read-only in
