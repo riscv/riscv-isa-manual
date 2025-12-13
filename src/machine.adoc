@@ -359,7 +359,7 @@ boundaries to ease human readability.
 integer ID of the hardware thread running the code.#
 [#norm:mhartid_always_rd]#This register must be readable in any implementation.#
 Hart IDs might not necessarily be
-numbered contiguously in a multiprocessor system, but at least one hart
+numbered contiguously in a multiprocessor system, but one hart
 must have a hart ID of zero. Hart IDs must be unique within the
 execution environment.
 
@@ -776,12 +776,12 @@ provides the hooks necessary to lazily populate shadow page tables.
 
 The TW (Timeout Wait) bit is a *WARL* field that supports intercepting the WFI
 instruction (see <<wfi>>). When TW=0, the WFI
-instruction may execute in lower privilege modes when not prevented for
+instruction may execute in modes less privileged than M when not prevented for
 some other reason. When TW=1, then if WFI is executed in any
 less-privileged mode, and it does not complete within an
 implementation-specific, bounded time limit, the WFI instruction causes
 an illegal-instruction exception. An implementation may have WFI always
-raise an illegal-instruction exception in less-privileged modes when
+raise an illegal-instruction exception in modes less privileged than M when
 TW=1, even if there are pending globally-disabled interrupts when the
 instruction is executed. TW is read-only 0 when there are no modes less
 privileged than M.
@@ -2249,7 +2249,23 @@ behaves as follows:
   unless configured by a mode less privileged than M to perform a flush
   operation.
 
-The definition of the PMM field is furnished by the Smnpm extension.
+If the Smnpm extension is implemented, the `PMM` field enables or disables
+pointer masking (see <<Zpm>>) for the next-lower privilege mode (S-/HS-mode if
+S-mode is implemented, or U-mode otherwise), according to the values in
+<<menvcfg-pmm-values>>. If Smnpm is not implemented, `PMM` is read-only zero.
+The `PMM` field is read-only zero for RV32.
+
+[[menvcfg-pmm-values]]
+
+[%header, cols="25%,75%", options="header"]
+.Legal values of `PMM` WARL field
+|===
+|Value|Description
+|00|Pointer masking is disabled (PMLEN = 0)
+|01|Reserved
+|10|Pointer masking is enabled with PMLEN = XLEN - 57 (PMLEN = 7 on RV64)
+|11|Pointer masking is enabled with PMLEN = XLEN - 48 (PMLEN = 16 on RV64)
+|===
 
 The Zicfilp extension adds the `LPE` field in `menvcfg`. When the `LPE` field is
 set to 1 and S-mode is implemented, the Zicfilp extension is enabled in S-mode.
@@ -2285,6 +2301,7 @@ The `menvcfgh` register does not exist when XLEN=64.
 If U-mode is not supported, then registers `menvcfg` and `menvcfgh` do
 not exist.
 
+[[sec:mseccfg]]
 ==== Machine Security Configuration (`mseccfg`) Register
 
 `mseccfg` is an optional 64-bit read/write register, formatted as
@@ -2297,10 +2314,112 @@ include::images/wavedrom/mseccfg.edn[]
 The definitions of the SSEED and USEED fields are furnished by the
 entropy-source extension, Zkr.
 
-The definitions of the RLB, MMWP, and MML fields are furnished by the
-PMP-enhancement extension, Smepmp.
+The Smepmp extension adds the `RLB`, `MMWP`, and the `MML` fields in
+`mseccfg`.
 
-The definition of the PMM field is furnished by the Smmpm extension.
+When `mseccfg.RLB` (Rule Locking Bypass) a WARL field that provides a mechanism
+to temporarily modify *Locked* PMP rules. When `mseccfg.RLB` is 1, locked PMP
+rules may be removed or modified and locked PMP rules may be edited. When
+`mseccfg.RLB` is 0 and `pmpcfg.L` is 1 in any rule or entry (including disabled
+entries), then `mseccfg.RLB` remains 0 and any further modifications to
+`mseccfg.RLB` are ignored until a *PMP reset*.
+
+[NOTE]
+====
+This feature is intended to be used as a debug mechanism, or as a temporary
+workaround during the boot process for simplifying software, and optimizing the
+allocation of memory and PMP rules. Using this functionality under normal
+operation, after the boot process is completed, should be avoided since it
+weakens the protection of _M-mode-only_ rules. Vendors who don’t need this
+functionality may hardwire this field to 0.
+
+The terminology used to specify the fields introduced by the Smepmp extension
+is listed in <<smepmp>>.
+====
+
+The `mseccfg.MMWP` (Machine-Mode Allowlist Policy) is a WARL field. This field
+changes the default PMP policy for Machine mode when accessing memory regions
+that don't have a matching PMP rule. This is a sticky bit, meaning that once
+set it cannot be unset until a *PMP reset*. When set it changes the default
+PMP policy for M-mode when accessing memory regions that don’t have a matching
+*PMP rule*, to *denied* instead of *ignored*.
+
+The `mseccfg.MML` (Machine Mode Lockdown) is a WARL field. The `MML` bit changes
+the interpretation of the `pmpcfg.L` bit defined in <<pmp-locking>>. This is a
+sticky bit, meaning that once set it cannot be unset until a *PMP reset*. When
+`mseccfg.MML` is set the system's behavior changes in the following way:
+
+. The meaning of `pmpcfg.L` changes: Instead of marking a rule as *locked* and
+  *enforced* in all modes, it now marks a rule as *M-mode-only* when set and
+  *S/U-mode-only* when unset. The formerly reserved encoding of `pmpcfg.RW=01`,
+  and the encoding `pmpcfg.LRWX=1111`, now encode a *Shared-Region*.           +
+                                                                               +
+  An _M-mode-only_ rule is *enforced* on Machine mode and *denied* in Supervisor
+  or User mode. It also remains *locked* so that any further modifications to
+  its associated configuration or address registers are ignored until a *PMP
+  reset*, unless `mseccfg.RLB` is set.                                         +
+                                                                               +
+  An _S/U-mode-only_ rule is *enforced* on Supervisor and User modes and
+  *denied* on Machine mode.                                                    +
+                                                                               +
+  A _Shared-Region_ rule is *enforced* on all modes, with restrictions depending
+  on the `pmpcfg.L` and `pmpcfg.X` bits:                                       +
+                                                                               +
+
+  * A _Shared-Region_ rule where `pmpcfg.L` is not set can be used for sharing
+    data between M-mode and S/U-mode, so is not executable. M-mode has
+    read/write access to that region, and S/U-mode has read access if `pmpcfg.X`
+    is not set, or read/write access if `pmpcfg.X` is set.
++
+  * A _Shared-Region_ rule where `pmpcfg.L` is set can be used for sharing code
+    between M-mode and S/U-mode, so is not writable. Both M-mode and S/U-mode
+    have execute access on the region, and M-mode also has read access if
+    `pmpcfg.X` is set. The rule remains *locked* so that any further
+    modifications to its associated configuration or address registers are
+    ignored until a *PMP reset*, unless `mseccfg.RLB` is set.
++
+  * The encoding `pmpcfg.LRWX=1111` can be used for sharing data between M-mode
+    and S/U mode, where both modes only have read-only access to the region. The
+    rule remains *locked* so that any further modifications to its associated
+    configuration or address registers are ignored until a *PMP reset*, unless
+    `mseccfg.RLB` is set.
+
+. Adding a rule with executable privileges that either is *M-mode-only* or a
+  *locked* *Shared-Region* is not possible and such `pmpcfg` writes are
+  ignored, leaving `pmpcfg` unchanged. This restriction can be temporarily
+  lifted by setting `mseccfg.RLB` e.g. during the boot process.
+
+. Executing code with Machine mode privileges is only possible from memory
+  regions with a matching *M-mode-only* rule or a *locked* *Shared-Region* rule
+  with executable privileges. Executing code from a region without a matching
+  rule or with a matching _S/U-mode-only_ rule is *denied*.
+
+. If `mseccfg.MML` is not set, the combination of `pmpcfg.RW=01` remains
+  reserved for future standard use.
+
+If the Smmpm extension is implemented, the `PMM` field enables or disables
+pointer masking (see <<Zpm>>) for M-mode according to the values in
+<<mseccfg-pmm-values>>. If Smmpm is not implemented, `PMM` is read-only zero.
+The `PMM` field is read-only zero for RV32.
+
+[[mseccfg-pmm-values]]
+
+[%header, cols="25%,75%", options="header"]
+.Legal values of `PMM` WARL field
+|===
+|Value|Description
+|00|Pointer masking is disabled (PMLEN = 0)
+|01|Reserved
+|10|Pointer masking is enabled with PMLEN = XLEN - 57 (PMLEN = 7 on RV64)
+|11|Pointer masking is enabled with PMLEN = XLEN - 48 (PMLEN = 16 on RV64)
+|===
+
+[NOTE]
+====
+`Smmpm` implementations need to satisfy max(largest supported virtual address
+size, largest supported supervisor physical address size) <= (XLEN - PMLEN)
+bits to avoid any masking logic on the TLB access path.
+====
 
 The Zicfilp extension adds the `MLPE` field in `mseccfg`. When `MLPE` field is
 1, Zicfilp extension is enabled in M-mode. When the `MLPE` field is 0, the
@@ -2585,6 +2704,9 @@ extension is implemented, the `mnstatus`.NMIE field is reset to 0. No
  *WARL* field contains an illegal value. If the Zicfilp extension is
 implemented, the `mseccfg`.MLPE field is reset to 0. All other hart
 state is UNSPECIFIED.
+
+The `MML`, `MMWP`, and `RLB` fields of the `mseccfg` register are set to 0,
+unless the platform mandates a different reset value.
 
 The `mcause` values after reset have implementation-specific
 interpretation, but the value 0 should be returned on implementations
@@ -3286,6 +3408,7 @@ back to NAPOT.
 Software may determine the PMP granularity by writing zero to `pmp0cfg`, then writing all ones to `pmpaddr0`, then reading back `pmpaddr0`. If _G_ is the index of the least-significant bit set, the PMP granularity is 2^G+2^ bytes.
 ====
 
+[[pmp-locking]]
 ===== Locking and Privilege Mode
 
 The L bit indicates that the PMP entry is locked, i.e., writes to the
