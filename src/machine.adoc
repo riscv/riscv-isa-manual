@@ -1471,10 +1471,14 @@ interrupts. The behavior of the CSR instructions is slightly modified
 from regular CSR accesses as a result.
 ====
 
-If supervisor mode is implemented, bits `mip`.STIP and `mie`.STIE are
-the interrupt-pending and interrupt-enable bits for supervisor-level
-timer interrupts. STIP is writable in `mip`, and may be written by
-M-mode software to deliver timer interrupts to S-mode.
+If supervisor mode is implemented, its `mip`.STIP and `mie`.STIE are the
+interrupt-pending and interrupt-enable bits for supervisor-level timer
+interrupts. If the stimecmp register is not implemented, STIP is writable in
+mip, and may be written by M-mode software to deliver timer interrupts to
+S-mode. If the `stimecmp` (supervisor-mode timer compare) register is
+implemented, STIP is read-only in mip and reflects the supervisor-level timer
+interrupt signal resulting from stimecmp. This timer interrupt signal is
+cleared by writing `stimecmp` with a value greater than the current time value.
 
 If supervisor mode is implemented, bits `mip`.SSIP and `mie`.SSIE are
 the interrupt-pending and interrupt-enable bits for supervisor-level
@@ -1594,6 +1598,14 @@ features in software. For harts that need high-performance timers and
 counters but are not concerned with obfuscating the underlying hardware
 counters, the counters can be directly exposed to lower privilege modes.
 ====
+
+In addition, when the TM bit in the `mcounteren` register is clear, attempts to
+access the `stimecmp` or `vstimecmp` register while executing in a mode less
+privileged than M will cause an illegal-instruction exception.  When this bit
+is set, access to the `stimecmp` or `vstimecmp` register is permitted in S-mode
+if implemented, and access to the `vstimecmp` register (via `stimecmp`) is
+permitted in VS-mode if implemented and not otherwise prevented by the TM bit in
+`hcounteren`.
 
 The `cycle`, `instret`, and `hpmcountern` CSRs are read-only shadows of
 `mcycle`, `minstret`, and `mhpmcounter n`, respectively. The `time` CSR
@@ -2218,7 +2230,15 @@ A/D bits need be set, hence Svade is implemented when ADUE=0.
 
 If the Smcdeleg extension is implemented, the CDE (Counter Delegation Enable) bit controls whether Zicntr and Zihpm counters can be delegated to S-mode. When CDE=1, the Smcdeleg extension is enabled, see <<smcdeleg>>. When CDE=0, the Smcdeleg and Ssccfg extensions appear to be not implemented. If Smcdeleg is not implemented, CDE is read-only zero.
 
-The definition of the STCE field is furnished by the Sstc extension.
+The Sstc extension adds the `STCE` (STimecmp Enable) bit to `menvcfg` CSR. When
+the Sstc extension is not implemented, `STCE` is read-only zero. The `STCE` bit
+enables `stimecmp` for S-mode when set to one. When this extension is
+implemented and `STCE` in `menvcfg` is zero, an attempt to access `stimecmp`
+in a mode other than M-mode raises an illegal-instruction exception, `STCE` in
+`henvcfg` is read-only zero, and `STIP` in `mip` and `sip` reverts to its
+defined behavior as if this extension is not implemented. Further, if the H
+extension is implemented, then `hip`.VSTIP also reverts its defined behavior as
+if this extension is not implemented.
 
 The Zicboz extension adds the `CBZE` (Cache Block Zero instruction enable) field
 to `menvcfg`. When the `CBZE` field is set to 1, it enables execution of the
