@@ -1503,10 +1503,14 @@ interrupts. The behavior of the CSR instructions is slightly modified
 from regular CSR accesses as a result.
 ====
 
-[#norm:mip_stip_mie_stie_op]#If supervisor mode is implemented, bits `mip`.STIP and `mie`.STIE are
+[#norm:mip_stip_mie_stie_op]#If supervisor mode is implemented, its `mip`.STIP and `mie`.STIE are
 the interrupt-pending and interrupt-enable bits for supervisor-level timer interrupts.#
-[#norm:mip_stip_acc]#STIP is writable in `mip`# and [#norm:mip_stip_op2]#may be written by
-M-mode software to deliver timer interrupts to S-mode.#
+[#norm:mip_stip_no-stimecmp_acc]#If the stimecmp register is not implemented, STIP is writable in
+mip#, and [#norm:mip_stip_no-stimecmp_op2]#may be written by M-mode software to deliver timer interrupts to
+S-mode.# [#norm:mip_stip_stimecmp_acc]#If the `stimecmp` (supervisor-mode timer compare) register is
+implemented, STIP is read-only in mip# and [#norm:mip_stip_stimecmp_op2]#reflects the supervisor-level timer
+interrupt signal resulting from stimecmp.# [#norm:mip_stip_stimecmp_clr]#The supervisor-level timer interrupt signal is
+cleared by writing `stimecmp` with a value greater than the current time value.#
 
 [#norm:mip_ssip_mie_ssie_op]#If supervisor mode is implemented, bits `mip`.SSIP and `mie`.SSIE are
 the interrupt-pending and interrupt-enable bits for supervisor-level software interrupts.#
@@ -1624,6 +1628,14 @@ features in software. For harts that need high-performance timers and
 counters but are not concerned with obfuscating the underlying hardware
 counters, the counters can be directly exposed to lower privilege modes.
 ====
+
+In addition, when the TM bit in the `mcounteren` register is clear, attempts to
+access the `stimecmp` or `vstimecmp` register while executing in a mode less
+privileged than M will cause an illegal-instruction exception.  When this bit
+is set, access to the `stimecmp` or `vstimecmp` register is permitted in S-mode
+if implemented, and access to the `vstimecmp` register (via `stimecmp`) is
+permitted in VS-mode if implemented and not otherwise prevented by the TM bit in
+`hcounteren`.
 
 The `cycle`, `instret`, and `hpmcountern` CSRs are read-only shadows of
 `mcycle`, `minstret`, and `mhpmcounter n`, respectively. The `time` CSR
@@ -2248,11 +2260,48 @@ A/D bits need be set, hence Svade is implemented when ADUE=0.
 
 If the Smcdeleg extension is implemented, the CDE (Counter Delegation Enable) bit controls whether Zicntr and Zihpm counters can be delegated to S-mode. When CDE=1, the Smcdeleg extension is enabled, see <<smcdeleg>>. When CDE=0, the Smcdeleg and Ssccfg extensions appear to be not implemented. If Smcdeleg is not implemented, CDE is read-only zero.
 
-The definition of the STCE field is furnished by the Sstc extension.
+[[norm:menvcfg-stce]]
+The Sstc extension adds the `STCE` (STimecmp Enable) bit to `menvcfg` CSR. When
+the Sstc extension is not implemented, `STCE` is read-only zero. The `STCE` bit
+enables `stimecmp` for S-mode when set to one. When this extension is
+implemented and `STCE` in `menvcfg` is zero, an attempt to access `stimecmp`
+in a mode other than M-mode raises an illegal-instruction exception, `STCE` in
+`henvcfg` is read-only zero, and `STIP` in `mip` and `sip` reverts to its
+defined behavior as if this extension is not implemented. Further, if the H
+extension is implemented, then `hip`.VSTIP also reverts its defined behavior as
+if this extension is not implemented.
 
-The definition of the CBZE field is furnished by the Zicboz extension.
+[[norm:menvcfg-cbze]]
+The Zicboz extension adds the `CBZE` (Cache Block Zero instruction enable) field
+to `menvcfg`. When the `CBZE` field is set to 1, it enables execution of the
+cache block zero instruction, `CBO.ZERO`, in modes less privileged than M.
+Otherwise, the instruction raises an illegal-instruction exception in modes less
+privileged than M. When the Zicboz extension is not implemented, `CBZE` is
+read-only zero.
 
-The definitions of the CBCFE and CBIE fields are furnished by the Zicbom extension.
+[[norm:menvcfg-cbcfe]]
+The Zicbom extension adds the `CBCFE` (Cache Block Clean and Flush instruction
+Enable) field to `menvcfg`. When the `CBCFE` field is set to 1, it enables
+execution of the cache block clean instruction (`CBO.CLEAN`) and the cache block
+flush instruction (`CBO.FLUSH`) in modes less privileged than M. Otherwise, these
+instructions raise an illegal-instruction exception in modes less privileged
+than M. When the Zicbom extension is not implemented, `CBCFE` is read-only zero.
+
+[#norm:menvcfg-cbie]#The Zicbom extension adds the `CBIE` (Cache Block Invalidate instruction Enable)
+WARL field to `menvcfg` to control execution of the cache block invalidate
+instruction (`CBO.INVAL`) in modes less privileged than M. When `CBIE` is set to
+`00b`, the instruction raises an illegal-instruction exception in modes less
+privileged than M. When the Zicbom extension is not implemented, `CBIE` is
+read-only zero. The encoding `10b` is reserved.#
+[#norm:cbo-inval_m-mode_op0]#When `CBIE` is set to `01b`
+or `11b`, and when enabled for execution in modes less privileged than M, it
+behaves as follows:#
+
+* [[norm:cbo-inval_m-mode_op1]]`01b` -- The instruction is executed and performs a flush operation, even if
+  configured by a mode less privileged than M to perform an invalidate operation.
+* [[norm:cbo-inval_m-mode_op2]]`11b` -- The instruction is executed and performs an invalidate operation,
+  unless configured by a mode less privileged than M to perform a flush
+  operation.
 
 If the Smnpm extension is implemented, the `PMM` field enables or disables
 pointer masking (see <<Zpm>>) for the next-lower privilege mode (S-/HS-mode if
@@ -2316,8 +2365,49 @@ shown in <<mseccfg>>, that controls security features.
 .Machine security configuration (`mseccfg`) register.
 include::images/wavedrom/mseccfg.edn[]
 
-The definitions of the SSEED and USEED fields are furnished by the
-entropy-source extension, Zkr.
+The Zkr extension adds the `SSEED` and `USEED` fields to the `mseccfg` CSR to
+control access to the `seed` CSR from modes less privileged than M.
+
+When `USEED` is 0, access to the `seed` CSR in U-mode raises an
+illegal-instruction exception. When `USEED` is 1, read-write access to the
+`seed` CSR from U-mode is allowed; all other types of accesses raise an
+illegal-instruction exception. If Zkr or U-mode is not implemented, `USEED` is
+read-only zero.
+
+When `SSEED` is 0, access to the `seed` CSR from S-/HS-mode raises an
+illegal-instruction exception. When `SSEED` is 1, read-write access to the
+`seed` CSR from S-/HS-mode is allowed; all other types of accesses raise an
+illegal-instruction exception. If Zkr or S-mode is not implemented, `SSEED` is
+read-only zero.
+
+When the H extension is also implemented, access to the `seed` CSR from an
+HS-qualified instruction leads to a virtual-instruction exception in VS and
+VU modes; all other types of accesses raise an illegal-instruction exception.
+
+.Entropy Source Access Control.
+
+[cols="1,1,1,7",options="header",]
+|=======================================================================
+|Mode   | `SSEED` | `USEED` | Description
+| M     |  -      |  -      | The `seed` CSR is always available in machine
+                              mode as normal (with a CSR read-write
+                              instruction.) Attempted read without a write
+                              raises an illegal-instruction exception
+                              regardless of mode and access control bits.
+| U     |  -      | `0`     | Any `seed` CSR access raises an
+                              illegal-instruction exception.
+| U     |  -      | `1`     | The `seed` CSR is accessible as normal. No
+                              exception is raised for read-write.
+| S/HS  | `0`     |  -      | Any `seed` CSR access raises an
+                              illegal-instruction exception.
+| S/HS  | `1`     |  -      | The `seed` CSR is accessible as normal. No
+                              exception is raised for read-write.
+| VS/VU | `0`     |  -      | Any `seed` CSR access raises an
+                              illegal-instruction exception.
+| VS/VU | `1`     |  -      | A read-write `seed` access raises a
+                              virtual-instruction exception, while other access
+                              conditions raise an illegal-instruction exception.
+|=======================================================================
 
 The Smepmp extension adds the `RLB`, `MMWP`, and the `MML` fields in
 `mseccfg`.
@@ -2719,6 +2809,10 @@ that do not distinguish different reset conditions. Implementations that
 distinguish different reset conditions should only use 0 to indicate the
 most complete reset.
 
+The `USEED` and `SSEED` fields of the `mseccfg` CSR must have defined
+reset values. The system must not allow them to be in an undefined state
+after reset.
+
 [NOTE]
 ====
 Some designs may have multiple causes of reset (e.g., power-on reset,
@@ -2911,8 +3005,8 @@ _AMOLogical_, and _AMOArithmetic_. AMONone indicates that no AMO
 operations are supported. AMOSwap indicates that only `amoswap`
 instructions are supported in this address range. AMOLogical indicates
 that swap instructions plus all the logical AMOs (`amoand`, `amoor`,
-`amoxor`) are supported. AMOArithmetic indicates that all RISC-V AMOs
-are supported. For each level of support, naturally aligned AMOs of a
+`amoxor`) are supported. AMOArithmetic indicates that all RISC-V AMOs defined by
+the A extension are supported. For each level of support, naturally aligned AMOs of a
 given width are supported if the underlying memory region supports reads
 and writes of that width. Main memory and I/O regions may only support a
 subset or none of the processor-supported atomic operations.
@@ -2937,6 +3031,26 @@ above + `amoadd`, `amomin`, `amomax`, `amominu`,
 We recommend providing at least AMOLogical support for I/O regions where
 possible.
 ====
+
+The Zacas extension defines three additional levels of support: AMOCASW,
+AMOCASD, and AMOCASQ.
+
+AMOCASW indicates that in addition to instructions indicated by AMOArithmetic
+level support, the `AMOCAS.W` instruction is supported. AMOCASD indicates that
+in addition to instructions indicated by AMOCASW level support, the `AMOCAS.D`
+instruction is supported. AMOCASQ indicates that in addition to instructions
+indicated by AMOCASD level support, the `AMOCAS.Q` instruction is supported.
+
+[NOTE]
+====
+`AMOCASW/D/Q` require AMOArithmetic level support as the `AMOCAS.W/D/Q`
+instructions require ability to perform an arithmetic comparison and a swap
+operation.
+====
+
+The AMOs specified by the Zabha extension require the same level of support as
+the corresponding instructions in the A standard extension or the Zacas
+extension.
 
 ===== Reservability PMA
 
