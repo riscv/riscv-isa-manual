@@ -131,7 +131,7 @@ Pointer masking applies to all explicit memory accesses. Currently, in the Base 
 * **Atomics**: All instructions in RV32A and RV64A.
 * **Floating Point**: FLW, FLD, FLQ, FSW, FSD, FSQ.
 * **Compressed**: All instructions mapping to any of the above, and C.LWSP, C.LDSP, C.FLWSP, C.FLDSP, C.SWSP, C.SDSP, C.FSWSP, C.FSDSP.
-* **Hypervisor Extension**: HLV.\*, HSV.* (in some cases; see <<_ssnpm>>).
+* **Hypervisor Extension**: HLV.\*, HSV.* (in some cases; see <<sec:hstatus>>).
 * **Cache Management Operations**: All instructions in Zicbom, Zicbop and Zicboz.
 * **Vector Extension**: All vector load and store instructions in the ratified RVV 1.0 spec.
 * **Zicfiss Extension**: SSPUSH, C.SSPUSH, SSPOPCHK, C.SSPOPCHK, SSAMOSWAP.W/D.
@@ -175,9 +175,9 @@ Misaligned accesses are supported, subject to the same limitations as in the abs
 
 No pointer masking operations are applied when software reads/writes to CSRs, including those meant to hold addresses. If software stores tagged addresses into such CSRs, data load or data store operations based on those addresses are subject to pointer masking only if they are explicit (<<_memory_accesses_subject_to_pointer_masking>>) and pointer masking is enabled for the privilege mode that performs the access. The implemented WARL width of CSRs is unaffected by pointer masking (e.g., if a CSR supports 52 bits of valid addresses and pointer masking is supported with PMLEN=16, the necessary number of WARL bits remains 52 independently of whether pointer masking is enabled or disabled).
 
-In contrast to software writes, pointer masking **is applied** for hardware writes to a CSR (e.g., when the hardware writes the transformed address to `stval` when taking an exception). Pointer masking is also applied to the memory access address when matching address triggers in debug.
+In contrast to software writes, pointer masking, when applicable, **is applied** for hardware writes to a CSR (e.g., when the hardware writes the transformed address to `stval` when taking an exception). Pointer masking is also applied, when applicable, to the memory access address when matching address triggers in debug.
 
-For example, software is free to write a tagged or untagged address to `stvec`, but on trap delivery (e.g., due to an exception or interrupt), pointer masking **will not be applied** to the address of the trap handler. However, pointer masking **will be applied** by the hardware to any address written into `stval` when delivering an exception.
+For example, software is free to write a tagged or untagged address to `stvec`, but on trap delivery (e.g., due to an exception or interrupt), pointer masking **will not be applied** to the address of the trap handler. However, when delivering an exception, the hardware applies pointer masking to any address written into `stval` if pointer masking is applicable to that address.
 
 [NOTE]
 ====
@@ -190,11 +190,9 @@ Pointer masking refers to a number of separate extensions, all of which are priv
 
 **Extensions**:
 
-* **Ssnpm**: A supervisor-level extension that provides pointer masking for the next lower privilege mode (U-mode), and for VS- and VU-modes if the H extension is present.
-* **Smnpm**: A machine-level extension that provides pointer masking for the next lower privilege mode (S/HS if S-mode is implemented, or U-mode otherwise).
-* **Smmpm**: A machine-level extension that provides pointer masking for M-mode.
-
-See <<_isa_extensions>> for details on how each of these extensions is configured.
+* **Ssnpm**: A supervisor-level extension that provides pointer masking for the next lower privilege mode (U-mode), and for VS- and VU-modes if the H extension is present. See <<sec:senvcfg>>, <<sec:henvcfg>>, <<sec:hstatus>>, and <<pm-two-stage>>.
+* **Smnpm**: A machine-level extension that provides pointer masking for the next lower privilege mode (S/HS if S-mode is implemented, or U-mode otherwise). See <<sec:menvcfg>>.
+* **Smmpm**: A machine-level extension that provides pointer masking for M-mode. See <<sec:mseccfg>>.
 
 In addition, the pointer masking standard defines two extensions that describe an execution environment but have no bearing on hardware implementations. These extensions are intended to be used in profile specifications where a User profile or a Supervisor profile can only reference User level or Supervisor level pointer masking functionality, and not the associated CSR controls that exist at a higher privilege level (i.e., in the execution environment).
 
@@ -203,94 +201,17 @@ In addition, the pointer masking standard defines two extensions that describe a
 
 The precise nature of these facilities is left to the respective execution environment.
 
-Pointer masking only applies to RV64. In RV32, trying to enable pointer masking will result in an illegal WARL write and not update the pointer masking configuration bits (see <<_isa_extensions>> for details). The same is the case on RV64 or larger systems when UXL/SXL/MXL is set to 1 for the corresponding privilege mode. Note that in RV32, the CSR bits introduced by pointer masking are still present, for compatibility between RV32 and larger systems with UXL/SXL/MXL set to 1. Setting UXL/SXL/MXL to 1 will clear the corresponding pointer masking configuration bits.
+Pointer masking only applies to RV64. In RV32, trying to enable pointer masking will result in an illegal WARL write and not update the pointer masking configuration bits (see <<sec:mseccfg>>, <<sec:menvcfg>>, <<sec:henvcfg>>, and <<sec:senvcfg>> for details). The same is the case on RV64 or larger systems when UXL/SXL/MXL is set to 1 for the corresponding privilege mode. Note that in RV32, the CSR bits introduced by pointer masking are still present, for compatibility between RV32 and larger systems with UXL/SXL/MXL set to 1. Setting UXL/SXL/MXL to 1 will clear the corresponding pointer masking configuration bits.
 
 [NOTE]
 ====
 Note that setting UXL/SXL/MXL to 1 and back to 0 does not preserve the previous values of the PMM bits. This includes the case of entering an RV32 virtual machine from an RV64 hypervisor and returning.
 ====
 
-=== ISA Extensions
-
-This section describes the pointer masking extensions `Smmpm`, `Smnpm` and `Ssnpm`. All of these extensions are privileged ISA extensions and do not add any new CSRs. For the definitions of `Sspm` and `Supm`, see <<_pointer_masking_extensions>>.
-
 [NOTE]
 ====
 Future extensions may introduce additional CSRs to allow different privilege modes to modify their own pointer masking settings. This may be required for future use cases in managed runtime systems that are not currently addressed as part of this extension.
 ====
-
-Each extension introduces a 2-bit WARL field (`PMM`) that may take on the following values to set the pointer masking settings for a particular privilege mode.
-
-[[pmm-values]]
-
-[%header, cols="25%,75%", options="header"]
-.Possible values of `PMM` WARL field.
-|===
-|Value|Description
-|00|Pointer masking is disabled (PMLEN=0)
-|01|Reserved
-|10|Pointer masking is enabled with PMLEN=XLEN-57 (PMLEN=7 on RV64)
-|11|Pointer masking is enabled with PMLEN=XLEN-48 (PMLEN=16 on RV64)
-|===
-
-All of these fields are read-only 0 on RV32 systems.
-
-==== Ssnpm
-
-`Ssnpm` adds a new 2-bit WARL field (`PMM`) to bits 33:32 of `senvcfg`. Setting `PMM` enables or disables pointer masking for the next lower privilege mode (U/VU mode), according to the values in <<pmm-values>>.
-
-In systems where the H Extension is present, `Ssnpm` also adds a new 2-bit WARL field (`PMM`) to bits 33:32 of `henvcfg`. Setting `PMM` enables or disables pointer masking for VS-mode, according to the values in <<pmm-values>>. Further, a 2-bit WARL field (`HUPMM`) is added to bits 49:48 of `hstatus`. Setting `hstatus.HUPMM` enables or disables pointer masking for `HLV.\*` and `HSV.*` instructions in U-mode, according to the values in <<pmm-values>>, when their explicit memory access is performed as though in VU-mode. In HS- and M-modes, pointer masking for these instructions is enabled or disabled by `senvcfg.PMM`, when their explicit memory access is performed as though in VU-mode. Setting `henvcfg.PMM` enables or disables pointer masking for `HLV.\*` and `HSV.*` when their explicit memory access is performed as though in VS-mode.
-
-[NOTE]
-====
-The hypervisor should copy the value written to `senvcfg.PMM` by the guest to the `hstatus.HUPMM` field prior to invoking `HLV.\*` or `HSV.*` instructions in U-mode.
-====
-
-The memory accesses performed by the `HLVX.*` instructions are not subject to pointer masking.
-
-[NOTE]
-====
-`HLVX.*` instructions, designed for emulating implicit access to fetch instructions from guest memory, perform memory accesses that are exempt from pointer masking to facilitate this emulation. For the same reason, pointer masking does not apply when MXR is set.
-====
-
-==== Smnpm
-
-`Smnpm` adds a new 2-bit WARL field (`PMM`) to bits 33:32 of `menvcfg`. Setting `PMM` enables or disables pointer masking for the next lower privilege mode (S-/HS-mode if S-mode is implemented, or U-mode otherwise), according to the values in <<pmm-values>>.
-
-[NOTE]
-====
-The type of address determines which type of pointer masking is applied. For example, when running with virtualization in VS/VU mode with `vsatp.MODE` = Bare, physical address pointer masking (zero extension) applies.
-====
-
-==== Smmpm
-
-`Smmpm` adds a new 2-bit WARL field (`PMM`) to bits 33:32 of `mseccfg`. The presence of `Smmpm` implies the presence of the `mseccfg` register, even if it would not otherwise be present. Setting `PMM` enables or disables pointer masking for M mode, according to the values in <<pmm-values>>.
-
-==== Interaction with SFENCE.VMA
-
-Since pointer masking applies to the effective address only and does not affect any memory-management data structures, no SFENCE.VMA is required after enabling/disabling pointer masking.
-
-==== Interaction with Two-Stage Address Translation
-
-Guest physical addresses (GPAs) are 2 bits wider than the corresponding virtual address translation modes, resulting in additional address translation schemes Sv32x4, Sv39x4, Sv48x4, and Sv57x4 for translating guest physical addresses to supervisor physical addresses. When running with virtualization in VS/VU mode with `vsatp.MODE` = Bare, this means that those two bits may be subject to pointer masking, depending on `hgatp.MODE` and `senvcfg.PMM`/`henvcfg.PMM` (for VU/VS mode). If `vsatp.MODE` != BARE, this issue does *not* apply.
-
-[NOTE]
-====
-An implementation could mask those two bits on the TLB access path, but this can have a significant timing impact. Alternatively, an implementation may choose to "waste" TLB capacity by having up to 4 duplicate entries for each page. In this case, the pointer masking operation can be applied on the TLB refill path, where it is unlikely to affect timing. To support this approach, some TLB entries need to be flushed when PMLEN changes in a way that may affect these duplicate entries.
-====
-
-To support implementations where (XLEN-PMLEN) can be less than the GPA width supported by `hgatp.MODE`, hypervisors should execute an `HFENCE.GVMA` with _rs1_=`x0` if the `henvcfg.PMM` is changed from or to a value where (XLEN-PMLEN) is less than GPA width supported by the `hgatp` translation mode of that guest. Specifically, these cases are:
-
-* `PMLEN=7` and `hgatp.MODE=sv57x4`
-* `PMLEN=16` and `hgatp.MODE=sv57x4`
-* `PMLEN=16` and `hgatp.MODE=sv48x4`
-
-[NOTE]
-====
-`Smmpm` implementations need to satisfy max(largest supported virtual address size, largest supported supervisor physical address size) <= (XLEN - PMLEN) bits to avoid any masking logic on the TLB access path.
-====
-
-Implementation of an address-specific `HFENCE.GVMA` should either ignore the address argument, or should ignore the top masked GPA bits of entries when comparing for an address match.
 
 ==== Number of Masked Bits
 

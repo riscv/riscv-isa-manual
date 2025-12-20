@@ -100,8 +100,6 @@ DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
 DOCS_NORM_TAGS := $(addprefix $(BUILD_DIR)/, $(addsuffix $(DOC_NORM_TAG_SUFFIX), $(DOCS)))
 NORM_RULES_JSON := $(BUILD_DIR)/norm-rules.json
-NORM_RULES_XLSX := $(BUILD_DIR)/norm-rules.xlsx
-NORM_RULES_ADOC := $(BUILD_DIR)/norm-rules.adoc
 NORM_RULES_HTML := $(BUILD_DIR)/norm-rules.html
 
 ENV := LANG=C.utf8
@@ -132,8 +130,8 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-mathematical \
             --require=asciidoctor-sail
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-xlsx build-norm-rules-html
+.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html
 
 all: build
 
@@ -149,7 +147,6 @@ build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
 build-norm-rules-json: $(NORM_RULES_JSON)
-build-norm-rules-xlsx: $(NORM_RULES_XLSX)
 build-norm-rules-html: $(NORM_RULES_HTML)
 build-norm-rules: build-norm-rules-json build-norm-rules-html
 build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
@@ -199,20 +196,6 @@ $(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
-
-$(NORM_RULES_XLSX): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL)
-	$(WORKDIR_SETUP)
-	cp -f $(DOCS_NORM_TAGS) $@.workdir
-	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -x $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
-	$(WORKDIR_TEARDOWN)
-
-$(NORM_RULES_ADOC): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL)
-	$(WORKDIR_SETUP)
-	cp -f $(DOCS_NORM_TAGS) $@.workdir
-	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -a $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 $(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL) $(DOCS_HTML)
