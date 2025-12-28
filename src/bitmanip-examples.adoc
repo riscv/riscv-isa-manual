@@ -1,0 +1,145 @@
+[appendix]
+== Bit Manipulation Extensions Assembly Code Examples
+
+The following examples provide software optimization guidance.
+
+=== strlen
+
+The *orc.b* instruction allows for the efficient detection of *NUL* bytes in an XLEN-sized chunk of data:
+
+ * the result of *orc.b* on a chunk that does not contain any *NUL* bytes will be all-ones, and
+ * after a bitwise-negation of the result of *orc.b*, the number of data bytes before the  first *NUL* byte (if any) can be detected by *ctz*/*clz* (depending on the endianness of data).
+
+A full example of a *strlen* function, which uses these techniques and also demonstrates the use of it for unaligned/partial data, is the following:
+
+[source,asm]
+--
+#include <sys/asm.h>
+
+    .text
+    .globl strlen
+    .type  strlen, @function
+strlen:
+    andi    a3, a0, (SZREG-1)   // offset
+    andi    a1, a0, -SZREG      // align pointer
+.Lprologue:
+    li      a4, SZREG
+    sub     a4, a4, a3          // XLEN - offset
+    slli    a3, a3, 3           // offset * 8
+    REG_L   a2, 0(a1)           // chunk
+    /*
+     * Shift the partial/unaligned chunk we loaded to remove the bytes
+     * from before the start of the string, adding NUL bytes at the end.
+     */
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    srl     a2, a2 ,a3          // chunk >> (offset * 8)
+#else
+    sll     a2, a2, a3
+#endif
+    orc.b   a2, a2
+    not     a2, a2
+    /*
+     * Non-NUL bytes in the string have been expanded to 0x00, while
+     * NUL bytes have become 0xff.  Search for the first set bit
+     * (corresponding to a NUL byte in the original chunk).
+     */
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    ctz     a2, a2
+#else
+    clz     a2, a2
+#endif
+    /*
+     * The first chunk is special: compare against the number of valid
+     * bytes in this chunk.
+     */
+    srli    a0, a2, 3
+    bgtu    a4, a0, .Ldone
+    addi    a3, a1, SZREG
+    li      a4, -1
+    .align 2
+    /*
+     * Our critical loop is 4 instructions and processes data in 4 byte
+     * or 8 byte chunks.
+     */
+.Lloop:
+    REG_L   a2, SZREG(a1)
+    addi    a1, a1, SZREG
+    orc.b   a2, a2
+    beq     a2, a4, .Lloop
+
+.Lepilogue:
+    not     a2, a2
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    ctz     a2, a2
+#else
+    clz     a2, a2
+#endif
+    sub     a1, a1, a3
+    add     a0, a0, a1
+    srli    a2, a2, 3
+    add     a0, a0, a2
+.Ldone:
+    ret
+--
+
+=== strcmp
+
+[source,asm]
+--
+#include <sys/asm.h>
+
+  .text
+  .globl strcmp
+  .type  strcmp, @function
+strcmp:
+  or    a4, a0, a1
+  li    t2, -1
+  and   a4, a4, SZREG-1
+  bnez  a4, .Lsimpleloop
+
+  # Main loop for aligned strings
+.Lloop:
+  REG_L a2, 0(a0)
+  REG_L a3, 0(a1)
+  orc.b t0, a2
+  bne   t0, t2, .Lfoundnull
+  addi  a0, a0, SZREG
+  addi  a1, a1, SZREG
+  beq   a2, a3, .Lloop
+
+  # Words don't match, and no null byte in first word.
+  # Get bytes in big-endian order and compare.
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  rev8  a2, a2
+  rev8  a3, a3
+#endif
+  # Synthesize (a2 >= a3) ? 1 : -1 in a branchless sequence.
+  sltu a0, a2, a3
+  neg  a0, a0
+  ori  a0, a0, 1
+  ret
+
+.Lfoundnull:
+  # Found a null byte.
+  # If words don't match, fall back to simple loop.
+  bne   a2, a3, .Lsimpleloop
+
+  # Otherwise, strings are equal.
+  li    a0, 0
+  ret
+
+  # Simple loop for misaligned strings
+.Lsimpleloop:
+  lbu   a2, 0(a0)
+  lbu   a3, 0(a1)
+  addi  a0, a0, 1
+  addi  a1, a1, 1
+  bne   a2, a3, 1f
+  bnez  a2, .Lsimpleloop
+
+1:
+  sub   a0, a2, a3
+  ret
+
+.size   strcmp, .-strcmp
+--
