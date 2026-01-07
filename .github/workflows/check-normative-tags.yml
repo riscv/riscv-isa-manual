@@ -1,0 +1,58 @@
+---
+name: Check Normative Tag Changes
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'normative_rule_defs/**'
+      - 'ref/**'
+      - 'scripts/check-tag-changes.sh'
+  workflow_dispatch:  # Allows manual testing from GitHub UI
+
+jobs:
+  check-tags:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $(cat dependencies/apt_packages.txt | tr '\n' ' ')
+          bundle install
+
+      - name: Run tag change check
+        id: check
+        continue-on-error: true
+        run: |
+          bash scripts/check-tag-changes.sh
+
+      - name: Create issue on failure
+        if: steps.check.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const script = require('./.github/scripts/create-tag-change-issue.js');
+            await script({github, context});
+
+      - name: Fail the workflow if check failed
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error::Normative tag check failed. Please review the changes."
+          exit 1
