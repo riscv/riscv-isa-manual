@@ -3,7 +3,7 @@
 
 This chapter describes the machine-level operations available in
 [#norm:M_highest_priv_mode]#machine-mode (M-mode), which is the highest privilege mode in a RISC-V
-hart.# [#norm:M_mode_at_reset]#M-mode is used for low-level access to a hardware platform and
+hart.# [#norm:M-mode_at_rst1]#M-mode is used for low-level access to a hardware platform and
 is the first mode entered at reset.# M-mode can also be used to implement
 features that are too difficult or expensive to implement in hardware
 directly. The RISC-V machine-level ISA contains a common core that is
@@ -70,7 +70,7 @@ bit 25 which encodes "Z").#
 and [#norm:misa_e_op]#the "E" bit will be set for RV32E and RV64E.#
 [#norm:misa_extensions_warl_op]#The Extensions field is a *WARL* field that can contain writable bits where the
 implementation allows the supported ISA to be modified.#
-[#norm:misa_extensions_rst]#At reset, the Extensions field shall contain the maximal set of supported extensions,
+[#norm:misa_extensions_rst1]#At reset, the Extensions field shall contain the maximal set of supported extensions,
 and "I" shall be selected over "E" if both are available.#
 
 [[norm:misa_extensions_disabling]]
@@ -1270,7 +1270,7 @@ implemented without a hardware adder circuit.
 
 ***
 
-[#norm:reset_nmi_addr]#Reset and NMI vector locations are given in a platform specification.#
+[#norm:rst_and_nmi_addr]#Reset and NMI vector locations are given in a platform specification.#
 ====
 
 ==== Machine Trap Delegation (`medeleg` and `mideleg`) Registers
@@ -2028,23 +2028,24 @@ priority order at which the hardware error is discovered.
 
 ==== Machine Trap Value (`mtval`) Register
 
-The `mtval` register is an MXLEN-bit read-write register formatted as
-shown in <<mtvalreg>>. When a trap is taken into
-M-mode, `mtval` is either set to zero or written with exception-specific
+[#norm:mtval_sz_acc]#The `mtval` register is an MXLEN-bit read-write register formatted as
+shown in <<norm:mtval_enc_img>>#.
+[#norm:mtval_op]#When a trap is taken into M-mode,
+`mtval` is either set to zero or written with exception-specific
 information to assist software in handling the trap. Otherwise, `mtval`
 is never written by the implementation, though it may be explicitly
-written by software. The hardware platform will specify which exceptions
+written by software.#
+[#norm:mtval_per_exc_behavior]#The hardware platform will specify which exceptions
 must set `mtval` informatively, which may unconditionally set it to
 zero, and which may exhibit either behavior, depending on the underlying event
-that caused the exception.
-If the hardware platform specifies that no exceptions set `mtval`
-to a nonzero value, then `mtval` is read-only zero.
+that caused the exception.#
+[#norm:mtval_rdonly0]#If the hardware platform specifies that no exceptions set `mtval`
+to a nonzero value, then `mtval` is read-only zero.#
 
-If `mtval` is written with a nonzero value when a breakpoint,
+[#norm:mtval_vaddr_wr1]#If `mtval` is written with a nonzero value when a breakpoint,
 address-misaligned, access-fault, page-fault, or hardware-error exception
-occurs on an
-instruction fetch, load, or store, then `mtval` will contain the
-faulting virtual address.
+occurs on an instruction fetch, load, or store, then `mtval` will contain the
+faulting virtual address.#
 
 On a breakpoint exception raised by an EBREAK or C.EBREAK instruction, `mtval`
 is written with either zero or the virtual address of the instruction.
@@ -2054,42 +2055,40 @@ the instruction is already recorded in `mepc`.
 Recording the same address in `mtval` is redundant; the option is provided for
 backwards compatibility.
 
-When page-based virtual memory is enabled, `mtval` is written with the
-faulting virtual address, even for physical-memory access-fault
-exceptions. This design reduces datapath cost for most implementations,
+[#norm:mtval_vaddr_not_paddr]#When page-based virtual memory is enabled, `mtval` is written with the
+faulting virtual address, even for physical-memory access-fault exceptions.#
+This design reduces datapath cost for most implementations,
 particularly those with hardware page-table walkers.
 
-[[mtvalreg]]
+[[norm:mtval_enc_img]]
 .Machine Trap Value (`mtval`) register.
 include::images/bytefield/mtvalreg.edn[]
 
+[#norm:mtval_vaddr_wr2]#If `mtval` is written with a nonzero value when a misaligned load or
+store causes an access-fault, page-fault, or hardware-error exception, then `mtval` will
+contain the virtual address of the portion of the access that caused the fault.#
 
-If `mtval` is written with a nonzero value when a misaligned load or
-store causes an access-fault, page-fault, or hardware-error exception,
-then `mtval` will
-contain the virtual address of the portion of the access that caused the
-fault.
-
-If `mtval` is written with a nonzero value when an instruction
+[#norm:mtval_varlen_wr]#If `mtval` is written with a nonzero value when an instruction
 access-fault, page-fault, or hardware-error exception occurs on a hart with
 variable-length instructions, then `mtval` will contain the virtual
-address of the portion of the instruction that caused the fault, while
-`mepc` will point to the beginning of the instruction.
+address of the portion of the instruction that caused the fault#, while
+[#norm:mepc_varlen_wr]#`mepc` will point to the beginning of the instruction.#
 
-The `mtval` register can optionally also be used to return the faulting
-instruction bits on an illegal-instruction exception (`mepc` points to
+[#norm:mtval_instr_bits_lead-in]#The `mtval` register can optionally also be used to return the faulting
+instruction bits on an illegal-instruction exception# (`mepc` points to
 the faulting instruction in memory). If `mtval` is written with a
 nonzero value when an illegal-instruction exception occurs, then `mtval`
-will contain the shortest of:
+will contain the shortest of:#
 
+[[norm:mtval_instr_bits_list]]
 * the actual faulting instruction
 
 * the first ILEN bits of the faulting instruction
 
 * the first MXLEN bits of the faulting instruction
 
-The value loaded into `mtval` on an illegal-instruction exception is
-right-justified and all unused upper bits are cleared to zero.
+[#norm:mtval_ill_instr_exc_in_low_bits]#The value loaded into `mtval` on an illegal-instruction exception is
+right-justified and all unused upper bits are cleared to zero.#
 
 [NOTE]
 ====
@@ -2114,46 +2113,44 @@ two cases (or alternatively, the system configuration information can be
 interrogated to install the appropriate trap handling before runtime).
 ====
 
-On a trap caused by a software-check exception, the `mtval` register holds
-the cause for the exception. The following encodings are defined:
+[#norm:mtval_swchk_lead-in]#On a trap caused by a software-check exception, the `mtval` register holds
+the cause for the exception. The following encodings are defined:#
 
+[[norm:mtval_swchk_list]]
 * 0 - No information provided.
 * 2 - Landing Pad Fault. Defined by the Zicfilp extension (<<priv-forward>>).
 * 3 - Shadow Stack Fault. Defined by the Zicfiss extension (<<priv-backward>>).
 
-For other traps, `mtval` is set to zero, but a future standard may
+[#norm:mtval_other_traps_zero]#For other traps, `mtval` is set to zero#, but a future standard may
 redefine `mtval`’s setting for other traps.
 
-If `mtval` is not read-only zero, it is a *WARL* register that must be able to
-hold all valid virtual addresses and the value zero. It need not be
-capable of holding all possible invalid addresses. Prior to writing
-`mtval`, implementations may convert an invalid address into some other
-invalid address that `mtval` is capable of holding. If the feature to
-return the faulting instruction bits is implemented, `mtval` must also
-be able to hold all values less than 2^__N__^, where
-_N_ is the smaller of MXLEN and ILEN.
+[#norm:mtval_warl]#If `mtval` is not read-only zero, it is a *WARL* register# that
+[#norm:mtval_vaddr_and_0_sz]#must be able to hold all valid virtual addresses and the value zero.#
+It need not be capable of holding all possible invalid addresses.
+[#norm:mtval_inv_addr_conv]#Prior to writing `mtval`, implementations may convert an invalid address
+into some other invalid address that `mtval` is capable of holding.#
+[#norm:mtval_instr_bits_sz]#If the feature to return the faulting instruction bits is implemented,
+`mtval` must also be able to hold all values less than 2^__N__^, where
+_N_ is the smaller of MXLEN and ILEN.#
 
 ==== Machine Configuration Pointer (`mconfigptr`) Register
 
-The `mconfigptr` register is an MXLEN-bit read-only CSR, formatted as shown in
-<<mconfigptrreg>>, that holds the physical
-address of a configuration data structure. Software can traverse this
-data structure to discover information about the harts, the platform,
+[#norm:mconfigptr_sz_acc]#The `mconfigptr` register is an MXLEN-bit read-only CSR formatted as shown in <<norm:mconfigptr_enc_img>>#, that
+[#norm:mconfigptr_op]#holds the physical address of a configuration data structure.#
+Software can traverse this data structure to discover information about the harts, the platform,
 and their configuration.
 
-[[mconfigptrreg]]
+[[norm:mconfigptr_enc_img]]
 .Machine Configuration Pointer (`mconfigptr`) register.
 include::images/bytefield/mconfigptrreg.edn[]
 
+[#norm:mconfigptr_align]#The pointer alignment in bits must be no smaller than MXLEN: i.e., if MXLEN is
+8{times}__n__, then `mconfigptr`[log~2n~-1:0] must be zero.#
 
-The pointer alignment in bits must be no smaller than MXLEN:
-i.e., if MXLEN is
-8{times}__n__, then `mconfigptr`[log~2n~-1:0]
-must be zero.
-
-The `mconfigptr` register must be implemented, but it may be zero to indicate the
+[#norm:mconfigptr_mandatory]#The `mconfigptr` register must be implemented#, but
+[#norm:mconfigptr_zero]#it may be zero to indicate the
 configuration data structure does not exist or that an alternative
-mechanism must be used to locate it.
+mechanism must be used to locate it.#
 
 [NOTE]
 ====
@@ -2172,32 +2169,32 @@ M-mode software towards the beginning of the boot process.
 [[sec:menvcfg]]
 ====  Machine Environment Configuration (`menvcfg`) Register
 
-The `menvcfg` CSR is a 64-bit read/write register, formatted
-as shown in <<menvcfgreg>>, that controls
-certain characteristics of the execution environment for modes less
-privileged than M.
+[#norm:menvcfg_sz_acc]#The `menvcfg` CSR is a 64-bit read/write register, formatted
+as shown in <<norm:menvcfg_enc_img>>#, that
+[#norm:menvcfg_op]#controls certain characteristics of the execution environment
+for modes less privileged than M.#
 
-[[menvcfgreg]]
+[[norm:menvcfg_enc_img]]
 .Machine environment configuration (`menvcfg`) register.
 include::images/wavedrom/menvcfgreg.edn[]
 
 
-If bit FIOM (Fence of I/O implies Memory) is set to one in `menvcfg`,
+[#norm:menvcfg_fiom_fence_op]#If bit FIOM (Fence of I/O implies Memory) is set to one in `menvcfg`,
 FENCE instructions executed in modes less privileged than M are modified
 so the requirement to order accesses to device I/O implies also the
-requirement to order main memory accesses. <<menvcfg-FIOM>>
+requirement to order main memory accesses. <<norm:menvcfg_fiom_fence_presuc_op>>
 details the modified interpretation of FENCE instruction bits PI, PO,
-SI, and SO for modes less privileged than M when FIOM=1.
+SI, and SO for modes less privileged than M when FIOM=1.#
 
-Similarly, for modes less privileged than M when FIOM=1, if an atomic
+Similarly, [#norm:menvcfg_fiom_atomic_op]#for modes less privileged than M when FIOM=1, if an atomic
 instruction that accesses a region ordered as device I/O has its _aq_
 and/or _rl_ bit set, then that instruction is ordered as though it
-accesses both device I/O and memory.
+accesses both device I/O and memory.#
 
-If S-mode is not supported, or if `satp`.MODE is read-only zero (always
-Bare), the implementation may make FIOM read-only zero.
+[#norm:menvcfg_fiom_rdonly0_ok]#If S-mode is not supported, or if `satp`.MODE is read-only zero (always
+Bare), the implementation may make FIOM read-only zero.#
 
-[[menvcfg-FIOM]]
+[[norm:menvcfg_fiom_fence_presuc_op]]
 .Modified interpretation of FENCE predecessor and successor sets for modes less privileged than M when FIOM=1.
 [%autowidth,float="center",align="center",cols="^,<",options="header"]
 |===
@@ -2219,24 +2216,24 @@ extension of <<hypervisor>>, which has an
 equivalent FIOM bit in the hypervisor CSR `henvcfg`.
 ====
 
-The PBMTE bit controls whether the Svpbmt extension is available for use
+[#norm:menvcfg_pbmte_op]#The PBMTE bit controls whether the Svpbmt extension is available for use
 in S-mode and G-stage address translation (i.e., for page tables pointed
 to by `satp` or `hgatp`). When PBMTE=1, Svpbmt is available for S-mode
 and G-stage address translation. When PBMTE=0, the implementation
-behaves as though Svpbmt were not implemented. If Svpbmt is not
-implemented, PBMTE is read-only zero. Furthermore, for implementations
-with the hypervisor extension, `henvcfg`.PBMTE is read-only zero if
-`menvcfg`.PBMTE is zero.
+behaves as though Svpbmt were not implemented.#
+[#norm:menvcfg_pbmte_rdonly0]#If Svpbmt is not implemented, PBMTE is read-only zero.#
+Furthermore,
+[#norm:menvcfg_pbmte_henvcfg_pbmte_rdonly0]#for implementations with the hypervisor extension,
+`henvcfg`.PBMTE is read-only zero if `menvcfg`.PBMTE is zero.#
 
-After changing `menvcfg`.PBMTE, executing an SFENCE.VMA instruction with
+[#norm:menvcfg_pbmte_fence]#After changing `menvcfg`.PBMTE, executing an SFENCE.VMA instruction with
 _rs1_=`x0` and _rs2_=`x0` suffices to synchronize address-translation caches
-with respect to the altered interpretation of page-table entries' PBMT fields.
+with respect to the altered interpretation of page-table entries' PBMT fields.#
 See <<hyp-mm-fences>> for additional synchronization requirements when the
 hypervisor extension is implemented.
 
-If the Svadu extension is implemented, the ADUE bit controls whether hardware
-updating of PTE A/D bits is enabled for S-mode and G-stage address
-translations.
+[#norm:menvcfg_adue_op]#If the Svadu extension is implemented, the ADUE bit controls whether hardware
+updating of PTE A/D bits is enabled for S-mode and G-stage address translations.
 When ADUE=1, hardware updating of PTE A/D bits is enabled during S-mode
 address translation, and the implementation behaves as though the Svade
 extension were not implemented for S-mode address translation.
@@ -2245,73 +2242,75 @@ PTE A/D bits is enabled during G-stage address translation, and the
 implementation behaves as though the Svade extension were not implemented for
 G-stage address translation.
 When ADUE=0, the implementation behaves as though Svade were implemented for
-S-mode and G-stage address translation.
-If Svadu is not implemented, ADUE is read-only zero.
-Furthermore, for implementations with the hypervisor extension, `henvcfg`.ADUE
-is read-only zero if `menvcfg`.ADUE is zero.
+S-mode and G-stage address translation.#
+[#norm:menvcfg_adue_rdonly0]#If Svadu is not implemented, ADUE is read-only zero.#
+Furthermore, [#norm:menvcfg_adue_henvcfg_adue_rdonly0]#for implementations with the hypervisor extension,
+`henvcfg`.ADUE is read-only zero if `menvcfg`.ADUE is zero.#
 
-After changing `menvcfg`.ADUE, executing an SFENCE.VMA instruction with
+[#norm:menvcfg_adue_fence]#After changing `menvcfg`.ADUE, executing an SFENCE.VMA instruction with
 _rs1_=`x0` and _rs2_=`x0` suffices to synchronize address-translation caches
-with respect to the altered interpretation of page-table entries' A/D bits.
+with respect to the altered interpretation of page-table entries' A/D bits.#
 See <<hyp-mm-fences>> for additional synchronization requirements when the
 hypervisor extension is implemented.
 
 NOTE: The Svade extension requires page-fault exceptions be raised when PTE
 A/D bits need be set, hence Svade is implemented when ADUE=0.
 
-If the Smcdeleg extension is implemented, the CDE (Counter Delegation Enable) bit controls whether Zicntr and Zihpm counters can be delegated to S-mode. When CDE=1, the Smcdeleg extension is enabled, see <<smcdeleg>>. When CDE=0, the Smcdeleg and Ssccfg extensions appear to be not implemented. If Smcdeleg is not implemented, CDE is read-only zero.
+[#norm:menvcfg_cde_op]#If the Smcdeleg extension is implemented, the CDE (Counter Delegation Enable) bit
+controls whether Zicntr and Zihpm counters can be delegated to S-mode. When CDE=1, the Smcdeleg extension is
+enabled, see <<smcdeleg>>. When CDE=0, the Smcdeleg and Ssccfg extensions appear to be not implemented.#
+[#norm:menvcfg_cde_rdonly0]#If Smcdeleg is not implemented, CDE is read-only zero.#
 
-[[norm:menvcfg-stce]]
-The Sstc extension adds the `STCE` (STimecmp Enable) bit to `menvcfg` CSR. When
-the Sstc extension is not implemented, `STCE` is read-only zero. The `STCE` bit
-enables `stimecmp` for S-mode when set to one. When this extension is
-implemented and `STCE` in `menvcfg` is zero, an attempt to access `stimecmp`
+[#norm:menvcfg_stce_op1]#The Sstc extension adds the `STCE` (STimecmp Enable) bit to `menvcfg` CSR.#
+[#norm:menvcfg_stce_rdonly0]#When the Sstc extension is not implemented, `STCE` is read-only zero.#
+[#norm:menvcfg_stce_op2]#The `STCE` bit enables `stimecmp` for S-mode when set to one.
+When this extension is implemented and `STCE` in `menvcfg` is zero, an attempt to access `stimecmp`
 in a mode other than M-mode raises an illegal-instruction exception, `STCE` in
 `henvcfg` is read-only zero, and `STIP` in `mip` and `sip` reverts to its
 defined behavior as if this extension is not implemented. Further, if the H
 extension is implemented, then `hip`.VSTIP also reverts its defined behavior as
-if this extension is not implemented.
+if this extension is not implemented.#
 
-[[norm:menvcfg-cbze]]
-The Zicboz extension adds the `CBZE` (Cache Block Zero instruction enable) field
+[#norm:menvcfg_cbze_op]#The Zicboz extension adds the `CBZE` (Cache Block Zero instruction enable) field
 to `menvcfg`. When the `CBZE` field is set to 1, it enables execution of the
 cache block zero instruction, `CBO.ZERO`, in modes less privileged than M.
 Otherwise, the instruction raises an illegal-instruction exception in modes less
-privileged than M. When the Zicboz extension is not implemented, `CBZE` is
-read-only zero.
+privileged than M.#
+[#norm:menvcfg_cbze_rdonly0]#When the Zicboz extension is not implemented, `CBZE` is read-only zero.#
 
-[[norm:menvcfg-cbcfe]]
-The Zicbom extension adds the `CBCFE` (Cache Block Clean and Flush instruction
+[#norm:menvcfg_cbcfe_op]#The Zicbom extension adds the `CBCFE` (Cache Block Clean and Flush instruction
 Enable) field to `menvcfg`. When the `CBCFE` field is set to 1, it enables
 execution of the cache block clean instruction (`CBO.CLEAN`) and the cache block
 flush instruction (`CBO.FLUSH`) in modes less privileged than M. Otherwise, these
-instructions raise an illegal-instruction exception in modes less privileged
-than M. When the Zicbom extension is not implemented, `CBCFE` is read-only zero.
+instructions raise an illegal-instruction exception in modes less privileged than M.#
+[#norm:menvcfg_cbcfe_rdonly0]#When the Zicbom extension is not implemented, `CBCFE` is read-only zero.#
 
-[#norm:menvcfg-cbie]#The Zicbom extension adds the `CBIE` (Cache Block Invalidate instruction Enable)
+[#norm:menvcfg_cbie_warl_op]#The Zicbom extension adds the `CBIE` (Cache Block Invalidate instruction Enable)
 WARL field to `menvcfg` to control execution of the cache block invalidate
 instruction (`CBO.INVAL`) in modes less privileged than M. When `CBIE` is set to
 `00b`, the instruction raises an illegal-instruction exception in modes less
-privileged than M. When the Zicbom extension is not implemented, `CBIE` is
-read-only zero. The encoding `10b` is reserved.#
-[#norm:cbo-inval_m-mode_op0]#When `CBIE` is set to `01b`
+privileged than M.#
+[#norm:menvcfg_cbie_rdonly0]#When the Zicbom extension is not implemented, `CBIE` is read-only zero.#
+The encoding `10b` is reserved.
+[#norm:menvcfg_cbie_cbo-inval_op_lead-in]#When `CBIE` is set to `01b`
 or `11b`, and when enabled for execution in modes less privileged than M, it
 behaves as follows:#
 
-* [[norm:cbo-inval_m-mode_op1]]`01b` -- The instruction is executed and performs a flush operation, even if
+[[norm:menvcfg_cbie_cbo-inval_op_list]]
+* `01b` -- The instruction is executed and performs a flush operation, even if
   configured by a mode less privileged than M to perform an invalidate operation.
-* [[norm:cbo-inval_m-mode_op2]]`11b` -- The instruction is executed and performs an invalidate operation,
+* `11b` -- The instruction is executed and performs an invalidate operation,
   unless configured by a mode less privileged than M to perform a flush
   operation.
 
-If the Smnpm extension is implemented, the `PMM` field enables or disables
+[#norm:menvcfg_pmm_op]#If the Smnpm extension is implemented, the `PMM` field enables or disables
 pointer masking (see <<Zpm>>) for the next-lower privilege mode (S-/HS-mode if
 S-mode is implemented, or U-mode otherwise), according to the values in
-<<menvcfg-pmm-values>>. If Smnpm is not implemented, `PMM` is read-only zero.
-The `PMM` field is read-only zero for RV32.
+<<norm:menvcfg_pmm_enc>>.#
+[#norm:menvcfg_pmm_rdonly0]#If Smnpm is not implemented, `PMM` is read-only zero.
+The `PMM` field is read-only zero for RV32.#
 
-[[menvcfg-pmm-values]]
-
+[[norm:menvcfg_pmm_enc]]
 [%header, cols="25%,75%", options="header"]
 .Legal values of `PMM` WARL field
 |===
@@ -2322,72 +2321,76 @@ The `PMM` field is read-only zero for RV32.
 |11|Pointer masking is enabled with PMLEN = XLEN - 48 (PMLEN = 16 on RV64)
 |===
 
-The Zicfilp extension adds the `LPE` field in `menvcfg`. When the `LPE` field is
+[#norm:menvcfg_lpe_op_lead-in]#The Zicfilp extension adds the `LPE` field in `menvcfg`. When the `LPE` field is
 set to 1 and S-mode is implemented, the Zicfilp extension is enabled in S-mode.
 If `LPE` field is set to 1 and S-mode is not implemented, the Zicfilp extension
 is enabled in U-mode. When the `LPE` field is 0, the Zicfilp extension is not
 enabled in S-mode, and the following rules apply to S-mode. If the `LPE` field
-is 0 and S-mode is not implemented, then the same rules apply to U-mode.
+is 0 and S-mode is not implemented, then the same rules apply to U-mode.#
 
+[[norm:menvcfg_lpe_op_list]]
 * The hart does not update the `ELP` state; it remains as `NO_LP_EXPECTED`.
 * The `LPAD` instruction operates as a no-op.
 
-The Zicfiss extension adds the `SSE` field to `menvcfg`. When the `SSE` field is
-set to 1 the Zicfiss extension is activated in S-mode. When `SSE` field is 0,
-the following rules apply to privilege modes that are less than M:
+[#norm:menvcfg_sse_op_lead-in]#The Zicfiss extension adds the `SSE` field to `menvcfg`.
+When the `SSE` field is set to 1 the Zicfiss extension is activated in S-mode. When `SSE` field is 0,
+the following rules apply to privilege modes that are less than M:#
 
+[[norm:menvcfg_sse_op_list]]
 * 32-bit Zicfiss instructions will revert to their behavior as defined by Zimop.
 * 16-bit Zicfiss instructions will revert to their behavior as defined by Zcmop.
 * The `pte.xwr=010b` encoding in VS/S-stage page tables becomes reserved.
 * `SSAMOSWAP.W/D` raises an illegal-instruction exception.
 
-When `menvcfg.SSE` is 0, the `henvcfg.SSE` and `senvcfg.SSE` fields are
-read-only zero.
+[#norm:menvcfg_sse_rdonly0]#When `menvcfg.SSE` is 0, the `henvcfg.SSE` and `senvcfg.SSE` fields are
+read-only zero.#
 
-The Ssdbltrp extension adds the double-trap-enable (`DTE`) field in `menvcfg`.
+[#norm:menvcfg_dte_op]#The Ssdbltrp extension adds the double-trap-enable (`DTE`) field in `menvcfg`.
 When `menvcfg.DTE` is zero, the implementation behaves as though Ssdbltrp is not
 implemented. When Ssdbltrp is not implemented `sstatus.SDT`, `vsstatus.SDT`, and
-`henvcfg.DTE` bits are read-only zero.
+`henvcfg.DTE` bits are read-only zero.#
 
-When XLEN=32, `menvcfgh` is a 32-bit read/write register
+[#norm:menvcfgh_sz_acc_op]#When XLEN=32, `menvcfgh` is a 32-bit read/write register
 that aliases bits 63:32 of `menvcfg`.
-The `menvcfgh` register does not exist when XLEN=64.
+The `menvcfgh` register does not exist when XLEN=64.#
 
-If U-mode is not supported, then registers `menvcfg` and `menvcfgh` do
-not exist.
+[#norm:menvcfg_menvcfgh_no_U-mode]#If U-mode is not supported, then registers `menvcfg` and `menvcfgh` do
+not exist.#
 
 [[sec:mseccfg]]
 ==== Machine Security Configuration (`mseccfg`) Register
 
-`mseccfg` is a 64-bit read/write register, formatted as shown in <<mseccfg>>,
-that controls security features. It exists if any extension that adds a field
-to `mseccfg` is implemented. Otherwise, it is reserved.
+[#norm:mseccfg_sz_acc]#`mseccfg` is a 64-bit read/write register, formatted as shown in <<norm:mseccfg_enc_img>>,
+that controls security features.#
+[#norm:mseccfg_presence]#It exists if any extension that adds a field to `mseccfg` is implemented. Otherwise, it is reserved.#
 
-[[mseccfg]]
+[[norm:mseccfg_enc_img]]
 .Machine security configuration (`mseccfg`) register.
 include::images/wavedrom/mseccfg.edn[]
 
+[[norm:mseccfg_sseed_useed_presence]]
 The Zkr extension adds the `SSEED` and `USEED` fields to the `mseccfg` CSR to
 control access to the `seed` CSR from modes less privileged than M.
 
-When `USEED` is 0, access to the `seed` CSR in U-mode raises an
+[#norm:mseccfg_useed_U-mode_op]#When `USEED` is 0, access to the `seed` CSR in U-mode raises an
 illegal-instruction exception. When `USEED` is 1, read-write access to the
 `seed` CSR from U-mode is allowed; all other types of accesses raise an
-illegal-instruction exception. If Zkr or U-mode is not implemented, `USEED` is
-read-only zero.
+illegal-instruction exception.#
+[#norm:mseccfg_useed_rdonly0]#If Zkr or U-mode is not implemented, `USEED` is read-only zero.#
 
-When `SSEED` is 0, access to the `seed` CSR from S-/HS-mode raises an
+[#norm:mseccfg_sseed_SorHS-mode_op]#When `SSEED` is 0, access to the `seed` CSR from S-/HS-mode raises an
 illegal-instruction exception. When `SSEED` is 1, read-write access to the
 `seed` CSR from S-/HS-mode is allowed; all other types of accesses raise an
-illegal-instruction exception. If Zkr or S-mode is not implemented, `SSEED` is
-read-only zero.
+illegal-instruction exception.#
+[#norm:mseccfg_sseed_rdonly0]#If Zkr or S-mode is not implemented, `SSEED` is read-only zero.#
 
-When the H extension is also implemented, access to the `seed` CSR from an
+[#norm:mseccfg_sseed_VSorVU-mode_op]#When the H extension is also implemented,
+access to the `seed` CSR from an
 HS-qualified instruction leads to a virtual-instruction exception in VS and
-VU modes; all other types of accesses raise an illegal-instruction exception.
+VU modes; all other types of accesses raise an illegal-instruction exception.#
 
+[[norm:mseccfg_sseed_useed_op_tbl]]
 .Entropy Source Access Control.
-
 [cols="1,1,1,7",options="header",]
 |=======================================================================
 |Mode   | `SSEED` | `USEED` | Description
@@ -2411,9 +2414,11 @@ VU modes; all other types of accesses raise an illegal-instruction exception.
                               conditions raise an illegal-instruction exception.
 |=======================================================================
 
+[[norm:mseccfg_rlb_mmwp_mml_presence]]
 The Smepmp extension adds the `RLB`, `MMWP`, and the `MML` fields in
 `mseccfg`.
 
+[[norm:mseccfg_rlb_op_warl]]
 When `mseccfg.RLB` (Rule Locking Bypass) a WARL field that provides a mechanism
 to temporarily modify *Locked* PMP rules. When `mseccfg.RLB` is 1, locked PMP
 rules may be removed or modified and locked PMP rules may be edited. When
@@ -2434,6 +2439,7 @@ The terminology used to specify the fields introduced by the Smepmp extension
 is listed in <<smepmp>>.
 ====
 
+[[norm:mseccfg_mmwp_op_warl]]
 The `mseccfg.MMWP` (Machine-Mode Allowlist Policy) is a WARL field. This field
 changes the default PMP policy for Machine mode when accessing memory regions
 that don't have a matching PMP rule. This is a sticky bit, meaning that once
@@ -2441,66 +2447,68 @@ set it cannot be unset until a *PMP reset*. When set it changes the default
 PMP policy for M-mode when accessing memory regions that don’t have a matching
 *PMP rule*, to *denied* instead of *ignored*.
 
-The `mseccfg.MML` (Machine Mode Lockdown) is a WARL field. The `MML` bit changes
-the interpretation of the `pmpcfg.L` bit defined in <<pmp-locking>>. This is a
-sticky bit, meaning that once set it cannot be unset until a *PMP reset*. When
-`mseccfg.MML` is set the system's behavior changes in the following way:
+[#norm:mseccfg_mml_warl]#The `mseccfg.MML` (Machine Mode Lockdown) is a WARL field.#
+The `MML` bit changes the interpretation of the `pmpcfg.L` bit defined in <<pmp-locking>>.
+[#norm:mseccfg_mml_sticky]#This is a sticky bit, meaning that once set it cannot be unset
+until a *PMP reset*.#
+[#norm:mseccfg_mml_set]#When `mseccfg.MML` is set the system's behavior changes in the following way:#
 
-. The meaning of `pmpcfg.L` changes: Instead of marking a rule as *locked* and
+. [#norm:mseccfg_mml_pmpcfg_L_op]#The meaning of `pmpcfg.L` changes:
+  Instead of marking a rule as *locked* and
   *enforced* in all modes, it now marks a rule as *M-mode-only* when set and
   *S/U-mode-only* when unset. The formerly reserved encoding of `pmpcfg.RW=01`,
-  and the encoding `pmpcfg.LRWX=1111`, now encode a *Shared-Region*.           +
+  and the encoding `pmpcfg.LRWX=1111`, now encode a *Shared-Region*.#          +
                                                                                +
-  An _M-mode-only_ rule is *enforced* on Machine mode and *denied* in Supervisor
+  [#norm:mseccfg_mml_M_rule_op]#An _M-mode-only_ rule is *enforced* on Machine mode and *denied* in Supervisor
   or User mode. It also remains *locked* so that any further modifications to
   its associated configuration or address registers are ignored until a *PMP
-  reset*, unless `mseccfg.RLB` is set.                                         +
+  reset*, unless `mseccfg.RLB` is set.#                                        +
                                                                                +
-  An _S/U-mode-only_ rule is *enforced* on Supervisor and User modes and
-  *denied* on Machine mode.                                                    +
+  [#norm:mseccfg_mml_SorU_rule_op]#An _S/U-mode-only_ rule is *enforced* on Supervisor and User modes and
+  *denied* on Machine mode.#                                                   +
                                                                                +
-  A _Shared-Region_ rule is *enforced* on all modes, with restrictions depending
-  on the `pmpcfg.L` and `pmpcfg.X` bits:                                       +
+  [#norm:mseccfg_mml_shared_rule_op]#A _Shared-Region_ rule is *enforced* on all modes, with restrictions depending
+  on the `pmpcfg.L` and `pmpcfg.X` bits:#                                      +
                                                                                +
 
-  * A _Shared-Region_ rule where `pmpcfg.L` is not set can be used for sharing
+  * [#norm:mseccfg_mml_shared_L0_op]#A _Shared-Region_ rule where `pmpcfg.L` is not set can be used for sharing
     data between M-mode and S/U-mode, so is not executable. M-mode has
     read/write access to that region, and S/U-mode has read access if `pmpcfg.X`
-    is not set, or read/write access if `pmpcfg.X` is set.
+    is not set, or read/write access if `pmpcfg.X` is set.#
 +
-  * A _Shared-Region_ rule where `pmpcfg.L` is set can be used for sharing code
+  * [#norm:mseccfg_mml_shared_L1_op]#A _Shared-Region_ rule where `pmpcfg.L` is set can be used for sharing code
     between M-mode and S/U-mode, so is not writable. Both M-mode and S/U-mode
     have execute access on the region, and M-mode also has read access if
     `pmpcfg.X` is set. The rule remains *locked* so that any further
     modifications to its associated configuration or address registers are
-    ignored until a *PMP reset*, unless `mseccfg.RLB` is set.
+    ignored until a *PMP reset*, unless `mseccfg.RLB` is set.#
 +
-  * The encoding `pmpcfg.LRWX=1111` can be used for sharing data between M-mode
+  * [#norm:mseccfg_mml_shared_LRWX_1111_op]#The encoding `pmpcfg.LRWX=1111` can be used for sharing data between M-mode
     and S/U mode, where both modes only have read-only access to the region. The
     rule remains *locked* so that any further modifications to its associated
     configuration or address registers are ignored until a *PMP reset*, unless
-    `mseccfg.RLB` is set.
+    `mseccfg.RLB` is set.#
 
-. Adding a rule with executable privileges that either is *M-mode-only* or a
+. [#norm:mseccfg_mml_X_restrict]#Adding a rule with executable privileges that either is *M-mode-only* or a
   *locked* *Shared-Region* is not possible and such `pmpcfg` writes are
   ignored, leaving `pmpcfg` unchanged. This restriction can be temporarily
-  lifted by setting `mseccfg.RLB` e.g. during the boot process.
+  lifted by setting `mseccfg.RLB`# e.g. during the boot process.
 
-. Executing code with Machine mode privileges is only possible from memory
+. [#norm:mseccfg_mml_exec_code]#Executing code with Machine mode privileges is only possible from memory
   regions with a matching *M-mode-only* rule or a *locked* *Shared-Region* rule
   with executable privileges. Executing code from a region without a matching
-  rule or with a matching _S/U-mode-only_ rule is *denied*.
+  rule or with a matching _S/U-mode-only_ rule is *denied*.#
 
 . If `mseccfg.MML` is not set, the combination of `pmpcfg.RW=01` remains
   reserved for future standard use.
 
-If the Smmpm extension is implemented, the `PMM` field enables or disables
-pointer masking (see <<Zpm>>) for M-mode according to the values in
-<<mseccfg-pmm-values>>. If Smmpm is not implemented, `PMM` is read-only zero.
-The `PMM` field is read-only zero for RV32.
+[#norm:mseccfg_pmm_presence_op]#If the Smmpm extension is implemented,
+the `PMM` field enables or disables pointer masking (see <<Zpm>>) for M-mode
+according to the values in <<norm:mseccfg_pmm_enc>>.#
+[#norm:mseccfg_pmm_rdonly0]#If Smmpm is not implemented, `PMM` is read-only zero.
+The `PMM` field is read-only zero for RV32.#
 
-[[mseccfg-pmm-values]]
-
+[[norm:mseccfg_pmm_enc]]
 [%header, cols="25%,75%", options="header"]
 .Legal values of `PMM` WARL field
 |===
@@ -2518,41 +2526,47 @@ size, largest supported supervisor physical address size) <= (XLEN - PMLEN)
 bits to avoid any masking logic on the TLB access path.
 ====
 
-The Zicfilp extension adds the `MLPE` field in `mseccfg`. When `MLPE` field is
-1, Zicfilp extension is enabled in M-mode. When the `MLPE` field is 0, the
-Zicfilp extension is not enabled in M-mode and the following rules apply to
-M-mode.
+[#norm:mseccfg_mlpe_presence]#The Zicfilp extension adds the `MLPE` field in `mseccfg`.#
+[#norm:mseccfg_mlpe_set_op]#When `MLPE` field is 1, Zicfilp extension is enabled in M-mode.#
+[#norm:mseccfg_mlpe_clr_op_lead-in]#When the `MLPE` field is 0, the Zicfilp extension is not enabled
+in M-mode and the following rules apply to M-mode.#
 
+[[norm:mseccfg_mlpe_clr_op_list]]
 * The hart does not update the `ELP` state; it remains as `NO_LP_EXPECTED`.
 * The `LPAD` instruction operates as a no-op.
 
-When XLEN=32 only, `mseccfgh` is a 32-bit read/write register that
-aliases bits 63:32 of `mseccfg`.
-Register `mseccfgh` exists when XLEN=32 and `mseccfg` is implemented;
-it does not exist when XLEN=64.
+[#norm:mseccfgh_sz_acc_op]#When XLEN=32 only, `mseccfgh` is a 32-bit read/write register that
+aliases bits 63:32 of `mseccfg`.#
+[#norm:mseccfgh_presence]#Register `mseccfgh` exists when XLEN=32 and `mseccfg` is implemented;
+it does not exist when XLEN=64.#
 
 === Machine-Level Memory-Mapped Registers
 
 ==== Machine Timer (`mtime` and `mtimecmp`) Registers
 
-Platforms provide a real-time counter, exposed as a memory-mapped
-machine-mode read-write register, `mtime`. `mtime` must increment at
-constant frequency, and the platform must provide a mechanism for
-determining the period of an `mtime` tick. The `mtime` register will
-wrap around if the count overflows.
+[#norm:mtime_acc]#Platforms provide a real-time counter, exposed as a memory-mapped
+machine-mode read-write register, `mtime`.#
+[#norm:mtime_op]#`mtime` must increment at constant frequency#, and
+[#norm:mtime_tick_period]#the platform must provide a mechanism for
+determining the period of an `mtime` tick.#
+[#norm:mtime_wrap]#The `mtime` register will wrap around if the count overflows.#
 
-The `mtime` register has a 64-bit precision on all RV32 and RV64
-systems. Platforms provide a 64-bit memory-mapped machine-mode timer
-compare register (`mtimecmp`). A machine timer interrupt becomes pending
+[#norm:mtime_sz]#The `mtime` register has a 64-bit precision on all RV32 and RV64 systems.#
+[#norm:mtimecmp_sz]#Platforms provide a 64-bit memory-mapped machine-mode timer
+compare register (`mtimecmp`).#
+[#norm:mtime_intr_pending]#A machine timer interrupt becomes pending
 whenever `mtime` contains a value greater than or equal to `mtimecmp`,
-treating the values as unsigned integers. The interrupt remains posted
-until `mtimecmp` becomes greater than `mtime` (typically as a result of
-writing `mtimecmp`). The interrupt will only be taken if interrupts are
-enabled and the MTIE bit is set in the `mie` register.
+treating the values as unsigned integers.
+The interrupt remains posted until `mtimecmp` becomes greater than `mtime`#
+(typically as a result of writing `mtimecmp`).
+[#norm:mtime_intr_taken]#The interrupt will only be taken if interrupts are
+enabled and the MTIE bit is set in the `mie` register.#
 
+[[norm:mtime_enc_img]]
 .Machine time register (memory-mapped control register).
 include::images/bytefield/mtime.edn[]
 
+[[norm:mtimecmp_enc_img]]
 .Machine time compare register (memory-mapped control register).
 include::images/bytefield/mtimecmp.edn[]
 
@@ -2581,9 +2595,8 @@ Simple fixed-frequency systems can use a single clock for both cycle
 counting and wall-clock time.
 ====
 
-If the result of the comparison between `mtime` and `mtimecmp` changes, it is
-guaranteed to be reflected in MTIP eventually, but not necessarily
-immediately.
+[#norm:mtime_intr_mtip_visibility]#If the result of the comparison between `mtime` and `mtimecmp`
+changes, it is guaranteed to be reflected in MTIP eventually, but not necessarily immediately.#
 
 [NOTE]
 ====
@@ -2595,13 +2608,13 @@ extremely unlikely. It is almost always more performant to incur an
 occasional spurious timer interrupt than to poll MTIP until it falls.
 ====
 
-In RV32, memory-mapped writes to `mtimecmp` modify only one 32-bit part
-of the register. The following code sequence sets a 64-bit `mtimecmp`
-value without spuriously generating a timer interrupt due to the
-intermediate value of the comparand:
+[#norm:mtimecmp_rv32_wr]#In RV32, memory-mapped writes to `mtimecmp` modify only one 32-bit part
+of the register.#
+The following code sequence sets a 64-bit `mtimecmp` value without spuriously generating a
+timer interrupt due to the intermediate value of the comparand:
 
-For RV64, naturally aligned 64-bit memory accesses to the `mtime` and
-`mtimecmp` registers are additionally supported and are atomic.
+[#norm:mtime_mtimecmp_rv64_wr]#For RV64, naturally aligned 64-bit memory accesses to the `mtime` and
+`mtimecmp` registers are additionally supported and are atomic.#
 
 .Sample code for setting the 64-bit time comparand in RV32 assuming a little-endian memory system and that the registers live in a strongly ordered I/O region.  Storing -1 to the low-order bits of `mtimecmp` prevents `mtimecmp` from temporarily becoming smaller than the lesser of the old and new values.
 ....
@@ -2618,9 +2631,8 @@ The `time` CSR is a read-only shadow of the memory-mapped `mtime` register.
 When XLEN=32, the `timeh` CSR is a read-only shadow of the upper 32 bits of the
 memory-mapped `mtime` register, while `time` shadows only the lower 32 bits of
 `mtime`.
-When `mtime` changes, it is guaranteed to be reflected in `time` and `timeh`
-eventually, but not necessarily immediately.
-
+[#norm:time_timeh_visibility_mtime]#When `mtime` changes, it is guaranteed to be reflected in `time`
+and `timeh` eventually, but not necessarily immediately.#
 
 === Machine-Mode Privileged Instructions
 
@@ -2628,6 +2640,7 @@ eventually, but not necessarily immediately.
 
 include::images/wavedrom/mm-env-call.edn[]
 
+[[norm:ecall_op2]]
 The ECALL instruction is used to make a request to the supporting
 execution environment. When executed in U-mode, S-mode, or M-mode, it
 generates an environment-call-from-U-mode exception,
@@ -2642,6 +2655,7 @@ typical use case for Unix-like operating systems is to delegate to
 S-mode the environment-call-from-U-mode exception but not the others.
 ====
 
+[[norm:ebreak_op2]]
 The EBREAK instruction is used by debuggers to cause control to be
 transferred back to a debugging environment.
 Unless overridden by an external debug environment, EBREAK raises
@@ -2654,11 +2668,12 @@ in Volume I of this manual, the C.EBREAK instruction performs the same
 operation as the EBREAK instruction.
 ====
 
-ECALL and EBREAK cause the receiving privilege mode’s `epc` register to
+[#norm:ecall_ebreak_epc_value]#ECALL and EBREAK cause the receiving privilege mode’s `epc` register to
 be set to the address of the ECALL or EBREAK instruction itself, _not_
-the address of the following instruction. As ECALL and EBREAK cause
+the address of the following instruction.#
+[#norm:ecall_ebreak_no_minstret_inc]#As ECALL and EBREAK cause
 synchronous exceptions, they are not considered to retire, and should
-not increment the `minstret` CSR.
+not increment the `minstret` CSR.#
 
 [[otherpriv]]
 ==== Trap-Return Instructions
@@ -2666,24 +2681,28 @@ not increment the `minstret` CSR.
 Instructions to return from trap are encoded under the PRIV minor
 opcode.
 
+[[norm:xret_enc_img]]
 include::images/wavedrom/trap-return.edn[]
 
 To return after handling a trap, there are separate trap return
-instructions per privilege level, MRET and SRET. MRET is always
-provided. SRET must be provided if supervisor mode is supported, and
-should raise an illegal-instruction exception otherwise. SRET should
-also raise an illegal-instruction exception when TSR=1 in `mstatus`, as
-described in <<virt-control>>. An __x__RET instruction
-can be executed in privilege mode _x_ or higher, where executing a
-lower-privilege __x__RET instruction will pop the relevant lower-privilege
-interrupt enable and privilege mode stack. Attempting to execute an __x__RET
+instructions per privilege level, MRET and SRET.
+[#norm:mret_presence]#MRET is always provided.#
+[#norm:sret_presence]#SRET must be provided if supervisor mode is supported, and
+should raise an illegal-instruction exception otherwise.#
+[#norm:sret_ill_inst_exc_rst]#SRET should also raise an illegal-instruction exception when TSR=1
+in `mstatus`, as described in <<virt-control>>.#
+[#norm:xret_in_higher_mode]#An __x__RET instruction can be executed in privilege mode _x_ or higher,
+where executing a lower-privilege __x__RET instruction will pop the relevant lower-privilege
+interrupt enable and privilege mode stack.#
+[#norm:xret_in_lower_mode]#Attempting to execute an __x__RET
 instruction in a mode less privileged than _x_ will raise an
-illegal-instruction exception. In addition to manipulating
-the privilege stack as described in <<privstack>>,
-__x__RET sets the `pc` to the value stored in the `__x__epc` register.
+illegal-instruction exception.#
 
-If the A extension is supported, the __x__RET instruction is allowed to
-clear any outstanding LR address reservation but is not required to.
+[#norm:xret_op]#In addition to manipulating the privilege stack as described in <<privstack>>,
+__x__RET sets the `pc` to the value stored in the `__x__epc` register.#
+
+[#norm:xret_clr_lr_resv]#If the A extension is supported, the __x__RET instruction is allowed to
+clear any outstanding LR address reservation but is not required to.#
 Trap handlers should explicitly clear the reservation if required (e.g.,
 by using a dummy SC) before executing the __x__RET.
 
@@ -2696,21 +2715,22 @@ impossible to single-step through LR/SC sequences using a debugger.
 [[wfi]]
 ==== Wait for Interrupt
 
-The Wait for Interrupt instruction (WFI) informs the
+[#norm:wfi_op]#The Wait for Interrupt instruction (WFI) informs the
 implementation that the current hart can be stalled until an interrupt
 might need servicing. Execution of the WFI instruction can also be used
 to inform the hardware platform that suitable interrupts should
-preferentially be routed to this hart. WFI is available in all
-privileged modes, and optionally available to U-mode. This instruction
-may raise an illegal-instruction exception when TW=1 in `mstatus`, as
-described in <<virt-control>>.
+preferentially be routed to this hart.#
+[#norm:wfi_all_privileged_modes]#WFI is available in all privileged modes#, and
+[#norm:wfi_opt_U-mode]#optionally available to U-mode.#
+[#norm:wfi_ill_exc]#This instruction may raise an illegal-instruction exception when TW=1 in `mstatus`, as
+described in <<virt-control>>.#
 
+[[norm:wfi_enc_img]]
 include::images/wavedrom/wfi.edn[]
 
-If an enabled interrupt is present or later becomes present while the
+[#norm:wfi_mepc_val]#If an enabled interrupt is present or later becomes present while the
 hart is stalled, the interrupt trap will be taken on the following
-instruction, i.e., execution resumes in the trap handler and `mepc` =
-`pc` + 4.
+instruction, i.e., execution resumes in the trap handler and `mepc` = `pc` + 4.#
 
 [NOTE]
 ====
@@ -2719,9 +2739,9 @@ return from the trap handler will execute code after the WFI
 instruction.
 ====
 
-Implementations are permitted to resume execution for any reason, even if an
-enabled interrupt has not become pending.  Hence, a legal implementation is to
-simply implement the WFI instruction as a NOP.
+[#norm:wfi_resume_reason]#Implementations are permitted to resume execution for any reason, even if an
+enabled interrupt has not become pending.
+Hence, a legal implementation is to simply implement the WFI instruction as a NOP.#
 
 [NOTE]
 ====
@@ -2731,8 +2751,8 @@ idle loop containing the WFI, and on a simple return from the handler,
 the idle loop will resume execution.
 ====
 
-The WFI instruction can also be executed when interrupts are disabled.
-The operation of WFI must be unaffected by the global interrupt bits in
+[#norm:wfi_intr_dis]#The WFI instruction can also be executed when interrupts are disabled.#
+[#norm:wfi_unaffected_conditions]#The operation of WFI must be unaffected by the global interrupt bits in
 `mstatus` (MIE and SIE) and the delegation register `mideleg` (i.e.,
 the hart must resume if a locally enabled interrupt becomes pending,
 even if it has been delegated to a less-privileged mode), but should
@@ -2740,12 +2760,12 @@ honor the individual interrupt enables (e.g, MTIE) (i.e.,
 implementations should avoid resuming the hart if the interrupt is
 pending but not individually enabled). WFI is also required to resume
 execution for locally enabled interrupts pending at any privilege level,
-regardless of the global interrupt enable at each privilege level.
+regardless of the global interrupt enable at each privilege level.#
 
-If the event that causes the hart to resume execution does not cause an
-interrupt to be taken, execution will resume at `pc` + 4, and software
-must determine what action to take, including looping back to repeat the
-WFI if there was no actionable event.
+[#norm:wfi_no_intr_pc]#If the event that causes the hart to resume execution
+does not cause an interrupt to be taken, execution will resume at `pc` + 4#,
+and software must determine what action to take, including looping back
+to repeat the WFI if there was no actionable event.
 
 [NOTE]
 ====
@@ -2786,35 +2806,37 @@ include::images/bytefield/cust-sys-instr.edn[]
 [[reset]]
 === Reset
 
-Upon reset, a hart’s privilege mode is set to M. The `mstatus` fields
-MIE and MPRV are reset to 0. If little-endian memory accesses are
-supported, the `mstatus`/`mstatush` field MBE is reset to 0. The `misa`
-register is reset to enable the maximal set of supported extensions,
-as described in <<misa>>.  For
-implementations with the "A" standard extension, there is no valid
-load reservation. The `pc` is set to an implementation-defined reset
-vector. The `mcause` register is set to a value indicating the cause of
-the reset. Writable PMP registers’ A and L fields are set to 0, unless
+[#norm:M-mode_at_rst2]#Upon reset, a hart’s privilege mode is set to M.#
+[#norm:mstatus_mie_mprv_rst]#The `mstatus` fields MIE and MPRV are reset to 0.#
+[#norm:mstatus_mstatush_mbe_rst]#If little-endian memory accesses are supported, the `mstatus`/`mstatush` field MBE is reset to 0.#
+[#norm:misa_extensions_rst2]#The `misa` register is reset to enable the maximal set of supported
+extensions, as described in <<misa>>.#
+[#norm:ld_rsv_rst]#For implementations with the "A" standard extension, there is no valid
+load reservation.#
+[#norm:pc_rst]#The `pc` is set to an implementation-defined reset vector.#
+[#norm:mcause_rst1_val]#The `mcause` register is set to a value indicating the cause of the reset.#
+[#norm:pmp_A_L_rst]#Writable PMP registers’ A and L fields are set to 0, unless
 the platform mandates a different reset value for some PMP registers’ A
-and L fields. If the hypervisor extension is implemented, the
-`hgatp`.MODE and `vsatp`.MODE fields are reset to 0. If the Smrnmi
-extension is implemented, the `mnstatus`.NMIE field is reset to 0. No
- *WARL* field contains an illegal value. If the Zicfilp extension is
-implemented, the `mseccfg`.MLPE field is reset to 0. All other hart
-state is UNSPECIFIED.
+and L fields.#
+[#norm:hgatp_vsatp_mode_rst]#If the hypervisor extension is implemented, the
+`hgatp`.MODE and `vsatp`.MODE fields are reset to 0.#
+[#norm:mnstatus_nmie_rst]#If the Smrnmi extension is implemented, the `mnstatus`.NMIE field is reset to 0.#
+[#norm:warl_rst]#No *WARL* field contains an illegal value.#
+[#norm:mseccfg_mlpe_rst]#If the Zicfilp extension is implemented, the `mseccfg`.MLPE field is reset to 0.#
+All other hart state is UNSPECIFIED.
 
-The `MML`, `MMWP`, and `RLB` fields of the `mseccfg` register are set to 0,
-unless the platform mandates a different reset value.
+[#norm:mseccfg_mml_mmwp_rlb_rst]#The `MML`, `MMWP`, and `RLB` fields of the `mseccfg` register
+are set to 0, unless the platform mandates a different reset value.#
 
-The `mcause` values after reset have implementation-specific
-interpretation, but the value 0 should be returned on implementations
+[#norm:mcause_rst2_val]#The `mcause` values after reset have implementation-specific
+interpretation#, but [#norm:mcause_rst_zero]#the value 0 should be returned on implementations
 that do not distinguish different reset conditions. Implementations that
 distinguish different reset conditions should only use 0 to indicate the
-most complete reset.
+most complete reset.#
 
-The `USEED` and `SSEED` fields of the `mseccfg` CSR must have defined
-reset values. The system must not allow them to be in an undefined state
-after reset.
+[#norm:mseccfg_useed_sseed_rst]#The `USEED` and `SSEED` fields of the `mseccfg` CSR
+must have defined reset values. The system must not allow them to be in an undefined state
+after reset.#
 
 [NOTE]
 ====
@@ -2823,8 +2845,8 @@ external hard reset, brownout detected, watchdog timer elapse,
 sleep-mode wake-up), which machine-mode software and debuggers may wish
 to distinguish.
 
-`mcause` reset values may alias `mcause` values following synchronous
-exceptions. There should be no ambiguity in this overlap, since on reset
+To avoid ambiguity, [#norm:mcause_rst_alias_ok]#`mcause` reset values may alias `mcause` values
+following synchronous exceptions#. There should be no ambiguity in this overlap, since on reset
 the `pc` is typically set to a different value than on other traps.
 ====
 
@@ -2832,20 +2854,20 @@ the `pc` is typically set to a different value than on other traps.
 === Non-Maskable Interrupts
 
 Non-maskable interrupts (NMIs) are only used for hardware error
-conditions, and cause an immediate jump to an implementation-defined NMI
+conditions, and [#norm:nmi_op]#cause an immediate jump to an implementation-defined NMI
 vector running in M-mode regardless of the state of a hart’s interrupt
 enable bits. The `mepc` register is written with the virtual address of
-the instruction that was interrupted, and `mcause` is set to a value
-indicating the source of the NMI. The NMI can thus overwrite state in an
+the instruction that was interrupted,# and [#norm:nmi_mcause_val1]#`mcause` is set to a value
+indicating the source of the NMI.# The NMI can thus overwrite state in an
 active machine-mode interrupt handler.
 
-The values written to `mcause` on an NMI are implementation-defined. The
-high Interrupt bit of `mcause` should be set to indicate that this was
-an interrupt. An Exception Code of 0 is reserved to mean "unknown
+[#norm:nmi_mcause_val2]#The values written to `mcause` on an NMI are implementation-defined.#
+[#norm:nmi_mcause_restrictions]#The high Interrupt bit of `mcause` should be set to indicate
+that this was an interrupt. An Exception Code of 0 is reserved to mean "unknown
 cause" and implementations that do not distinguish sources of NMIs via
-the `mcause` register should return 0 in the Exception Code.
+the `mcause` register should return 0 in the Exception Code.#
 
-Unlike resets, NMIs do not reset processor state, enabling diagnosis,
+Unlike resets, [#norm:nmi_no_rst]#NMIs do not reset processor state#, enabling diagnosis,
 reporting, and possible containment of the hardware error.
 
 [[pma]]
@@ -2867,8 +2889,8 @@ systems implement and check PMAs.
 
 PMAs are inherent properties of the underlying hardware and rarely
 change during system operation. Unlike physical memory protection values
-described in <<pmp>>, PMAs do not vary by execution
-context. The PMAs of some memory regions are fixed at chip design
+described in <<pmp>>, [#norm:pma_indep_exec_context]#PMAs do not vary by execution
+context.# The PMAs of some memory regions are fixed at chip design
 time—for example, for an on-chip ROM. Others are fixed at board design
 time, depending, for example, on which other chips are connected to
 off-chip buses. Off-chip buses might also support devices that could be
@@ -2896,21 +2918,22 @@ inefficient use of expensive TLB entries.
 For RISC-V, we separate out specification and checking of PMAs into a
 separate hardware structure, the _PMA checker_. In many cases, the
 attributes are known at system design time for each physical address
-region, and can be hardwired into the PMA checker. Where the attributes
-are run-time configurable, platform-specific memory-mapped control
-registers can be provided to specify these attributes at a granularity
+region, and can be hardwired into the PMA checker.
+[#norm:pma_rtcfg_mmr]#Where the attributes are run-time configurable,
+platform-specific memory-mapped control
+registers can be provided# to specify these attributes at a granularity
 appropriate to each region on the platform (e.g., for an on-chip SRAM
 that can be flexibly divided between cacheable and uncacheable uses).
-PMAs are checked for any access to physical memory, including accesses
-that have undergone virtual to physical memory translation. To aid in
-system debugging, we strongly recommend that, where possible, RISC-V
+[#norm:pma_chk_paddr]#PMAs are checked for any access to physical memory, including accesses
+that have undergone virtual to physical memory translation.# To aid in
+system debugging, [#norm:pma_precise_recom]#we strongly recommend that, where possible, RISC-V
 processors precisely trap physical memory accesses that fail PMA checks.
 Precisely trapped PMA violations manifest as instruction, load, or store
-access-fault exceptions, distinct from virtual-memory page-fault
-exceptions. Precise PMA traps might not always be possible, for example,
+access-fault exceptions, distinct from virtual-memory page-fault exceptions.#
+[#norm:pma_imprecise_ok]#Precise PMA traps might not always be possible, for example,
 when probing a legacy bus architecture that uses access failures as part
 of the discovery mechanism. In this case, error responses from
-peripheral devices will be reported as imprecise bus-error interrupts.
+peripheral devices will be reported as imprecise bus-error interrupts.#
 
 PMAs must also be readable by software to correctly access certain
 devices or to correctly configure other hardware components that access
@@ -2933,6 +2956,7 @@ available only to machine-mode.
 
 ==== Main Memory versus I/O Regions
 
+[[norm:pma_mm_vs_io_def]]
 The most important characterization of a given memory address range is
 whether it holds regular main memory or I/O devices.
 Regular main memory is required to have a number of properties,
@@ -2959,9 +2983,8 @@ I/O devices and might therefore need to know which access sizes are
 supported.
 ====
 
-Main memory regions always support read and write of all access widths
-required by the attached devices, and can specify whether instruction
-fetch is supported.
+[#norm:pma_mm_rw]#Main memory regions always support read and write of all access widths
+required by the attached devices#, and [#norm:pma_mm_ifetch]#can specify whether instruction fetch is supported.#
 
 [NOTE]
 ====
@@ -2971,17 +2994,17 @@ memory regions.
 
 ***
 
-In some cases, the design of a processor or device accessing main memory
+In some cases, [#norm:pma_mm_mandatory_sz]#the design of a processor or device accessing main memory
 might support other widths, but must be able to function with the types
-supported by the main memory.
+supported by the main memory.#
 ====
 
-I/O regions can specify which combinations of read, write, or execute
-accesses to which data widths are supported.
+[#norm:pma_io_rwx_per_sz]#I/O regions can specify which combinations of read, write, or execute
+accesses to which data widths are supported.#
 
-For systems with page-based virtual memory, I/O and memory regions can
+[#norm:pma_vm_hw_tbl_acc]#For systems with page-based virtual memory, I/O and memory regions can
 specify which combinations of hardware page-table reads and hardware
-page-table writes are supported.
+page-table writes are supported.#
 
 [NOTE]
 ====
@@ -2997,22 +3020,22 @@ categories: _LR/SC_ and _AMOs_.
 
 [NOTE]
 ====
-Some platforms might mandate that all of cacheable main memory support
-all atomic operations required by the attached processors.
+[#norm:pma_cache_mm_all_atomics]#Some platforms might mandate that all of cacheable main memory support
+all atomic operations# required by the attached processors.
 ====
 
 ===== AMO PMA
 
-Within AMOs, there are four levels of support: _AMONone_, _AMOSwap_,
+[#norm:pma_amo_levels]#Within AMOs, there are four levels of support: _AMONone_, _AMOSwap_,
 _AMOLogical_, and _AMOArithmetic_. AMONone indicates that no AMO
 operations are supported. AMOSwap indicates that only `amoswap`
 instructions are supported in this address range. AMOLogical indicates
 that swap instructions plus all the logical AMOs (`amoand`, `amoor`,
 `amoxor`) are supported. AMOArithmetic indicates that all RISC-V AMOs defined by
-the A extension are supported. For each level of support, naturally aligned AMOs of a
-given width are supported if the underlying memory region supports reads
-and writes of that width. Main memory and I/O regions may only support a
-subset or none of the processor-supported atomic operations.
+the A extension are supported.#
+[#norm:pma_amo_sz_support]#For each level of support, naturally aligned AMOs of a given width
+are supported if the underlying memory region supports reads and writes of that width.#
+[#norm:pma_amo_far_subset_proc]#Main memory and I/O regions may only support a subset or none of the processor-supported atomic operations.#
 
 .Classes of AMOs supported by I/O regions.
 [i%autowidth,float="center",align="center",cols="<,<",options="header"]
@@ -3035,37 +3058,34 @@ We recommend providing at least AMOLogical support for I/O regions where
 possible.
 ====
 
-The Zacas extension defines three additional levels of support: AMOCASW,
-AMOCASD, and AMOCASQ.
+[#norm:pma_amo_zacas_levels1]#The Zacas extension defines three additional levels of support: AMOCASW,
+AMOCASD, and AMOCASQ.#
 
-AMOCASW indicates that in addition to instructions indicated by AMOArithmetic
+[#norm:pma_amo_zacas_levels2]#AMOCASW indicates that in addition to instructions indicated by AMOArithmetic
 level support, the `AMOCAS.W` instruction is supported. AMOCASD indicates that
 in addition to instructions indicated by AMOCASW level support, the `AMOCAS.D`
 instruction is supported. AMOCASQ indicates that in addition to instructions
-indicated by AMOCASD level support, the `AMOCAS.Q` instruction is supported.
+indicated by AMOCASD level support, the `AMOCAS.Q` instruction is supported.#
 
 [NOTE]
 ====
-`AMOCASW/D/Q` require AMOArithmetic level support as the `AMOCAS.W/D/Q`
-instructions require ability to perform an arithmetic comparison and a swap
-operation.
+[#norm:pma_amo_zacas_req_arith]#`AMOCASW/D/Q` require AMOArithmetic level support as the `AMOCAS.W/D/Q`
+instructions require ability to perform an arithmetic comparison and a swap operation.#
 ====
 
-The AMOs specified by the Zabha extension require the same level of support as
-the corresponding instructions in the A standard extension or the Zacas
-extension.
+[#norm:pma_amo_zabha_req]#The AMOs specified by the Zabha extension require the same level of support as
+the corresponding instructions in the A standard extension or the Zacas extension.#
 
 ===== Reservability PMA
 
-For _LR/SC_, there are three levels of support indicating combinations
+[#norm:pma_rsrv_levels]#For _LR/SC_, there are three levels of support indicating combinations
 of the reservability and eventuality properties: _RsrvNone_,
 _RsrvNonEventual_, and _RsrvEventual_. RsrvNone indicates that no LR/SC
 operations are supported (the location is non-reservable).
 RsrvNonEventual indicates that the operations are supported (the
 location is reservable), but without the eventual success guarantee
 described in the unprivileged ISA specification. RsrvEventual indicates
-that the operations are supported and provide the eventual success
-guarantee.
+that the operations are supported and provide the eventual success guarantee.#
 
 [NOTE]
 ====
@@ -3083,6 +3103,7 @@ progress is detected.
 
 ==== Misaligned Atomicity Granule PMA
 
+[[norm:pma_mag_def]]
 The misaligned atomicity granule PMA provides constrained support for
 misaligned AMOs.
 This PMA, if present, specifies the size of a _misaligned atomicity granule_,
@@ -3090,28 +3111,29 @@ a naturally aligned power-of-two number of bytes.
 Specific supported values for this PMA are represented by MAG__NN__, e.g.,
 MAG16 indicates the misaligned atomicity granule is at least 16 bytes.
 
-The misaligned atomicity granule PMA applies only to AMOs, loads and stores
+[#norm:pma_mag_insts]#The misaligned atomicity granule PMA applies only to AMOs, loads and stores
 defined in the base ISAs, and loads and stores of no more than XLEN bits
-defined in the F, D, and Q extensions, and compressed encodings thereof.
-For an instruction in that set, if all accessed bytes lie within the same
+defined in the F, D, and Q extensions, and compressed encodings thereof.#
+For an instruction in that set, [#norm:pma_mag_op_within]#if all accessed bytes lie within the same
 misaligned atomicity granule, the instruction will not raise an exception for
 reasons of address alignment, and the instruction will give rise to only one
-memory operation for the purposes of RVWMO--i.e., it will execute atomically.
+memory operation for the purposes of RVWMO--i.e., it will execute atomically.#
 
-If a misaligned AMO accesses a region that does not specify a misaligned
+[#norm:pma_mag_op_amo]#If a misaligned AMO accesses a region that does not specify a misaligned
 atomicity granule PMA, or if not all accessed bytes lie within the same
-misaligned atomicity granule, then an exception is raised.
-For regular loads and stores that access such a region or for which not all
+misaligned atomicity granule, then an exception is raised.#
+[#norm:pma_mag_op_ldst]#For regular loads and stores that access such a region or for which not all
 accessed bytes lie within the same atomicity granule, then either an exception
-is raised, or the access proceeds but is not guaranteed to be atomic.
-Implementations may raise access-fault exceptions instead of
+is raised, or the access proceeds but is not guaranteed to be atomic.#
+[#norm:pma_mag_exc]#Implementations may raise access-fault exceptions instead of
 address-misaligned exceptions for some misaligned accesses, indicating the
-instruction should not be emulated by a trap handler.
+instruction should not be emulated by a trap handler.#
 
-NOTE: LR/SC instructions are unaffected by this PMA and so always raise an
-exception when misaligned.  Vector memory accesses are also unaffected, so
-might execute non-atomically even when contained within a misaligned atomicity
-granule.  Implicit accesses are similarly unaffected by this PMA.
+NOTE: [#norm:pma_mag_op_rsrv]#LR/SC instructions are unaffected by this PMA and so always raise an
+exception when misaligned.#
+[#norm:pma_mag_op_vec]#Vector memory accesses are also unaffected, so might execute non-atomically even
+when contained within a misaligned atomicity granule.#
+[#norm:pma_mag_op_implicit]#Implicit accesses are similarly unaffected by this PMA.#
 
 ==== Memory-Ordering PMAs
 
@@ -3138,12 +3160,14 @@ By contrast, accesses
 to an I/O region with strong ordering are generally observed by other
 harts and bus mastering devices in program order.
 
-Each strongly ordered I/O region specifies a numbered ordering channel,
+[#norm:pma_mo_io_chan_def]#Each strongly ordered I/O region specifies a numbered ordering channel,
 which is a mechanism by which ordering guarantees can be provided
-between different I/O regions. Channel 0 is used to indicate
+between different I/O regions.#
+[#norm:pma_mo_io_chan_0]#Channel 0 is used to indicate
 point-to-point strong ordering only, where only accesses by the hart to
-the single associated I/O region are strongly ordered.
+the single associated I/O region are strongly ordered.#
 
+[[norm:pma_mo_io_chan_1]]
 Channel 1 is used to provide global strong ordering across all I/O
 regions. Any accesses by a hart to any I/O region associated with
 channel 1 can only be observed to have occurred in program order by all
@@ -3153,11 +3177,12 @@ different channel numbers. In other words, any access to a region in
 channel 1 is equivalent to executing a `fence io,io` instruction before
 and after the instruction.
 
+[[norm:pma_mo_io_chan_other]]
 Other larger channel numbers provide program ordering to accesses by
-that hart across any regions with the same channel number.
+that hart across any regions with the same channel number
 
-Systems might support dynamic configuration of ordering properties on
-each memory region.
+[[norm:pma_mo_dyn]]
+Systems might support dynamic configuration of ordering properties on each memory region.
 
 [NOTE]
 ====
@@ -3239,24 +3264,24 @@ because they will be fixed as either uncached, read-only, hardware
 cache-coherent, or only accessed by one agent.
 ====
 
-If a PMA indicates non-cacheability, then accesses to that region must
-be satisfied by the memory itself, not by any caches.
+[#norm:pma_non_cacheable]#If a PMA indicates non-cacheability, then accesses to that region must
+be satisfied by the memory itself, not by any caches.#
 
 [NOTE]
 ====
-For implementations with a cacheability-control mechanism, the situation
+[#norm:uncached_ignores_cached]#For implementations with a cacheability-control mechanism, the situation
 may arise that a program uncacheably accesses a memory location that is
 currently cache-resident. In this situation, the cached copy must be
 ignored. This constraint is necessary to prevent more-privileged modes’
 speculative cache refills from affecting the behavior of less-privileged
-modes’ uncacheable accesses.
+modes’ uncacheable accesses.#
 ====
 
 ==== Idempotency PMAs
 
 Idempotency PMAs describe whether reads and writes to an address region
-are idempotent. Main memory regions are assumed to be idempotent. For
-I/O regions, idempotency on reads and writes can be specified separately
+are idempotent. [#norm:pma_idp_mm]#Main memory regions are assumed to be idempotent.#
+For I/O regions, idempotency on reads and writes can be specified separately
 (e.g., reads are idempotent but writes are not). If accesses are
 non-idempotent, i.e., there is potentially a side effect on any read or
 write access, then speculative or redundant accesses must be avoided.
@@ -3267,19 +3292,19 @@ effect.
 
 [NOTE]
 ====
-While hardware should always be designed to avoid speculative or
-redundant accesses to memory regions marked as non-idempotent, it is
+While [#norm:pma_idp_no_spec]#hardware should always be designed to avoid speculative or
+redundant accesses to memory regions marked as non-idempotent#, it is
 also necessary to ensure software or compiler optimizations do not
 generate spurious accesses to non-idempotent memory regions.
 
-Non-idempotent regions might not support misaligned accesses. Misaligned
+[#norm:pma_idp_misaligned_exc]#Non-idempotent regions might not support misaligned accesses. Misaligned
 accesses to such regions should raise access-fault exceptions rather
-than address-misaligned exceptions, indicating that software should not
+than address-misaligned exceptions#, indicating that software should not
 emulate the misaligned access using multiple smaller accesses, which
 could cause unexpected side effects.
 ====
 
-For non-idempotent regions, implicit reads and writes must not be
+[#norm:pma_idp_implicit_ok]#For non-idempotent regions, implicit reads and writes must not be
 performed early or speculatively, with the following exceptions. When a
 non-speculative implicit read is performed, an implementation is
 permitted to additionally read any of the bytes within a naturally
@@ -3287,12 +3312,12 @@ aligned power-of-2 region containing the address of the non-speculative
 implicit read. Furthermore, when a non-speculative instruction fetch is
 performed, an implementation is permitted to additionally read any of
 the bytes within the _next_ naturally aligned power-of-2 region of the
-same size (with the address of the region taken modulo
-2^XLEN^). The results of these additional reads
+same size (with the address of the region taken modulo 2^XLEN^).#
+The results of these additional reads
 may be used to satisfy subsequent early or speculative implicit reads.
-The size of these naturally aligned power-of-2 regions is
+[#norm:pma_idp_implicit_sz]#The size of these naturally aligned power-of-2 regions is
 implementation-defined, but, for systems with page-based virtual memory,
-must not exceed the smallest supported page size.
+must not exceed the smallest supported page size.#
 
 [[pmp]]
 === Physical Memory Protection
@@ -3305,11 +3330,11 @@ privileges (read, write, execute) to be specified for each physical
 memory region. The PMP values are checked in parallel with the PMA
 checks described in <<pma>>.
 
-The granularity of PMP access control settings are platform-specific,
-but the standard PMP encoding supports regions as small as four bytes.
-Certain regions’ privileges can be hardwired—for example, some regions
+[#norm:pmp_granularity_param]#The granularity of PMP access control settings are platform-specific,
+but the standard PMP encoding supports regions as small as four bytes.#
+[#norm:pmp_mmode_only_regions]#Certain regions’ privileges can be hardwired—for example, some regions
 might only ever be visible in machine mode but in no lower-privilege
-layers.
+layers.#
 
 [NOTE]
 ====
@@ -3318,39 +3343,39 @@ some platforms may provide other PMP structures in addition to or
 instead of the scheme described in this section.
 ====
 
-PMP checks are applied to all accesses whose effective privilege mode is
+[#norm:pmp_check_priv_modes]#PMP checks are applied to all accesses whose effective privilege mode is
 S or U, including instruction fetches and data accesses in S and U mode,
 and data accesses in M-mode when the MPRV bit in `mstatus` is set and
-the MPP field in `mstatus` contains S or U. PMP checks are also applied
+the MPP field in `mstatus` contains S or U.# [#norm:pmp_check_pagetable_access]#PMP checks are also applied
 to page-table accesses for virtual-address translation, for which the
-effective privilege mode is S. Optionally, PMP checks may additionally
+effective privilege mode is S.# [#norm:pmp_mmode_locking]#Optionally, PMP checks may additionally
 apply to M-mode accesses, in which case the PMP registers themselves are
 locked, so that even M-mode software cannot change them until the hart
-is reset. In effect, PMP can _grant_ permissions to S and U modes, which
+is reset.# In effect, PMP can _grant_ permissions to S and U modes, which
 by default have none, and can _revoke_ permissions from M-mode, which by
 default has full permissions.
 
-PMP violations are always trapped precisely at the processor.
+[#norm:pmp_violation_precise_trap]#PMP violations are always trapped precisely at the processor.#
 
 ==== Physical Memory Protection CSRs
 
-PMP entries are described by an 8-bit configuration register and one
+[#norm:pmp_entry_structure]#PMP entries are described by an 8-bit configuration register and one
 MXLEN-bit address register. Some PMP settings additionally use the
-address register associated with the preceding PMP entry. Up to 64 PMP
+address register associated with the preceding PMP entry.# [#norm:pmp_entry_count]#Up to 64 PMP
 entries are supported. Implementations may implement zero, 16, or 64 PMP
-entries; the lowest-numbered PMP entries must be implemented first. All
-PMP CSR fields are *WARL* and may be read-only zero. PMP CSRs are only
-accessible to M-mode.
+entries; the lowest-numbered PMP entries must be implemented first.# [#norm:pmp_csrs_warl_access]#All
+PMP CSR fields are *WARL* and may be read-only zero.# [#norm:pmp_csr_mode]#PMP CSRs are only
+accessible to M-mode.#
 
 The PMP configuration registers are densely packed into CSRs to minimize
-context-switch time. For RV32, sixteen CSRs, `pmpcfg0`–`pmpcfg15`, hold
+context-switch time. [#norm:pmp_cfg_rv32_layout]#For RV32, sixteen CSRs, `pmpcfg0`–`pmpcfg15`, hold
 the configurations `pmp0cfg`–`pmp63cfg` for the 64 PMP entries, as shown
-in <<pmpcfg-rv32>>. For RV64, eight
+in <<pmpcfg-rv32>>.# [#norm:pmp_cfg_rv64_layout]#For RV64, eight
 even-numbered CSRs, `pmpcfg0`, `pmpcfg2`, …, `pmpcfg14`, hold the
 configurations for the 64 PMP entries, as shown in
-<<pmpcfg-rv64>>. For RV64, the odd-numbered
+<<pmpcfg-rv64>>.# [#norm:pmp_cfg_rv64_illegal]#For RV64, the odd-numbered
 configuration registers, `pmpcfg1`, `pmpcfg3`, …, `pmpcfg15`, are
-illegal.
+illegal.#
 
 [NOTE]
 ====
@@ -3369,13 +3394,13 @@ include::images/bytefield/pmp-rv32.edn[]
 include::images/bytefield/pmp-rv64.edn[]
 
 
-The PMP address registers are CSRs named `pmpaddr0`-`pmpaddr63`. Each
+[#norm:pmp_addr_registers]#The PMP address registers are CSRs named `pmpaddr0`-`pmpaddr63`.# [#norm:pmp_addr_encoding]#Each
 PMP address register encodes bits 33-2 of a 34-bit physical address for
 RV32, as shown in <<pmpaddr-rv32>>. For RV64,
 each PMP address register encodes bits 55-2 of a 56-bit physical
-address, as shown in <<pmpaddr-rv64>>. Not all
+address, as shown in <<pmpaddr-rv64>>.# [#norm:pmp_addr_warl]#Not all
 physical address bits may be implemented, and so the `pmpaddr` registers
-are *WARL*.
+are *WARL*.#
 
 [NOTE]
 ====
@@ -3396,35 +3421,36 @@ include::images/bytefield/pmpaddr-rv32.edn[]
 .PMP address register format, RV64.
 include::images/bytefield/pmpaddr-rv64.edn[]
 
-<<pmpcfg>> shows the layout of a PMP configuration
+[#norm:pmp_cfg_permissions]#<<pmpcfg>> shows the layout of a PMP configuration
 register. The R, W, and X bits, when set, indicate that the PMP entry
 permits read, write, and instruction execution, respectively. When one
-of these bits is clear, the corresponding access type is denied. The R,
-W, and X fields form a collective *WARL* field for which the combinations with R=0 and W=1 are reserved. The remaining two fields, A and L, are described in the following sections.
+of these bits is clear, the corresponding access type is denied.#
+[#norm:pmp_rwx_warl]#The R,
+W, and X fields form a collective *WARL* field for which the combinations with R=0 and W=1 are reserved.# The remaining two fields, A and L, are described in the following sections.
 
 [[pmpcfg]]
 .PMP configuration register format.
 include::images/bytefield/pmpcfg.edn[]
 
 
-Attempting to fetch an instruction from a PMP region that does not have
-execute permissions raises an instruction access-fault exception.
-Attempting to execute a load, load-reserved, or cache-block management instruction which accesses
+[#norm:pmp_exec_fault]#Attempting to fetch an instruction from a PMP region that does not have
+execute permissions raises an instruction access-fault exception.#
+[#norm:pmp_load_fault]#Attempting to execute a load, load-reserved, or cache-block management instruction which accesses
 a physical address within a PMP region without read permissions raises a
-load access-fault exception. Attempting to execute a store,
+load access-fault exception.# [#norm:pmp_store_fault]#Attempting to execute a store,
 store-conditional, AMO, or cache-block zero instruction which accesses a physical address
 within a PMP region without write permissions raises a store
-access-fault exception.
+access-fault exception.#
 
 ===== Address Matching
 
-The A field in a PMP entry's configuration register encodes the
+[#norm:pmp_a_field_encoding]#The A field in a PMP entry's configuration register encodes the
 address-matching mode of the associated PMP address register. The
-encoding of this field is shown in <<pmpcfg-a>>.
-When A=0, this PMP entry is disabled and matches no addresses. Two other
-address-matching modes are supported: naturally aligned power-of-2
+encoding of this field is shown in <<pmpcfg-a>>.#
+[#norm:pmp_a_field_off]#When A=0, this PMP entry is disabled and matches no addresses.# Two other
+address-matching modes are supported: [#norm:pmp_a_field_napot_na4]#naturally aligned power-of-2
 regions (NAPOT), including the special case of naturally aligned
-four-byte regions (NA4); and the top boundary of an arbitrary range
+four-byte regions (NA4);# and the top boundary of an arbitrary range
 (TOR). These modes support four-byte granularity.
 
 [[pmpcfg-a]]
@@ -3447,9 +3473,9 @@ Naturally aligned power-of-two region, {ge}8
 bytes
 |===
 
-NAPOT ranges make use of the low-order bits of the associated address
+[#norm:pmp_napot_encoding_low_bits]#NAPOT ranges make use of the low-order bits of the associated address
 register to encode the size of the range, as shown in
-<<pmpcfg-napot>>.
+<<pmpcfg-napot>>.#
 
 [[pmpcfg-napot]]
 .`NAPOT` range encoding in PMP address and configuration registers.
@@ -3485,11 +3511,11 @@ NAPOT
 2^XLEN+3^-byte NAPOT range
 |===
 
-If TOR is selected, the associated address register forms the top of the
+[#norm:pmp_a_field_tor]#If TOR is selected, the associated address register forms the top of the
 address range, and the preceding PMP address register forms the bottom
 of the address range. If PMP entry __i__'s A field is set to
 TOR, the entry matches any address _y_ such that `pmpaddr~i-1~`{le}__y__<``pmpaddr~i~`` (irrespective of the value of `pmpcfg~i-1~`). If PMP entry 0's A field is set to TOR, zero is used for the lower bound, and so it matches
-any address `y<pmpaddr~0~`.
+any address `y<pmpaddr~0~`.#
 
 [NOTE]
 ====
@@ -3508,22 +3534,22 @@ If the supervisor manages memory at base-page granularity, just 0.00002% of
 the 16{nbsp}GiB address space is lost.
 ====
 
-Although the PMP mechanism supports regions as small as four bytes,
+[#norm:pmp_region_granularity_g]#Although the PMP mechanism supports regions as small as four bytes,
 platforms may specify coarser PMP regions. In general, the PMP grain is
-2^G+2^ bytes and must be the same across all PMP regions.
-When G {ge} 1, the NA4 mode is not selectable. When
+2^G+2^ bytes and must be the same across all PMP regions.#
+[#norm:pmp_na4_select_restriction]#When G {ge} 1, the NA4 mode is not selectable.# [#norm:pmp_napot_addr_read_mask]#When
 G {ge} 2 and pmpcfg~i~.A[1] is set,
 i.e. the mode is NAPOT, then bits pmpaddr~i~[G-2:0]
-read as all ones. When G {ge} 1 and
+read as all ones.# [#norm:pmp_tor_off_addr_read_mask]#When G {ge} 1 and
 pmpcfg~i~.A[1] is clear, i.e. the mode is OFF or TOR,
 then bits pmpaddr~i~[G-1:0] read as all zeros. Bits
-pmpaddr~i~[G-1:0] do not affect the TOR address-matching logic.
-Although changing pmpcfg~i~.A[1] affects the value
+pmpaddr~i~[G-1:0] do not affect the TOR address-matching logic.#
+[#norm:pmp_addr_retention_on_mode_change]#Although changing pmpcfg~i~.A[1] affects the value
 read from pmpaddr~i~, it does not affect the
 underlying value stored in that register—in particular,
 pmpaddr~i~[G-1] retains its original value when
 pmpcfg~i~.A is changed from NAPOT to TOR/OFF then
-back to NAPOT.
+back to NAPOT.#
 
 [NOTE]
 ====
@@ -3533,12 +3559,12 @@ Software may determine the PMP granularity by writing zero to `pmp0cfg`, then wr
 [[pmp-locking]]
 ===== Locking and Privilege Mode
 
-The L bit indicates that the PMP entry is locked, i.e., writes to the
-configuration register and associated address registers are ignored.
-Locked PMP entries remain locked until the hart is reset. If PMP entry
+[#norm:pmp_l_bit_function]#The L bit indicates that the PMP entry is locked, i.e., writes to the
+configuration register and associated address registers are ignored.#
+Locked PMP entries remain locked until the hart is reset. [#norm:pmp_l_bit_write_protection]#If PMP entry
 _i_ is locked, writes to ``pmp``__i__``cfg`` and ``pmpaddr``__i__ are ignored. Additionally, if PMP
 entry _i_ is locked and ``pmp``__i__``cfg.A`` is set
-to TOR, writes to ``pmpaddr``__i__-1 are ignored.
+to TOR, writes to ``pmpaddr``__i__-1 are ignored.#
 
 [NOTE]
 ====
@@ -3546,43 +3572,43 @@ Setting the L bit locks the PMP entry even when the A field is set to
 OFF.
 ====
 
-In addition to locking the PMP entry, the L bit indicates whether the
+[#norm:pmp_l_bit_m_mode_enforcement]#In addition to locking the PMP entry, the L bit indicates whether the
 R/W/X permissions are additionally enforced on M-mode accesses.
 When the L bit is
 set, these permissions are enforced for all privilege modes. When the L
 bit is clear, any M-mode access matching the PMP entry will succeed; the
-R/W/X permissions apply only to S and U modes.
+R/W/X permissions apply only to S and U modes.#
 
 ===== Priority and Matching Logic
 
-On some implementations, misaligned loads, stores, and instruction
+[#norm:pmp_misaligned_access_behavior]#On some implementations, misaligned loads, stores, and instruction
 fetches may be decomposed into multiple memory operations, some of which may
 succeed before an access-fault exception occurs, as described in the RVWMO
-specification. PMP checking is performed on each memory operation independently.
+specification. PMP checking is performed on each memory operation independently.#
 In particular, a portion of a misaligned store that passes
 the PMP check may become visible, even if another portion fails the PMP check.
 The same behavior may manifest for stores wider than XLEN bits (e.g., the
 FSD instruction in RV32D), even when the store address is naturally aligned.
 
-PMP entries are statically prioritized. The lowest-numbered PMP entry
+[#norm:pmp_entry_priority]#PMP entries are statically prioritized. The lowest-numbered PMP entry
 that matches any byte of a memory operation determines whether that operation
-succeeds or fails. The matching PMP entry must match all bytes of a memory
-operation, or the operation fails, irrespective of the L, R, W, and X bits.
+succeeds or fails.# [#norm:pmp_full_match_required]#The matching PMP entry must match all bytes of a memory
+operation, or the operation fails, irrespective of the L, R, W, and X bits.#
 For example, if a PMP entry is configured to match the four-byte range
 `0xC`–`0xF`, then an 8-byte access to the range `0x8`–`0xF` will fail,
 assuming that PMP entry is the highest-priority entry that matches those
 addresses.
 
-If a PMP entry matches all bytes of a memory operation, then the L, R, W, and X
+[#norm:pmp_rwx_check]#If a PMP entry matches all bytes of a memory operation, then the L, R, W, and X
 bits determine whether the operation succeeds or fails. If the L bit is
 clear and the privilege mode of the access is M, the operation succeeds.
 Otherwise, if the L bit is set or the privilege mode of the access is S
 or U, then the operation succeeds only if the R, W, or X bit corresponding
-to the access type is set.
+to the access type is set.#
 
-If no PMP entry matches an M-mode memory operation, the operation succeeds.
+[#norm:pmp_no_entry_match]#If no PMP entry matches an M-mode memory operation, the operation succeeds.
 If no PMP entry matches an S-mode or U-mode memory operation, but at least
-one PMP entry is implemented, the operation fails.
+one PMP entry is implemented, the operation fails.#
 
 [NOTE]
 ====
@@ -3590,8 +3616,8 @@ If at least one PMP entry is implemented, but all PMP entries’ A fields
 are set to OFF, then all S-mode and U-mode memory accesses will fail.
 ====
 
-Failed memory operations generate an instruction, load, or store access-fault
-exception. Note that a single instruction may generate multiple
+[#norm:pmp_access_fault_exception]#Failed memory operations generate an instruction, load, or store access-fault
+exception.# Note that a single instruction may generate multiple
 memory operations, which may not be mutually atomic. An access-fault exception
 is generated if at least one memory operation generated by an instruction fails,
 though other memory operations generated by that instruction may succeed with
@@ -3604,24 +3630,24 @@ memory are decomposed into multiple memory operations.
 
 The Physical Memory Protection mechanism is designed to compose with the
 page-based virtual memory systems described in
-<<supervisor>>. When paging is enabled,
+<<supervisor>>. [#norm:pmp_with_paging]#When paging is enabled,
 instructions that access virtual memory may result in multiple
 physical-memory accesses, including implicit references to the page
-tables. The PMP checks apply to all of these accesses. The effective
+tables. The PMP checks apply to all of these accesses.# The effective
 privilege mode for implicit page-table accesses is S.
 
-Implementations with virtual memory are permitted to perform address
+[#norm:pmp_speculative_translations]#Implementations with virtual memory are permitted to perform address
 translations speculatively and earlier than required by an explicit
 memory access, and are permitted to cache them in address translation
 cache structures—including possibly caching the identity mappings from
 effective address to physical address used in Bare translation modes and
 M-mode. The PMP settings for the resulting physical address may be
 checked (and possibly cached) at any point between the address
-translation and the explicit memory access. Hence, when the PMP settings
+translation and the explicit memory access.# Hence, [#norm:pmp_sfence_required]#when the PMP settings
 are modified, M-mode software must synchronize the PMP settings with the
 virtual memory system and any PMP or address-translation caches. This is
 accomplished by executing an SFENCE.VMA instruction with _rs1_=`x0` and
-_rs2_=`x0`, after the PMP CSRs are written.
+_rs2_=`x0`, after the PMP CSRs are written.#
 See <<hyp-mm-fences>> for additional synchronization requirements when the
 hypervisor extension is implemented.
 
