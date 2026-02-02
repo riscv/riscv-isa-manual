@@ -131,7 +131,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags
 
 all: build
 
@@ -146,9 +146,12 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
+check-tags:
+	@./scripts/check-tag-changes.sh
+
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
-build-norm-rules: build-norm-rules-json build-norm-rules-html
+build-norm-rules: build-norm-rules-json build-norm-rules-html check-tags
 build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
