@@ -24,6 +24,7 @@ The canonical list of **open-source RISC-V implementations' marchid CSR values**
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, build instructions, and contribution guidelines.
 If you would like to contribute to this documentation, please refer to the [Documentation Developer's Guide](https://github.com/riscv/docs-dev-guide).
 
 The recommended method for building the PDF files is to use the Docker Image, as described in the [RISC-V Docs Base Container Image repository](https://github.com/riscv/riscv-docs-base-container-image).
