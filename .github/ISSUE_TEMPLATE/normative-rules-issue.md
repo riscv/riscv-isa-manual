@@ -11,7 +11,7 @@ assignees: ''
 < Describe your issue >
 
 ## Any changes required
-< Describe the required changes > 
+< Describe the required changes >
 
 ## PRs
 < Pull Requests for described changes >
