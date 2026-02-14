@@ -8,7 +8,7 @@ on:
       - 'normative_rule_defs/**'
       - 'ref/**'
       - 'scripts/check-tag-changes.sh'
-  pull_request:
+  pull_request_target:
     paths:
       - 'src/**'
       - 'normative_rule_defs/**'
@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: Check for bypass label
         id: bypass
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
         run: |
           LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
           if echo "$LABELS" | grep -q "normative-change-approved"; then
@@ -45,6 +45,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
 
       - name: Build normative tags
@@ -138,7 +139,10 @@ jobs:
           git push
 
       - name: Comment on PR with detected changes
-        if: steps.check.outputs.has_any_changes == 'true' && github.event_name == 'pull_request' && steps.bypass.outputs.has_bypass != 'true'
+        if: >-
+          steps.check.outputs.has_any_changes == 'true' &&
+          (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
+          steps.bypass.outputs.has_bypass != 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -147,7 +151,10 @@ jobs:
             await script({github, context, tagChanges});
 
       - name: Create issue on merge to configured branches
-        if: steps.check.outputs.has_any_changes == 'true' && github.event_name == 'push' && steps.branch-check.outputs.is_trigger_branch == 'true'
+        if: >-
+          steps.check.outputs.has_any_changes == 'true' &&
+          github.event_name == 'push' &&
+          steps.branch-check.outputs.is_trigger_branch == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -156,7 +163,10 @@ jobs:
             await script({github, context, tagChanges});
 
       - name: Report changes (bypass mode)
-        if: steps.check.outputs.has_any_changes == 'true' && github.event_name == 'pull_request' && steps.bypass.outputs.has_bypass == 'true'
+        if: >-
+          steps.check.outputs.has_any_changes == 'true' &&
+          (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
+          steps.bypass.outputs.has_bypass == 'true'
         uses: actions/github-script@v7
         with:
           script: |
