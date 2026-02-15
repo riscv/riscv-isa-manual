@@ -147,7 +147,7 @@ build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
 check-tags:
-	@./scripts/check-tag-changes.sh
+	@bash ./scripts/check-tag-changes.sh
 
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
