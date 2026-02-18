@@ -12,9 +12,3 @@ assignees: ''
 
 ## Any changes required
 < Describe the required changes >
-
-## PRs
-< Pull Requests for described changes >
-
-
-(cc @riscv/csc)
