@@ -131,7 +131,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref-tags
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref
 
 all: build
 
@@ -149,6 +149,8 @@ build-tags: $(DOCS_NORM_TAGS)
 check-tags:
 	@bash ./scripts/check-tag-changes.sh
 
+# Copy built normative tags JSON files to ref directory and use sed to ensure they end with a newline.
+# Required by GitHub pre-commit checks for this repo.
 update-ref: $(DOCS_NORM_TAGS)
 	cp -f $(DOCS_NORM_TAGS) ref
 	sed -i -e '$$a\' ref/*.json
