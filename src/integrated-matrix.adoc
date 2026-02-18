@@ -1,0 +1,1394 @@
+[[IME]]
+== Integrated Matrix Extensions
+
+=== Introduction
+
+High-performance computing and machine learning workloads depend critically on general matrix multiplication (GEMM), computing C ← A × B + C over a wide range of data types and precisions.
+Dedicated matrix-multiply accelerators often require new register state—separate matrix register files—to achieve competitive throughput, introducing substantial architectural complexity and binary interface disruption.
+
+The Integrated Matrix family of extensions (Zvvmm, Zvvfmm, Zvvmtls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
+By interpreting groups of existing vector registers as two-dimensional matrix tiles, the Integrated Matrix extensions deliver high arithmetic density without introducing any new architected state.
+
+The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
+A key design goal is that the same binary executes correctly—and achieves near-peak arithmetic throughput—across this entire range without recompilation.
+
+=== Overview
+
+The Integrated Matrix family of extensions (Zvvmm, Zvvfmm, Zvvmtls) provides the following sub-extensions:
+
+* <<#zvvmm>>: multiply-accumulate instructions for integer matrix tiles
+* <<#zvvfmm>>: multiply-accumulate instructions for floating-point matrix tiles
+* <<#zvvmtls>>: two-dimensional load/store instructions for moving data between memory and vector registers interpreted as matrix tiles
+
+==== Matrix tile geometry
+
+Matrix tiles are represented using the existing RISC-V V register file and its configuration state.
+The three matrices in the multiply-accumulate operation C ← A × B + C are stored as follows:
+
+* The _accumulator_ C is stored in a vector register group with element width SEW.
+  Its register group multiplier MUL is determined by the tile geometry rather than LMUL directly:
+  MUL = LMUL / λ², where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
+  The C register group may start at any vector register index.
+
+* The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
+  equal to SEW for non-widening variants, SEW/2 for widening, and SEW/4 for quad-widening variants.
+  The K dimension of the multiply equals λ for non-widening instructions, 2λ for widening, and 4λ for quad-widening; LMUL scales the A and B register groups along the K dimension only and does not affect C.
+
+The following table lists all computational sub-extensions in the Integrated Matrix family:
+
+[cols="1,1,3,3", options="header"]
+|===
+|Extension       | Dependencies | Multiplicand Types           | Accumulator Type
+|Zvvmmi4b       ^| Zve64d       | [U]Int4, (U)Int4             | Int8
+|Zvvmmi4h       ^| Zve64d       | [U]Int4, (U)Int4             | Int16
+|Zvvmmi4w       ^| Zve64d       | [U]Int4, (U)Int4             | Int32
+|Zvvmmb         ^| Zve64d       | [U]Int8, (U)Int8             | Int8
+|Zvvmmbh        ^| Zve64d       | [U]Int8, (U)Int8             | Int16
+|Zvvmmbw        ^| Zve64d       | [U]Int8, (U)Int8             | Int32
+|Zvvmmbd        ^| Zve64d       | [U]Int8, (U)Int8             | Int64
+|Zvvmmh         ^| Zve64d       | [U]Int16, (U)Int16           | Int16
+|Zvvmmhw        ^| Zve64d       | [U]Int16, (U)Int16           | Int32
+|Zvvmmhd        ^| Zve64d       | [U]Int16, (U)Int16           | Int64
+|Zvvmmw         ^| Zve64d       | [U]Int32, (U)Int32           | Int32
+|Zvvmmwd        ^| Zve64d       | [U]Int32, (U)Int32           | Int64
+|Zvvmmd         ^| Zve64d       | [U]Int64, (U)Int64           | Int64
+|Zvvfmmofp4opf8 ^| Zve64d       | OFP4, OFP4                   | OFP8
+|Zvvfmmofp4h    ^| Zve64d       | OFP4, OFP4                   | IEEE binary16
+|Zvvfmmofp4bf16 ^| Zve64d       | OFP4, OFP4                   | BFloat16
+|Zvvfmmofp8     ^| Zve64d       | OFP8, OFP8                   | OFP8
+|Zvvfmmofp8h    ^| Zve64d       | OFP8, OFP8                   | IEEE binary16
+|Zvvfmmofp8bf16 ^| Zve64d       | OFP8, OFP8                   | BFloat16
+|Zvvfmmofp8w    ^| Zve64d       | OFP8, OFP8                   | IEEE binary32
+|Zvvfmmh        ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary16
+|Zvvfmmhf       ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary32
+|Zvvfmmhd       ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary64
+|Zvvfmmbf16     ^| Zve64d       | BFloat16, BFloat16           | BFloat16
+|Zvvfmmbf16f    ^| Zve64d       | BFloat16, BFloat16           | IEEE binary32
+|Zvvfmmbf16d    ^| Zve64d       | BFloat16, BFloat16           | IEEE binary64
+|Zvvfmmf        ^| Zve64d       | IEEE binary32, IEEE binary32 | IEEE binary32
+|Zvvfmmfd       ^| Zve64d       | IEEE binary32, IEEE binary32 | IEEE binary64
+|Zvvfmmd        ^| Zve64d       | IEEE binary64, IEEE binary64 | IEEE binary64
+|===
+
+=== New fields in the Vector Type (`vtype`) Register
+
+The Integrated Matrix family of extensions defines the following additional fields in the `vtype` CSR:
+
+* `lambda[2:0]` at `vtype[XLEN-2:XLEN-4]` is the Selected Lambda
+* `altfmt_A` at `vtype[9]` is the Alternate Floating-Point Format for input A
+* `altfmt_B` at `vtype[10]` is the Alternate Floating-Point Format for input B
+
+==== Selected lambda (`lambda[2:0]`) field
+
+The `lambda[2:0]` field is a 3-bit WARL read/write field in the `vtype` CSR that holds the dynamic _selected lambda_ (i.e., the effective K dimension used for registers backing the output matrix C) for multiply-accumulate and 2D load/store instructions.
+
+`lambda[2:0]` is a WARL field, so it can only be programmed to values supported by the implementation.
+One discovery mechanism is to attempt to program different values and read back which are retained.
+
+.lambda[2:0] (selected lambda) encoding
+[cols="1,1,1,1"]
+[%autowidth,float="center",align="center",options="header"]
+|===
+3+| lambda[2:0] | K
+
+| 0 | 0 | 0 |   _invalid_/_dynamic_
+| 0 | 0 | 1 |   1
+| 0 | 1 | 0 |   2
+| 0 | 1 | 1 |   4
+| 1 | 0 | 0 |   8
+| 1 | 0 | 1 |   16
+| 1 | 1 | 0 |   32
+| 1 | 1 | 1 |   64
+|===
+
+==== Alternate floating-point format for the output (`altfmt`)
+
+The Integrated Matrix floating-point extensions use the _altfmt_ field (as defined by Zvfbfa) to select the floating-point format of the elements in the output accumulator matrix C, in conjunction with `vsew`.
+
+.Output data type encoding (altfmt × vsew[2:0])
+[cols="1,1,1,1,1"]
+[%autowidth,float="center",align="center",options="header"]
+|===
+| altfmt 3+| vsew[2:0] | FP format
+
+| 0 | 0 | 0 | 0 | E4M3 (OFP8)
+| 1 | 0 | 0 | 0 | E5M2 (OFP8)
+| 0 | 0 | 0 | 1 | IEEE binary16
+| 1 | 0 | 0 | 1 | BFloat16
+| 0 | 0 | 1 | 0 | IEEE binary32
+| 1 | 0 | 1 | 0 | _reserved_
+| 0 | 0 | 1 | 1 | IEEE binary64
+| 1 | 0 | 1 | 1 | _reserved_
+| X | 1 | X | X | _reserved_
+|===
+
+==== Alternate floating-point formats for inputs (`altfmt_A`, `altfmt_B`)
+
+The `altfmt_A` and `altfmt_B` fields are 1-bit read/write fields added to the `vtype` CSR by the Integrated Matrix extensions to select the interpretation of elements in input matrices A and B, respectively.
+Their meaning depends on whether the instruction is a floating-point or integer multiply-accumulate.
+
+===== Floating-point instructions
+
+For floating-point multiply-accumulate instructions, `altfmt_A` and `altfmt_B` select the floating-point format of the corresponding input operand.
+These fields are only significant for sub-word floating-point input operands (OFP8, 16-bit FP); for IEEE binary32 and IEEE binary64 inputs they are ignored.
+
+.FP input data type encoding (altfmt_A or altfmt_B × input element width)
+[cols="1,2,2"]
+[%autowidth,float="center",align="center",options="header"]
+|===
+| altfmt_A / altfmt_B | Input element width | FP format
+
+| 0 | 4-bit | E2M1 (OFP4)
+| 1 | 4-bit | E3M0 (OFP4)
+| 0 | 8-bit | E4M3 (OFP8)
+| 1 | 8-bit | E5M2 (OFP8)
+| 0 | 16-bit | IEEE binary16
+| 1 | 16-bit | BFloat16
+|===
+
+===== Integer instructions
+
+For integer multiply-accumulate instructions, `altfmt_A` and `altfmt_B` select whether the corresponding input operand is interpreted as signed or unsigned.
+
+.Integer input signedness encoding (altfmt_A or altfmt_B)
+[cols="1,2"]
+[%autowidth,float="center",align="center",options="header"]
+|===
+| altfmt_A / altfmt_B | Interpretation
+
+| 0 | Signed
+| 1 | Unsigned
+|===
+
+[#zvvmm,reftext=Matrix-multiplication instructions (integer)]
+=== Zvvmm: Extension for matrix-multiplication on vector-registers interpreted as 2D integer matrix-tiles
+
+The `Zvvmm` family of extensions provides instructions that perform matrix multiply-accumulate on integer data, computing C ← C + A × B, where A, B, and C are matrix tiles held in the vector register file.
+
+The K-dimension of the multiplication (shared inner dimension of A and B) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
+
+    K_effective = λ × W × LMUL
+
+The element widths are related by the widening factor: A and B tiles have elements of width SEW÷W, while the accumulator C has elements of width SEW.
+The signedness of each input is controlled independently: `altfmt_A = 0` selects signed A, `altfmt_A = 1` unsigned A; likewise for `altfmt_B`.
+The accumulator C is always treated as signed.
+Integer accumulation wraps modulo 2^SEW^.
+
+The tile dimensions follow from the widening and LMUL settings:
+
+    L_A         = LMUL × VLEN ÷ (SEW ÷ W)   (total A or B tile elements across LMUL registers)
+    K_effective = λ × W × LMUL
+    M = N       = L_A ÷ K_effective           (rows = columns of the square accumulator tile)
+
+The accumulator register group has cardinality MUL_C = VLEN ÷ (SEW × λ²), independent of both W and LMUL.
+
+[cols="3,1,1,1", options="header"]
+|===
+| Mnemonic | W | A/B element width | C element width
+
+| `vmmacc.vv vd, vs1, vs2`   | 1 | SEW     | SEW
+| `vwmmacc.vv vd, vs1, vs2`  | 2 | SEW/2   | SEW
+| `vqwmmacc.vv vd, vs1, vs2` | 4 | SEW/4   | SEW
+|===
+
+[#zvvfmm,reftext=Matrix-multiplication instructions (floating-point)]
+=== Zvvfmm: Extension for matrix-multiplication on vector-registers interpreted as 2D floating-point matrix-tiles
+
+The `Zvvfmm` family of extensions provides instructions that perform matrix multiply-accumulate on floating-point data, computing C ← C + A × B, where A, B, and C are matrix tiles held in the vector register file.
+
+The floating-point format of each operand tile is controlled by fields in `vtype`:
+
+* `altfmt_A` and `altfmt_B` select the FP format for A and B input elements, interpreted in conjunction with the input element width SEW÷W (see <<_alternate_floating_point_formats_for_inputs_altfmt_a_altfmt_b>>).
+  Both input tiles must use the same format (`altfmt_A` == `altfmt_B`).
+* `altfmt` (as defined by Zvfbfa) selects the FP format for the C accumulator elements, interpreted in conjunction with SEW (see <<_alternate_floating_point_format_for_the_output_altfmt>>).
+
+All multiply and add operations use the dynamic rounding mode from `frm`; floating-point exception flags are accumulated into `fflags`.
+
+The K-dimension of the multiplication is determined by λ from `vtype`, scaled by a per-instruction widening factor W and by LMUL:
+
+    K_effective = λ × W × LMUL
+
+The tile dimensions follow from the widening and LMUL settings:
+
+    L_A         = LMUL × VLEN ÷ (SEW ÷ W)   (total A or B tile elements across LMUL registers)
+    K_effective = λ × W × LMUL
+    M = N       = L_A ÷ K_effective           (rows = columns of the square accumulator tile)
+
+The accumulator register group has cardinality MUL_C = VLEN ÷ (SEW × λ²), independent of both W and LMUL.
+
+[cols="3,1,1,1", options="header"]
+|===
+| Mnemonic | W | A/B element width | C element width
+
+| `vfmmacc.vv vd, vs1, vs2`   | 1 | SEW     | SEW
+| `vfwmmacc.vv vd, vs1, vs2`  | 2 | SEW/2   | SEW
+| `vfqwmmacc.vv vd, vs1, vs2` | 4 | SEW/4   | SEW
+|===
+
+[#zvvmtls,reftext=Load/store instructions for matrix tiles]
+=== Zvvmtls: Extension for loading and storing vector-registers interpreted as 2D matrix-tiles
+
+The `Zvvmtls` extension provides instructions that transfer 2D matrix tiles between memory and the vector register file without requiring a separate repacking step.
+Matrix data in memory is typically stored as a large 2D array in row-major or column-major order with a leading dimension that may exceed the tile width, allowing a tile to address a sub-matrix within a larger allocation.
+The tile load and store instructions bridge the gap between this strided 2D memory layout and the flat vector register representation used by the multiply-accumulate instructions.
+
+==== Memory layout
+
+Tile instructions interpret memory as a 2D array of SEW-bit elements.
+`rs1` holds the base address of the tile; `rs2` holds the _leading dimension_ `LD`, i.e., the stride between the starts of consecutive segments, measured in elements.
+For a row-major matrix, `LD` equals the number of columns in the full matrix; for a column-major matrix, `LD` equals the number of rows.
+`LD` may be larger than the tile dimension, enabling access to a sub-tile of a larger matrix without copying.
+
+The byte address of the element at offset `d` along the stride direction and offset `k` within a segment is:
+
+    address(d, k) = rs1 + (d × LD + k) × (SEW ÷ 8)
+
+==== Tile geometry
+
+The tile dimensions are fully determined by the current `vtype` settings (SEW, VL, LMUL, and λ), consistent with the operand geometry of the multiply-accumulate instructions.
+The tile load and store instructions make use of the following parameters from the CSRs:
+
+* SEW — element width
+* VL — active vector length (must be a multiple of λ)
+* LMUL — vector length multiplier
+* λ — selected lambda, read from `lambda[2:0]` in `vtype`
+
+The resulting tile dimensions are μ = ν = VL/λ, with the accumulator tile C occupying MUL = LMUL/λ² vector registers.
+When loading A or B input tiles, `vmtl.v` and `vmttl.v` shall be used with SEW equal to the element width of the C accumulator tile.
+
+==== Instructions
+
+All tile load/store instructions support two optional operands that follow `rs2` in the assembly syntax:
+
+* An _immediate lambda_ `Lλ` (one of `L1`, `L2`, `L4`, `L8`, `L16`, `L32`, `L64`), which overrides `lambda[2:0]` from `vtype` for the duration of that instruction.
+  When omitted, the dynamic lambda from `vtype` is used.
+* A _mask_ specifier `v0.t`, which enables element-level masking using `v0` as the mask register.
+  For loads, masked-off elements (`v0[i] = 0`) are not written to the destination register group.
+  For stores, masked-off elements are not written to memory.
+  When omitted, all elements are active.
+
+When both are present, the immediate lambda precedes the mask: `vmtts.v v4,(a0),a1,L64,v0.t`.
+
+[cols="2,4", options="header"]
+|===
+| Mnemonic | Description
+
+| `vmtl.v vd, (rs1), rs2 [, Lλ] [, vm]`   | Order-preserving tile load
+| `vmts.v vs3, (rs1), rs2 [, Lλ] [, vm]`  | Order-preserving tile store
+| `vmttl.v vd, (rs1), rs2 [, Lλ] [, vm]`  | Transposing tile load
+| `vmtts.v vs3, (rs1), rs2 [, Lλ] [, vm]` | Transposing tile store
+|===
+
+===== `vmtl.v` — Order-Preserving Tile Load
+
+    vmtl.v vd, (rs1), rs2 [, Lλ] [, vm]
+
+Loads a 2D matrix tile from memory into the vector register group starting at `vd`.
+`rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
+
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`, the load computes:
+
+    VD[i] = M[rs1 + (i / linesize) × LD + (i % linesize)]
+
+This instruction is the correct choice when A is stored in row-major order or when B is
+stored in column-major order: in both cases the memory layout consists of _linesize_-element
+contiguous segments with a stride of `LD` elements between them.
+
+===== `vmts.v` — Order-Preserving Tile Store
+
+    vmts.v vs3, (rs1), rs2 [, Lλ] [, vm]
+
+Stores the 2D matrix tile held in the vector register group starting at `vs3` to memory.
+`rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
+
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`, the store computes:
+
+    M[rs1 + (i / linesize) × LD + (i % linesize)] = VS[i]
+
+===== `vmttl.v` — Transposing Tile Load
+
+    vmttl.v vd, (rs1), rs2 [, Lλ] [, vm]
+
+Loads a 2D matrix tile from memory and transposes it into the vector register layout required by the matrix multiplier.
+This instruction is used when a B tile is stored in row-major order, or when an A or C tile is stored in column-major order in memory.
+`rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
+
+
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`, the transposing load computes:
+
+    VD[i] = M[rs1 + (i % linesize) × LD + (i / linesize)]
+
+===== `vmtts.v` — Transposing Tile Store
+
+    vmtts.v vs3, (rs1), rs2 [, Lλ] [, vm]
+
+Stores a 2D matrix tile from vector registers to memory, applying the inverse transposition of `vmttl.v`.
+`rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
+
+
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`, the transposing store computes:
+
+    M[rs1 + (i % linesize) × LD + (i / linesize)] = VS[i]
+
+
+<<<
+
+[#integrated-matrix-insns,reftext="Instructions (in alphabetical order)"]
+=== Instructions (in alphabetical order)
+
+The semantics of each instruction is expressed in a SAIL-like syntax, using the following
+helper functions that are shared across all instructions in this chapter:
+
+[source,sail]
+--
+// Decode a 3-bit lambda encoding to the actual lambda value.
+// Returns None() if the encoding is 0b000 (meaning "use vtype.lambda").
+function decode_vlambda(lam_enc : bits(3)) -> option(int) =
+  if lam_enc == 0b000 then None()
+  else Some(2 ^ (unsigned(lam_enc) - 1))
+
+// Map sequential tile element index i to the flat register-group element index.
+// linesize = lambda * LMUL; elements within one tile row span LMUL registers.
+function tile_reg_idx(i : int, LMUL : int, lambda : int, elems_per_reg : int) -> int = {
+  let linesize     : int = lambda * LMUL;
+  let line         : int = i / linesize;
+  let elem_in_line : int = i % linesize;
+  let regoff       : int = elem_in_line / lambda;
+  let elementoff   : int = line * lambda + elem_in_line % lambda;
+  regoff * elems_per_reg + elementoff
+}
+
+// A[i, k] in vs1: A is stored row-major (rows are the outer dimension).
+function mat_A_idx(i : int, k : int, K_eff : int,
+                   LMUL : int, lambda : int, epr : int) -> int =
+  tile_reg_idx(i * K_eff + k, LMUL, lambda, epr)
+
+// B[k, j] in vs2: B is stored column-major (columns are the outer dimension).
+function mat_B_idx(k : int, j : int, K_eff : int,
+                   LMUL : int, lambda : int, epr : int) -> int =
+  tile_reg_idx(j * K_eff + k, LMUL, lambda, epr)
+
+// C[i, j] in vd: C is stored column-major.
+// MUL_C = VLEN / (SEW * lambda^2) is the number of registers in the C group.
+function mat_C_idx(i : int, j : int, M : int,
+                   MUL_C : int, lambda : int, epr : int) -> int =
+  tile_reg_idx(j * M + i, MUL_C, lambda, epr)
+
+// fp_format_of(EEW : int, alt : bit) -> fp_fmt
+//   Decode (element width in bits, altfmt flag) to the concrete FP format as specified
+//   by the altfmt encoding tables in the vtype section (e.g. EEW=8, alt=0 → E4M3 (OFP8)).
+
+// fp_mul_to(a     : bits(EEW_A), fmt_A : fp_fmt,
+//           b     : bits(EEW_A), fmt_B : fp_fmt,
+//           EEW_C : int,         fmt_C : fp_fmt,
+//           rm    : rounding_mode) -> bits(EEW_C)
+//   Multiply a (in format fmt_A) by b (in format fmt_B), round the product
+//   into format fmt_C, and return the EEW_C-wide bit pattern.  Updates fflags.
+
+// fp_add(acc  : bits(EEW), prod : bits(EEW),
+//        EEW  : int,       fmt  : fp_fmt,
+//        rm   : rounding_mode) -> bits(EEW)
+//   Add prod to acc, both in format fmt at width EEW, rounded per rm.  Updates fflags.
+--
+
+<<<
+[#insns-vfmmacc_vv,reftext="Floating-Point Matrix Multiply-Accumulate"]
+==== vfmmacc.vv
+
+Synopsis::
+Floating-Point Matrix Multiply-Accumulate
+
+Mnemonic::
+vfmmacc.vv _vd_, _vs1_, _vs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x57, attr: ['OP-V'] },
+    { bits: 5, name: 'vd' },
+    { bits: 3, name: 0x1,  attr: ['OPFVV'] },
+    { bits: 5, name: 'vs1' },
+    { bits: 5, name: 'vs2' },
+    { bits: 1, name: 'vm' },
+    { bits: 6, name: 0x14, attr: ['vfmmacc.vv'] }
+]}
+....
+
+Description::
+Computes the floating-point matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T.
++
+_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
+(column-major register layout), and _vd_ as an M×N accumulator tile (column-major register
+layout).  All three tiles have elements of width SEW.
++
+K_effective = λ × LMUL.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+The floating-point format for A and B elements is selected by `altfmt_A` and `altfmt_B` in `vtype`
+(both must be equal); the C accumulator format is selected by `altfmt`.
+All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
+
+Exceptions::
+_Illegal Instruction_ is raised if any of the following conditions is not satisfied:
++
+* VL is not a multiple of K_effective (= λ × LMUL).
+* MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
+* _vs1_ or _vs2_ is not aligned for LMUL.
+* _vd_ is not aligned for MUL_C.
+
+Operation::
+[source,sail]
+--
+let SEW_pow  : int = get_sew_pow();
+let EEW      : int = 2 ^ SEW_pow;
+let LMUL_pow : int = get_lmul_pow();
+let LMUL     : int = 2 ^ max(0, LMUL_pow);
+let epr      : int = vlen / EEW;
+
+let lambda : int =
+  match decode_vlambda(vtype[lambda]) {
+    Some(lam) => lam,
+    None()    => return Illegal_Instruction()
+  };
+
+let K_eff : int = lambda * LMUL;
+let N     : int = unsigned(vl) / K_eff;
+let M     : int = (LMUL * vlen / EEW) / K_eff;
+let MUL_C : int = M / lambda;
+
+if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
+if MUL_C not in {1,2,4,8,16}  then return Illegal_Instruction();
+
+let fmt_A : fp_fmt       = fp_format_of(EEW, vtype[altfmt_A]);
+let fmt_B : fp_fmt       = fp_format_of(EEW, vtype[altfmt_B]);
+let fmt_C : fp_fmt       = fp_format_of(EEW, vtype[altfmt]);
+let rm    : rounding_mode = get_fp_rounding_mode();
+
+foreach (j from 0 to (N - 1)) {
+  foreach (i from 0 to (M - 1)) {
+    let c_flat : int       = mat_C_idx(i, j, M, MUL_C, lambda, epr);
+    var acc : bits(EEW)    = read_single_element(EEW, c_flat, vd);
+    foreach (k from 0 to (K_eff - 1)) {
+      let a_flat : int       = mat_A_idx(i, k, K_eff, LMUL, lambda, epr);
+      let b_flat : int       = mat_B_idx(k, j, K_eff, LMUL, lambda, epr);
+      let a_bits : bits(EEW) = read_single_element(EEW, a_flat, vs1);
+      let b_bits : bits(EEW) = read_single_element(EEW, b_flat, vs2);
+      let prod   : bits(EEW) = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW, fmt_C, rm);
+      acc = fp_add(acc, prod, EEW, fmt_C, rm)
+    };
+    write_single_element(EEW, c_flat, vd, acc)
+  }
+};
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvfmm (<<#zvvfmm>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vfqwmmacc_vv,reftext="Floating-Point Quad-Widening Matrix Multiply-Accumulate"]
+==== vfqwmmacc.vv
+
+Synopsis::
+Floating-Point Quad-Widening Matrix Multiply-Accumulate
+
+Mnemonic::
+vfqwmmacc.vv _vd_, _vs1_, _vs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x57, attr: ['OP-V'] },
+    { bits: 5, name: 'vd' },
+    { bits: 3, name: 0x1,  attr: ['OPFVV'] },
+    { bits: 5, name: 'vs1' },
+    { bits: 5, name: 'vs2' },
+    { bits: 1, name: 'vm' },
+    { bits: 6, name: 0x16, attr: ['vfqwmmacc.vv'] }
+]}
+....
+
+Description::
+Computes the floating-point matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+with a widening factor of 4 applied to the K dimension.
++
+_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
+(column-major register layout), and _vd_ as an M×N accumulator tile (column-major register
+layout).
+_vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
++
+K_effective = λ × 4 × LMUL.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+The floating-point format for A and B elements is selected by `altfmt_A` and `altfmt_B`
+(both must be equal), interpreted for input element width SEW÷4; the C format is selected
+by `altfmt`, interpreted for width SEW.
+All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
+
+Operation::
+[source,sail]
+--
+let SEW_pow  : int = get_sew_pow();
+let EEW_C    : int = 2 ^ SEW_pow;
+let EEW_A    : int = EEW_C / 4;
+let LMUL_pow : int = get_lmul_pow();
+let LMUL     : int = 2 ^ max(0, LMUL_pow);
+let epr_A    : int = vlen / EEW_A;
+let epr_C    : int = vlen / EEW_C;
+
+let lambda : int =
+  match decode_vlambda(vtype[lambda]) {
+    Some(lam) => lam,
+    None()    => return Illegal_Instruction()
+  };
+
+let K_eff : int = lambda * 4 * LMUL;
+let N     : int = unsigned(vl) / K_eff;
+let M     : int = (LMUL * vlen / EEW_A) / K_eff;
+let MUL_C : int = M / lambda;
+
+if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
+if MUL_C not in {1,2,4,8,16}  then return Illegal_Instruction();
+
+let fmt_A : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_A]);
+let fmt_B : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_B]);
+let fmt_C : fp_fmt        = fp_format_of(EEW_C, vtype[altfmt]);
+let rm    : rounding_mode = get_fp_rounding_mode();
+
+foreach (j from 0 to (N - 1)) {
+  foreach (i from 0 to (M - 1)) {
+    let c_flat : int          = mat_C_idx(i, j, M, MUL_C, lambda, epr_C);
+    var acc : bits(EEW_C)     = read_single_element(EEW_C, c_flat, vd);
+    foreach (k from 0 to (K_eff - 1)) {
+      let a_flat : int          = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
+      let b_flat : int          = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
+      let a_bits : bits(EEW_A)  = read_single_element(EEW_A, a_flat, vs1);
+      let b_bits : bits(EEW_A)  = read_single_element(EEW_A, b_flat, vs2);
+      let prod   : bits(EEW_C)  = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW_C, fmt_C, rm);
+      acc = fp_add(acc, prod, EEW_C, fmt_C, rm)
+    };
+    write_single_element(EEW_C, c_flat, vd, acc)
+  }
+};
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvfmm (<<#zvvfmm>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vfwmmacc_vv,reftext="Floating-Point Widening Matrix Multiply-Accumulate"]
+==== vfwmmacc.vv
+
+Synopsis::
+Floating-Point Widening Matrix Multiply-Accumulate
+
+Mnemonic::
+vfwmmacc.vv _vd_, _vs1_, _vs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x57, attr: ['OP-V'] },
+    { bits: 5, name: 'vd' },
+    { bits: 3, name: 0x1,  attr: ['OPFVV'] },
+    { bits: 5, name: 'vs1' },
+    { bits: 5, name: 'vs2' },
+    { bits: 1, name: 'vm' },
+    { bits: 6, name: 0x15, attr: ['vfwmmacc.vv'] }
+]}
+....
+
+Description::
+Computes the floating-point matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+with a widening factor of 2 applied to the K dimension.
++
+_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
+(column-major register layout), and _vd_ as an M×N accumulator tile (column-major register
+layout).
+_vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
++
+K_effective = λ × 2 × LMUL.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+The floating-point format for A and B elements is selected by `altfmt_A` and `altfmt_B`
+(both must be equal), interpreted for input element width SEW÷2; the C format is selected
+by `altfmt`, interpreted for width SEW.
+All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
+
+Operation::
+[source,sail]
+--
+let SEW_pow  : int = get_sew_pow();
+let EEW_C    : int = 2 ^ SEW_pow;
+let EEW_A    : int = EEW_C / 2;
+let LMUL_pow : int = get_lmul_pow();
+let LMUL     : int = 2 ^ max(0, LMUL_pow);
+let epr_A    : int = vlen / EEW_A;
+let epr_C    : int = vlen / EEW_C;
+
+let lambda : int =
+  match decode_vlambda(vtype[lambda]) {
+    Some(lam) => lam,
+    None()    => return Illegal_Instruction()
+  };
+
+let K_eff : int = lambda * 2 * LMUL;
+let N     : int = unsigned(vl) / K_eff;
+let M     : int = (LMUL * vlen / EEW_A) / K_eff;
+let MUL_C : int = M / lambda;
+
+if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
+if MUL_C not in {1,2,4,8,16}  then return Illegal_Instruction();
+
+let fmt_A : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_A]);
+let fmt_B : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_B]);
+let fmt_C : fp_fmt        = fp_format_of(EEW_C, vtype[altfmt]);
+let rm    : rounding_mode = get_fp_rounding_mode();
+
+foreach (j from 0 to (N - 1)) {
+  foreach (i from 0 to (M - 1)) {
+    let c_flat : int          = mat_C_idx(i, j, M, MUL_C, lambda, epr_C);
+    var acc : bits(EEW_C)     = read_single_element(EEW_C, c_flat, vd);
+    foreach (k from 0 to (K_eff - 1)) {
+      let a_flat : int          = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
+      let b_flat : int          = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
+      let a_bits : bits(EEW_A)  = read_single_element(EEW_A, a_flat, vs1);
+      let b_bits : bits(EEW_A)  = read_single_element(EEW_A, b_flat, vs2);
+      let prod   : bits(EEW_C)  = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW_C, fmt_C, rm);
+      acc = fp_add(acc, prod, EEW_C, fmt_C, rm)
+    };
+    write_single_element(EEW_C, c_flat, vd, acc)
+  }
+};
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvfmm (<<#zvvfmm>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vmmacc_vv,reftext="Integer Matrix Multiply-Accumulate"]
+==== vmmacc.vv
+
+Synopsis::
+Integer Matrix Multiply-Accumulate
+
+Mnemonic::
+vmmacc.vv _vd_, _vs1_, _vs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x57, attr: ['OP-V'] },
+    { bits: 5, name: 'vd' },
+    { bits: 3, name: 0x0,  attr: ['OPIVV'] },
+    { bits: 5, name: 'vs1' },
+    { bits: 5, name: 'vs2' },
+    { bits: 1, name: 'vm' },
+    { bits: 6, name: 0x38, attr: ['vmmacc.vv'] }
+]}
+....
+
+Description::
+Computes the matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T.
++
+_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
+(column-major register layout), and _vd_ as an M×N accumulator tile (column-major register
+layout).  All three tiles have elements of width SEW.
++
+K_effective = λ × LMUL.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of
+K_effective.
+The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
+0 = signed, 1 = unsigned.
+Accumulation is modular (wraps at 2^SEW^).
+
+Exceptions::
+_Illegal Instruction_ is raised if any of the following conditions is not satisfied:
++
+* VL is not a multiple of K_effective (= λ × LMUL).
+* MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
+* _vs1_ or _vs2_ is not aligned for LMUL.
+* _vd_ is not aligned for MUL_C.
+
+Operation::
+[source,sail]
+--
+let SEW_pow   : int = get_sew_pow();
+let EEW       : int = 2 ^ SEW_pow;
+let LMUL_pow  : int = get_lmul_pow();
+let LMUL      : int = 2 ^ max(0, LMUL_pow);
+let epr       : int = vlen / EEW;
+
+let lambda : int =
+  match decode_vlambda(vtype[lambda]) {
+    Some(lam) => lam,
+    None()    => return Illegal_Instruction()
+  };
+
+let K_eff : int = lambda * LMUL;
+let N     : int = unsigned(vl) / K_eff;
+let M     : int = (LMUL * vlen / EEW) / K_eff;
+let MUL_C : int = M / lambda;
+
+if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
+if MUL_C not in {1,2,4,8,16} then return Illegal_Instruction();
+
+let signed_A : bool = vtype[altfmt_A] == 0b0;
+let signed_B : bool = vtype[altfmt_B] == 0b0;
+
+foreach (j from 0 to (N - 1)) {
+  foreach (i from 0 to (M - 1)) {
+    let c_flat : int = mat_C_idx(i, j, M, MUL_C, lambda, epr);
+    let c_bits : bits(EEW) = read_single_element(EEW, c_flat, vd);
+    var acc : int = signed(c_bits);
+    foreach (k from 0 to (K_eff - 1)) {
+      let a_flat : int = mat_A_idx(i, k, K_eff, LMUL, lambda, epr);
+      let b_flat : int = mat_B_idx(k, j, K_eff, LMUL, lambda, epr);
+      let a_val  : int = if signed_A
+                         then signed(read_single_element(EEW, a_flat, vs1))
+                         else unsigned(read_single_element(EEW, a_flat, vs1));
+      let b_val  : int = if signed_B
+                         then signed(read_single_element(EEW, b_flat, vs2))
+                         else unsigned(read_single_element(EEW, b_flat, vs2));
+      acc = acc + a_val * b_val
+    };
+    write_single_element(EEW, c_flat, vd, to_bits_unsafe(EEW, acc))
+  }
+};
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvmm (<<#zvvmm>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vmtl_v,reftext="Order-Preserving Tile Load"]
+==== vmtl.v
+
+Synopsis::
+Order-Preserving Matrix Tile Load
+
+Mnemonic::
+vmtl.v _vd_, (_rs1_), _rs2_ [, _Lλ_] [, _vm_]
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x07, attr: ['Vector tile (2D) load'] },
+    { bits: 5, name: 'vd', attr: ['destination of load'], type: 2 },
+    { bits: 3, name: 0x7 },
+    { bits: 5, name: 'rs1', attr: ['base address'], type: 4 },
+    { bits: 5, name: 'rs2', type: 2 },
+    { bits: 1, name: 'vm' },
+    { bits: 2, name: 0x0, attr: ['order preserving'] },
+    { bits: 1, name: 1 },
+    { bits: 3, name: 'lambda', type: 4 }
+]}
+....
+
+Description::
+Loads a 2D matrix tile from memory into the vector register group starting at _vd_.
+_rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
+When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
+When masked (`v0.t`), masked-off elements are not written to the destination.
++
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`:
++
+    VD[i] = M[rs1 + (i / linesize) × LD + (i % linesize)]
++
+This is the correct load variant when A is stored in row-major order or when B is stored in
+column-major order: in both cases the memory layout consists of _linesize_-element
+contiguous segments with a stride of `LD` elements between them.
+For LMUL=1 this simplifies to λ-element segments.
+
+Operation::
+[source,sail]
+--
+let SEW_pow       : int        = get_sew_pow();
+let EEW           : int        = 2 ^ SEW_pow;
+let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
+let LMUL_pow      : int        = get_lmul_pow();
+let LMUL          : int        = 2 ^ max(0, LMUL_pow);
+let elems_per_reg : int        = vlen / EEW;
+let num_elem      : int        = unsigned(vl);
+
+let eff_lambda : int =
+  match decode_vlambda(instr.lambda) {
+    Some(lam) => lam,
+    None()    => match decode_vlambda(vtype[lambda]) {
+      Some(lam) => lam,
+      None()    => return Illegal_Instruction()
+    }
+  };
+
+let LD     : int      = unsigned(X(rs2));
+let vm_val            = read_vmask(num_elem, vm, zvreg);
+let linesize : int    = eff_lambda * LMUL;
+
+foreach (i from 0 to (num_elem - 1)) {
+  if vm_val[i] == 0b1 then {
+    set_vstart(to_bits_unsafe(16, i));
+    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+    let mem_off  : int = (i / linesize) * LD + (i % linesize);
+    match vmem_read(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
+                    EEW_bytes, Load(Data), false, false, false) {
+      Ok(elem) => write_single_element(EEW, flat_idx, vd, elem),
+      Err(e)   => return e,
+    }
+  }
+  // inactive elements: vd[tile_reg_idx(i, ...)] left undisturbed (or agnostic per vma policy)
+};
+
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvmtls (<<#zvvmtls>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vmts_v,reftext="Order-Preserving Tile Store"]
+==== vmts.v
+
+Synopsis::
+Order-Preserving Matrix Tile Store
+
+Mnemonic::
+vmts.v _vs3_, (_rs1_), _rs2_ [, _Lλ_] [, _vm_]
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x27, attr: ['Vector tile (2D) store'] },
+    { bits: 5, name: 'vd', attr: ['source of store'], type: 2 },
+    { bits: 3, name: 0x7 },
+    { bits: 5, name: 'rs1', attr: ['base address'], type: 4 },
+    { bits: 5, name: 'rs2', type: 2 },
+    { bits: 1, name: 'vm' },
+    { bits: 2, name: 0x0, attr: ['order preserving'] },
+    { bits: 1, name: 1 },
+    { bits: 3, name: 'lambda', type: 4 }
+]}
+....
+
+Description::
+Stores the 2D matrix tile held in the vector register group starting at _vs3_ to memory.
+_rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
+When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
+When masked (`v0.t`), masked-off elements are not written to memory.
++
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`:
++
+    M[rs1 + (i / linesize) × LD + (i % linesize)] = VS[i]
+
+Operation::
+[source,sail]
+--
+let SEW_pow       : int        = get_sew_pow();
+let EEW           : int        = 2 ^ SEW_pow;
+let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
+let LMUL_pow      : int        = get_lmul_pow();
+let LMUL          : int        = 2 ^ max(0, LMUL_pow);
+let elems_per_reg : int        = vlen / EEW;
+let num_elem      : int        = unsigned(vl);
+
+let eff_lambda : int =
+  match decode_vlambda(instr.lambda) {
+    Some(lam) => lam,
+    None()    => match decode_vlambda(vtype[lambda]) {
+      Some(lam) => lam,
+      None()    => return Illegal_Instruction()
+    }
+  };
+
+let LD     : int   = unsigned(X(rs2));
+let vm_val         = read_vmask(num_elem, vm, zvreg);
+let mask           = match init_masked_source(num_elem, LMUL_pow, vm_val) {
+  Ok(v)   => v,
+  Err(()) => return Illegal_Instruction()
+};
+let linesize : int = eff_lambda * LMUL;
+
+foreach (i from 0 to (num_elem - 1)) {
+  if mask[i] == 0b1 then {
+    set_vstart(to_bits_unsafe(16, i));
+    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+    let mem_off  : int = (i / linesize) * LD + (i % linesize);
+    let data               = read_single_element(EEW, flat_idx, vs3);
+    match vmem_write(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
+                     EEW_bytes, data, Store(Data), false, false, false) {
+      Ok(true)  => (),
+      Ok(false) => internal_error(__FILE__, __LINE__, "store got false from vmem_write"),
+      Err(e)    => return e,
+    }
+  }
+};
+
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvmtls (<<#zvvmtls>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vmttl_v,reftext="Transposing Tile Load"]
+==== vmttl.v
+
+Synopsis::
+Transposing Matrix Tile Load
+
+Mnemonic::
+vmttl.v _vd_, (_rs1_), _rs2_ [, _Lλ_] [, _vm_]
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x07, attr: ['Vector tile (2D) load'] },
+    { bits: 5, name: 'vd', attr: ['destination of load'], type: 2 },
+    { bits: 3, name: 0x7 },
+    { bits: 5, name: 'rs1', attr: ['base address'], type: 4 },
+    { bits: 5, name: 'rs2', type: 2 },
+    { bits: 1, name: 'vm' },
+    { bits: 2, name: 0x1, attr: ['transposing'] },
+    { bits: 1, name: 1 },
+    { bits: 3, name: 'lambda', type: 4 }
+]}
+....
+
+Description::
+Loads a 2D matrix tile from memory and transposes it into the vector register layout
+required by the matrix multiplier.
+This instruction is used when a B tile is stored in row-major order, or when an A or C tile
+is stored in column-major order in memory.
+_rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
+When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
+When masked (`v0.t`), masked-off elements are not written to the destination.
+
++
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`:
++
+    VD[i] = M[rs1 + (i % linesize) × LD + (i / linesize)]
+
+Operation::
+[source,sail]
+--
+let SEW_pow       : int        = get_sew_pow();
+let EEW           : int        = 2 ^ SEW_pow;
+let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
+let LMUL_pow      : int        = get_lmul_pow();
+let LMUL          : int        = 2 ^ max(0, LMUL_pow);
+let elems_per_reg : int        = vlen / EEW;
+let num_elem      : int        = unsigned(vl);
+
+let eff_lambda : int =
+  match decode_vlambda(instr.lambda) {
+    Some(lam) => lam,
+    None()    => match decode_vlambda(vtype[lambda]) {
+      Some(lam) => lam,
+      None()    => return Illegal_Instruction()
+    }
+  };
+
+let LD     : int   = unsigned(X(rs2));
+let vm_val         = read_vmask(num_elem, vm, zvreg);
+let linesize : int = eff_lambda * LMUL;
+
+foreach (i from 0 to (num_elem - 1)) {
+  if vm_val[i] == 0b1 then {
+    set_vstart(to_bits_unsafe(16, i));
+    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+    // Transposing: swap line and elem_in_line for the memory address
+    let mem_off  : int = (i % linesize) * LD + (i / linesize);
+    match vmem_read(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
+                    EEW_bytes, Load(Data), false, false, false) {
+      Ok(elem) => write_single_element(EEW, flat_idx, vd, elem),
+      Err(e)   => return e,
+    }
+  }
+  // inactive elements: vd[tile_reg_idx(i, ...)] left undisturbed (or agnostic per vma policy)
+};
+
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvmtls (<<#zvvmtls>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vmtts_v,reftext="Transposing Tile Store"]
+==== vmtts.v
+
+Synopsis::
+Transposing Matrix Tile Store
+
+Mnemonic::
+vmtts.v _vs3_, (_rs1_), _rs2_ [, _Lλ_] [, _vm_]
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x27, attr: ['Vector tile (2D) store'] },
+    { bits: 5, name: 'vd', attr: ['source of store'], type: 2 },
+    { bits: 3, name: 0x7 },
+    { bits: 5, name: 'rs1', attr: ['base address'], type: 4 },
+    { bits: 5, name: 'rs2', type: 2 },
+    { bits: 1, name: 'vm' },
+    { bits: 2, name: 0x1, attr: ['transposing'] },
+    { bits: 1, name: 1 },
+    { bits: 3, name: 'lambda', type: 4 }
+]}
+....
+
+Description::
+Stores a 2D matrix tile from vector registers to memory, applying the inverse transposition
+of `vmttl.v`.
+_rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
+When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
+When masked (`v0.t`), masked-off elements are not written to memory.
+
++
+Let _linesize_ = λ × LMUL.
+For each active element index `i` in `[0, VL)`:
++
+    M[rs1 + (i % linesize) × LD + (i / linesize)] = VS[i]
+
+Operation::
+[source,sail]
+--
+let SEW_pow       : int        = get_sew_pow();
+let EEW           : int        = 2 ^ SEW_pow;
+let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
+let LMUL_pow      : int        = get_lmul_pow();
+let LMUL          : int        = 2 ^ max(0, LMUL_pow);
+let elems_per_reg : int        = vlen / EEW;
+let num_elem      : int        = unsigned(vl);
+
+let eff_lambda : int =
+  match decode_vlambda(instr.lambda) {
+    Some(lam) => lam,
+    None()    => match decode_vlambda(vtype[lambda]) {
+      Some(lam) => lam,
+      None()    => return Illegal_Instruction()
+    }
+  };
+
+let LD     : int   = unsigned(X(rs2));
+let vm_val         = read_vmask(num_elem, vm, zvreg);
+let mask           = match init_masked_source(num_elem, LMUL_pow, vm_val) {
+  Ok(v)   => v,
+  Err(()) => return Illegal_Instruction()
+};
+let linesize : int = eff_lambda * LMUL;
+
+foreach (i from 0 to (num_elem - 1)) {
+  if mask[i] == 0b1 then {
+    set_vstart(to_bits_unsafe(16, i));
+    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+    // Transposing: swap line and elem_in_line for the memory address
+    let mem_off  : int = (i % linesize) * LD + (i / linesize);
+    let data               = read_single_element(EEW, flat_idx, vs3);
+    match vmem_write(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
+                     EEW_bytes, data, Store(Data), false, false, false) {
+      Ok(true)  => (),
+      Ok(false) => internal_error(__FILE__, __LINE__, "store got false from vmem_write"),
+      Err(e)    => return e,
+    }
+  }
+};
+
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvmtls (<<#zvvmtls>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vqwmmacc_vv,reftext="Integer Quad-Widening Matrix Multiply-Accumulate"]
+==== vqwmmacc.vv
+
+Synopsis::
+Integer Quad-Widening Matrix Multiply-Accumulate
+
+Mnemonic::
+vqwmmacc.vv _vd_, _vs1_, _vs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x57, attr: ['OP-V'] },
+    { bits: 5, name: 'vd' },
+    { bits: 3, name: 0x0,  attr: ['OPIVV'] },
+    { bits: 5, name: 'vs1' },
+    { bits: 5, name: 'vs2' },
+    { bits: 1, name: 'vm' },
+    { bits: 6, name: 0x3a, attr: ['vqwmmacc.vv'] }
+]}
+....
+
+Description::
+Computes the matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+with a widening factor of 4 applied to the K dimension.
++
+_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
+(column-major register layout), and _vd_ as an M×N accumulator tile (column-major register
+layout).
+_vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
++
+K_effective = λ × 4 × LMUL.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ.
+The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
+0 = signed, 1 = unsigned.
+Accumulation is modular (wraps at 2^SEW^).
+
+Operation::
+[source,sail]
+--
+let SEW_pow   : int = get_sew_pow();
+let EEW_C     : int = 2 ^ SEW_pow;
+let EEW_A     : int = EEW_C / 4;
+let LMUL_pow  : int = get_lmul_pow();
+let LMUL      : int = 2 ^ max(0, LMUL_pow);
+let epr_A     : int = vlen / EEW_A;
+let epr_C     : int = vlen / EEW_C;
+
+let lambda : int =
+  match decode_vlambda(vtype[lambda]) {
+    Some(lam) => lam,
+    None()    => return Illegal_Instruction()
+  };
+
+let K_eff : int = lambda * 4 * LMUL;
+let N     : int = unsigned(vl) / K_eff;
+let M     : int = (LMUL * vlen / EEW_A) / K_eff;
+let MUL_C : int = M / lambda;
+
+if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
+if MUL_C not in {1,2,4,8,16} then return Illegal_Instruction();
+
+let signed_A : bool = vtype[altfmt_A] == 0b0;
+let signed_B : bool = vtype[altfmt_B] == 0b0;
+
+foreach (j from 0 to (N - 1)) {
+  foreach (i from 0 to (M - 1)) {
+    let c_flat : int = mat_C_idx(i, j, M, MUL_C, lambda, epr_C);
+    let c_bits : bits(EEW_C) = read_single_element(EEW_C, c_flat, vd);
+    var acc : int = signed(c_bits);
+    foreach (k from 0 to (K_eff - 1)) {
+      let a_flat : int = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
+      let b_flat : int = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
+      let a_val  : int = if signed_A
+                         then signed(read_single_element(EEW_A, a_flat, vs1))
+                         else unsigned(read_single_element(EEW_A, a_flat, vs1));
+      let b_val  : int = if signed_B
+                         then signed(read_single_element(EEW_A, b_flat, vs2))
+                         else unsigned(read_single_element(EEW_A, b_flat, vs2));
+      acc = acc + a_val * b_val
+    };
+    write_single_element(EEW_C, c_flat, vd, to_bits_unsafe(EEW_C, acc))
+  }
+};
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvmm (<<#zvvmm>>)
+|0.1
+|Draft
+|===
+
+<<<
+[#insns-vwmmacc_vv,reftext="Integer Widening Matrix Multiply-Accumulate"]
+==== vwmmacc.vv
+
+Synopsis::
+Integer Widening Matrix Multiply-Accumulate
+
+Mnemonic::
+vwmmacc.vv _vd_, _vs1_, _vs2_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg:[
+    { bits: 7, name: 0x57, attr: ['OP-V'] },
+    { bits: 5, name: 'vd' },
+    { bits: 3, name: 0x0,  attr: ['OPIVV'] },
+    { bits: 5, name: 'vs1' },
+    { bits: 5, name: 'vs2' },
+    { bits: 1, name: 'vm' },
+    { bits: 6, name: 0x39, attr: ['vwmmacc.vv'] }
+]}
+....
+
+Description::
+Computes the matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+with a widening factor of 2 applied to the K dimension.
++
+_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
+(column-major register layout), and _vd_ as an M×N accumulator tile (column-major register
+layout).
+_vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
++
+K_effective = λ × 2 × LMUL.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ.
+The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
+0 = signed, 1 = unsigned.
+Accumulation is modular (wraps at 2^SEW^).
+
+Operation::
+[source,sail]
+--
+let SEW_pow   : int = get_sew_pow();
+let EEW_C     : int = 2 ^ SEW_pow;
+let EEW_A     : int = EEW_C / 2;
+let LMUL_pow  : int = get_lmul_pow();
+let LMUL      : int = 2 ^ max(0, LMUL_pow);
+let epr_A     : int = vlen / EEW_A;
+let epr_C     : int = vlen / EEW_C;
+
+let lambda : int =
+  match decode_vlambda(vtype[lambda]) {
+    Some(lam) => lam,
+    None()    => return Illegal_Instruction()
+  };
+
+let K_eff : int = lambda * 2 * LMUL;
+let N     : int = unsigned(vl) / K_eff;
+let M     : int = (LMUL * vlen / EEW_A) / K_eff;
+let MUL_C : int = M / lambda;
+
+if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
+if MUL_C not in {1,2,4,8,16} then return Illegal_Instruction();
+
+let signed_A : bool = vtype[altfmt_A] == 0b0;
+let signed_B : bool = vtype[altfmt_B] == 0b0;
+
+foreach (j from 0 to (N - 1)) {
+  foreach (i from 0 to (M - 1)) {
+    let c_flat : int = mat_C_idx(i, j, M, MUL_C, lambda, epr_C);
+    let c_bits : bits(EEW_C) = read_single_element(EEW_C, c_flat, vd);
+    var acc : int = signed(c_bits);
+    foreach (k from 0 to (K_eff - 1)) {
+      let a_flat : int = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
+      let b_flat : int = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
+      let a_val  : int = if signed_A
+                         then signed(read_single_element(EEW_A, a_flat, vs1))
+                         else unsigned(read_single_element(EEW_A, a_flat, vs1));
+      let b_val  : int = if signed_B
+                         then signed(read_single_element(EEW_A, b_flat, vs2))
+                         else unsigned(read_single_element(EEW_A, b_flat, vs2));
+      acc = acc + a_val * b_val
+    };
+    write_single_element(EEW_C, c_flat, vd, to_bits_unsafe(EEW_C, acc))
+  }
+};
+RETIRE_SUCCESS
+--
+
+Included in::
+[%header,cols="4,2,2"]
+|===
+|Extension
+|Minimum version
+|Lifecycle state
+
+|Zvvmm (<<#zvvmm>>)
+|0.1
+|Draft
+|===
