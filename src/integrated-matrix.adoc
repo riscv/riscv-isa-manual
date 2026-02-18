@@ -334,8 +334,114 @@ For each active element index `i` in `[0, VL)`, the transposing store computes:
 
     M[rs1 + (i % linesize) × LD + (i / linesize)] = VS[i]
 
+<<<
+
+==== Tile geometry
+
+The tile dimensions are fully determined by the current vector configuration:
+
+    M_tile = VLEN / (SEW × λ)           (rows of A and C per computation)
+    K_eff  = λ × W × LMUL               (shared K-dimension step)
+    N_tile = VL / K_eff                  (columns of B and C; set via vsetvl)
+    MUL_C  = VLEN / (SEW × λ²)          (C accumulator register group size)
+
+`M_tile` is fixed by the hardware (VLEN) and the chosen SEW and λ; it cannot be
+changed by VL.
+`N_tile` is controlled by the programmer through VL; use `vsetvl` to select the
+largest `N_tile` that fits the remaining columns.
+
+Because the multiply-accumulate instructions always read all `M_tile` rows of A
+independent of VL, loading an A tile requires VL = M_tile × K_eff (the natural
+maximum VL for the chosen LMUL), while the B load and computation use the
+narrower VL = K_eff × N_tile.
+
+==== Memory layout and instruction selection
+
+[cols="3,2,2", options="header"]
+|===
+| Matrix / memory order | Load instruction | Store instruction
+
+| A, row-major      | `vmtl.v` (order-preserving) | —
+| B, column-major   | `vmtl.v` (order-preserving) | —
+| B, row-major      | `vmttl.v` (transposing)      | —
+| C, column-major   | `vmtl.v` (if loaded from memory) | `vmts.v`
+|===
+
+==== Example: single-precision floating-point GEMM
+
+The following pseudocode implements C ← C + A × B for single-precision
+floating-point data, tiled over all three matrix dimensions.
+The configuration uses SEW=32, LMUL=1, and λ=4, giving K_eff = 4 and
+M_tile = VLEN/128.
+A is stored row-major; B and C are stored column-major.
+
+[source,c]
+--
+// C (M×N, col-major, stride ldc) += A (M×K, row-major, stride lda)
+//                                 × B (K×N, col-major, stride ldb)
+// Pre-condition: vtype configured for SEW=32, LMUL=1, lambda=4
+// Pre-condition: K is a multiple of K_eff (= lambda × LMUL = 4)
+
+const int K_eff  = 4;               // lambda × LMUL
+const int M_tile = VLEN / (32 * 4); // VLEN / (SEW × lambda)
+
+for (j = 0; j < N; j += N_tile) {
+    // Choose N_tile: how many B/C columns to handle this iteration.
+    // vsetvl rounds down to a multiple of K_eff automatically.
+    vl     = vsetvl_e32m1(K_eff * (N - j));
+    N_tile = vl / K_eff;
+
+    for (i = 0; i < M; i += M_tile) {
+
+        // Zero the C tile accumulator (MUL_C registers starting at v8).
+        vsetvl(K_eff * M_tile);   // VL = vl_max, needed to touch all elements
+        vmv.v.i v8, 0;
+
+        // Inner K loop: accumulate A sub-columns × B sub-rows into C tile.
+        for (k = 0; k < K; k += K_eff) {
+
+            // Load A[i:i+M_tile][k:k+K_eff]: M_tile rows, K_eff cols, row-major.
+            // Must use VL = M_tile × K_eff so all rows are written to v0.
+            vsetvl(K_eff * M_tile);           // VL = vl_max
+            vmtl.v v0, &A[i*lda + k], lda;   // LD = lda (A row stride)
+
+            // Load B[k:k+K_eff][j:j+N_tile]: K_eff rows, N_tile cols, col-major.
+            // Then accumulate into C tile.
+            vsetvl(vl);                        // VL = K_eff × N_tile
+            vmtl.v    v4, &B[j*ldb + k], ldb; // LD = ldb (B col stride = K_total)
+            vfmmacc.vv v8, v0, v4;            // C[i..][j..] += A_tile × B_tile
+        }
+
+        // Store C[i:i+M_tile][j:j+N_tile]: M_tile rows, N_tile cols, col-major.
+        vsetvl(vl);
+        vmts.v v8, &C[j*ldc + i], ldc;        // LD = ldc (C col stride = M_total)
+    }
+}
+--
+
+Key observations:
+
+* The A tile must be loaded with `VL = M_tile × K_eff` (the maximum VL for the
+  chosen LMUL) because `vfmmacc.vv` always reads all `M_tile` rows of A
+  regardless of the VL set for the computation.
+  A separate `vsetvl` is therefore required before each `vmtl.v` for A.
+
+* The B load and the multiply-accumulate instruction share `VL = K_eff × N_tile`,
+  which restricts computation to the current column block.
+
+* For integer GEMM, substitute `vmmacc.vv` for `vfmmacc.vv` and set `altfmt_A`
+  and `altfmt_B` in `vtype` to select the desired operand signedness.
+  The load instructions are unchanged.
+
+* For widening variants (W=2 or W=4), use `vfwmmacc.vv`/`vfqwmmacc.vv` or
+  `vwmmacc.vv`/`vqwmmacc.vv`.
+  The narrower A and B element widths are encoded in the multiply-accumulate
+  instruction; the tile load instructions require no modification.
 
 <<<
+
+[#integrated-matrix-software,reftext="Software considerations"]
+=== Software considerations
 
 [#integrated-matrix-insns,reftext="Instructions (in alphabetical order)"]
 === Instructions (in alphabetical order)
@@ -1392,3 +1498,4 @@ Included in::
 |0.1
 |Draft
 |===
+
