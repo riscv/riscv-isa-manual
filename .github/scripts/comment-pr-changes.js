@@ -23,10 +23,8 @@ ${tagChanges || 'No detailed changes available.'}
 
 **How to update reference files (if needed):**
 \`\`\`bash
-make build-tags
-cp build/riscv-unprivileged-norm-tags.json ref/
-cp build/riscv-privileged-norm-tags.json ref/
-git add ref/
+make update-ref
+git add ref/*.json
 git commit -m "Update normative tag reference files"
 \`\`\`
 
