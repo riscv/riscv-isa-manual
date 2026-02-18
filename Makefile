@@ -131,7 +131,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref-tags
 
 all: build
 
@@ -148,6 +148,10 @@ build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
 check-tags:
 	@bash ./scripts/check-tag-changes.sh
+
+update-ref: $(DOCS_NORM_TAGS)
+	cp -f $(DOCS_NORM_TAGS) ref
+	sed -i -e '$$a\' ref/*.json
 
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
