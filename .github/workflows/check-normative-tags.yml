@@ -45,7 +45,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Keep push/workflow_dispatch on a branch so later auto-commit can push.
+          # For pull_request_target, analyze the PR head commit contents.
+          ref: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref || github.event.pull_request.head.sha }}
           submodules: recursive
 
       - name: Build normative tags
@@ -135,8 +137,12 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add ref/*.json
-          git diff --staged --quiet || git commit -m "Auto-update normative tag reference files"
-          git push
+          if git diff --staged --quiet; then
+            echo "No reference file changes to commit."
+            exit 0
+          fi
+          git commit -m "Auto-update normative tag reference files"
+          git push origin "HEAD:${GITHUB_REF#refs/heads/}"
 
       - name: Comment on PR with detected changes
         if: >-
