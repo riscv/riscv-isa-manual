@@ -1,0 +1,381 @@
+== "Zvzip" Extension for Reordering Structured Data, Version 0.1
+
+This chapter describes the Zvzip standard extension for reordering structured
+data in vector registers. These instructions address usages such as packing and
+unpacking data structures such as color components of a pixel, real and
+imaginary components of complex numbers, transposing small matrices, among
+others.
+
+[%autowidth]
+[%header,cols="2,4"]
+|===
+|Mnemonic      |Instruction
+| vzip.vv      | <<insns-vzip>>
+| vunzipe.v    | <<insns-vunzipe>>
+| vunzipo.v    | <<insns-vunzipo>>
+| vpaire.vv    | <<insns-vpaire>>
+| vpairo.vv    | <<insns-vpairo>>
+|===
+
+The Zvzip Extension depends on the Zve32x Extension.
+
+<<<
+
+[[insns-vzip, Vector Zip]]
+=== Vector Zip Instruction
+
+Synopsis::
+
+Interleave elements from source vector register groups into destination vector
+register groups.
+
+Mnemonic::
+
+vzip.vv vd, vs2, vs1, vm
+
+Encoding::
+
+[wavedrom, , svg]
+....
+{reg:[
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm'},
+  {bits: 6, name: '111110'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Description::
+
+Vector Zip (VZIP) instruction interleaves elements from two source vector
+register groups (`vs2` and `vs1`) into one destination vector register group
+(`vd`) by alternating elements from the two sources.                           +
+                                                                               +
+For destination element index `i`, if `i` is even then `vd[i] = vs2[i/2]`, and
+if `i` is odd then `vd[i] = vs1[i/2]`.                                         +
+                                                                               +
+Equivalently, the result order is:
+`vd = [vs2[0], vs1[0], vs2[1], vs1[1], ... ]`                                  +
+                                                                               +
+This instruction operates with an effective vector length (EVL) of 2*VL. The
+destination EMUL is 2xLMUL. The instruction is reserved when LMUL is 8.
+Prestart, inactive, and tail element handling follows the standard vector
+rules, applied over the EVL.                                                   +
+                                                                               +
+The destination vector register group may overlap the source vector register
+group if the overlap is in the highest-numbered part of the destination
+register group and the source EMUL is at least 1. If the overlap violates these
+constraints, the instruction encoding is reserved.
+
+Operation::
+
+[source,sail]
+--
+function clause execute (VZIP(vs2, vs1, vd, vm)) = {
+  EVL = 2 * VL;
+  foreach (i from vstart to EVL-1) {
+    let j   = i / 2;
+    let op1 = get_velem(vs1, SEW, j);
+    let op2 = get_velem(vs2, SEW, j);
+    let res = if (i % 2 == 0) then op2 else op1;
+    if (vm == 0b1) | (v0[i] == 0b1) then
+      set_velem(vd, EEW=SEW, i, res);
+    // inactive element handling follows VMA
+  }
+  // tail element handling follows VTA
+  RETIRE_SUCCESS
+}
+--
+
+<<<
+
+[[insns-vunzipe, Vector Unzip Even]]
+=== Vector Unzip Even Instruction
+
+Synopsis::
+
+Extract even-indexed elements from source vector register group into the
+destination vector register group.
+
+Mnemonic::
+
+vunzipe.v vd, vs2, vm
+
+Encoding::
+
+[wavedrom, , svg]
+....
+{reg:[
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: '01011'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm'},
+  {bits: 6, name: '010010'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Description::
+
+The vector unzip-even instruction (VUNZIPE) extracts VL even-indexed elements
+from the source vector register group into the destination vector register
+group.                                                                         +
+                                                                               +
+This instruction accesses 2*VL elements in the source vector register group and
+the source EMUL is 2xLMUL. The instruction is reserved when LMUL is 8.         +
+                                                                               +
+Prestart, inactive, and tail element handling follow the standard vector
+rules and are defined over the destination element indices (`0` to `VL-1`).    +
+                                                                               +
+The destination vector register group may overlap the source vector register
+group only if the overlap is in the lowest-numbered part of the source register
+group. If the overlap violates these constraints, the instruction encoding is
+reserved.
+
+Operation::
+
+[source,sail]
+--
+function clause execute (VUNZIPE(vs2, vd, vm)) = {
+  foreach (i from vstart to VL-1) {
+    let j = i * 2;
+    if (vm == 0b1) | (v0[i] == 0b1) then
+      set_velem(vd, EEW=SEW, i, get_velem(vs2, SEW, j));
+    // inactive element handling follows VMA
+  }
+  // tail element handling follows VTA
+  RETIRE_SUCCESS
+}
+--
+
+<<<
+
+[[insns-vunzipo, Vector Unzip Odd]]
+=== Vector Unzip Odd Instruction
+
+Synopsis::
+
+Extract odd-indexed elements from source vector register group into the
+destination vector register group.
+
+Mnemonic::
+
+vunzipo.v vd, vs2, vm
+
+Encoding::
+
+[wavedrom, , svg]
+....
+{reg:[
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: '01111'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm'},
+  {bits: 6, name: '010010'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Description::
+
+The vector unzip-odd instruction (VUNZIPO) extracts VL odd-indexed elements
+from the source vector register group into the destination vector register
+group.                                                                         +
+                                                                               +
+This instruction accesses 2*VL elements in the source vector register group and
+the source EMUL is 2xLMUL. The instruction is reserved when LMUL is 8.         +
+                                                                               +
+Prestart, inactive, and tail element handling follow the standard vector
+rules and are defined over the destination element indices (`0` to `VL-1`).    +
+                                                                               +
+The destination vector register group may overlap the source vector register
+group only if the overlap is in the lowest-numbered part of the source register
+group. If the overlap violates these constraints, the instruction encoding is
+reserved.
+
+Operation::
+
+[source,sail]
+--
+function clause execute (VUNZIPO(vs2, vd, vm)) = {
+  foreach (i from vstart to VL-1) {
+    let j = (i * 2) + 1;
+    if (vm == 0b1) | (v0[i] == 0b1) then
+      set_velem(vd, EEW=SEW, i, get_velem(vs2, SEW, j));
+    // inactive element handling follows VMA
+  }
+  // tail element handling follows VTA
+  RETIRE_SUCCESS
+}
+--
+
+<<<
+
+[[insns-vpaire, Vector Pair Even]]
+=== Vector Pair Even Instruction
+
+Synopsis::
+
+Interleave the even-indexed elements of the source vector register groups into
+the destination vector register group.
+
+Mnemonic::
+
+vpaire.vv vd, vs2, vs1, vm
+
+
+Encoding::
+
+[wavedrom, , svg]
+....
+{reg:[
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPIVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm'},
+  {bits: 6, name: '001111'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Description::
+
+The vector pair-even instruction (VPAIRE) interleaves the even-indexed
+elements of the source vector register groups into the destination vector
+register group.                                                                +
+                                                                               +
+For destination element index `i`, if `i` is even then `vd[i] = vs2[i]`, and if
+`i` is odd then `vd[i] = vs1[i - 1]`.                                          +
+                                                                               +
+Equivalently, the result order is:
+`vd = [vs2[0], vs1[0], vs2[2], vs1[2], ... ]`                                  +
+                                                                               +
+The destination vector register group cannot overlap the source vector register
+groups and, if masked, cannot overlap the mask register. If the overlap
+violates these constraints, the instruction encoding is reserved.              +
+                                                                               +
+Prestart, inactive, and tail element handling follow the standard vector rules.
+
+Operation::
+
+[source,sail]
+--
+function clause execute (VPAIRE(vs2, vs1, vd, vm)) = {
+  foreach (i from vstart to VL-1) {
+    let j = if (i % 2) == 0 then i else (i - 1);
+    let res = if (i % 2) == 0
+              then get_velem(vs2, SEW, j)
+              else get_velem(vs1, SEW, j);
+    if (vm == 0b1) | (v0[i] == 0b1) then
+      set_velem(vd, EEW=SEW, i, res);
+    // inactive element handling follows VMA
+  }
+  // tail element handling follows VTA
+  RETIRE_SUCCESS
+}
+--
+
+<<<
+
+[[insns-vpairo, Vector Pair Odd]]
+=== Vector Pair Odd Instruction
+
+Synopsis::
+
+Interleave the odd-indexed elements of the source vector register groups into
+the destination vector register group.
+
+Mnemonic::
+
+vpairo.vv vd, vs2, vs1, vm
+
+
+Encoding::
+
+[wavedrom, , svg]
+....
+{reg:[
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm'},
+  {bits: 6, name: '001111'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+Description::
+
+The vector pair-odd instruction (VPAIRO) interleaves the odd-indexed
+elements of the source vector register groups into the destination vector
+register group.                                                                +
+                                                                               +
+For destination element index `i`, if `i` is even then `vd[i] = vs2[i + 1]`, and
+if `i` is odd then `vd[i] = vs1[i]`.                                           +
+                                                                               +
+Equivalently, the result order is:
+`vd = [vs2[1], vs1[1], vs2[3], vs1[3], ... ]`                                  +
+                                                                               +
+The destination vector register group cannot overlap the source vector register
+groups and, if masked, cannot overlap the mask register. If the overlap
+violates these constraints, the instruction encoding is reserved.              +
+                                                                               +
+Prestart, inactive, and tail element handling follow the standard vector rules.
+                                                                               +
+VPAIRO may read one element past `VL` in `vs2` when `VL` is odd. If the element
+index is greater than or equal to VLMAX in the source vector register group,
+the value 0 is returned for that element.
+
+Operation::
+
+[source,sail]
+--
+function clause execute (VPAIRO(vs2, vs1, vd, vm)) = {
+  foreach (i from vstart to VL-1) {
+    let j = if (i % 2) == 0 then (i + 1) else i;
+    let res =
+      if (j >= vlmax) then zeros()
+      else if (i % 2) == 0 then get_velem(vs2, SEW, j)
+      else                      get_velem(vs1, SEW, j);
+    if (vm == 0b1) | (v0[i] == 0b1) then
+      set_velem(vd, EEW=SEW, i, res);
+    // inactive element handling follows VMA
+  }
+  // tail element handling follows VTA
+  RETIRE_SUCCESS
+}
+--
+
+<<<
+
+[NOTE]
+====
+
+The following example illustrates use of the vector pair-even and pair-odd to
+transpose VL/4 independent 4x4 matrices packed across vector registers.
+
+The first stage operates on 32-bit elements. The second stage packs adjacent
+pairs into 64-bit elements to complete the transpose.
+
+----
+vsetivli t0, zero, e32, m1, ta, ma
+vpaire.vv v5, v1, v2 #|a|b|c|d|A|B|C|D|..    |a|e|c|g|A|E|C|G|..
+vpairo.vv v6, v1, v2 #|e|f|g|h|E|F|G|H|.. -> |b|f|d|h|B|F|D|H|..
+vpaire.vv v7, v3, v4 #|i|j|k|l|I|J|K|L|..    |i|m|k|o|I|M|K|O|..
+vpairo.vv v8, v3, v4 #|m|n|o|p|M|N|O|P|..    |j|n|l|p|J|N|L|P|..
+
+vsetivli t0, zero, e64, m1, ta, ma
+vpaire.vv v1, v5, v7 #|a e|c g|A E|C G|..    |a e|i m|A E|I M|..
+vpaire.vv v2, v6, v8 #|b f|d h|B F|D H|.. -> |b f|j n|B F|J N|..
+vpairo.vv v3, v5, v7 #|i m|k o|I M|K O|..    |c g|k o|C G|K O|..
+vpairo.vv v4, v6, v8 #|j n|l p|J N|L P|..    |d h|l p|D H|L P|..
+----
+
+====
