@@ -66,3 +66,4 @@ rrv32         | Solra Bizna                     | [Solra Bizna](mailto:solra@biz
 VexiiRiscv    | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 46               | https://github.com/SpinalHDL/VexiiRiscv
 Wildcat       | Technical University of Denmark | [Martin Schoeberl](mailto:masca@dtu.dk)                     | 47               | https://github.com/schoeberl/wildcat
 CVA5          | OpenHW Group                    | [Lesley Shannon](mailto:lesley_shannon@sfu.ca)              | 48               | https://github.com/openhwgroup/cva5
+River         | Midstall Software               | [Inquiry](mailto:inquire@midstall.com)                      | 49               | https://github.com/MidstallSoftware/river
