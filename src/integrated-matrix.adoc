@@ -3,11 +3,12 @@
 
 === Introduction
 
-High-performance computing and machine learning workloads depend critically on general matrix multiplication (GEMM), computing C ← A × B + C over a wide range of data types and precisions.
+High-performance computing and machine learning workloads depend critically on general matrix multiplication (GEMM) over a wide range of data types and precisions.
 Dedicated matrix-multiply accelerators often require new register state—separate matrix register files—to achieve competitive throughput, introducing substantial architectural complexity and binary interface disruption.
 
 The Integrated Matrix family of extensions (Zvvmm, Zvvfmm, Zvvmtls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
 By interpreting groups of existing vector registers as two-dimensional matrix tiles, the Integrated Matrix extensions deliver high arithmetic density without introducing any new architected state.
+We focus, in particular, in the computation of C ← A × B^T^ + C, where A, B, and C are row-major matrix panels of shapes μ × λ, ν × λ, and μ × ν, respectively.
 
 The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
 A key design goal is that the same binary executes correctly—and achieves near-peak arithmetic throughput—across this entire range without recompilation.
@@ -23,35 +24,37 @@ The Integrated Matrix family of extensions (Zvvmm, Zvvfmm, Zvvmtls) provides the
 ==== Matrix tile geometry
 
 Matrix tiles are represented using the existing RISC-V V register file and its configuration state.
-The three matrices in the multiply-accumulate operation C ← A × B + C are stored as follows:
+The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are stored as follows:
 
 * The _accumulator_ C is stored in a vector register group with element width SEW.
-  Its register group multiplier MUL is determined by the tile geometry rather than LMUL directly:
-  MUL = LMUL / λ², where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
-  The C register group may start at any vector register index.
+  Its register group multiplier CMUL is determined by the tile geometry:
+  CMUL = VLENE / λ², where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
+  The C register group may start at any vector register index that is CMUL-aligned.
 
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
-  equal to SEW for non-widening variants, SEW/2 for widening, and SEW/4 for quad-widening variants.
-  The K dimension of the multiply equals λ for non-widening instructions, 2λ for widening, and 4λ for quad-widening; LMUL scales the A and B register groups along the K dimension only and does not affect C.
+  equal to SEW for non-packing variants, SEW/2 for double-packing, and SEW/4 for quad-packing variants.
+  The K dimension of the multiply equals λ for non-packing instructions, 2λ for double-packing, and 4λ for quad-packing; LMUL scales the A and B register groups along the K dimension only and does not affect C.
 
-The following table lists all computational sub-extensions in the Integrated Matrix family:
+Table <<tbl-subextensions>> lists all computational sub-extensions in the Integrated Matrix family.
 
+[#tbl-subextensions]
+.Computational subextensions in the Integrated Matrix family.
 [cols="1,1,3,3", options="header"]
 |===
 |Extension       | Dependencies | Multiplicand Types           | Accumulator Type
-|Zvvmmi4b       ^| Zve64d       | [U]Int4, (U)Int4             | Int8
-|Zvvmmi4h       ^| Zve64d       | [U]Int4, (U)Int4             | Int16
-|Zvvmmi4w       ^| Zve64d       | [U]Int4, (U)Int4             | Int32
-|Zvvmmb         ^| Zve64d       | [U]Int8, (U)Int8             | Int8
-|Zvvmmbh        ^| Zve64d       | [U]Int8, (U)Int8             | Int16
-|Zvvmmbw        ^| Zve64d       | [U]Int8, (U)Int8             | Int32
-|Zvvmmbd        ^| Zve64d       | [U]Int8, (U)Int8             | Int64
-|Zvvmmh         ^| Zve64d       | [U]Int16, (U)Int16           | Int16
-|Zvvmmhw        ^| Zve64d       | [U]Int16, (U)Int16           | Int32
-|Zvvmmhd        ^| Zve64d       | [U]Int16, (U)Int16           | Int64
-|Zvvmmw         ^| Zve64d       | [U]Int32, (U)Int32           | Int32
-|Zvvmmwd        ^| Zve64d       | [U]Int32, (U)Int32           | Int64
-|Zvvmmd         ^| Zve64d       | [U]Int64, (U)Int64           | Int64
+|Zvvmmi4b       ^| Zve64d       | [U]Int4, [U]Int4             | Int8
+|Zvvmmi4h       ^| Zve64d       | [U]Int4, [U]Int4             | Int16
+|Zvvmmi4w       ^| Zve64d       | [U]Int4, [U]Int4             | Int32
+|Zvvmmb         ^| Zve64d       | [U]Int8, [U]Int8             | Int8
+|Zvvmmbh        ^| Zve64d       | [U]Int8, [U]Int8             | Int16
+|Zvvmmbw        ^| Zve64d       | [U]Int8, [U]Int8             | Int32
+|Zvvmmbd        ^| Zve64d       | [U]Int8, [U]Int8             | Int64
+|Zvvmmh         ^| Zve64d       | [U]Int16, [U]Int16           | Int16
+|Zvvmmhw        ^| Zve64d       | [U]Int16, [U]Int16           | Int32
+|Zvvmmhd        ^| Zve64d       | [U]Int16, [U]Int16           | Int64
+|Zvvmmw         ^| Zve64d       | [U]Int32, [U]Int32           | Int32
+|Zvvmmwd        ^| Zve64d       | [U]Int32, [U]Int32           | Int64
+|Zvvmmd         ^| Zve64d       | [U]Int64, [U]Int64           | Int64
 |Zvvfmmofp4opf8 ^| Zve64d       | OFP4, OFP4                   | OFP8
 |Zvvfmmofp4h    ^| Zve64d       | OFP4, OFP4                   | IEEE binary16
 |Zvvfmmofp4bf16 ^| Zve64d       | OFP4, OFP4                   | BFloat16
@@ -75,8 +78,8 @@ The following table lists all computational sub-extensions in the Integrated Mat
 The Integrated Matrix family of extensions defines the following additional fields in the `vtype` CSR:
 
 * `lambda[2:0]` at `vtype[XLEN-2:XLEN-4]` is the Selected Lambda
-* `altfmt_A` at `vtype[9]` is the Alternate Floating-Point Format for input A
-* `altfmt_B` at `vtype[10]` is the Alternate Floating-Point Format for input B
+* `altfmt_A` at `vtype[9]` is the Alternate Format for input A
+* `altfmt_B` at `vtype[10]` is the Alternate Format for input B
 
 ==== Selected lambda (`lambda[2:0]`) field
 
@@ -122,7 +125,7 @@ The Integrated Matrix floating-point extensions use the _altfmt_ field (as defin
 | X | 1 | X | X | _reserved_
 |===
 
-==== Alternate floating-point formats for inputs (`altfmt_A`, `altfmt_B`)
+==== Alternate formats for inputs (`altfmt_A`, `altfmt_B`)
 
 The `altfmt_A` and `altfmt_B` fields are 1-bit read/write fields added to the `vtype` CSR by the Integrated Matrix extensions to select the interpretation of elements in input matrices A and B, respectively.
 Their meaning depends on whether the instruction is a floating-point or integer multiply-accumulate.
@@ -159,6 +162,8 @@ For integer multiply-accumulate instructions, `altfmt_A` and `altfmt_B` select w
 | 0 | Signed
 | 1 | Unsigned
 |===
+
+=== Storage formats
 
 [#zvvmm,reftext=Matrix-multiplication instructions (integer)]
 === Zvvmm: Extension for matrix-multiplication on vector-registers interpreted as 2D integer matrix-tiles
