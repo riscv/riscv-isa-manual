@@ -165,6 +165,63 @@ For integer multiply-accumulate instructions, `altfmt_A` and `altfmt_B` select w
 
 === Storage formats
 
+==== Arithmetic considerations
+
+Each multiply-accumulate instruction computes, for every output element C[m, n]:
+
+    C[m, n] ← C[m, n] + Σ_{k=0}^{K_eff−1} A[m, k] × B[k, n]
+
+where K_eff = λ × W × LMUL.
+This section specifies how the K_eff product terms may be grouped and when intermediate rounding is permitted.
+
+===== Sub-dot-products
+
+For widening instructions (W = 2 or W = 4), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_: the W multiplications of (SEW÷W)-bit elements are performed and their products summed.
+
+Because each individual product of two (SEW÷W)-bit values is _exact_ at SEW precision—the significand of the product has at most 2 × p~input~ − 1 bits, which fits in the wider SEW format—the sub-dot-product can be computed with very little loss at SEW or wider precision.
+
+There are K_eff ÷ W = λ × LMUL sub-dot-products per output element.
+
+For non-widening instructions (W = 1), each product of two SEW-bit values is exact at 2 × SEW bits; a sub-dot-product consists of a single product term.
+
+===== Accumulation and rounding model (floating-point)
+
+An implementation partitions the λ × LMUL sub-dot-products for each output element into consecutive groups of G sub-dot-products.
+
+* Within each group, the G partial results are accumulated using internal precision that requires no rounding to SEW precision inside a group.
+
+* After each group, the accumulated partial sum is rounded to C's precision (SEW) using an _implementation-defined_ rounding mode and _added to the running value of C[m, n]_.
+  The rounding mode used for these intermediate additions is not required to match `frm`.
+
+The value of G is _implementation-defined_ and may depend on SEW, W, λ, LMUL, and the microarchitecture.
+It must satisfy:
+
+* G is a power of two;
+* 1 ≤ G ≤ λ.
+
+The resulting number of rounding additions to C per output element is (λ × LMUL) ÷ G.
+
+The final accumulation step—adding the fully reduced dot-product to the original value of C[m, n]—uses the dynamic rounding mode from `frm`.
+
+[NOTE]
+====
+In a *systolic-array* datapath, G is typically 1: each sub-dot-product is rounded and added to C immediately, yielding λ × LMUL rounding additions per output element.
+
+In an *outer-product* datapath, G is typically on the order of λ (e.g. λ, λ÷2, λ÷4, or λ÷8): multiple sub-dot-products are accumulated at extended internal precision before a single rounding and C addition, significantly reducing the number of expensive full-precision additions.
+
+Software must not depend on a particular value of G.
+====
+
+Because G and the intermediate rounding mode are implementation-defined, two conforming implementations may produce floating-point results that differ in the least-significant bits for identical inputs.
+Bit-exact reproducibility of floating-point matrix multiply-accumulate results across different implementations is therefore _not_ guaranteed.
+
+Floating-point exception flags (inexact, overflow, underflow, invalid, etc.) are accumulated into `fflags`; the order in which individual exceptions are raised within a single instruction execution is implementation-defined.
+
+===== Integer accumulation
+
+For integer multiply-accumulate instructions, all intermediate results are reduced modulo 2^SEW^.
+Because modular addition is both associative and commutative, the final result is uniquely defined regardless of the accumulation order or grouping factor.
+
 [#zvvmm,reftext=Matrix-multiplication instructions (integer)]
 === Zvvmm: Extension for matrix-multiplication on vector-registers interpreted as 2D integer matrix-tiles
 
