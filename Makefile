@@ -109,8 +109,8 @@ ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
 ASCIIDOCTOR_TAGS := $(ENV) asciidoctor --backend tags --require=./docs-resources/converters/tags.rb
-CREATE_NORM_RULE_TOOL := docs-resources/tools/create_normative_rules.rb
-CREATE_NORM_RULE_RUBY := ruby $(CREATE_NORM_RULE_TOOL)
+CREATE_NORM_RULE_TOOL := docs-resources/tools/create_normative_rules.py
+CREATE_NORM_RULE_PYTHON := python3 $(CREATE_NORM_RULE_TOOL)
 
 OPTIONS := --trace \
            -a compress \
@@ -204,14 +204,14 @@ $(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 $(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL) $(DOCS_HTML)
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -h $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) --html $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 # Update docker image to latest
