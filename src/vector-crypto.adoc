@@ -303,13 +303,14 @@ all other `SEW` values are _reserved_.#
 | Instructions
 | Required SEW
 
-| vaes*          | 32
-| Zvknha: vsha2* | 32
-| Zvknhb: vsha2* | 32 or 64
-| vclmul[h]      | 64
-| vg*            | 32
-| vsm3*          | 32
-| vsm4*          | 32
+| vaes*               | 32
+| Zvknha: vsha2*      | 32
+| Zvknhb: vsha2*      | 32 or 64
+| vclmul[h] (Zvbc)    | 64
+| vclmul[h] (Zvbc32e) | 8, 16, 32
+| vg*                 | 32
+| vsm3*               | 32
+| vsm4*               | 32
 
 
 |===
@@ -491,14 +492,14 @@ Note: If `Zve32x` is supported then `Zvkb` or `Zvbb` provide support for EEW of 
 
 
 All _cryptography-specific_ instructions defined in this Vector Crypto specification (i.e., those
-in <<zvkned>>, <<zvknh,Zvknh[ab]>>, <<Zvkg>>, <<Zvksed>> and <<zvksh>> but _not_ <<zvbb>>,<<zvkb>>, or <<zvbc>>) shall
+in <<zvkned>>, <<zvknh,Zvknh[ab]>>, <<Zvkg>>, <<Zvkg,Zvkgs>>, <<Zvksed>> and <<zvksh>> but _not_ <<zvbb>>, <<zvkb>>, <<zvbc>>, or <<zvbc,Zvbc32e>>) shall
 be executed with data-independent execution latency as defined in the
 <<#crypto_scalar_instructions,RISC-V Scalar Cryptography Extensions specification>>.
 [#norm:veccrypto_indepZkt]#It is important to note that the Vector Crypto instructions are independent of the
 implementation of the `Zkt` extension and do not require that `Zkt` is implemented.#
 
 This specification includes a <<Zvkt>> extension that, when implemented, requires certain vector instructions
-(including <<zvbb>>, <<zvkb>>, and <<zvbc>>) to be executed with data-independent execution latency.
+(including <<zvbb>>, <<zvkb>>, <<zvbc,Zvbc>>, and <<zvbc,Zvbc32e>>) to be executed with data-independent execution latency.
 
 Detection of individual cryptography extensions uses the
 unified software-based RISC-V discovery method.
@@ -541,12 +542,16 @@ This extension is a superset of the <<Zvkb>> extension.
 <<<
 
 [[zvbc,Zvbc]]
-==== `Zvbc` - Vector Carry-less Multiplication
+==== `Zvbc` and `Zvbc32e` - Vector Carry-less Multiplication
 
 General purpose carry-less multiplication instructions which are commonly used in cryptography
 and hashing (e.g., Elliptic curve cryptography, GHASH, CRC).
 
-[#norm:Zvbc_sew64only]#These instructions are only defined for `SEW`=64.#
+[#norm:Zvbc_sew64only]#These instructions are defined for `SEW`=64. (Zvbc)#
+[#norm:Zvbc32e_sew8_16_32only]#These instructions are defined for `SEW`=8, 16, 32. (Zvbc32e)#
+
+Note:: `Zvbc` and `Zvbc32e` can be implemented independently.
+
 
 [%autowidth]
 [%header,cols="^2,4"]
@@ -596,10 +601,14 @@ in the Zvbb extension: vbrev.v, vclz.v, vctz.v, vcpop.v, and vwsll.[vv,vx,vi].
 <<<
 
 [[zvkg,Zvkg]]
-==== `Zvkg` - Vector GCM/GMAC
+==== `Zvkg` and `Zvkgs` - Vector GCM/GMAC
 
 Instructions to enable the efficient implementation of GHASH~H~ which is used in Galois/Counter Mode (GCM) and
 Galois Message Authentication Code (GMAC).
+
+`Zvkg` defines the vector-vector (.vv) versions of the instructions.
+`Zvkgs` defines the vector-scalar (.vs) versions of the instructions.
+`Zvkgs` depends on `Zvkg`.
 
 [#norm:Zvkg_egw128b_elem32b]#All of these instructions work on 128-bit element groups comprised of four 32-bit elements.#
 
@@ -631,8 +640,8 @@ therefore must be a multiple of `EGS=4`.# +
 |EGW
 |Mnemonic
 |Instruction
-| 32 | 128 | vghsh.vv | <<insns-vghsh>>
-| 32 | 128 | vgmul.vv | <<insns-vgmul>>
+| 32 | 128 | vghsh.[vv,vs] | <<insns-vghsh>>
+| 32 | 128 | vgmul.[vv,vs] | <<insns-vgmul>>
 
 |===
 
@@ -876,7 +885,7 @@ This extension is shorthand for the following set of other extensions:
 
 [NOTE]
 ====
-While Zvkg and Zvbc are not part of this extension, it is recommended that at least one of them is implemented with this extension to enable efficient AES-GCM.
+While Zvkg, Zvkgs, and Zvbc are not part of this extension, it is recommended that at least one of them is implemented with this extension to enable efficient AES-GCM.
 ====
 
 <<<
@@ -951,7 +960,7 @@ This extension is shorthand for the following set of other extensions:
 
 [NOTE]
 ====
-While Zvkg and Zvbc are not part of this extension, it is recommended that at least one of them is implemented with this extension to enable efficient SM4-GCM.
+While Zvkg, Zvkgs, and Zvbc are not part of this extension, it is recommended that at least one of them is implemented with this extension to enable efficient SM4-GCM.
 ====
 
 <<<
@@ -1057,7 +1066,7 @@ All <<Zvkb>> instructions are also covered by DIEL as they are a
 proper subset of <<Zvbb>>
 ====
 
-===== All <<Zvbc>> instructions
+===== All <<Zvbc>> and Zvbc32e instructions
 - vclmul[h].v[vx]
 
 ===== add/sub
@@ -2214,7 +2223,9 @@ Encoding (Vector-Scalar)::
 ]}
 ....
 Reserved Encodings::
-* [#norm:vclmul_sewn64_rsv]#`SEW` is any value other than 64#
+* [#norm:vclmul_sewn64_rsv]#`SEW` is any value other than 64 (Zvbc) #
+* [#norm:vclmul_sewn8_16_32_rsv]#`SEW` is any value other than 8, 16, or 32 (Zvbc32e)
+
 
 Arguments::
 
@@ -2231,22 +2242,20 @@ Arguments::
 |===
 
 Description::
-Produces the low half of 128-bit carry-less product.
+Produces the low half of `2*SEW`-bit carry-less product.
 
-[#norm:vclmul_op]#Each 64-bit element in the `vs2` vector register is carry-less multiplied by
-either each 64-bit element in `vs1` (vector-vector), or the 64-bit value
+[#norm:vclmul_op]#Each `SEW`-bit element in the `vs2` vector register is carry-less multiplied by
+either each `SEW`-bit element in `vs1` (vector-vector), or the `SEW`-bit value
 from integer register `rs1` (vector-scalar). The result is the least
-significant 64 bits of the carry-less product.#
+significant `SEW` bits of the carry-less product.#
 
 [NOTE]
 ====
-The 64-bit carry-less multiply instructions can be used for implementing GCM in the absence of the `zvkg` extension.
-We do not make these instructions exclusive as the 64-bit carry-less multiply is readily derived from the
+The carry-less multiply instructions can be used for implementing GCM in the absence of the `zvkg` extension.
+We do not make these instructions exclusive as the carry-less multiply is readily derived from the
 instructions in the `zvkg` extension and can have utility in other areas.
-Likewise, we treat other SEW values as reserved so as not to preclude
-future extensions from using this opcode with different element widths.
-For example, a future extension might define an `SEW`=32 version of this instruction to enable `Zve32*` implementations to have
-vector carry-less multiplication instructions.
+
+Zvbc32e allows Zve32x implementations to support vector carry-less multiplication.
 ====
 
 Operation::
@@ -2257,10 +2266,10 @@ Operation::
 function clause execute (VCLMUL(vs2, vs1, vd, suffix)) = {
 
   foreach (i from vstart to vl-1) {
-    let op1 : bits (64) = if suffix =="vv" then get_velem(vs1,i)
+    let op1 : bits (SEW) = if suffix == "vv" then get_velem(vs1, i)
                           else zext_or_truncate_to_sew(X(vs1));
-    let op2 : bits (64) = get_velem(vs2,i);
-    let product : bits (64) = clmul(op1,op2,SEW);
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmul(op1, op2, SEW);
     set_velem(vd, i, product);
   }
   RETIRE_SUCCESS
@@ -2273,10 +2282,12 @@ function clmul(x, y, width) = {
   }
   result
 }
+
+
 --
 
 Included in::
-<<zvbc>>, <<zvknc>>, <<zvksc>>
+<<zvbc>>, <<zvbc,Zvbc32e>>, <<zvknc>>, <<zvksc>>
 
 <<<
 
@@ -2318,7 +2329,8 @@ Encoding (Vector-Scalar)::
 ]}
 ....
 Reserved Encodings::
-* [#norm:vclmulh_sewn64_rsv]#`SEW` is any value other than 64#
+* [#norm:vclmulh_sewn64_rsv]#`SEW` is any value other than 64 (Zvbc)#
+* [#norm:vclmulh_sewn8_16_32_rsv]#`SEW` is any value other than 8, 16, or 32 (Zvbc32e)
 
 Arguments::
 
@@ -2335,12 +2347,12 @@ Arguments::
 |===
 
 Description::
-Produces the high half of 128-bit carry-less product.
+Produces the high half of `2*SEW`-bit carry-less product.
 
-[#norm:vclmulh_op]#Each 64-bit element in the `vs2` vector register is carry-less multiplied by
-either each 64-bit element in `vs1` (vector-vector), or the 64-bit value
+[#norm:vclmulh_op]#Each `SEW`-bit element in the `vs2` vector register is carry-less multiplied by
+either each `SEW`-bit element in `vs1` (vector-vector), or the `SEW`-bit value
 from integer register `rs1` (vector-scalar). The result is the most
-significant 64 bits of the carry-less product.#
+significant `SEW` bits of the carry-less product.#
 
 // This instruction must always be implemented such that its execution latency does not depend
 // on the data being operated upon.
@@ -2349,12 +2361,11 @@ Operation::
 [source,sail]
 --
 function clause execute (VCLMULH(vs2, vs1, vd, suffix)) = {
-
   foreach (i from vstart to vl-1) {
-    let op1 : bits (64) = if suffix =="vv" then get_velem(vs1,i)
+    let op1 : bits (SEW) = if suffix == "vv" then get_velem(vs1,i)
                           else zext_or_truncate_to_sew(X(vs1));
-    let op2 : bits (64) = get_velem(vs2, i);
-    let product : bits (64) = clmulh(op1, op2, SEW);
+    let op2 : bits (SEW) = get_velem(vs2, i);
+    let product : bits (SEW) = clmulh(op1, op2, SEW);
     set_velem(vd, i, product);
   }
   RETIRE_SUCCESS
@@ -2367,11 +2378,10 @@ function clmulh(x, y, width) = {
   }
   result
 }
-
 --
 
 Included in::
-<<zvbc>>, <<zvknc>>, <<zvksc>>
+<<zvbc>>, <<zvbc,Zvbc32e>>, <<zvknc>>, <<zvksc>>
 
 <<<
 
@@ -2554,15 +2564,16 @@ Included in::
 <<<
 
 [[insns-vghsh, Vector GHASH Add-Multiply]]
-==== vghsh.vv
+==== vghsh.[vv,vs]
 
 Synopsis::
 Vector Add-Multiply over GHASH Galois-Field
 
 Mnemonic::
-vghsh.vv vd, vs2, vs1
+vghsh.vv vd, vs2, vs1 +
+vghsh.vs vd, vs2, vs1
 
-Encoding::
+Encoding (Vector-Vector)::
 [wavedrom, , svg]
 ....
 {reg:[
@@ -2575,8 +2586,26 @@ Encoding::
 {bits: 6, name: '101100'},
 ]}
 ....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-VE'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: '1'},
+{bits: 6, name: '100011'},
+]}
+....
+
+
+
 Reserved Encodings::
 * [#norm:vghsh-vv_sewn32_rsv]#`SEW` is any value other than 32#
+* [#norm:vghsh-vs_vdovlpvs2_rsv]#Only for the `.vs` form: the `vd` register group overlaps the `vs2` scalar element group#
 
 Arguments::
 
@@ -2599,7 +2628,12 @@ Arguments::
 Description::
 A single "iteration" of the GHASH~H~ algorithm is performed.
 
-[#norm:vghsh-vv_op]#This instruction treats all of the inputs and outputs as 128-bit polynomials and
+[#norm:vghsh-vv_op]#The previous partial hashes are read as 4-element groups from `vd`,
+the cipher texts are read as 4-element groups from `vs1`
+ and the hash subkey is read either as 4-element groups from `vs2` (`vghsh.vv`) or from the scalar 4-element group in `vs2` (`vghsh.vs`).
+The resulting partial hashes are written as 4-element groups into `vd`.
+
+This instruction treats all of the inputs and outputs as 128-bit polynomials and
 performs operations over GF[2].
 It produces the next partial hash (Y~i+1~) by adding the current partial
 hash (Y~i~) to the cipher text block (X~i~) and then multiplying (over GF(2^128^))
@@ -2629,12 +2663,6 @@ with the NIST specification. These reversals are inexpensive to implement as the
 swap bit positions and therefore do not require any logic.
 ====
 
-[NOTE]
-====
-Since the same hash subkey `H` will typically be used repeatedly on a given message,
-a future extension might define a vector-scalar version of this instruction where
-`vs2` is the scalar element group. This would help reduce register pressure when `LMUL` > 1.
-====
 
 Operation::
 [source,pseudocode]
@@ -2650,9 +2678,10 @@ function clause execute (VGHSH(vs2, vs1, vd)) = {
   eg_start = (vstart/EGS)
 
   foreach (i from eg_start to eg_len-1) {
+    let hindex = if suffix == "vv" then i else 0;
     let Y = get_velem(vd,EGW=128,i);  // current partial-hash
     let X = get_velem(vs1,EGW=128,i);  // block cipher output
-    let H = brev8(get_velem(vs2,EGW=128,i)); // Hash subkey
+    let H = brev8(get_velem(vs2,EGW=128,hindex)); // Hash subkey
 
     let Z : bits(128) = 0;
 
@@ -2676,21 +2705,25 @@ function clause execute (VGHSH(vs2, vs1, vd)) = {
 }
 --
 
-Included in::
+`vghsh.vv` is included in::
 <<zvkg>>, <<zvkng>>, <<zvksg>>
+
+`vghsh.vs` is included in::
+<<zvkg,Zvkgs>>
 
 <<<
 
 [[insns-vgmul, Vector GHASH Multiply]]
-==== vgmul.vv
+==== vgmul.[vv,vs]
 
 Synopsis::
 Vector Multiply over GHASH Galois-Field
 
 Mnemonic::
-vgmul.vv vd, vs2
+vgmul.vv vd, vs2 +
+vgmul.vs vd, vs2
 
-Encoding::
+Encoding (Vector-Vector)::
 [wavedrom, , svg]
 ....
 {reg:[
@@ -2703,8 +2736,24 @@ Encoding::
 {bits: 6, name: '101000'},
 ]}
 ....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-VE'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '10001'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: '1'},
+{bits: 6, name: '101001'},
+]}
+....
+
 Reserved Encodings::
 * [#norm:vgmul-vv_sewn32_rsv]#`SEW` is any value other than 32#
+* [#norm:vgmul-vs_vdovlpvs2_rsv]#Only for the `.vs` form: the `vd` register group overlaps the `vs2` scalar element group#
 
 Arguments::
 
@@ -2726,7 +2775,11 @@ Arguments::
 Description::
 A GHASH~H~ multiply is performed.
 
-[#norm:vgmul-vv_op]#This instruction treats all of the inputs and outputs as 128-bit polynomials and
+[#norm:vgmul-vv_op]#The multipliers are read as 4-element groups from `vd`,
+ the multiplicand subkey is read either as 4-element groups from `vs2` (`vgmul.vv`) or from the scalar element group in `vs2` (`vgmul.vs`).
+The resulting products are written as 4-element groups into `vd`.
+
+This instruction treats all of the inputs and outputs as 128-bit polynomials and
 performs operations over GF[2].
 It produces the product over GF(2^128^) of the two 128-bit inputs.#
 
@@ -2750,20 +2803,14 @@ with the NIST specification. These reversals are inexpensive to implement as the
 swap bit positions and therefore do not require any logic.
 ====
 
-[NOTE]
-====
-Since the same multiplicand will typically be used repeatedly on a given message,
-a future extension might define a vector-scalar version of this instruction where
-`vs2` is the scalar element group. This would help reduce register pressure when `LMUL` > 1.
-====
 
 [NOTE]
 ====
-This instruction is identical to `vghsh.vv` with vs1=0.
+This instruction is identical to `vghsh.vv` (respectively `vghsh.vs`) with vs1=0.
 This instruction is often used in GHASH code. In some cases it is followed
 by an XOR to perform a multiply-add. Implementations may choose to fuse these
 two instructions to improve performance on GHASH code that
-doesn't use the add-multiply form of the `vghsh.vv` instruction.
+doesn't use the add-multiply form of the `vghsh.[vv,vs]` instruction.
 ====
 
 
@@ -2781,8 +2828,9 @@ function clause execute (VGMUL(vs2, vs1, vd)) = {
   eg_start = (vstart/EGS)
 
   foreach (i from eg_start to eg_len-1) {
+    let hindex = if suffix == "vv" then i else 0;
     let Y = brev8(get_velem(vd,EGW=128,i));  // Multiplier
-    let H = brev8(get_velem(vs2,EGW=128,i)); // Multiplicand
+    let H = brev8(get_velem(vs2,EGW=128,hindex)); // Multiplicand
     let Z : bits(128) = 0;
 
     for (int bit = 0; bit < 128; bit++) {
@@ -2804,8 +2852,11 @@ function clause execute (VGMUL(vs2, vs1, vd)) = {
 }
 --
 
-Included in::
+`vgmul.vv` included in::
 <<zvkg>>, <<zvkng>>, <<zvksg>>
+
+`vgmul.vs` included in::
+<<zvkg, Zvkgs>>
 
 <<<
 
@@ -4397,7 +4448,7 @@ Crypto Vector instructions except Zvbb and Zvbc
 |100000||||| 100000 |V| | vsm3me      | 100000 | | |
 | 100001 | | | |            | 100001 |V| | vsm4k.vi    | 100001 | | |
 | 100010 | | | |            | 100010 |V| | vaeskf1.vi  | 100010 | | |
-| 100011 | | | |            | 100011 | | |             | 100011 | | |
+| 100011 | | | |            | 100011 | | | vghsh.vs    | 100011 | | |
 | 100100 | | | |            | 100100 | | |             | 100100 | | |
 | 100101 | | | |            | 100101 | | |             | 100101 | | |
 | 100110 | | | |            | 100110 | | |             | 100110 | | |
@@ -4407,7 +4458,7 @@ Crypto Vector instructions except Zvbb and Zvbc
 | 101001 | | | |            | 101001 |V| | *VAES.vs*   | 101001 | | |
 | 101010 | | | |            | 101010 |V| | vaeskf2.vi  | 101010 | | |
 | 101011 | | | |            | 101011 |V| | vsm3c.vi    | 101011 | | |
-| 101100 | | | |            | 101100 |V| | vghsh      | 101100 | | |
+| 101100 | | | |            | 101100 |V| | vghsh.vv   | 101100 | | |
 | 101101 | | | |            | 101101 |V| | vsha2ms     | 101101 | | |
 | 101110 | | | |            | 101110 |V| | vsha2ch     | 101110 | | |
 | 101111 | | | |            | 101111 |V| | vsha2cl     | 101111 | | |
