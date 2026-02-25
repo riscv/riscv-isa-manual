@@ -21,7 +21,7 @@
 
 DOCS := riscv-privileged riscv-unprivileged
 
-RELEASE_TYPE ?= draft
+RELEASE_TYPE ?= official
 
 ifeq ($(RELEASE_TYPE), draft)
   WATERMARK_OPT := -a draft-watermark
@@ -36,7 +36,8 @@ else
   $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
 endif
 
-DATE ?= $(shell date +%Y%m%d)
+#DATE ?= $(shell date +%Y%m%d)
+DATE ?= 20260120
 DOCKER_BIN ?= docker
 SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := ghcr.io/riscv/riscv-docs-base-container-image:latest
