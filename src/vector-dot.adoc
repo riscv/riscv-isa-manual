@@ -1,0 +1,469 @@
+
+== Vector Dot Product Instructions
+
+=== Introduction
+
+This chapter describes the proposed _vector_ _dot_ _product_
+extensions for RISC-V.
+
+Convolution operations have seen considerable speedup on other microprocessor architectures with the adoption of specialized dot-product instructions. Such convolutions are used in many AI/ML, image-processing, and DSP algorithms. These algorithms can be found in benchmark suites which are used to measure the relative performance of microprocessor cores with different ISAs against each other. This suite of _vector dot product_ extensions is designed to bring RISC-V vector performance up to or to exceed the level of the competition, depending on the implementation vector-length and number of vector ALUs.
+
+The dot product operation is defined for four `SEW/4`-bit values held in a `SEW`-bit element group with an accumulation back into a single `SEW`-bit value with quad-widening.
+The dot-product operation takes the `SEW/4`-bit values at the same index from each source and multiplies them together.
+The four products are summed together and accumulated into the `SEW`-bit element of the destination register.
+If the instruction variant has any signed source data, then the accumulation is performed into a signed value.
+
+Given that the source data is `SEW/4`-bits and accumulation is performed into `SEW`-bits, it is presumed that overflow is infrequent and thus no saturation option has been provided.
+
+To save on opcode encoding space the unsigned-signed vector-vector variant is not encoded; it is always possible to swap the order of the input operands to the signed-unsigned vector-vector variant.
+
+[[dot_product_extensions]]
+=== Extensions Overview
+
+The section introduces all of the extensions in the Vector Dot Product Instruction Set Extension Specification.
+
+All the Vector Dot Product Extensions can be built on _any_ embedded (Zve*) or application ("V") base Vector Extension.
+
+[[Zvdot4a8i,Zvdot4a8i]]
+=== `Zvdot4a8i` - Vector 4-element Dot Product of packed 8-bit Integers, Version 0.1
+
+`Zvdot4a8i` defines 8-bit Integer dot-product instructions performing the dot product between two 4-element vectors of 8-bit integer elements and accumulating it into a 32-bit integer accumulator.
+
+`Zvdot4a8i` depends on `Zve32x`.
+
+`SEW` is used to indicate both the size of the accumulator elements and the size of the 4-element vectors.
+These instructions are only defined for `SEW`=32. Other values of SEW are _reserved_.
+
+These vector dot product instructions are defined with a fixed SEW value of 32. They work on an element group with four 8-bit values stored together in a 32-bit bundle. For each input bundle for the dot product there is a corresponding (same index) SEW-wide element in the accumulator source (and destination). The “q” in the mnemonic indicates that the instruction is quad-widening.
+
+The number of body bundles is determined by `vl`. The operation can be masked, each mask bit determines whether the corresponding element result is active or not.
+
+NOTE::
+Future variants could be defined for different SEW values thus:
+[%autowidth]
+[%header,cols="^2,4"]
+|===
+| SEW | values
+| 32 | 8-bit
+| 64 | 16-bit
+| 16 | 4-bit
+|===
+
+All the instructions defined in this extension fall into two schemes: vector-vector or vector-scalar.
+
+
+.Vector Scalar data layout
+image::zvdot4a8i_vdota4_vx.svg[width=60%]
+
+.Vector Vector data layout
+image::zvdot4a8i_vdota4_vv.svg[width=60%]
+
+
+[%autowidth]
+[%header,cols="^2,4"]
+|===
+|Mnemonic
+|Instruction
+| vdota4.[vv,vx]   | <<insns-vdota4>>
+| vdota4u.[vv,vx]  | <<insns-vdota4u>>
+| vdota4su.[vv,vx] | <<insns-vdota4su>>
+| vdota4us.vx      | <<insns-vdota4us>>
+
+|===
+
+
+// ------------------------------------------------------------
+
+[[vector_dot_product_insns, reftext="Vector Dot Product Instructions"]]
+=== Vector Dot Product Instructions
+
+[[insns-vdota4, Vector SEW/4-bit Signed-Signed 4-Element Dot Product]]
+==== vdota4.[vv,vx]
+
+Synopsis::
+Vector SEW/4-bit Signed-Signed 4-Element Dot Product
+
+Mnemonic::
+vdota4.vv vd, vs2, vs1, vm +
+vdota4.vx vd, vs2, rs1, vm +
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '101100'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '101100'},
+]}
+....
+
+Reserved Encodings::
+* `SEW` is any value other than 32
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `vs1`/`rs1` | input  | vector of `SEW/4`-bit signed multipliers
+| `vs2`       | input  | vector of `SEW/4`-bit signed multiplicands
+| `vd`        | input  | vector of `SEW`-bit signed accumulator sources
+| `vd`        | output | vector of `SEW`-bit signed accumulated dot products
+|===
+
+Description::
+`vdota4` performs a partial dot product of two vectors of `SEW/4`-bit signed integers,
+accumulating the partial sums into a vector of `SEW`-bit signed integers.
++
+In the vector-vector (`.vv`) variant,
+each `SEW`-bit element of `vs1` and `vs2` is interpreted as a list of four `SEW/4`-bit signed integer sub-elements,
+whereas each `SEW`-bit element of `vd` is interpreted as a single `SEW`-bit signed integer.
+For each pair of elements taken consecutively from `vs1` and `vs2`,
+the associated sub-element lists are multiplied componentwise,
+widening (with sign-extension) to `SEW` bits.
+Finally, the four products are accumulated into the associated element of `vd`,
+wrapping on signed overflow.
++
+The vector-scalar (`.vx`) variant reuses a single `SEW`-bit element,
+read from integer register `rs1`, instead of a vector (`vs1`) of such elements.
+
+
+Operation::
+[source,sail]
+--
+function clause execute (VDOT4A(vs2, vs1, vd, suffix)) = {
+  foreach (i from vstart to vl-1) {
+    // TODO sign extension
+    let {a0 @ a1 @ a2 @ a3} : bits (4*SEW/4) = get_velem(vs2, i)
+    let {b0 @ b1 @ b2 @ b3} : bits (4*SEW/4) = if suffix =="vv" then get_velem(vs1, i)
+                          else zext_or_truncate_to_sew(X(rs1));
+    let acc : bits (SEW) = get_velem(vd, i);
+    let res : bits (SEW) = a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3 + acc;
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+<<Zvdot4a8i>>
+
+[[insns-vdota4u, Vector `SEW/4`-bit Unsigned 4-Element Dot Product]]
+==== vdota4u.[vv,vx]
+
+Synopsis::
+Vector `SEW/4`-bit Unsigned 4-Element Dot Product
+
+Mnemonic::
+vdota4u.vv vd, vs2, vs1, vm +
+vdota4u.vx vd, vs2, rs1, vm +
+
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '101000'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '101000'},
+]}
+....
+
+Reserved Encodings::
+* `SEW` is any value other than 32
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `vs1`/`rs1` | input  | unsigned multiplier
+| `vs2`       | input  | unsigned multiplicand
+| `vd`        | input  | unsigned accumulator source
+| `vd`        | output | unsigned accumulated dot product
+|===
+
+
+Description::
+`vdota4u` performs a partial dot product of two vectors of `SEW/4`-bit unsigned integers,
+accumulating the partial sums into a vector of `SEW`-bit unsigned integers.
++
+In the vector-vector (`.vv`) variant,
+each `SEW`-bit element of `vs1` and `vs2` is interpreted as a list of four `SEW/4`-bit unsigned integer sub-elements,
+whereas each `SEW`-bit element of `vd` is interpreted as a single `SEW`-bit unsigned integer.
+For each pair of elements taken consecutively from `vs1` and `vs2`,
+the associated sub-element lists are multiplied componentwise,
+widening (with zero-extension) to `SEW` bits.
+Finally, the four products are accumulated into the associated element of `vd`,
+wrapping on unsigned overflow.
++
+The vector-scalar (`.vx`) variant reuses a single `SEW`-bit element,
+read from integer register `rs1`, instead of a vector (`vs1`) of such elements.
+
+Operation::
+[source,sail]
+--
+function clause execute (VDOT4AU(vs2, vs1, vd, suffix)) = {
+  foreach (i from vstart to vl-1) {
+    // TODO sign extension
+    let {a0 @ a1 @ a2 @ a3} : bits (4*8) = get_velem(vs2, i)
+    let {b0 @ b1 @ b2 @ b3} : bits (4*8) = if suffix =="vv" then get_velem(vs1, i)
+                          else zext_or_truncate_to_sew(X(rs1));
+    let acc : bits (SEW) = get_velem(vd, i);
+    let res : bits (SEW) = a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3 + acc;
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+<<Zvdot4a8i>>
+
+[[insns-vdota4su, Vector `SEW/4`-bit Signed-Unsigned 4-Element Dot Product]]
+==== vdota4su.[vv,vx]
+
+Synopsis::
+Vector `SEW/4`-bit Signed-Unsigned 4-Element Dot Product
+
+Mnemonic::
+vdota4su.vv vd, vs2, vs1, vm +
+vdota4su.vx vd, vs2, rs1, vm +
+
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '101010'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '101010'},
+]}
+....
+
+Reserved Encodings::
+* `SEW` is any value other than 32
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `vs1`/`rs1` | input  | vector of `SEW/4`-bit unsigned multipliers
+| `vs2`       | input  | vector of `SEW/4`-bit signed multiplicands
+| `vd`        | input  | vector of `SEW`-bit signed accumulator sources
+| `vd`        | output | vector of `SEW`-bit signed accumulated dot products
+|===
+
+
+Description::
+`vdota4su` performs a partial dot product of a vector of `SEW/4`-bit signed integers by a vector of `SEW/4`-bit unsigned integers,
+accumulating the partial sums into a vector of `SEW`-bit signed integers.
++
+In the vector-vector (`.vv`) variant,
+each `SEW`-bit element of `vs1` (respectively `vs2`) is interpreted as a list of four `SEW/4`-bit unsigned (respectively signed) integer sub-elements,
+whereas each `SEW`-bit element of `vd` is interpreted as a single `SEW`-bit signed integer.
+For each pair of elements taken consecutively from `vs1` and `vs2`,
+the associated sub-element lists are multiplied componentwise,
+widened (with sign-extension) to `SEW` bits.
+Finally, the four products are accumulated into the associated element of `vd`,
+wrapping on signed overflow.
++
+The vector-scalar (`.vx`) variant reuses a single `SEW`-bit element,
+read from integer register `rs1`, instead of a vector (`vs1`) of such elements.
+
+Operation::
+[source,sail]
+--
+function clause execute (VDOT4ASU(vs2, vs1, vd, suffix)) = {
+  foreach (i from vstart to vl-1) {
+    // TODO sign extension
+    let {a0 @ a1 @ a2 @ a3} : bits (4*8) = get_velem(vs2, i)
+    let {b0 @ b1 @ b2 @ b3} : bits (4*8) = if suffix =="vv" then get_velem(vs1, i)
+                          else zext_or_truncate_to_sew(X(rs1));
+    let acc : bits (SEW) = get_velem(vd, i);
+    let res : bits (SEW) = a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3 + acc;
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+<<Zvdot4a8i>>
+
+[[insns-vdota4us, Vector `SEW/4`-bit Unsigned-Signed 4-Element Dot Product]]
+==== vdota4us.vx
+
+Synopsis::
+Vector `SEW/4`-bit Unsigned-Signed 4-Element Dot Product
+
+Mnemonic::
+vdota4us.vx vd, vs2, rs1, vm +
+
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '101110'},
+]}
+....
+
+Reserved Encodings::
+* `SEW` is any value other than 32
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| `rs1` | input  | vector of `SEW/4`-bit signed multipliers
+| `vs2` | input  | vector of `SEW/4`-bit unsigned multiplicands
+| `vd`  | input  | vector of `SEW`-bit signed accumulator sources
+| `vd`  | output | vector of `SEW`-bit signed accumulated dot products
+|===
+
+[NOTE]
+====
+The vector-vector variant of `vdota4us` is not specified because it can be obtained by swapping the `vs1` and `vs2` operand of the `vdota4su.vv` instruction.
+====
+
+Description::
+`vdota4us` performs a partial dot product of a vector of `SEW/4`-bit unsigned integers by a vector of `SEW/4`-bit signed integers,
+accumulating the partial sums into a vector of `SEW`-bit signed integers.
++
+Each `SEW`-bit element of `vs2` is interpreted as a list of four `SEW/4`-bit unsigned integer sub-elements;
+the `SEW`-bit element read from general purpose register `rs1` is interpreted as a list of four `SEW/4`-bit signed integer sub-elements;
+whereas each `SEW`-bit element of `vd` is interpreted as a single `SEW`-bit signed integer.
+For each element taken consecutively from `vs2`,
+the associated sub-element list is multiplied componentwise by the element list from `rs1`,
+widening (with sign-extension) to `SEW` bits.
+Finally, the four products are accumulated into the associated element of `vd`,
+wrapping on signed overflow.
+
+Operation::
+[source,sail]
+--
+function clause execute (VDOT4AUS(vs2, vs1, vd)) = {
+  foreach (i from vstart to vl-1) {
+    // TODO sign extension
+    let {a0 @ a1 @ a2 @ a3} : bits (4*SEW/4) = get_velem(vs2, i)
+    let {b0 @ b1 @ b2 @ b3} : bits (4*SEW/4) = zext_or_truncate_to_sew(X(rs1));
+    let acc : bits (SEW) = get_velem(vd, i);
+    let res : bits (SEW) = a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3 + acc;
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+--
+
+Included in::
+<<Zvdot4a8i>>
+
+
+[[Proposed_Encodings, reftext="Proposed Encodings"]]
+
+[appendix]
+[[vector_dot_product_instructions]]
+=== Proposed Encodings
+
+OP-V (0x57)
+Vector dot product instruction
+
+[cols="4,1,1,1,1,4,1,1,1,4,1,1,1"]
+|===
+5+^|Integer 4+^|Integer 4+^| FP
+
+| funct3 | | | |            | funct3 | | |             | funct3 | | |
+| OPIVV  |V| | |            | OPMVV  |V| |             | OPFVV  |V| |
+| OPIVX  | |X| |            | OPMVX  | |X|             | OPFVF  | |F|
+| OPIVI  | | |I|            |        | | |             |        | | |
+|===
+
+[cols="4,1,1,1,6,4,1,1,6,4,1,1,6"]
+
+|===
+5+^| funct6                  4+^| funct6                 4+^| funct6
+
+| 101000 |V|X|I| `vsrl`    | 101000 |V|X| `vdota4u`  | 101000 |V|F| `vfmadd`
+| 101010 |V|X|I| `vssrl`   | 101010 |V|X| `vdota4su` | 101010 |V|F| `vfmsub`
+| 101100 |V|X|I| `vnsrl`   | 101100 |V|X| `vdota4`   | 101100 |V|F| `vfmacc`
+| 101110 |V|X|I| `vnclipu` | 101110 | |X| `vdota4us` | 101110 |V|F| `vfmsac`
+|===
