@@ -14,7 +14,7 @@ for spec in $SPECS; do
   echo "|===================================|"
   echo "| Checking $spec tag changes |"
   echo "|===================================|"
-  ruby docs-resources/tools/detect_tag_changes.rb \
+  python3 docs-resources/tools/detect_tag_changes.py \
     --update-reference \
     ref/riscv-$spec-norm-tags.json \
     build/riscv-$spec-norm-tags.json
