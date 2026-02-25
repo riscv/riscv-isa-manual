@@ -39,7 +39,7 @@ endif
 DATE ?= $(shell date +%Y%m%d)
 DOCKER_BIN ?= docker
 SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
-DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
+DOCKER_IMG := ghcr.io/riscv/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
     DOCKER_IS_PODMAN = \
         $(shell ! ${DOCKER_BIN}  -v | grep podman >/dev/null ; echo $$?)
@@ -131,7 +131,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref
 
 all: build
 
@@ -146,9 +146,18 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
+check-tags:
+	@bash ./scripts/check-tag-changes.sh
+
+# Copy built normative tags JSON files to ref directory and use sed to ensure they end with a newline.
+# Required by GitHub pre-commit checks for this repo.
+update-ref: $(DOCS_NORM_TAGS)
+	cp -f $(DOCS_NORM_TAGS) ref
+	sed -i -e '$$a\' ref/*.json
+
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
-build-norm-rules: build-norm-rules-json build-norm-rules-html
+build-norm-rules: build-norm-rules-json build-norm-rules-html check-tags
 build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
