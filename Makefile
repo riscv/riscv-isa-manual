@@ -38,6 +38,7 @@ endif
 
 DATE ?= $(shell date +%Y%m%d)
 DOCKER_BIN ?= docker
+DOCKER_INTERACTIVE=$(shell [ -t 0 ] && echo "-it --init")
 SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := ghcr.io/riscv/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
@@ -62,6 +63,7 @@ ifneq ($(SKIP_DOCKER),true)
 
     DOCKER_CMD = \
         ${DOCKER_BIN} run --rm \
+            ${DOCKER_INTERACTIVE} \
             -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
             -v ${PWD}/src:/src:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/normative_rule_defs:/normative_rule_defs:ro${DOCKER_EXTRA_VOL_SUFFIX} \
