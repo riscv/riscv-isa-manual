@@ -123,6 +123,8 @@ OPTIONS := --trace \
            -a revnumber='$(DATE)' \
            -a revremark='$(RELEASE_DESCRIPTION)' \
            -a docinfo=shared \
+           -I src/lib \
+           -r sectnumoffset-treeprocessor.rb \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=WARN
