@@ -38,8 +38,9 @@ endif
 
 DATE ?= $(shell date +%Y%m%d)
 DOCKER_BIN ?= docker
+DOCKER_INTERACTIVE=$(shell [ -t 0 ] && echo "-it --init")
 SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
-DOCKER_IMG := riscvintl/riscv-docs-base-container-image:latest
+DOCKER_IMG := ghcr.io/riscv/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
     DOCKER_IS_PODMAN = \
         $(shell ! ${DOCKER_BIN}  -v | grep podman >/dev/null ; echo $$?)
@@ -62,6 +63,7 @@ ifneq ($(SKIP_DOCKER),true)
 
     DOCKER_CMD = \
         ${DOCKER_BIN} run --rm \
+            ${DOCKER_INTERACTIVE} \
             -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
             -v ${PWD}/src:/src:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/normative_rule_defs:/normative_rule_defs:ro${DOCKER_EXTRA_VOL_SUFFIX} \
@@ -109,8 +111,8 @@ ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
 ASCIIDOCTOR_TAGS := $(ENV) asciidoctor --backend tags --require=./docs-resources/converters/tags.rb
-CREATE_NORM_RULE_TOOL := docs-resources/tools/create_normative_rules.rb
-CREATE_NORM_RULE_RUBY := ruby $(CREATE_NORM_RULE_TOOL)
+CREATE_NORM_RULE_TOOL := docs-resources/tools/create_normative_rules.py
+CREATE_NORM_RULE_PYTHON := python3 $(CREATE_NORM_RULE_TOOL)
 
 OPTIONS := --trace \
            -a compress \
@@ -131,7 +133,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref
 
 all: build
 
@@ -146,9 +148,18 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
+check-tags:
+	@bash ./scripts/check-tag-changes.sh
+
+# Copy built normative tags JSON files to ref directory and use sed to ensure they end with a newline.
+# Required by GitHub pre-commit checks for this repo.
+update-ref: $(DOCS_NORM_TAGS)
+	cp -f $(DOCS_NORM_TAGS) ref
+	sed -i -e '$$a\' ref/*.json
+
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
-build-norm-rules: build-norm-rules-json build-norm-rules-html
+build-norm-rules: build-norm-rules-json build-norm-rules-html check-tags
 build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
@@ -195,14 +206,14 @@ $(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 $(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL) $(DOCS_HTML)
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_RUBY) -h $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) --html $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 # Update docker image to latest
