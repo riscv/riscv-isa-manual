@@ -325,11 +325,17 @@ All tile load/store instructions support two optional operands that follow `rs2`
 * An _immediate lambda_ `Lλ` (one of `L1`, `L2`, `L4`, `L8`, `L16`, `L32`, `L64`), which overrides `lambda[2:0]` from `vtype` for the duration of that instruction.
   When omitted, the dynamic lambda from `vtype` is used.
 * A _mask_ specifier `v0.t`, which enables element-level masking using `v0` as the mask register.
-  For loads, masked-off elements (`v0[i] = 0`) are not written to the destination register group.
-  For stores, masked-off elements are not written to memory.
-  When omitted, all elements are active.
+  When omitted, all elements are unmasked.
 
 When both are present, the immediate lambda precedes the mask: `vmtts.v v4,(a0),a1,L64,v0.t`.
+
+Tile load and store instructions follow the standard vector element-status semantics (see <<sec-inactive-defs>>):
+
+* _Active_ elements (body, mask enabled): loads fetch from memory and write `vd`; stores read `vs3` and write to memory.
+  Active elements may raise memory exceptions.
+* _Inactive_ elements (body, mask disabled): loads do not update the destination register unless `vtype.vma`=1 (mask-agnostic), in which case those elements may be overwritten with 1s; stores do not write to memory and do not raise exceptions.
+* _Tail_ elements (index ≥ VL): loads do not update the destination register unless `vtype.vta`=1 (tail-agnostic), in which case those elements may be overwritten with 1s; stores do not write to memory and do not raise exceptions.
+* _Prestart_ elements (index < `vstart`): neither the destination register nor memory is updated; no exceptions are raised.
 
 [cols="2,4", options="header"]
 |===
@@ -349,7 +355,7 @@ Loads a 2D matrix tile from memory into the vector register group starting at `v
 `rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
 
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`, the load computes:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
     VD[i] = M[rs1 + (i / linesize) × LD + (i % linesize)]
 
@@ -365,7 +371,7 @@ Stores the 2D matrix tile held in the vector register group starting at `vs3` to
 `rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
 
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`, the store computes:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
     M[rs1 + (i / linesize) × LD + (i % linesize)] = VS[i]
 
@@ -379,7 +385,7 @@ This instruction is used when a B tile is stored in row-major order, or when an 
 
 
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`, the transposing load computes:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
     VD[i] = M[rs1 + (i % linesize) × LD + (i / linesize)]
 
@@ -392,7 +398,7 @@ Stores a 2D matrix tile from vector registers to memory, applying the inverse tr
 
 
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`, the transposing store computes:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
     M[rs1 + (i % linesize) × LD + (i / linesize)] = VS[i]
 
@@ -419,14 +425,14 @@ When N_tile < N_tile_max, the elements C[i, j] for 0 ≤ i < M_tile and N_tile �
 Multiply-accumulate instructions never read or write C tile tail elements.
 
 * If `vta` = 0 (tail-undisturbed): tail elements retain their pre-instruction values.
-  This is achieved by write-skip — the instruction simply does not access those element positions — so implementations are not required to read the tail portion of the C register group.
+  This is achieved by write-skip — the instruction simply does not access those element positions — so implementations are not required to read the tail portion of the C register group (i.e., all registers that fall entirely into the tail).
 * If `vta` = 1 (tail-agnostic): tail elements may be written with any value (including all-ones), or left unchanged.
   Implementations are likewise not required to read the tail elements before deciding what to write.
 
 [NOTE]
 ====
 This differs from the tail policy for ordinary vector instructions, where tail-undisturbed is typically implemented via read-merge: the implementation reads the old destination register contents, updates active positions, and writes the merged result back.
-For IME multiply-accumulate instructions, undisturbed behavior requires no read — the instruction leaves tail element positions untouched — which permits hardware implementations (including outer-product engines and register-renaming machines) to process only the N_tile active columns of the C tile without referencing the tail portion of the C register group.
+For IME multiply-accumulate instructions, undisturbed behavior requires no read — the instruction leaves tail element positions untouched — which permits hardware implementations (including outer-product engines and register-renaming machines) to process only the N_tile active columns of the C tile without referencing the tail portion of the C register group (i.e., all registers that fall entirely into the tail).
 ====
 
 ==== Memory layout and instruction selection
@@ -1017,10 +1023,12 @@ Description::
 Loads a 2D matrix tile from memory into the vector register group starting at _vd_.
 _rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
 When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
-When masked (`v0.t`), masked-off elements are not written to the destination.
+Inactive elements (masked off) are not updated unless `vtype.vma`=1 (mask-agnostic), in which case they may be overwritten with 1s.
+Tail elements (index ≥ VL) are not updated unless `vtype.vta`=1 (tail-agnostic), in which case they may be overwritten with 1s.
+Neither inactive nor tail elements raise memory exceptions.
 +
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 +
     VD[i] = M[rs1 + (i / linesize) × LD + (i % linesize)]
 +
@@ -1064,7 +1072,8 @@ foreach (i from 0 to (num_elem - 1)) {
       Err(e)   => return e,
     }
   }
-  // inactive elements: vd[tile_reg_idx(i, ...)] left undisturbed (or agnostic per vma policy)
+  // inactive (body, mask=0): undisturbed unless vma=1 (may overwrite with 1s)
+  // tail (i >= VL): not reached by this loop; undisturbed unless vta=1 (may overwrite with 1s)
 };
 
 set_vstart(zeros());
@@ -1113,10 +1122,11 @@ Description::
 Stores the 2D matrix tile held in the vector register group starting at _vs3_ to memory.
 _rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
 When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
-When masked (`v0.t`), masked-off elements are not written to memory.
+Inactive elements (masked off) are not written to memory and do not raise exceptions.
+Tail elements (index ≥ VL) are not written to memory and do not raise exceptions.
 +
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 +
     M[rs1 + (i / linesize) × LD + (i % linesize)] = VS[i]
 
@@ -1142,14 +1152,10 @@ let eff_lambda : int =
 
 let LD     : int   = unsigned(X(rs2));
 let vm_val         = read_vmask(num_elem, vm, zvreg);
-let mask           = match init_masked_source(num_elem, LMUL_pow, vm_val) {
-  Ok(v)   => v,
-  Err(()) => return Illegal_Instruction()
-};
 let linesize : int = eff_lambda * LMUL;
 
 foreach (i from 0 to (num_elem - 1)) {
-  if mask[i] == 0b1 then {
+  if vm_val[i] == 0b1 then {
     set_vstart(to_bits_unsafe(16, i));
     let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
     let mem_off  : int = (i / linesize) * LD + (i % linesize);
@@ -1212,11 +1218,12 @@ This instruction is used when a B tile is stored in row-major order, or when an 
 is stored in column-major order in memory.
 _rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
 When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
-When masked (`v0.t`), masked-off elements are not written to the destination.
-
+Inactive elements (masked off) are not updated unless `vtype.vma`=1 (mask-agnostic), in which case they may be overwritten with 1s.
+Tail elements (index ≥ VL) are not updated unless `vtype.vta`=1 (tail-agnostic), in which case they may be overwritten with 1s.
+Neither inactive nor tail elements raise memory exceptions.
 +
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 +
     VD[i] = M[rs1 + (i % linesize) × LD + (i / linesize)]
 
@@ -1256,7 +1263,8 @@ foreach (i from 0 to (num_elem - 1)) {
       Err(e)   => return e,
     }
   }
-  // inactive elements: vd[tile_reg_idx(i, ...)] left undisturbed (or agnostic per vma policy)
+  // inactive (body, mask=0): undisturbed unless vma=1 (may overwrite with 1s)
+  // tail (i >= VL): not reached by this loop; undisturbed unless vta=1 (may overwrite with 1s)
 };
 
 set_vstart(zeros());
@@ -1306,11 +1314,11 @@ Stores a 2D matrix tile from vector registers to memory, applying the inverse tr
 of `vmttl.v`.
 _rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements.
 When _Lλ_ is specified, it overrides `lambda[2:0]` from `vtype` for this instruction.
-When masked (`v0.t`), masked-off elements are not written to memory.
-
+Inactive elements (masked off) are not written to memory and do not raise exceptions.
+Tail elements (index ≥ VL) are not written to memory and do not raise exceptions.
 +
 Let _linesize_ = λ × LMUL.
-For each active element index `i` in `[0, VL)`:
+For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 +
     M[rs1 + (i % linesize) × LD + (i / linesize)] = VS[i]
 
@@ -1336,14 +1344,10 @@ let eff_lambda : int =
 
 let LD     : int   = unsigned(X(rs2));
 let vm_val         = read_vmask(num_elem, vm, zvreg);
-let mask           = match init_masked_source(num_elem, LMUL_pow, vm_val) {
-  Ok(v)   => v,
-  Err(()) => return Illegal_Instruction()
-};
 let linesize : int = eff_lambda * LMUL;
 
 foreach (i from 0 to (num_elem - 1)) {
-  if mask[i] == 0b1 then {
+  if vm_val[i] == 0b1 then {
     set_vstart(to_bits_unsafe(16, i));
     let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
     // Transposing: swap line and elem_in_line for the memory address
