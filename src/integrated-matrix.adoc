@@ -165,6 +165,46 @@ For integer multiply-accumulate instructions, `altfmt_A` and `altfmt_B` select w
 
 === Storage formats
 
+==== Element packing in input tiles
+
+For non-widening multiply-accumulate instructions (W=1), the input elements
+A and B have the same width as the accumulator (SEW) and no packing occurs.
+
+For widening instructions (W=2 or W=4), each input register group holds
+elements at the effective input element width EEW = SEW ÷ W.  Because
+tile load instructions always transfer data at SEW granularity, every loaded
+SEW-bit position contains W contiguous narrow elements that the
+multiply-accumulate instruction consumes as a sub-dot-product.
+
+===== Byte-sized and wider elements (EEW ≥ 8)
+
+When the input element width is 8 bits or wider (EEW ∈ {8, 16, 32, 64}), the
+elements within the input register group follow standard RISC-V V element
+ordering: element _k_ at width EEW occupies bits
+[_k_ × EEW + EEW − 1 : _k_ × EEW] of the register group.  This is
+identical to the layout produced by a vector load at the same element width
+(e.g., `vle8.v` for EEW=8) and requires no special data preparation beyond
+the tile load itself.
+
+===== Sub-byte elements (EEW = 4)
+
+Four-bit input elements (OFP4 E2M1 / E3M0, Int4) are packed two per byte
+in little-endian nibble order:
+
+* The _even-indexed_ element (element 2__n__) occupies the *lower* nibble
+  [3:0] of byte __n__.
+* The _odd-indexed_ element (element 2__n__ + 1) occupies the *upper* nibble
+  [7:4] of byte __n__.
+
+This extends the standard RISC-V V element-indexing convention to sub-byte
+widths: element _k_ at width 4 occupies bits [4__k__ + 3 : 4__k__] of the
+register group, consistent with the formula for all element widths.
+
+Because tile loads operate at SEW (≥ 8 bits), each loaded byte already
+contains a naturally ordered pair of 4-bit elements.  Software preparing
+input data in memory must pack adjacent elements within each byte
+accordingly.
+
 ==== Arithmetic considerations
 
 Each multiply-accumulate instruction computes, for every output element C[m, n]:
@@ -522,9 +562,6 @@ Key observations:
 
 [#integrated-matrix-software,reftext="Software considerations"]
 === Software considerations
-
-[#integrated-matrix-arithmetic,reftext="Arithmetic considerations"]
-=== Arithmetic considerations
 
 [#integrated-matrix-insns,reftext="Instructions (in alphabetical order)"]
 === Instructions (in alphabetical order)
