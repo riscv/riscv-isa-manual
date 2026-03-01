@@ -19,7 +19,7 @@
 #   docker pull ghcr.io/riscv/riscv-docs-base-container-image:latest
 #
 
-DOCS := riscv-privileged riscv-unprivileged
+DOCS := riscv-spec
 
 RELEASE_TYPE ?= draft
 DATE ?= $(shell date +%Y%m%d)
