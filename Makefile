@@ -22,7 +22,10 @@
 DOCS := riscv-privileged riscv-unprivileged
 
 RELEASE_TYPE ?= draft
+DATE ?= $(shell date +%Y%m%d)
+MONTHYEAR := $(shell date -j -f "%Y%m%d" "$(DATE)" +"%B %Y" 2>/dev/null || date -d "$(DATE)" +"%B %Y")
 
+CITATION_DESCRIPTION := $(DATE)-$(RELEASE_TYPE)
 ifeq ($(RELEASE_TYPE), draft)
   WATERMARK_OPT := -a draft-watermark
   RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
@@ -32,11 +35,11 @@ else ifeq ($(RELEASE_TYPE), intermediate)
 else ifeq ($(RELEASE_TYPE), official)
   WATERMARK_OPT :=
   RELEASE_DESCRIPTION := Official Release
+  CITATION_DESCRIPTION := $(DATE)
 else
   $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
 endif
 
-DATE ?= $(shell date +%Y%m%d)
 DOCKER_BIN ?= docker
 DOCKER_INTERACTIVE=$(shell [ -t 0 ] && echo "-it --init")
 SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
@@ -121,6 +124,8 @@ OPTIONS_TAGS := --trace \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
            $(WATERMARK_OPT) \
            -a revnumber='$(DATE)' \
+           -a monthyear='$(MONTHYEAR)' \
+           -a revcite='$(CITATION_DESCRIPTION)' \
            -a revremark='$(RELEASE_DESCRIPTION)' \
            -a docinfo=shared \
            $(XTRA_ADOC_OPTS) \
