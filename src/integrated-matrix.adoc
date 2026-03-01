@@ -402,20 +402,32 @@ For each active element index `i` in `[0, VL)`, the transposing store computes:
 
 The tile dimensions are fully determined by the current vector configuration:
 
-    M_tile = VLEN / (SEW × λ)           (rows of A and C per computation)
-    K_eff  = λ × W × LMUL               (shared K-dimension step)
-    N_tile = VL / K_eff                  (columns of B and C; set via vsetvl)
-    MUL_C  = VLEN / (SEW × λ²)          (C accumulator register group size)
+    M_tile     = VLEN / (SEW × λ)       (rows of A and C per computation)
+    K_eff      = λ × W × LMUL           (shared K-dimension step)
+    N_tile     = VL / K_eff             (active columns of B and C; set via vsetvl)
+    N_tile_max = M_tile                  (maximum columns when VL = VL_max)
+    MUL_C      = VLEN / (SEW × λ²)     (C accumulator register group size)
 
-`M_tile` is fixed by the hardware (VLEN) and the chosen SEW and λ; it cannot be
-changed by VL.
-`N_tile` is controlled by the programmer through VL; use `vsetvl` to select the
-largest `N_tile` that fits the remaining columns.
+`M_tile` is fixed by the hardware (VLEN) and the chosen SEW and λ; it cannot be changed by VL.
+`N_tile` is controlled by the programmer through VL; use `vsetvl` to select the largest `N_tile` that fits the remaining columns.
 
-Because the multiply-accumulate instructions always read all `M_tile` rows of A
-independent of VL, loading an A tile requires VL = M_tile × K_eff (the natural
-maximum VL for the chosen LMUL), while the B load and computation use the
-narrower VL = K_eff × N_tile.
+Because the multiply-accumulate instructions always read all `M_tile` rows of A independent of VL, loading an A tile requires VL = M_tile × K_eff (the natural maximum VL for the chosen LMUL), while the B load and computation use the narrower VL = K_eff × N_tile.
+
+==== C tile tail policy
+
+When N_tile < N_tile_max, the elements C[i, j] for 0 ≤ i < M_tile and N_tile ≤ j < N_tile_max are _C tile tail elements_.
+Multiply-accumulate instructions never read or write C tile tail elements.
+
+* If `vta` = 0 (tail-undisturbed): tail elements retain their pre-instruction values.
+  This is achieved by write-skip — the instruction simply does not access those element positions — so implementations are not required to read the tail portion of the C register group.
+* If `vta` = 1 (tail-agnostic): tail elements may be written with any value (including all-ones), or left unchanged.
+  Implementations are likewise not required to read the tail elements before deciding what to write.
+
+[NOTE]
+====
+This differs from the tail policy for ordinary vector instructions, where tail-undisturbed is typically implemented via read-merge: the implementation reads the old destination register contents, updates active positions, and writes the merged result back.
+For IME multiply-accumulate instructions, undisturbed behavior requires no read — the instruction leaves tail element positions untouched — which permits hardware implementations (including outer-product engines and register-renaming machines) to process only the N_tile active columns of the C tile without referencing the tail portion of the C register group.
+====
 
 ==== Memory layout and instruction selection
 
