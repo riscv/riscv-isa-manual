@@ -8,14 +8,14 @@ Dedicated matrix-multiply accelerators often require new register state—separa
 
 The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
 By interpreting groups of existing vector registers as two-dimensional matrix tiles, the Zvvm family of Integrated Matrix extensions delivers high arithmetic density without introducing any new architected state.
-We focus, in particular, in the computation of C ← A × B^T^ + C, where A, B, and C are row-major matrix panels of shapes μ × λ, ν × λ, and μ × ν, respectively.
+We focus, in particular, on the computation of C ← A × B^T^ + C, where A (μ × λ) and B (ν × λ) are row-major matrix panels and C (μ × ν) is column-major.
 
 The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
 A key design goal is that the same binary executes correctly—and achieves near-peak arithmetic throughput—across this entire range without recompilation.
 
 === Overview
 
-The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) provides the following sub-extensions:
+The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) provides the following subextensions:
 
 * <<#zvvmm>>: multiply-accumulate instructions for integer matrix tiles
 * <<#zvvfmm>>: multiply-accumulate instructions for floating-point matrix tiles
@@ -33,11 +33,12 @@ The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are 
 
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
   equal to SEW for non-packing variants, SEW/2 for double-packing, and SEW/4 for quad-packing variants.
-  The K dimension of the multiply equals λ for non-packing instructions, 2λ for double-packing, and 4λ for quad-packing; LMUL scales the A and B register groups along the K dimension only and does not affect C.
+  The K dimension of the multiply equals λ for non-packing instructions, 2λ for double-packing, and 4λ for quad-packing.
+  LMUL scales the A and B register groups along the K dimension only and does not affect C.
   Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
   Fractional LMUL settings (LMUL < 1) are reserved and shall raise an illegal-instruction exception when used with any IME instruction.
 
-Table <<tbl-subextensions>> lists all computational sub-extensions in the Zvvm family.
+Table <<tbl-subextensions>> lists all computational subextensions in the Zvvm family.
 
 [#tbl-subextensions]
 .Computational subextensions in the Zvvm family of Integrated Matrix extensions.
@@ -57,7 +58,7 @@ Table <<tbl-subextensions>> lists all computational sub-extensions in the Zvvm f
 |Zvvmmw         ^| Zve64d       | [U]Int32, [U]Int32           | Int32
 |Zvvmmwd        ^| Zve64d       | [U]Int32, [U]Int32           | Int64
 |Zvvmmd         ^| Zve64d       | [U]Int64, [U]Int64           | Int64
-|Zvvfmmofp4opf8 ^| Zve64d       | OFP4 (E2M1 or E3M0), OFP4 (E2M1 or E3M0) | OFP8
+|Zvvfmmofp4ofp8 ^| Zve64d       | OFP4 (E2M1 or E3M0), OFP4 (E2M1 or E3M0) | OFP8
 |Zvvfmmofp4h    ^| Zve64d       | OFP4 (E2M1 or E3M0), OFP4 (E2M1 or E3M0) | IEEE binary16
 |Zvvfmmofp4bf16 ^| Zve64d       | OFP4 (E2M1 or E3M0), OFP4 (E2M1 or E3M0) | BFloat16
 |Zvvfmmofp8     ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | OFP8
@@ -75,6 +76,144 @@ Table <<tbl-subextensions>> lists all computational sub-extensions in the Zvvm f
 |Zvvfmmd        ^| Zve64d       | IEEE binary64, IEEE binary64 | IEEE binary64
 |===
 
+Microscaling subextensions that add E8M0-scaled variants of the narrow
+input formats (OFP4, OFP8) are listed separately in
+<<tbl-mx-subextensions>>.
+
+==== Encoding map
+
+The following tables enumerate every (instruction, SEW, altfmt) encoding
+point and map it to its input and output data types and the governing
+subextension.  Entries marked _reserved_ raise an illegal-instruction
+exception.
+
+===== Floating-point encoding map
+
+For all floating-point multiply-accumulate instructions, `altfmt_A` must
+equal `altfmt_B`; encodings where `altfmt_A ≠ altfmt_B` are _reserved_ and
+are not shown below.
+
+[#tbl-fp-encoding-map]
+.Floating-point multiply-accumulate encoding map
+[cols="2,1,1,1,2,1,2,1,2,2,2,2", options="header"]
+|===
+| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | altfmt | C Type | Subextension | MX BS=32 (vm=0) | MX BS=16 (vm=0)
+
+12+^e| *vfmmacc.vv (W=1)*
+
+| vfmmacc  | 8  | 8  | 0 | E4M3  | 0 | E4M3  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 0 | E4M3  | 0 | E4M3  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 1 | E5M2  | 1 | E5M2  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 1 | E5M2  | 1 | E5M2  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 16 | 16 | 0 | FP16  | 0 | FP16  | 0 | FP16  | Zvvfmmh        | —                 | —
+| vfmmacc  | 16 | 16 | 0 | FP16  | 0 | FP16  | 1 | BF16  | _reserved_     | —                 | —
+| vfmmacc  | 16 | 16 | 1 | BF16  | 1 | BF16  | 0 | FP16  | _reserved_     | —                 | —
+| vfmmacc  | 16 | 16 | 1 | BF16  | 1 | BF16  | 1 | BF16  | Zvvfmmbf16     | —                 | —
+| vfmmacc  | 32 | 32 | × | FP32  | × | FP32  | 0 | FP32  | Zvvfmmf        | —                 | —
+| vfmmacc  | 32 | 32 | × | FP32  | × | FP32  | 1 | —     | _reserved_     | —                 | —
+| vfmmacc  | 64 | 64 | × | FP64  | × | FP64  | 0 | FP64  | Zvvfmmd        | —                 | —
+| vfmmacc  | 64 | 64 | × | FP64  | × | FP64  | 1 | —     | _reserved_     | —                 | —
+
+12+^e| *vfwmmacc.vv (W=2)*
+
+| vfwmmacc | 8  | 4  | 0 | E2M1  | 0 | E2M1  | 0 | E4M3  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
+| vfwmmacc | 8  | 4  | 0 | E2M1  | 0 | E2M1  | 1 | E5M2  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
+| vfwmmacc | 8  | 4  | 1 | E3M0  | 1 | E3M0  | 0 | E4M3  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
+| vfwmmacc | 8  | 4  | 1 | E3M0  | 1 | E3M0  | 1 | E5M2  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
+| vfwmmacc | 16 | 8  | 0 | E4M3  | 0 | E4M3  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
+| vfwmmacc | 16 | 8  | 0 | E4M3  | 0 | E4M3  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
+| vfwmmacc | 16 | 8  | 1 | E5M2  | 1 | E5M2  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
+| vfwmmacc | 16 | 8  | 1 | E5M2  | 1 | E5M2  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
+| vfwmmacc | 32 | 16 | 0 | FP16  | 0 | FP16  | 0 | FP32  | Zvvfmmhf       | —                 | —
+| vfwmmacc | 32 | 16 | 0 | FP16  | 0 | FP16  | 1 | —     | _reserved_     | —                 | —
+| vfwmmacc | 32 | 16 | 1 | BF16  | 1 | BF16  | 0 | FP32  | Zvvfmmbf16f    | —                 | —
+| vfwmmacc | 32 | 16 | 1 | BF16  | 1 | BF16  | 1 | —     | _reserved_     | —                 | —
+| vfwmmacc | 64 | 32 | × | FP32  | × | FP32  | 0 | FP64  | Zvvfmmfd       | —                 | —
+| vfwmmacc | 64 | 32 | × | FP32  | × | FP32  | 1 | —     | _reserved_     | —                 | —
+
+12+^e| *vfqwmmacc.vv (W=4)*
+
+| vfqwmmacc | 8  | 2 | × | —    | × | —     | × | —     | _reserved_      | —                 | —
+| vfqwmmacc | 16 | 4  | 0 | E2M1 | 0 | E2M1  | 0 | FP16  | Zvvfmmofp4h    | Zvvfmmmxfp4h     | Zvvfmmnxfp4h
+| vfqwmmacc | 16 | 4  | 0 | E2M1 | 0 | E2M1  | 1 | BF16  | Zvvfmmofp4bf16 | Zvvfmmmxfp4bf16  | Zvvfmmnxfp4bf16
+| vfqwmmacc | 16 | 4  | 1 | E3M0 | 1 | E3M0  | 0 | FP16  | Zvvfmmofp4h    | Zvvfmmmxfp4h     | Zvvfmmnxfp4h
+| vfqwmmacc | 16 | 4  | 1 | E3M0 | 1 | E3M0  | 1 | BF16  | Zvvfmmofp4bf16 | Zvvfmmmxfp4bf16  | Zvvfmmnxfp4bf16
+| vfqwmmacc | 32 | 8  | 0 | E4M3 | 0 | E4M3  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
+| vfqwmmacc | 32 | 8  | 0 | E4M3 | 0 | E4M3  | 1 | —     | _reserved_     | —                 | —
+| vfqwmmacc | 32 | 8  | 1 | E5M2 | 1 | E5M2  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
+| vfqwmmacc | 32 | 8  | 1 | E5M2 | 1 | E5M2  | 1 | —     | _reserved_     | —                 | —
+| vfqwmmacc | 64 | 16 | 0 | FP16 | 0 | FP16  | 0 | FP64  | Zvvfmmhd       | —                 | —
+| vfqwmmacc | 64 | 16 | 0 | FP16 | 0 | FP16  | 1 | —     | _reserved_     | —                 | —
+| vfqwmmacc | 64 | 16 | 1 | BF16 | 1 | BF16  | 0 | FP64  | Zvvfmmbf16d    | —                 | —
+| vfqwmmacc | 64 | 16 | 1 | BF16 | 1 | BF16  | 1 | —     | _reserved_     | —                 | —
+|===
+
+===== Integer encoding map
+
+`altfmt_A` and `altfmt_B` select signed (0) or unsigned (1) interpretation; the accumulator is always signed.
+`altfmt` is unused and `vm` must be 1 (`vm=0` is _reserved_).
+
+[#tbl-int-encoding-map]
+.Integer multiply-accumulate encoding map
+[cols="2,1,1,1,2,1,2,2,2", options="header"]
+|===
+| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | C Type | Subextension
+
+9+^e| *vmmacc.vv (W=1)*
+
+| vmmacc    | 8  | 8  | 0 | Int8   | 0 | Int8   | Int8  | Zvvmmb
+| vmmacc    | 8  | 8  | 0 | Int8   | 1 | UInt8  | Int8  | Zvvmmb
+| vmmacc    | 8  | 8  | 1 | UInt8  | 0 | Int8   | Int8  | Zvvmmb
+| vmmacc    | 8  | 8  | 1 | UInt8  | 1 | UInt8  | Int8  | Zvvmmb
+| vmmacc    | 16 | 16 | 0 | Int16  | 0 | Int16  | Int16 | Zvvmmh
+| vmmacc    | 16 | 16 | 0 | Int16  | 1 | UInt16 | Int16 | Zvvmmh
+| vmmacc    | 16 | 16 | 1 | UInt16 | 0 | Int16  | Int16 | Zvvmmh
+| vmmacc    | 16 | 16 | 1 | UInt16 | 1 | UInt16 | Int16 | Zvvmmh
+| vmmacc    | 32 | 32 | 0 | Int32  | 0 | Int32  | Int32 | Zvvmmw
+| vmmacc    | 32 | 32 | 0 | Int32  | 1 | UInt32 | Int32 | Zvvmmw
+| vmmacc    | 32 | 32 | 1 | UInt32 | 0 | Int32  | Int32 | Zvvmmw
+| vmmacc    | 32 | 32 | 1 | UInt32 | 1 | UInt32 | Int32 | Zvvmmw
+| vmmacc    | 64 | 64 | 0 | Int64  | 0 | Int64  | Int64 | Zvvmmd
+| vmmacc    | 64 | 64 | 0 | Int64  | 1 | UInt64 | Int64 | Zvvmmd
+| vmmacc    | 64 | 64 | 1 | UInt64 | 0 | Int64  | Int64 | Zvvmmd
+| vmmacc    | 64 | 64 | 1 | UInt64 | 1 | UInt64 | Int64 | Zvvmmd
+
+9+^e| *vwmmacc.vv (W=2)*
+
+| vwmmacc   | 8  | 4  | 0 | Int4   | 0 | Int4   | Int8  | Zvvmmi4b
+| vwmmacc   | 8  | 4  | 0 | Int4   | 1 | UInt4  | Int8  | Zvvmmi4b
+| vwmmacc   | 8  | 4  | 1 | UInt4  | 0 | Int4   | Int8  | Zvvmmi4b
+| vwmmacc   | 8  | 4  | 1 | UInt4  | 1 | UInt4  | Int8  | Zvvmmi4b
+| vwmmacc   | 16 | 8  | 0 | Int8   | 0 | Int8   | Int16 | Zvvmmbh
+| vwmmacc   | 16 | 8  | 0 | Int8   | 1 | UInt8  | Int16 | Zvvmmbh
+| vwmmacc   | 16 | 8  | 1 | UInt8  | 0 | Int8   | Int16 | Zvvmmbh
+| vwmmacc   | 16 | 8  | 1 | UInt8  | 1 | UInt8  | Int16 | Zvvmmbh
+| vwmmacc   | 32 | 16 | 0 | Int16  | 0 | Int16  | Int32 | Zvvmmhw
+| vwmmacc   | 32 | 16 | 0 | Int16  | 1 | UInt16 | Int32 | Zvvmmhw
+| vwmmacc   | 32 | 16 | 1 | UInt16 | 0 | Int16  | Int32 | Zvvmmhw
+| vwmmacc   | 32 | 16 | 1 | UInt16 | 1 | UInt16 | Int32 | Zvvmmhw
+| vwmmacc   | 64 | 32 | 0 | Int32  | 0 | Int32  | Int64 | Zvvmmwd
+| vwmmacc   | 64 | 32 | 0 | Int32  | 1 | UInt32 | Int64 | Zvvmmwd
+| vwmmacc   | 64 | 32 | 1 | UInt32 | 0 | Int32  | Int64 | Zvvmmwd
+| vwmmacc   | 64 | 32 | 1 | UInt32 | 1 | UInt32 | Int64 | Zvvmmwd
+
+9+^e| *vqwmmacc.vv (W=4)*
+
+| vqwmmacc  | 8  | 2  | × | —     | × | —      | —     | _reserved_
+| vqwmmacc  | 16 | 4  | 0 | Int4   | 0 | Int4   | Int16 | Zvvmmi4h
+| vqwmmacc  | 16 | 4  | 0 | Int4   | 1 | UInt4  | Int16 | Zvvmmi4h
+| vqwmmacc  | 16 | 4  | 1 | UInt4  | 0 | Int4   | Int16 | Zvvmmi4h
+| vqwmmacc  | 16 | 4  | 1 | UInt4  | 1 | UInt4  | Int16 | Zvvmmi4h
+| vqwmmacc  | 32 | 8  | 0 | Int8   | 0 | Int8   | Int32 | Zvvmmbw
+| vqwmmacc  | 32 | 8  | 0 | Int8   | 1 | UInt8  | Int32 | Zvvmmbw
+| vqwmmacc  | 32 | 8  | 1 | UInt8  | 0 | Int8   | Int32 | Zvvmmbw
+| vqwmmacc  | 32 | 8  | 1 | UInt8  | 1 | UInt8  | Int32 | Zvvmmbw
+| vqwmmacc  | 64 | 16 | 0 | Int16  | 0 | Int16  | Int64 | Zvvmmhd
+| vqwmmacc  | 64 | 16 | 0 | Int16  | 1 | UInt16 | Int64 | Zvvmmhd
+| vqwmmacc  | 64 | 16 | 1 | UInt16 | 0 | Int16  | Int64 | Zvvmmhd
+| vqwmmacc  | 64 | 16 | 1 | UInt16 | 1 | UInt16 | Int64 | Zvvmmhd
+|===
+
 === New fields in the Vector Type (`vtype`) Register
 
 The Zvvm family of Integrated Matrix extensions defines the following additional fields in the `vtype` CSR:
@@ -82,10 +221,12 @@ The Zvvm family of Integrated Matrix extensions defines the following additional
 * `lambda[2:0]` at `vtype[XLEN-2:XLEN-4]` is the Selected Lambda
 * `altfmt_A` at `vtype[9]` is the Alternate Format for input A
 * `altfmt_B` at `vtype[10]` is the Alternate Format for input B
+* `bs` at `vtype[11]` is the Block Size selector for microscaling
 
 ==== Selected lambda (`lambda[2:0]`) field
 
-The `lambda[2:0]` field is a 3-bit WARL read/write field in the `vtype` CSR that holds the dynamic _selected lambda_ (i.e., the effective K dimension used for registers backing the output matrix C) for multiply-accumulate and 2D load/store instructions.
+The `lambda[2:0]` field is a 3-bit WARL read/write field in the `vtype` CSR that holds the dynamic _selected lambda_ — the effective K dimension used for registers backing the output matrix C.
+It governs both multiply-accumulate and 2D load/store instructions.
 
 `lambda[2:0]` is a WARL field, so it can only be programmed to values supported by the implementation.
 One discovery mechanism is to attempt to program different values and read back which are retained.
@@ -130,7 +271,8 @@ The Zvvm Integrated Matrix floating-point extensions use the _altfmt_ field (as 
 [#integrated-matrix-altfmt-inputs]
 ==== Alternate formats for inputs (`altfmt_A`, `altfmt_B`)
 
-The `altfmt_A` and `altfmt_B` fields are 1-bit read/write fields added to the `vtype` CSR by the Zvvm family of Integrated Matrix extensions to select the interpretation of elements in input matrices A and B, respectively.
+The `altfmt_A` and `altfmt_B` fields are 1-bit read/write fields added to the `vtype` CSR by the Zvvm family of Integrated Matrix extensions.
+They select the interpretation of elements in input matrices A and B, respectively.
 Their meaning depends on whether the instruction is a floating-point or integer multiply-accumulate.
 
 [NOTE]
@@ -174,6 +316,23 @@ For integer multiply-accumulate instructions, `altfmt_A` and `altfmt_B` select w
 
 | 0 | Signed
 | 1 | Unsigned
+|===
+
+[#integrated-matrix-bs]
+==== Microscaling block size (`bs`)
+
+The `bs` field is a 1-bit read/write field in the `vtype` CSR that selects
+the block size used for microscaling operations (`vm=0`).  When `vm=1`, the
+`bs` field is ignored.
+
+.Block size encoding
+[cols="1,2"]
+[%autowidth,float="center",align="center",options="header"]
+|===
+| bs | Block size
+
+| 0 | 32 elements
+| 1 | 16 elements
 |===
 
 === Storage formats
@@ -229,9 +388,11 @@ This section specifies how the K_eff product terms may be grouped and when inter
 
 ===== Sub-dot-products
 
-For widening instructions (W = 2 or W = 4), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_: the W multiplications of (SEW÷W)-bit elements are performed and their products summed.
+For widening instructions (W = 2 or W = 4), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_.
+The W multiplications of (SEW÷W)-bit elements are performed and their products summed.
 
-Because each individual product of two (SEW÷W)-bit values is _exact_ at SEW precision—the significand of the product has at most 2 × p~input~ − 1 bits, which fits in the wider SEW format—the sub-dot-product can be computed with very little loss at SEW or wider precision.
+Each product of two (SEW÷W)-bit values is _exact_ at SEW precision: the significand has at most 2 × p~input~ − 1 bits, which fits in the wider SEW format.
+The sub-dot-product can therefore be computed with very little loss at SEW or wider precision.
 
 There are K_eff ÷ W = λ × LMUL sub-dot-products per output element.
 
@@ -260,7 +421,8 @@ The final accumulation step—adding the fully reduced dot-product to the origin
 ====
 In a *systolic-array* datapath, G is typically 1: each sub-dot-product is rounded and added to C immediately, yielding λ × LMUL rounding additions per output element.
 
-In an *outer-product* datapath, G is typically on the order of λ (e.g. λ, λ÷2, λ÷4, or λ÷8): multiple sub-dot-products are accumulated at extended internal precision before a single rounding and C addition, significantly reducing the number of expensive full-precision additions.
+In an *outer-product* datapath, G is typically on the order of λ (e.g. λ, λ÷2, λ÷4, or λ÷8): multiple sub-dot-products are accumulated at extended internal precision before a single rounding and C addition.
+This significantly reduces the number of expensive full-precision additions.
 
 Software must not depend on a particular value of G.
 ====
@@ -276,7 +438,7 @@ For integer multiply-accumulate instructions, all intermediate results are reduc
 Because modular addition is both associative and commutative, the final result is uniquely defined regardless of the accumulation order or grouping factor.
 
 [#zvvmm,reftext=Matrix-multiplication instructions (integer)]
-=== Zvvmm: Extension for matrix-multiplication on vector-registers interpreted as 2D integer matrix-tiles
+=== Zvvmm: Extension for matrix multiplication on vector registers interpreted as 2D integer matrix tiles
 
 The `Zvvmm` family of extensions provides instructions that perform matrix multiply-accumulate on integer data, computing C ← C + A × B, where A, B, and C are matrix tiles held in the vector register file.
 
@@ -284,9 +446,8 @@ The K-dimension of the multiplication (shared inner dimension of A and B) is det
 
     K_effective = λ × W × LMUL
 
-The element widths are related by the widening factor: A and B tiles have elements of width SEW÷W, while the accumulator C has elements of width SEW.
-The signedness of each input is controlled independently: `altfmt_A = 0` selects signed A, `altfmt_A = 1` unsigned A; likewise for `altfmt_B`.
-The accumulator C is always treated as signed.
+A and B tiles have elements of width SEW÷W; the accumulator C has elements of width SEW (see table below).
+The signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned); the accumulator C is always signed.
 Integer accumulation wraps modulo 2^SEW^.
 
 The tile dimensions follow from the widening and LMUL settings:
@@ -307,16 +468,16 @@ The accumulator register group has cardinality MUL_C = VLEN ÷ (SEW × λ²), in
 |===
 
 Vector masking is not supported on matrix multiply-accumulate instructions:
-the `vm` bit in the encoding must be 1.  Setting `vm=0` is _reserved_.
-
-NOTE: A future extension may redefine `vm=0` to source per-element scaling
-factors from `v0` for microscaling floating-point formats, analogous to the
-use of `v0` as a mask register in base-V masked operations.
+the `vm` bit in the encoding must be 1.
+For integer multiply-accumulate instructions, `vm=0` is _reserved_.
+For floating-point multiply-accumulate instructions, `vm=0` enables
+microscaling (see <<integrated-matrix-microscaling>>).
 
 [#zvvfmm,reftext=Matrix-multiplication instructions (floating-point)]
-=== Zvvfmm: Extension for matrix-multiplication on vector-registers interpreted as 2D floating-point matrix-tiles
+=== Zvvfmm: Extension for matrix multiplication on vector registers interpreted as 2D floating-point matrix tiles
 
-The `Zvvfmm` family of extensions provides instructions that perform matrix multiply-accumulate on floating-point data, computing C ← C + A × B, where A, B, and C are matrix tiles held in the vector register file.
+The `Zvvfmm` family of extensions provides floating-point matrix multiply-accumulate instructions, computing C ← C + A × B.
+A, B, and C are matrix tiles held in the vector register file.
 
 The floating-point format of each operand tile is controlled by fields in `vtype`:
 
@@ -330,7 +491,7 @@ The floating-point format of each operand tile is controlled by fields in `vtype
 
 Mixed-format inputs (`altfmt_A ≠ altfmt_B`) are permitted only when the
 exact product of every A×B element pair is representable in the C
-accumulator format — that is, when p~A~ + p~B~ ≤ p~C~, where p~A~,
+accumulator format — i.e., when p~A~ + p~B~ ≤ p~C~, where p~A~,
 p~B~, and p~C~ are the significand widths (in bits) of the respective
 formats.
 
@@ -444,10 +605,7 @@ is missing, the instruction raises an illegal-instruction exception.
 | vfqwmmacc.vv| FP64 (SEW=64)          | Zvvfmmhd AND Zvvfmmbf16d
 |===
 
-For example, a `vfwmmacc.vv` with one IEEE binary16 input and one BFloat16
-input (SEW=32) requires both Zvvfmmhf and Zvvfmmbf16f.  An implementation
-that provides only Zvvfmmhf (or only Zvvfmmbf16f) must raise an
-illegal-instruction exception for the mixed-input encoding.
+If the required subextensions are not both present, the instruction raises an illegal-instruction exception.
 
 ===== 32-bit and wider inputs
 
@@ -457,35 +615,348 @@ not apply.
 
 All multiply and add operations use the dynamic rounding mode from `frm`; floating-point exception flags are accumulated into `fflags`.
 
-The K-dimension of the multiplication is determined by λ from `vtype`, scaled by a per-instruction widening factor W and by LMUL:
-
-    K_effective = λ × W × LMUL
-
-The tile dimensions follow from the widening and LMUL settings:
-
-    L_A         = LMUL × VLEN ÷ (SEW ÷ W)   (total A or B tile elements across LMUL registers)
-    K_effective = λ × W × LMUL
-    M = N       = L_A ÷ K_effective           (rows = columns of the square accumulator tile)
-
-The accumulator register group has cardinality MUL_C = VLEN ÷ (SEW × λ²), independent of both W and LMUL.
-
-[cols="3,1,1,1", options="header"]
-|===
-| Mnemonic | W | A/B element width | C element width
-
-| `vfmmacc.vv vd, vs1, vs2`   | 1 | SEW     | SEW
-| `vfwmmacc.vv vd, vs1, vs2`  | 2 | SEW/2   | SEW
-| `vfqwmmacc.vv vd, vs1, vs2` | 4 | SEW/4   | SEW
-|===
+The K-dimension, tile-dimension formulae, MUL_C, and instruction-to-widening-factor mapping are the same as for the integer family (see <<zvvmm>>); the floating-point mnemonics are `vfmmacc.vv` (W=1), `vfwmmacc.vv` (W=2), and `vfqwmmacc.vv` (W=4).
 
 As with the integer multiply-accumulate instructions, vector masking is not
-supported: the `vm` bit must be 1 and `vm=0` is _reserved_.
+supported.  When `vm=0`, the instruction does not apply a vector mask;
+instead, `v0` supplies paired E8M0 block-scale factors for microscaling
+operation (see <<integrated-matrix-microscaling>>).
+
+[#integrated-matrix-microscaling]
+==== Microscaling support (`v0.scale`)
+
+Microscaling floating-point formats (as defined by the OCP Microscaling
+Formats specification) represent tensors using narrow per-element values
+(e.g., OFP4 or OFP8) combined with a coarser shared scale factor applied
+to a _block_ of consecutive elements along the K dimension.  The standard
+OCP MX block size is 32 elements; however, recent research (Lee et al.,
+"MX+: A Robust Framework for Finer-Grained MX Quantization", MICRO '25)
+demonstrates that a block size of 16 significantly improves accuracy for
+activation tensors with outliers.
+
+The Integrated Matrix extensions support microscaling on all floating-point
+multiply-accumulate instructions by encoding `vm=0` in the instruction and
+supplying paired E8M0 block-scale factors through `v0`.  The `bs` field in
+`vtype` selects the block size (32 or 16 elements).
+
+The assembly syntax for a microscaled operation appends `v0.scale` as the
+final operand, analogous to `v0.t` for masked operations in the base V
+extension:
+
+    vfmmacc.vv   vd, vs1, vs2, v0.scale
+    vfwmmacc.vv  vd, vs1, vs2, v0.scale
+    vfqwmmacc.vv vd, vs1, vs2, v0.scale
+
+When `vm=0` is not specified (i.e., `vm=1`, the default), no scaling is
+applied, `v0` is not read, and the `bs` field is ignored.
+
+===== Semantics
+
+When microscaling is active (`vm=0`), each output element is computed as:
+
+    C[m, n] ← C[m, n] + Σ_{s=0}^{S−1} scale_A[m][s] × scale_B[n][s] ×
+                    Σ_{k ∈ block s} A[m, k] × B[k, n]
+
+where S = ⌈K_eff / block_size⌉ is the number of scale blocks per
+row/column, and block _s_ covers elements
+[s × block_size, min((s+1) × block_size, K_eff) − 1].
+
+`scale_A[m][s]` and `scale_B[n][s]` are power-of-two values decoded from
+8-bit E8M0 fields in `v0`.  The E8M0 format uses an 8-bit biased exponent
+(bias 127) representing values from 2^−127^ to 2^127^; the bit pattern
+0xFF encodes NaN.
+
+The per-block scales for A and B are applied as exact power-of-two
+multiplications (implemented as exponent additions) and therefore introduce
+no rounding error.  If any `scale_A[m][s]` or `scale_B[n][s]` is NaN
+(0xFF), the corresponding output element C[m, n] is set to the default NaN
+regardless of the input element values.
+
+===== Scale layout in `v0`
+
+The register `v0` holds paired E8M0 scale values at an effective element
+width of 16 bits.  Each 16-bit element contains one (scale_A, scale_B)
+pair:
+
+* Lower byte [7:0]: `scale_A` — the E8M0 scale for a row of A
+* Upper byte [15:8]: `scale_B` — the E8M0 scale for a column of B
+
+The row stride in `v0` is R = λ × SEW ÷ 16 (in units of 16-bit elements).
+Within each row, S = ⌈K_eff / block_size⌉ elements are active.  Element
+index _p_ = _m_ × R + _s_ addresses the scale pair for row (or column) _m_
+at block _s_.  Specifically:
+
+* `scale_A[m][s]` is the lower byte of the 16-bit element at index (m × R + s)
+* `scale_B[n][s]` is the upper byte of the 16-bit element at index (n × R + s)
+
+The total number of 16-bit elements spanned per tile dimension is M × R,
+where M = N = VLEN ÷ (SEW × λ).  Because M × R = (VLEN ÷ (SEW × λ)) ×
+(λ × SEW ÷ 16) = VLEN ÷ 16, the scale data fills exactly one register
+regardless of configuration.
+
+**Capacity proof:**
+
+M × R = (VLEN ÷ (SEW × λ)) × (λ × SEW ÷ 16) = VLEN ÷ 16.
+
+Each of the VLEN ÷ 16 positions is a 16-bit element, so the total is exactly
+VLEN bits — the scale data fills one register in every legal configuration.
+
+**R ≥ S proof** (tile stride is never smaller than the active count):
+
+* block_size = 32: The constraint W × LMUL ≤ 2 × SEW ensures
+  K_eff = λ × W × LMUL ≤ 2 × λ × SEW, so
+  S = ⌈K_eff / 32⌉ ≤ ⌈2 × λ × SEW / 32⌉ ≤ λ × SEW / 16 = R.
+* block_size = 16: The constraint W × LMUL ≤ SEW ensures
+  K_eff = λ × W × LMUL ≤ λ × SEW, so
+  S = ⌈K_eff / 16⌉ ≤ ⌈λ × SEW / 16⌉ ≤ λ × SEW / 16 = R.
+
+When S < R, positions _s_ ∈ [S, R) within each row are padding and their
+contents are ignored by the instruction.
+
+.Scale layout parameters (block_size = 32, VLEN = 256)
+[cols="1,1,1,1,1,1,1,1", options="header"]
+|===
+| SEW | λ | W | LMUL | M | S | R | 16-bit extent (M×R)
+
+| 8  | 2 | 1 | 1 | 16 | 1 | 1 | 16
+| 8  | 2 | 1 | 8 | 16 | 1 | 1 | 16
+| 8  | 2 | 2 | 1 | 16 | 1 | 1 | 16
+| 8  | 2 | 2 | 8 | 16 | 1 | 1 | 16
+| 16 | 1 | 1 | 1 | 16 | 1 | 1 | 16
+| 16 | 1 | 1 | 2 | 16 | 1 | 1 | 16
+| 16 | 1 | 2 | 1 | 16 | 1 | 1 | 16
+| 16 | 1 | 4 | 1 | 16 | 1 | 1 | 16
+| 16 | 1 | 4 | 8 | 16 | 1 | 1 | 16 ^footnote:packfull[S = R: fully packed, no padding]
+| 16 | 2 | 4 | 1 | 8  | 1 | 2 | 16
+| 16 | 2 | 4 | 8 | 8  | 2 | 2 | 16 ^footnote:packfull[]
+| 32 | 1 | 1 | 1 | 8  | 1 | 2 | 16
+| 32 | 1 | 2 | 1 | 8  | 1 | 2 | 16
+| 32 | 2 | 1 | 1 | 4  | 1 | 4 | 16
+| 64 | 1 | 1 | 1 | 4  | 1 | 4 | 16
+|===
+
+Within each row stride, elements at positions _s_ ∈ [S, R) are padding
+and need not be initialised.  When S = R, the layout is fully packed with
+no padding.
+
+===== Block size selection
+
+The `bs` field in `vtype` (see <<integrated-matrix-bs>>) selects the
+microscaling block size.  When `bs=0`, the block size is 32 elements
+(standard OCP MX); when `bs=1`, the block size is 16 elements.
+
+Block size 16 doubles the number of scales per row/column (S is doubled),
+which doubles the M × S capacity requirement.  To guarantee that the
+paired scales fit within `v0`, the following constraint is imposed when
+`bs=1` and `vm=0`:
+
+    W × LMUL ≤ SEW
+
+If this constraint is violated, the instruction raises an
+illegal-instruction exception.
+
+.Maximum LMUL for block_size = 16
+[cols="2,2,1,1,1", options="header"]
+|===
+| Input format | Instruction | W | SEW | Max LMUL
+
+| FP4 → FP16/BF16 | vfqwmmacc | 4 | 16 | 4
+| FP4 → OFP8       | vfwmmacc  | 2 | 8  | 4
+| All others        | —         | — | —  | 8 (no restriction)
+|===
+
+===== Applicability
+
+Microscaling via `v0.scale` is supported on floating-point multiply-accumulate
+instructions only (`vfmmacc.vv`, `vfwmmacc.vv`, `vfqwmmacc.vv`).
+For integer multiply-accumulate instructions (`vmmacc.vv`, `vwmmacc.vv`,
+`vqwmmacc.vv`), `vm=0` remains _reserved_ and raises an illegal-instruction
+exception.
+
+Microscaling requires SEW × λ ≥ 16 to ensure that the paired 16-bit scale
+elements fit within `v0`.  Configurations where SEW × λ < 16 with `vm=0`
+raise an illegal-instruction exception.
+
+Microscaling is particularly useful with narrow input formats (OFP4, OFP8)
+where the limited dynamic range of the per-element format is compensated by
+the block-level E8M0 exponent, enabling high-throughput inference on
+microscaling-quantised models.
+
+===== Loading or constructing paired scales
+[NOTE]
+====
+This section is _informative_ (non-normative).
+
+The tile-strided scale layout in `v0` uses M × R 16-bit elements (always
+VLEN ÷ 16 elements, filling exactly one register).  Within each of the M
+row strides of length R, the first S positions are active and positions
+[S, R) are padding.  The following options are listed from simplest to most
+complex.
+
+*Option 1 — Pre-paired tile-strided load via `vmtl.v` (single instruction):*
+
+When the application stores pre-paired (scale_A, scale_B) 16-bit elements
+in a 2D scale matrix (M rows, stride LD ≥ R between rows), a single
+`vmtl.v` loads the current tile's scales directly into `v0`:
+
+[source,asm]
+----
+    # a0 = base of pre-paired scale sub-array for current tile
+    # a2 = M × R (= VLEN / 16)
+    # a3 = LD (leading dimension in 16-bit elements, LD ≥ R)
+    vsetvli  t0, a2, e16, m1, ta, ma
+    vmtl.v   v0, (a0), a3         # tile-load pre-paired scales
+----
+
+With EEW = 16 and LMUL = 1, linesize = λ = R (when SEW = 16).  Each
+`vmtl.v` line corresponds to one scale row, and LD allows rows to be
+non-contiguous in the outer scale matrix.  When LD = R, this reduces to a
+unit-stride load.
+
+NOTE: This form requires SEW = 16 (i.e., R = λ).  For SEW > 16, R > λ
+and a single `vmtl.v` cannot span a full scale row; use Option 2 instead.
+
+*Option 2 — Pre-paired flat load (`vle16.v`):*
+
+If the pre-paired tile-strided data is already contiguous in memory (M × R
+16-bit elements), a unit-stride load suffices:
+
+[source,asm]
+----
+    # a0 = pointer to contiguous pre-paired tile-strided scale array
+    # a2 = M × R (= VLEN / 16)
+    vsetvli  t0, a2, e16, m1, ta, ma
+    vle16.v  v0, (a0)
+----
+
+This works for all SEW values since M × R = VLEN ÷ 16 always.
+
+*Options 3–5 — Constructing from separate `scale_A` / `scale_B` arrays:*
+
+The following sequences construct the paired layout from separate
+`scale_A` and `scale_B` byte arrays, producing M × S contiguous pairs.
+This produces the correct tile-strided layout when S = R (fully packed).
+When S < R, the output must be placed at stride R, e.g., by storing
+the M × S pairs into a pre-zeroed M × R buffer before loading with
+Option 2.
+
+*Option 3 — Base V (widen + shift + OR):*
+
+[source,asm]
+----
+    # a0 = &scale_A, a1 = &scale_B (M × S bytes each), a2 = M × S
+    vsetvli  t0, a2, e8, mf2, ta, ma
+    vle8.v   v1, (a0)             # load scale_A
+    vle8.v   v2, (a1)             # load scale_B
+    vsetvli  t0, a2, e16, m1, ta, ma
+    vzext.vf2 v0, v1              # zero-extend scale_A to 16-bit
+    vzext.vf2 v3, v2              # zero-extend scale_B to 16-bit
+    vsll.vi  v3, v3, 8            # shift scale_B into upper byte
+    vor.vv   v0, v0, v3           # combine into paired layout
+----
+
+*Option 4 — Zvbb (widening shift + OR):*
+
+[source,asm]
+----
+    # a0 = &scale_A, a1 = &scale_B (M × S bytes each), a2 = M × S
+    vsetvli  t0, a2, e8, mf2, ta, ma
+    vle8.v   v1, (a0)             # load scale_A
+    vle8.v   v2, (a1)             # load scale_B
+    vwsll.vi v0, v2, 8            # widen scale_B to 16-bit, shift to upper byte
+    vsetvli  t0, a2, e16, m1, ta, ma
+    vzext.vf2 v3, v1              # zero-extend scale_A to 16-bit
+    vor.vv   v0, v0, v3           # combine into paired layout
+----
+
+*Option 5 — Zvzip (interleave):*
+
+[source,asm]
+----
+    # a0 = &scale_A, a1 = &scale_B (M × S bytes each), a2 = M × S
+    vsetvli  t0, a2, e8, mf2, ta, ma
+    vle8.v   v1, (a0)             # load scale_A
+    vle8.v   v2, (a1)             # load scale_B
+    vzip.vv  v0, v1, v2           # interleave bytes, EMUL = 2 × mf2 = m1
+----
+
+The `vzip.vv` instruction interleaves at SEW=8: the byte sequence
+`[A[0], B[0], A[1], B[1], ...]` reinterpreted as 16-bit little-endian
+elements yields `element[i] = B[i]<<8 | A[i]`, which is exactly the
+required paired layout.
+
+*Option 6 — Separate scales via `vmtl.v` + `vzip.vv` (SEW = 16):*
+
+When SEW = 16 and scales reside in separate 2D arrays, `vmtl.v` can load
+each scale array with the correct tile stride, then `vzip.vv` pairs them:
+
+[source,asm]
+----
+    # a0 = &scale_A, a1 = &scale_B (M rows, LD bytes between rows)
+    # a2 = M × R (= VLEN / 16), a3 = LD (leading dimension in elements)
+    vsetvli  t0, a2, e8, m1, ta, ma
+    vmtl.v   v1, (a0), a3          # tile-load scale_A
+    vmtl.v   v2, (a1), a3          # tile-load scale_B
+    vsetvli  t0, a2, e8, mf2, ta, ma
+    vzip.vv  v0, v1, v2            # pair into 16-bit layout
+----
+
+.Scale-packing instruction count comparison
+[cols="1,1,1,1", options="header"]
+|===
+| Option | Data instructions | `vsetvli` calls | Total
+
+| 1 (vmtl.v pre-paired)           | 1 | 1 | 2
+| 2 (vle16.v pre-paired)          | 1 | 1 | 2
+| 3 (Base V)                      | 5 | 2 | 7
+| 4 (Zvbb)                        | 4 | 2 | 6
+| 5 (Zvzip)                       | 3 | 1 | 4
+| 6 (vmtl.v + vzip.vv)            | 3 | 2 | 5
+|===
+====
+
+===== Microscaling subextensions
+
+Each microscaling subextension enables the `vm=0` / `v0.scale` encoding for
+a specific (input format, accumulator format, block size) combination.
+A microscaling subextension implies its corresponding base subextension:
+for example, Zvvfmmmxfp4h implies Zvvfmmofp4h, which provides the
+underlying OFP4→FP16 instruction support.  Only narrow input formats
+(OFP4, OFP8) define microscaling variants, as wider formats (IEEE binary16
+and above) have sufficient exponent range to not require a shared scale.
+
+The block size and implication relationships are listed in <<tbl-mx-subextensions>>.
+
+[#tbl-mx-subextensions]
+.Microscaling subextensions
+[cols="1,1,1,3,3", options="header"]
+|===
+|Extension        | BS | Implies          | Multiplicand Types                | Accumulator Type
+
+|Zvvfmmmxfp4ofp8 ^| 32 ^| Zvvfmmofp4ofp8  | MXFP4 (E8M0-scaled OFP4), MXFP4  | OFP8
+|Zvvfmmmxfp4h    ^| 32 ^| Zvvfmmofp4h     | MXFP4, MXFP4                     | IEEE binary16
+|Zvvfmmmxfp4bf16 ^| 32 ^| Zvvfmmofp4bf16  | MXFP4, MXFP4                     | BFloat16
+|Zvvfmmmxfp8     ^| 32 ^| Zvvfmmofp8      | MXFP8 (E8M0-scaled OFP8), MXFP8  | OFP8
+|Zvvfmmmxfp8h    ^| 32 ^| Zvvfmmofp8h     | MXFP8, MXFP8                     | IEEE binary16
+|Zvvfmmmxfp8bf16 ^| 32 ^| Zvvfmmofp8bf16  | MXFP8, MXFP8                     | BFloat16
+|Zvvfmmmxfp8w    ^| 32 ^| Zvvfmmofp8w     | MXFP8, MXFP8                     | IEEE binary32
+|Zvvfmmnxfp4ofp8 ^| 16 ^| Zvvfmmmxfp4ofp8 | MXFP4 (E8M0-scaled OFP4), MXFP4  | OFP8
+|Zvvfmmnxfp4h    ^| 16 ^| Zvvfmmmxfp4h    | MXFP4, MXFP4                     | IEEE binary16
+|Zvvfmmnxfp4bf16 ^| 16 ^| Zvvfmmmxfp4bf16 | MXFP4, MXFP4                     | BFloat16
+|Zvvfmmnxfp8     ^| 16 ^| Zvvfmmmxfp8     | MXFP8 (E8M0-scaled OFP8), MXFP8  | OFP8
+|Zvvfmmnxfp8h    ^| 16 ^| Zvvfmmmxfp8h    | MXFP8, MXFP8                     | IEEE binary16
+|Zvvfmmnxfp8bf16 ^| 16 ^| Zvvfmmmxfp8bf16 | MXFP8, MXFP8                     | BFloat16
+|Zvvfmmnxfp8w    ^| 16 ^| Zvvfmmmxfp8w    | MXFP8, MXFP8                     | IEEE binary32
+|===
+
+NOTE: See <<Block size selection>> for LMUL restrictions when `bs=1`.
 
 [#zvvmtls,reftext=Load/store instructions for matrix tiles]
-=== Zvvmtls: Extension for loading and storing vector-registers interpreted as 2D matrix-tiles
+=== Zvvmtls: Extension for loading and storing vector registers interpreted as 2D matrix tiles
 
 The `Zvvmtls` extension provides instructions that transfer 2D matrix tiles between memory and the vector register file without requiring a separate repacking step.
-Matrix data in memory is typically stored as a large 2D array in row-major or column-major order with a leading dimension that may exceed the tile width, allowing a tile to address a sub-matrix within a larger allocation.
+Matrix data in memory is typically stored as a large 2D array in row-major or column-major order with a leading dimension that may exceed the tile width.
+This allows a tile to address a sub-matrix within a larger allocation.
 The tile load and store instructions bridge the gap between this strided 2D memory layout and the flat vector register representation used by the multiply-accumulate instructions.
 
 ==== Memory layout
@@ -499,7 +970,7 @@ The byte address of the element at offset `d` along the stride direction and off
 
     address(d, k) = rs1 + (d × LD + k) × (SEW ÷ 8)
 
-==== Tile geometry
+==== Tile geometry for loads and stores
 
 The tile dimensions are fully determined by the current `vtype` settings (SEW, VL, LMUL, and λ), consistent with the operand geometry of the multiply-accumulate instructions.
 The tile load and store instructions make use of the following parameters from the CSRs:
@@ -523,12 +994,14 @@ All tile load/store instructions support two optional operands that follow `rs2`
 
 When both are present, the immediate lambda precedes the mask: `vmtts.v v4,(a0),a1,L64,v0.t`.
 
-Tile load and store instructions follow the standard vector element-status semantics (see <<sec-inactive-defs>>):
+Tile load and store instructions follow the standard vector element-status semantics:
 
 * _Active_ elements (body, mask enabled): loads fetch from memory and write `vd`; stores read `vs3` and write to memory.
   Active elements may raise memory exceptions.
-* _Inactive_ elements (body, mask disabled): loads do not update the destination register unless `vtype.vma`=1 (mask-agnostic), in which case those elements may be overwritten with 1s; stores do not write to memory and do not raise exceptions.
-* _Tail_ elements (index ≥ VL): loads do not update the destination register unless `vtype.vta`=1 (tail-agnostic), in which case those elements may be overwritten with 1s; stores do not write to memory and do not raise exceptions.
+* _Inactive_ elements (body, mask disabled): loads do not update the destination register unless `vtype.vma`=1 (mask-agnostic), in which case those elements may be overwritten with 1s.
+  Stores do not write to memory and do not raise exceptions.
+* _Tail_ elements (index ≥ VL): loads do not update the destination register unless `vtype.vta`=1 (tail-agnostic), in which case those elements may be overwritten with 1s.
+  Stores do not write to memory and do not raise exceptions.
 * _Prestart_ elements (index < `vstart`): neither the destination register nor memory is updated; no exceptions are raised.
 
 [cols="2,4", options="header"]
@@ -598,7 +1071,7 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
 <<<
 
-==== Tile geometry
+==== Tile geometry for multiply-accumulate
 
 The tile dimensions are fully determined by the current vector configuration:
 
@@ -611,7 +1084,8 @@ The tile dimensions are fully determined by the current vector configuration:
 `M_tile` is fixed by the hardware (VLEN) and the chosen SEW and λ; it cannot be changed by VL.
 `N_tile` is controlled by the programmer through VL; use `vsetvl` to select the largest `N_tile` that fits the remaining columns.
 
-Because the multiply-accumulate instructions always read all `M_tile` rows of A independent of VL, loading an A tile requires VL = M_tile × K_eff (the natural maximum VL for the chosen LMUL), while the B load and computation use the narrower VL = K_eff × N_tile.
+Because the multiply-accumulate instructions always read all `M_tile` rows of A independent of VL, loading an A tile requires VL = M_tile × K_eff (the natural maximum VL for the chosen LMUL).
+The B load and computation use the narrower VL = K_eff × N_tile.
 
 ==== C tile tail policy
 
@@ -619,14 +1093,16 @@ When N_tile < N_tile_max, the elements C[i, j] for 0 ≤ i < M_tile and N_tile �
 Multiply-accumulate instructions never read or write C tile tail elements.
 
 * If `vta` = 0 (tail-undisturbed): tail elements retain their pre-instruction values.
-  This is achieved by write-skip — the instruction simply does not access those element positions — so implementations are not required to read the tail portion of the C register group (i.e., all registers that fall entirely into the tail).
+  This is achieved by write-skip — the instruction simply does not access those element positions.
+  Implementations are therefore not required to read the tail portion of the C register group (i.e., all registers that fall entirely into the tail).
 * If `vta` = 1 (tail-agnostic): tail elements may be written with any value (including all-ones), or left unchanged.
   Implementations are likewise not required to read the tail elements before deciding what to write.
 
 [NOTE]
 ====
 This differs from the tail policy for ordinary vector instructions, where tail-undisturbed is typically implemented via read-merge: the implementation reads the old destination register contents, updates active positions, and writes the merged result back.
-For IME multiply-accumulate instructions, undisturbed behavior requires no read — the instruction leaves tail element positions untouched — which permits hardware implementations (including outer-product engines and register-renaming machines) to process only the N_tile active columns of the C tile without referencing the tail portion of the C register group (i.e., all registers that fall entirely into the tail).
+For IME multiply-accumulate instructions, undisturbed behaviour requires no read — the instruction leaves tail element positions untouched.
+This permits hardware implementations (including outer-product engines and register-renaming machines) to process only the N_tile active columns of the C tile without referencing the tail portion of the C register group (i.e., all registers that fall entirely into the tail).
 ====
 
 ==== Memory layout and instruction selection
@@ -1050,7 +1526,7 @@ format of the A and B input tiles.
 When a specific alternative format is required, the vs1/vs2 input element-type
 name is appended to the intrinsic name in place of the default input type;
 no separate `_alt` suffix is used.
-The following examples show `altfmt=1` variants for selected combinations:
+The following examples show `altfmt_A=altfmt_B=1` variants for selected combinations:
 
 [source,c]
 --
@@ -1168,6 +1644,27 @@ function mat_C_idx(i : int, j : int, M : int,
 //        EEW  : int,       fmt  : fp_fmt,
 //        rm   : rounding_mode) -> bits(EEW)
 //   Add prod to acc, both in format fmt at width EEW, rounded per rm.  Updates fflags.
+
+// fp_mul(a : bits(EEW), b : bits(EEW),
+//        EEW : int,     fmt : fp_fmt,
+//        rm  : rounding_mode) -> bits(EEW)
+//   Multiply a by b, both in format fmt at width EEW, rounded per rm.  Updates fflags.
+
+// fp_one(EEW : int, fmt : fp_fmt) -> bits(EEW)
+//   Return the bit pattern for +1.0 in the given format.
+
+// fp_is_NaN(x : bits(EEW), EEW : int, fmt : fp_fmt) -> bool
+//   Return true if x is a NaN in the given format.
+
+// fp_defaultNaN(EEW : int, fmt : fp_fmt) -> bits(EEW)
+//   Return the default (canonical) NaN bit pattern for the given format.
+
+// fp_zero(EEW : int, fmt : fp_fmt) -> bits(EEW)
+//   Return the positive zero bit pattern for the given format.
+
+// e8m0_to_fp(scale : bits(8), EEW : int, fmt : fp_fmt) -> bits(EEW)
+//   Convert an 8-bit E8M0 exponent-only value (bias 127) to the corresponding
+//   power-of-two in the target format.  E8M0 0xFF maps to NaN.
 --
 
 <<<
@@ -1178,7 +1675,8 @@ Synopsis::
 Floating-Point Matrix Multiply-Accumulate
 
 Mnemonic::
-vfmmacc.vv _vd_, _vs1_, _vs2_
+vfmmacc.vv _vd_, _vs1_, _vs2_ +
+vfmmacc.vv _vd_, _vs1_, _vs2_, v0.scale
 
 Encoding::
 [wavedrom, , svg]
@@ -1207,15 +1705,21 @@ The floating-point format for A and B elements is selected by `altfmt_A` and
 `altfmt_B` in `vtype` (both must be equal; see <<mixed-format-inputs>>);
 the C accumulator format is selected by `altfmt`.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
++
+When `vm=0` (`v0.scale`), the register `v0` supplies paired E8M0 block-scale
+factors for microscaling (see <<integrated-matrix-microscaling>>).  The `bs`
+field in `vtype` selects the block size (32 or 16 elements).
 
 Exceptions::
-_Illegal Instruction_ is raised if any of the following conditions is not satisfied:
+_Illegal Instruction_ is raised if any of the following conditions holds:
 +
 * `vm` = 0 (_reserved_).
 * VL is not a multiple of K_effective (= λ × LMUL).
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
+* When `vm=0`: SEW × λ < 16.
+* When `vm=0` and `bs=1`: W × LMUL > SEW.
 
 Operation::
 [source,sail]
@@ -1242,6 +1746,16 @@ let MUL_C : int = M / lambda;
 if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
 if MUL_C not in {1,2,4,8,16}  then return Illegal_Instruction();
 
+// Block size and scale count
+let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
+let S : int = (K_eff + block_size - 1) / block_size;
+let R : int = lambda * EEW / 16;  // tile-strided row stride
+
+// BS=16 LMUL restriction: W × LMUL ≤ SEW
+if vm == 0 & vtype[bs] == 0b1 & (1 * LMUL > EEW) then return Illegal_Instruction();
+// Microscaling legality: SEW × λ ≥ 16
+if vm == 0 & (EEW * lambda < 16) then return Illegal_Instruction();
+
 let fmt_A : fp_fmt       = fp_format_of(EEW, vtype[altfmt_A]);
 let fmt_B : fp_fmt       = fp_format_of(EEW, vtype[altfmt_B]);
 let fmt_C : fp_fmt       = fp_format_of(EEW, vtype[altfmt]);
@@ -1251,15 +1765,54 @@ foreach (j from 0 to (N - 1)) {
   foreach (i from 0 to (M - 1)) {
     let c_flat : int       = mat_C_idx(i, j, M, MUL_C, lambda, epr);
     var acc : bits(EEW)    = read_single_element(EEW, c_flat, vd);
-    foreach (k from 0 to (K_eff - 1)) {
-      let a_flat : int       = mat_A_idx(i, k, K_eff, LMUL, lambda, epr);
-      let b_flat : int       = mat_B_idx(k, j, K_eff, LMUL, lambda, epr);
-      let a_bits : bits(EEW) = read_single_element(EEW, a_flat, vs1);
-      let b_bits : bits(EEW) = read_single_element(EEW, b_flat, vs2);
-      let prod   : bits(EEW) = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW, fmt_C, rm);
-      acc = fp_add(acc, prod, EEW, fmt_C, rm)
+    var nan_out : bool = false;
+
+    foreach (s from 0 to (S - 1)) {
+      // Read paired 16-bit scale element from v0
+      let pair_A : bits(16) =
+        if vm == 0
+        then read_single_element(16, i * R + s, zvreg(0))
+        else 0x0000;
+      let pair_B : bits(16) =
+        if vm == 0
+        then read_single_element(16, j * R + s, zvreg(0))
+        else 0x0000;
+
+      let sA : bits(EEW) =
+        if vm == 0
+        then e8m0_to_fp(pair_A[7..0], EEW, fmt_C)
+        else fp_one(EEW, fmt_C);
+      let sB : bits(EEW) =
+        if vm == 0
+        then e8m0_to_fp(pair_B[15..8], EEW, fmt_C)
+        else fp_one(EEW, fmt_C);
+      let blk_scale : bits(EEW) = fp_mul(sA, sB, EEW, fmt_C, rm);
+
+      // NaN scale → NaN output
+      if fp_is_NaN(blk_scale, EEW, fmt_C) then {
+        nan_out = true; break
+      };
+
+      // Accumulate within block
+      let k_lo : int = s * block_size;
+      let k_hi : int = min((s + 1) * block_size, K_eff) - 1;
+      var blk_acc : bits(EEW) = fp_zero(EEW, fmt_C);
+      foreach (k from k_lo to k_hi) {
+        let a_flat : int       = mat_A_idx(i, k, K_eff, LMUL, lambda, epr);
+        let b_flat : int       = mat_B_idx(k, j, K_eff, LMUL, lambda, epr);
+        let a_bits : bits(EEW) = read_single_element(EEW, a_flat, vs1);
+        let b_bits : bits(EEW) = read_single_element(EEW, b_flat, vs2);
+        let prod   : bits(EEW) = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW, fmt_C, rm);
+        blk_acc = fp_add(blk_acc, prod, EEW, fmt_C, rm)
+      };
+      acc = fp_add(acc, fp_mul(blk_scale, blk_acc, EEW, fmt_C, rm),
+                   EEW, fmt_C, rm)
     };
-    write_single_element(EEW, c_flat, vd, acc)
+
+    if nan_out then
+      write_single_element(EEW, c_flat, vd, fp_defaultNaN(EEW, fmt_C))
+    else
+      write_single_element(EEW, c_flat, vd, acc)
   }
 };
 RETIRE_SUCCESS
@@ -1285,7 +1838,8 @@ Synopsis::
 Floating-Point Quad-Widening Matrix Multiply-Accumulate
 
 Mnemonic::
-vfqwmmacc.vv _vd_, _vs1_, _vs2_
+vfqwmmacc.vv _vd_, _vs1_, _vs2_ +
+vfqwmmacc.vv _vd_, _vs1_, _vs2_, v0.scale
 
 Encoding::
 [wavedrom, , svg]
@@ -1316,6 +1870,10 @@ The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷4; the C
 format is selected by `altfmt`, interpreted for width SEW.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
++
+When `vm=0` (`v0.scale`), the register `v0` supplies paired E8M0 block-scale
+factors for microscaling (see <<integrated-matrix-microscaling>>).  The `bs`
+field in `vtype` selects the block size (32 or 16 elements).
 
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
@@ -1336,8 +1894,6 @@ let EEW_A    : int = EEW_C / 4;
 let LMUL_pow : int = get_lmul_pow();
 let LMUL     : int = 2 ^ max(0, LMUL_pow);
 
-if vm == 0 then return Illegal_Instruction();
-
 let epr_A    : int = vlen / EEW_A;
 let epr_C    : int = vlen / EEW_C;
 
@@ -1355,6 +1911,16 @@ let MUL_C : int = M / lambda;
 if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
 if MUL_C not in {1,2,4,8,16}  then return Illegal_Instruction();
 
+// Block size and scale count
+let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
+let S : int = (K_eff + block_size - 1) / block_size;
+let R : int = lambda * EEW_C / 16;  // tile-strided row stride
+
+// BS=16 LMUL restriction: W × LMUL ≤ SEW
+if vm == 0 & vtype[bs] == 0b1 & (4 * LMUL > EEW_C) then return Illegal_Instruction();
+// Microscaling legality: SEW × λ ≥ 16
+if vm == 0 & (EEW_C * lambda < 16) then return Illegal_Instruction();
+
 let fmt_A : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_B]);
 let fmt_C : fp_fmt        = fp_format_of(EEW_C, vtype[altfmt]);
@@ -1364,15 +1930,54 @@ foreach (j from 0 to (N - 1)) {
   foreach (i from 0 to (M - 1)) {
     let c_flat : int          = mat_C_idx(i, j, M, MUL_C, lambda, epr_C);
     var acc : bits(EEW_C)     = read_single_element(EEW_C, c_flat, vd);
-    foreach (k from 0 to (K_eff - 1)) {
-      let a_flat : int          = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
-      let b_flat : int          = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
-      let a_bits : bits(EEW_A)  = read_single_element(EEW_A, a_flat, vs1);
-      let b_bits : bits(EEW_A)  = read_single_element(EEW_A, b_flat, vs2);
-      let prod   : bits(EEW_C)  = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW_C, fmt_C, rm);
-      acc = fp_add(acc, prod, EEW_C, fmt_C, rm)
+    var nan_out : bool = false;
+
+    foreach (s from 0 to (S - 1)) {
+      // Read paired 16-bit scale element from v0
+      let pair_A : bits(16) =
+        if vm == 0
+        then read_single_element(16, i * R + s, zvreg(0))
+        else 0x0000;
+      let pair_B : bits(16) =
+        if vm == 0
+        then read_single_element(16, j * R + s, zvreg(0))
+        else 0x0000;
+
+      let sA : bits(EEW_C) =
+        if vm == 0
+        then e8m0_to_fp(pair_A[7..0], EEW_C, fmt_C)
+        else fp_one(EEW_C, fmt_C);
+      let sB : bits(EEW_C) =
+        if vm == 0
+        then e8m0_to_fp(pair_B[15..8], EEW_C, fmt_C)
+        else fp_one(EEW_C, fmt_C);
+      let blk_scale : bits(EEW_C) = fp_mul(sA, sB, EEW_C, fmt_C, rm);
+
+      // NaN scale → NaN output
+      if fp_is_NaN(blk_scale, EEW_C, fmt_C) then {
+        nan_out = true; break
+      };
+
+      // Accumulate within block
+      let k_lo : int = s * block_size;
+      let k_hi : int = min((s + 1) * block_size, K_eff) - 1;
+      var blk_acc : bits(EEW_C) = fp_zero(EEW_C, fmt_C);
+      foreach (k from k_lo to k_hi) {
+        let a_flat : int          = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
+        let b_flat : int          = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
+        let a_bits : bits(EEW_A)  = read_single_element(EEW_A, a_flat, vs1);
+        let b_bits : bits(EEW_A)  = read_single_element(EEW_A, b_flat, vs2);
+        let prod   : bits(EEW_C)  = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW_C, fmt_C, rm);
+        blk_acc = fp_add(blk_acc, prod, EEW_C, fmt_C, rm)
+      };
+      acc = fp_add(acc, fp_mul(blk_scale, blk_acc, EEW_C, fmt_C, rm),
+                   EEW_C, fmt_C, rm)
     };
-    write_single_element(EEW_C, c_flat, vd, acc)
+
+    if nan_out then
+      write_single_element(EEW_C, c_flat, vd, fp_defaultNaN(EEW_C, fmt_C))
+    else
+      write_single_element(EEW_C, c_flat, vd, acc)
   }
 };
 RETIRE_SUCCESS
@@ -1398,7 +2003,8 @@ Synopsis::
 Floating-Point Widening Matrix Multiply-Accumulate
 
 Mnemonic::
-vfwmmacc.vv _vd_, _vs1_, _vs2_
+vfwmmacc.vv _vd_, _vs1_, _vs2_ +
+vfwmmacc.vv _vd_, _vs1_, _vs2_, v0.scale
 
 Encoding::
 [wavedrom, , svg]
@@ -1429,6 +2035,10 @@ The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷2; the C
 format is selected by `altfmt`, interpreted for width SEW.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
++
+When `vm=0` (`v0.scale`), the register `v0` supplies paired E8M0 block-scale
+factors for microscaling (see <<integrated-matrix-microscaling>>).  The `bs`
+field in `vtype` selects the block size (32 or 16 elements).
 
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
@@ -1449,8 +2059,6 @@ let EEW_A    : int = EEW_C / 2;
 let LMUL_pow : int = get_lmul_pow();
 let LMUL     : int = 2 ^ max(0, LMUL_pow);
 
-if vm == 0 then return Illegal_Instruction();
-
 let epr_A    : int = vlen / EEW_A;
 let epr_C    : int = vlen / EEW_C;
 
@@ -1468,6 +2076,16 @@ let MUL_C : int = M / lambda;
 if unsigned(vl) % K_eff != 0 then return Illegal_Instruction();
 if MUL_C not in {1,2,4,8,16}  then return Illegal_Instruction();
 
+// Block size and scale count
+let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
+let S : int = (K_eff + block_size - 1) / block_size;
+let R : int = lambda * EEW_C / 16;  // tile-strided row stride
+
+// BS=16 LMUL restriction: W × LMUL ≤ SEW
+if vm == 0 & vtype[bs] == 0b1 & (2 * LMUL > EEW_C) then return Illegal_Instruction();
+// Microscaling legality: SEW × λ ≥ 16
+if vm == 0 & (EEW_C * lambda < 16) then return Illegal_Instruction();
+
 let fmt_A : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(EEW_A, vtype[altfmt_B]);
 let fmt_C : fp_fmt        = fp_format_of(EEW_C, vtype[altfmt]);
@@ -1477,15 +2095,54 @@ foreach (j from 0 to (N - 1)) {
   foreach (i from 0 to (M - 1)) {
     let c_flat : int          = mat_C_idx(i, j, M, MUL_C, lambda, epr_C);
     var acc : bits(EEW_C)     = read_single_element(EEW_C, c_flat, vd);
-    foreach (k from 0 to (K_eff - 1)) {
-      let a_flat : int          = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
-      let b_flat : int          = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
-      let a_bits : bits(EEW_A)  = read_single_element(EEW_A, a_flat, vs1);
-      let b_bits : bits(EEW_A)  = read_single_element(EEW_A, b_flat, vs2);
-      let prod   : bits(EEW_C)  = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW_C, fmt_C, rm);
-      acc = fp_add(acc, prod, EEW_C, fmt_C, rm)
+    var nan_out : bool = false;
+
+    foreach (s from 0 to (S - 1)) {
+      // Read paired 16-bit scale element from v0
+      let pair_A : bits(16) =
+        if vm == 0
+        then read_single_element(16, i * R + s, zvreg(0))
+        else 0x0000;
+      let pair_B : bits(16) =
+        if vm == 0
+        then read_single_element(16, j * R + s, zvreg(0))
+        else 0x0000;
+
+      let sA : bits(EEW_C) =
+        if vm == 0
+        then e8m0_to_fp(pair_A[7..0], EEW_C, fmt_C)
+        else fp_one(EEW_C, fmt_C);
+      let sB : bits(EEW_C) =
+        if vm == 0
+        then e8m0_to_fp(pair_B[15..8], EEW_C, fmt_C)
+        else fp_one(EEW_C, fmt_C);
+      let blk_scale : bits(EEW_C) = fp_mul(sA, sB, EEW_C, fmt_C, rm);
+
+      // NaN scale → NaN output
+      if fp_is_NaN(blk_scale, EEW_C, fmt_C) then {
+        nan_out = true; break
+      };
+
+      // Accumulate within block
+      let k_lo : int = s * block_size;
+      let k_hi : int = min((s + 1) * block_size, K_eff) - 1;
+      var blk_acc : bits(EEW_C) = fp_zero(EEW_C, fmt_C);
+      foreach (k from k_lo to k_hi) {
+        let a_flat : int          = mat_A_idx(i, k, K_eff, LMUL, lambda, epr_A);
+        let b_flat : int          = mat_B_idx(k, j, K_eff, LMUL, lambda, epr_A);
+        let a_bits : bits(EEW_A)  = read_single_element(EEW_A, a_flat, vs1);
+        let b_bits : bits(EEW_A)  = read_single_element(EEW_A, b_flat, vs2);
+        let prod   : bits(EEW_C)  = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B, EEW_C, fmt_C, rm);
+        blk_acc = fp_add(blk_acc, prod, EEW_C, fmt_C, rm)
+      };
+      acc = fp_add(acc, fp_mul(blk_scale, blk_acc, EEW_C, fmt_C, rm),
+                   EEW_C, fmt_C, rm)
     };
-    write_single_element(EEW_C, c_flat, vd, acc)
+
+    if nan_out then
+      write_single_element(EEW_C, c_flat, vd, fp_defaultNaN(EEW_C, fmt_C))
+    else
+      write_single_element(EEW_C, c_flat, vd, acc)
   }
 };
 RETIRE_SUCCESS
@@ -1542,7 +2199,7 @@ The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in
 Accumulation is modular (wraps at 2^SEW^).
 
 Exceptions::
-_Illegal Instruction_ is raised if any of the following conditions is not satisfied:
+_Illegal Instruction_ is raised if any of the following conditions holds:
 +
 * `vm` = 0 (_reserved_).
 * VL is not a multiple of K_effective (= λ × LMUL).
@@ -1726,7 +2383,7 @@ Encoding::
 ....
 {reg:[
     { bits: 7, name: 0x27, attr: ['Vector tile (2D) store'] },
-    { bits: 5, name: 'vd', attr: ['source of store'], type: 2 },
+    { bits: 5, name: 'vs3', attr: ['source of store'], type: 2 },
     { bits: 3, name: 0x7 },
     { bits: 5, name: 'rs1', attr: ['base address'], type: 4 },
     { bits: 5, name: 'rs2', type: 2 },
@@ -1917,7 +2574,7 @@ Encoding::
 ....
 {reg:[
     { bits: 7, name: 0x27, attr: ['Vector tile (2D) store'] },
-    { bits: 5, name: 'vd', attr: ['source of store'], type: 2 },
+    { bits: 5, name: 'vs3', attr: ['source of store'], type: 2 },
     { bits: 3, name: 0x7 },
     { bits: 5, name: 'rs1', attr: ['base address'], type: 4 },
     { bits: 5, name: 'rs2', type: 2 },
