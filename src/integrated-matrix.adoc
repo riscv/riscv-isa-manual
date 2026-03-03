@@ -57,13 +57,13 @@ Table <<tbl-subextensions>> lists all computational sub-extensions in the Integr
 |Zvvmmw         ^| Zve64d       | [U]Int32, [U]Int32           | Int32
 |Zvvmmwd        ^| Zve64d       | [U]Int32, [U]Int32           | Int64
 |Zvvmmd         ^| Zve64d       | [U]Int64, [U]Int64           | Int64
-|Zvvfmmofp4opf8 ^| Zve64d       | OFP4, OFP4                   | OFP8
-|Zvvfmmofp4h    ^| Zve64d       | OFP4, OFP4                   | IEEE binary16
-|Zvvfmmofp4bf16 ^| Zve64d       | OFP4, OFP4                   | BFloat16
-|Zvvfmmofp8     ^| Zve64d       | OFP8, OFP8                   | OFP8
-|Zvvfmmofp8h    ^| Zve64d       | OFP8, OFP8                   | IEEE binary16
-|Zvvfmmofp8bf16 ^| Zve64d       | OFP8, OFP8                   | BFloat16
-|Zvvfmmofp8w    ^| Zve64d       | OFP8, OFP8                   | IEEE binary32
+|Zvvfmmofp4opf8 ^| Zve64d       | OFP4 (E2M1 or E3M0), OFP4 (E2M1 or E3M0) | OFP8
+|Zvvfmmofp4h    ^| Zve64d       | OFP4 (E2M1 or E3M0), OFP4 (E2M1 or E3M0) | IEEE binary16
+|Zvvfmmofp4bf16 ^| Zve64d       | OFP4 (E2M1 or E3M0), OFP4 (E2M1 or E3M0) | BFloat16
+|Zvvfmmofp8     ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | OFP8
+|Zvvfmmofp8h    ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | IEEE binary16
+|Zvvfmmofp8bf16 ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | BFloat16
+|Zvvfmmofp8w    ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | IEEE binary32
 |Zvvfmmh        ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary16
 |Zvvfmmhf       ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary32
 |Zvvfmmhd       ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary64
@@ -132,6 +132,16 @@ The Integrated Matrix floating-point extensions use the _altfmt_ field (as defin
 
 The `altfmt_A` and `altfmt_B` fields are 1-bit read/write fields added to the `vtype` CSR by the Integrated Matrix extensions to select the interpretation of elements in input matrices A and B, respectively.
 Their meaning depends on whether the instruction is a floating-point or integer multiply-accumulate.
+
+[NOTE]
+.Editorial Note
+====
+The `altfmt_A` and `altfmt_B` bits are currently assigned to `vtype[9]`
+and `vtype[10]`, which fall within the immediate operand of `vsetvli`.
+These bits are expected to move outside the `vsetvli` immediate field in a
+future revision.  The likely final location is just below the `lambda[2:0]`
+bits (i.e., at `vtype[XLEN-5]` and `vtype[XLEN-6]`).
+====
 
 ===== Floating-point instructions
 
@@ -311,8 +321,139 @@ The `Zvvfmm` family of extensions provides instructions that perform matrix mult
 The floating-point format of each operand tile is controlled by fields in `vtype`:
 
 * `altfmt_A` and `altfmt_B` select the FP format for A and B input elements, interpreted in conjunction with the input element width SEW÷W (see <<integrated-matrix-altfmt-inputs>>).
-  Both input tiles must use the same format (`altfmt_A` == `altfmt_B`).
+  The A and B input tiles may use different formats (`altfmt_A` ≠ `altfmt_B`);
+  see <<mixed-format-inputs>> for subextension requirements.
 * `altfmt` (as defined by Zvfbfa) selects the FP format for the C accumulator elements, interpreted in conjunction with SEW (see <<_alternate_floating_point_format_for_the_output_altfmt>>).
+
+[#mixed-format-inputs]
+==== Mixed-format inputs (`altfmt_A` ≠ `altfmt_B`)
+
+Mixed-format inputs (`altfmt_A ≠ altfmt_B`) are permitted only when the
+exact product of every A×B element pair is representable in the C
+accumulator format — that is, when p~A~ + p~B~ ≤ p~C~, where p~A~,
+p~B~, and p~C~ are the significand widths (in bits) of the respective
+formats.
+
+Because this condition is satisfied by every widening instruction
+(`vfwmmacc.vv`, `vfqwmmacc.vv`) but violated by every non-widening
+mixed-format combination, the practical rule is:
+
+* **`vfwmmacc.vv` and `vfqwmmacc.vv`**: mixed-format inputs are permitted.
+* **`vfmmacc.vv`**: `altfmt_A` must equal `altfmt_B`.  A mixed-format
+  encoding raises an illegal-instruction exception.
+
+[NOTE]
+--
+Same-format non-widening operations (e.g., E4M3 × E4M3 → E4M3, or
+FP16 × FP16 → FP16) also produce products wider than the output format,
+but those are existing, well-established operations whose rounding behaviour
+is fully defined by IEEE 754.  The restriction above applies only to the
+_mixed-format_ case (`altfmt_A ≠ altfmt_B`); same-format `vfmmacc.vv`
+(e.g., FP16 × FP16 → FP16 gated by Zvvfmmh, or BF16 × BF16 → BF16 gated
+by Zvvfmmbf16) is unaffected.
+--
+
+===== Mixed-format multiplication semantics
+
+Each A×B element product is computed per IEEE 754: the exact
+(infinite-precision) mathematical product is formed, then rounded once to
+the C accumulator format using the dynamic rounding mode from `frm`.
+This definition applies uniformly regardless of whether `fmt_A` equals
+`fmt_B`.
+
+[NOTE]
+====
+The exact product of two floating-point values with p~A~ and p~B~
+significand bits has at most p~A~ + p~B~ significand bits.  An
+implementation may compute the product in any internal format with at
+least that many significand bits and then round once to `fmt_C`.
+
+.Significand widths (p) of supported formats
+[cols="4,1"]
+[%autowidth,float="center",align="center",options="header"]
+|===
+| Format | p (significand bits)
+
+| E2M1 (OFP4) | 2
+| E3M0 (OFP4) | 1
+| E4M3 (OFP8) | 4
+| E5M2 (OFP8) | 3
+| IEEE binary16 | 11
+| BFloat16 | 8
+| IEEE binary32 | 24
+| IEEE binary64 | 53
+|===
+
+When p~A~ + p~B~ ≤ p~C~, the product is exact in `fmt_C` and no rounding
+is needed.  This holds for all mixed-format widening combinations — for
+example, E4M3 × E5M2 → FP16 (4 + 3 = 7 ≤ 11) and FP16 × BF16 → FP32
+(11 + 8 = 19 ≤ 24).
+
+An implementation need not use a standard IEEE 754 type for the internal
+product; any representation that captures the exact product (e.g., an
+integer significand–exponent pair) suffices, provided the final result
+equals the correctly-rounded value in `fmt_C`.
+====
+
+The subextension requirements for mixed-format operation depend on the input
+element width:
+
+===== Sub-word inputs (OFP4, OFP8)
+
+For 4-bit inputs, `altfmt_A` and `altfmt_B` independently select E2M1 or
+E3M0.  All four combinations (E2M1×E2M1, E2M1×E3M0, E3M0×E2M1, E3M0×E3M0)
+are covered by the same OFP4 subextension for the given output format (e.g.,
+Zvvfmmofp4h covers all OFP4 input combinations with an IEEE binary16
+accumulator).
+
+Likewise, for 8-bit inputs, `altfmt_A` and `altfmt_B` independently select
+E4M3 or E5M2.  All four combinations are covered by the same OFP8
+subextension for the given output format.
+
+NOTE: Mixed OFP8 inputs (E4M3 × E5M2) are only permitted with widening
+instructions (`vfwmmacc.vv`, `vfqwmmacc.vv`), not with `vfmmacc.vv`
+(OFP8 → OFP8), because the exact product (up to 7 significand bits) exceeds
+the OFP8 output precision (p ≤ 4).
+
+===== 16-bit inputs (IEEE binary16, BFloat16)
+
+For 16-bit inputs, `altfmt_A` and `altfmt_B` independently select IEEE
+binary16 or BFloat16.  When both are the same, a single subextension
+suffices (Zvvfmmh* for IEEE binary16, Zvvfmmbf16* for BFloat16), and all
+three instructions (`vfmmacc.vv`, `vfwmmacc.vv`, `vfqwmmacc.vv`) are
+available.
+
+When `altfmt_A ≠ altfmt_B` (one input is IEEE binary16 and the other is
+BFloat16), only widening instructions are permitted — `vfmmacc.vv` with
+mixed FP16/BF16 inputs raises an illegal-instruction exception because the
+exact product (up to 19 significand bits) exceeds the precision of any
+16-bit output format.
+
+For the permitted widening cases, _both_ the IEEE binary16 and BFloat16
+subextensions for the same instruction and output format are required.
+The instruction is legal only when both subextensions are present; if either
+is missing, the instruction raises an illegal-instruction exception.
+
+.Subextension requirements for mixed FP16/BF16 inputs
+[cols="2,2,3"]
+[%autowidth,float="center",align="center",options="header"]
+|===
+| Instruction | Output format | Required subextensions (both must be present)
+
+| vfwmmacc.vv | FP32 (SEW=32)          | Zvvfmmhf AND Zvvfmmbf16f
+| vfqwmmacc.vv| FP64 (SEW=64)          | Zvvfmmhd AND Zvvfmmbf16d
+|===
+
+For example, a `vfwmmacc.vv` with one IEEE binary16 input and one BFloat16
+input (SEW=32) requires both Zvvfmmhf and Zvvfmmbf16f.  An implementation
+that provides only Zvvfmmhf (or only Zvvfmmbf16f) must raise an
+illegal-instruction exception for the mixed-input encoding.
+
+===== 32-bit and wider inputs
+
+For IEEE binary32 and IEEE binary64 inputs, `altfmt_A` and `altfmt_B` are
+ignored (there is only one format per width), so mixed-format operation does
+not apply.
 
 All multiply and add operations use the dynamic rounding mode from `frm`; floating-point exception flags are accumulated into `fflags`.
 
@@ -930,6 +1071,23 @@ vbfloat16m4_t __riscv_vfqwmmacc_vv_bf16m4_f4e3m0m1(vbfloat16m4_t vd,
                                                       vfloat4e3m0m1_t vs1, vfloat4e3m0m1_t vs2, size_t vl);
 --
 
+When `altfmt_A ≠ altfmt_B`, the two input type suffixes differ:
+
+[source,c]
+--
+/* Mixed OFP8: E4M3 × E5M2 → FP16 via vfwmmacc.vv (altfmt_A=0, altfmt_B=1): */
+vfloat16m4_t __riscv_vfwmmacc_vv_f16m4_f8e4m3m1_f8e5m2m1(vfloat16m4_t vd,
+                                                            vfloat8e4m3m1_t vs1, vfloat8e5m2m1_t vs2, size_t vl);
+/* Mixed 16-bit: FP16 × BF16 → FP32 via vfwmmacc.vv (altfmt_A=0, altfmt_B=1): */
+vfloat32m2_t __riscv_vfwmmacc_vv_f32m2_f16m1_bf16m1(vfloat32m2_t vd,
+                                                      vfloat16m1_t vs1, vbfloat16m1_t vs2, size_t vl);
+/* Overloaded short forms — compiler resolves from vs1/vs2 types: */
+vfloat16m4_t __riscv_vfwmmacc_vv(vfloat16m4_t vd,
+                                  vfloat8e4m3m1_t vs1, vfloat8e5m2m1_t vs2, size_t vl) __attribute__((overloadable));
+vfloat32m2_t __riscv_vfwmmacc_vv(vfloat32m2_t vd,
+                                  vfloat16m1_t vs1, vbfloat16m1_t vs2, size_t vl) __attribute__((overloadable));
+--
+
 ===== VLEN-portable code
 
 Because CMUL = VLEN / (SEW × λ²), the accumulator register-group multiplier
@@ -1002,6 +1160,9 @@ function mat_C_idx(i : int, j : int, M : int,
 //           rm    : rounding_mode) -> bits(EEW_C)
 //   Multiply a (in format fmt_A) by b (in format fmt_B), round the product
 //   into format fmt_C, and return the EEW_C-wide bit pattern.  Updates fflags.
+//   Per IEEE 754, the exact (infinite-precision) product a × b is formed
+//   regardless of whether fmt_A equals fmt_B, then rounded once to fmt_C
+//   using rounding mode rm.
 
 // fp_add(acc  : bits(EEW), prod : bits(EEW),
 //        EEW  : int,       fmt  : fp_fmt,
@@ -1042,8 +1203,9 @@ layout).  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
 VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
-The floating-point format for A and B elements is selected by `altfmt_A` and `altfmt_B` in `vtype`
-(both must be equal); the C accumulator format is selected by `altfmt`.
+The floating-point format for A and B elements is selected by `altfmt_A` and
+`altfmt_B` in `vtype` (both must be equal; see <<mixed-format-inputs>>);
+the C accumulator format is selected by `altfmt`.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
 
 Exceptions::
@@ -1150,10 +1312,20 @@ _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
 VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
-The floating-point format for A and B elements is selected by `altfmt_A` and `altfmt_B`
-(both must be equal), interpreted for input element width SEW÷4; the C format is selected
-by `altfmt`, interpreted for width SEW.
+The floating-point format for A and B elements is selected independently by
+`altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷4; the C
+format is selected by `altfmt`, interpreted for width SEW.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
+
+Exceptions::
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* VL is not a multiple of K_effective (= λ × 4 × LMUL).
+* MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
+* _vs1_ or _vs2_ is not aligned for LMUL.
+* _vd_ is not aligned for MUL_C.
+* When `vm=0`: SEW × λ < 16.
+* When `vm=0` and `bs=1`: W × LMUL > SEW.
 
 Operation::
 [source,sail]
@@ -1253,10 +1425,20 @@ _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
 VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
-The floating-point format for A and B elements is selected by `altfmt_A` and `altfmt_B`
-(both must be equal), interpreted for input element width SEW÷2; the C format is selected
-by `altfmt`, interpreted for width SEW.
+The floating-point format for A and B elements is selected independently by
+`altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷2; the C
+format is selected by `altfmt`, interpreted for width SEW.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
+
+Exceptions::
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* VL is not a multiple of K_effective (= λ × 2 × LMUL).
+* MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
+* _vs1_ or _vs2_ is not aligned for LMUL.
+* _vd_ is not aligned for MUL_C.
+* When `vm=0`: SEW × λ < 16.
+* When `vm=0` and `bs=1`: W × LMUL > SEW.
 
 Operation::
 [source,sail]
@@ -1854,6 +2036,14 @@ The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in
 0 = signed, 1 = unsigned.
 Accumulation is modular (wraps at 2^SEW^).
 
+Exceptions::
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* VL is not a multiple of K_effective (= λ × 4 × LMUL).
+* MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
+* _vs1_ or _vs2_ is not aligned for LMUL.
+* _vd_ is not aligned for MUL_C.
+
 Operation::
 [source,sail]
 --
@@ -1957,6 +2147,14 @@ VL selects how many columns of B (and C) are updated; VL must be a multiple of �
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
 Accumulation is modular (wraps at 2^SEW^).
+
+Exceptions::
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* VL is not a multiple of K_effective (= λ × 2 × LMUL).
+* MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
+* _vs1_ or _vs2_ is not aligned for LMUL.
+* _vd_ is not aligned for MUL_C.
 
 Operation::
 [source,sail]
