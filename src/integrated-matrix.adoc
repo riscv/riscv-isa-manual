@@ -27,9 +27,9 @@ Matrix tiles are represented using the existing RISC-V V register file and its c
 The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are stored as follows:
 
 * The _accumulator_ C is stored in a vector register group with element width SEW.
-  Its register group multiplier CMUL is determined by the tile geometry:
-  CMUL = (VLEN / SEW) / λ², where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
-  The C register group may start at any vector register index that is CMUL-aligned.
+  Its register group multiplier MUL_C is determined by the tile geometry:
+  MUL_C = (VLEN / SEW) / λ², where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
+  The C register group may start at any vector register index that is MUL_C-aligned.
 
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
   equal to SEW for non-packing variants, SEW/2 for double-packing, and SEW/4 for quad-packing variants.
@@ -1184,10 +1184,12 @@ This permits hardware implementations (including outer-product engines and regis
 |===
 | Matrix / memory order | Load instruction | Store instruction
 
-| A, row-major      | `vmtl.v` (order-preserving) | —
-| B, column-major   | `vmtl.v` (order-preserving) | —
+| A, row-major      | `vmtl.v` (order-preserving)  | —
+| A, column-major   | `vmttl.v` (transposing)      | `vmtts.v`
+| B, column-major   | `vmtl.v` (order-preserving)  | —
 | B, row-major      | `vmttl.v` (transposing)      | —
 | C, column-major   | `vmtl.v` (if loaded from memory) | `vmts.v`
+| C, row-major      | `vmttl.v` (transposing)      | `vmtts.v`
 |===
 
 ==== Example: single-precision floating-point GEMM
@@ -1281,9 +1283,9 @@ The naming convention and type system extend the RISC-V V Intrinsics API
   intrinsics: `i8m1` → `vint8m1_t`, `f32m2` → `vfloat32m2_t`,
   `u16m4` → `vuint16m4_t`, etc.
   For multiply-accumulate intrinsics the register-group multiplier encoded in
-  the type-suffix is CMUL (= VLENE / λ²), which is determined by the
+  the type-suffix is MUL_C (= VLEN ÷ (SEW × λ²)), which is determined by the
   implementation's VLEN and is _independent of LMUL_.
-* When CMUL ≠ LMUL for a multiply-accumulate intrinsic, a `_lm{N}` qualifier
+* When MUL_C ≠ LMUL for a multiply-accumulate intrinsic, a `_lm{N}` qualifier
   (N ∈ {1, 2, 4, 8}) is appended to the intrinsic name to specify LMUL.
   The `_lm1` qualifier may be omitted; LMUL=1 is the default when no qualifier
   is present.
@@ -1321,7 +1323,7 @@ no input-type suffix, and no `_su` / `_us` sign suffix is needed in user code.
 
 The types of the arguments fully determine every variant:
 
-* `vd` type → accumulator SEW and CMUL.
+* `vd` type → accumulator SEW and MUL_C.
 * `vs1` / `vs2` types → input EEW and LMUL; for integer operations, signed
   vs. unsigned; for floating-point operations, the FP format (e.g., FP16
   vs. BF16 for `altfmt`).
@@ -1420,42 +1422,42 @@ void         __riscv_vmtts_v_i32m1_L4 (int32_t *base, size_t ld, vint32m1_t vs3,
 
 ===== Integer matrix multiply-accumulate (Zvvmm)
 
-The accumulator register group C uses CMUL = VLENE / λ² registers.
-CMUL is determined by the implementation's VLEN and is independent of LMUL.
+The accumulator register group C uses MUL_C = VLEN ÷ (SEW × λ²) registers.
+MUL_C is determined by the implementation's VLEN and is independent of LMUL.
 The type-suffix in the intrinsic name always encodes the accumulator C type
-(including its CMUL); A and B use `vs1` and `vs2` argument types that reflect
+(including its MUL_C); A and B use `vs1` and `vs2` argument types that reflect
 LMUL directly.
 The tables below list representative prototypes for VLEN=256 and λ=2 (giving
-CMUL = VLENE / 4); all valid (CMUL, LMUL) combinations are available with
+MUL_C = VLEN ÷ (SEW × 4)); all valid (MUL_C, LMUL) combinations are available with
 the appropriate `_lm{N}` qualifier.
 
 For `vmmacc.vv` (no widening, W=1), accumulator and both input tiles use SEW:
 
 [source,c]
 --
-/* SEW=8,  VLEN=256, λ=2: CMUL=8.  LMUL=1 (default): */
+/* SEW=8,  VLEN=256, λ=2: MUL_C=8.  LMUL=1 (default): */
 vint8m8_t  __riscv_vmmacc_vv_i8m8    (vint8m8_t  vd, vint8m1_t  vs1, vint8m1_t  vs2, size_t vl);
-/* SEW=16, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* SEW=16, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vint16m4_t __riscv_vmmacc_vv_i16m4   (vint16m4_t vd, vint16m1_t vs1, vint16m1_t vs2, size_t vl);
-/* SEW=32, VLEN=256, λ=2: CMUL=2.  LMUL=1 (default): */
+/* SEW=32, VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vint32m2_t __riscv_vmmacc_vv_i32m2   (vint32m2_t vd, vint32m1_t vs1, vint32m1_t vs2, size_t vl);
-/* Same CMUL=2, LMUL=2 (_lm2 qualifier): */
+/* Same MUL_C=2, LMUL=2 (_lm2 qualifier): */
 vint32m2_t __riscv_vmmacc_vv_i32m2_lm2(vint32m2_t vd, vint32m2_t vs1, vint32m2_t vs2, size_t vl);
-/* SEW=64, VLEN=256, λ=2: CMUL=1.  LMUL=1 (default, CMUL=LMUL): */
+/* SEW=64, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default, MUL_C=LMUL): */
 vint64m1_t __riscv_vmmacc_vv_i64m1   (vint64m1_t vd, vint64m1_t vs1, vint64m1_t vs2, size_t vl);
-/* Unsigned variants: __riscv_vmmacc_vv_u{sew}m{CMUL}[_lm{N}], accepting vuint types. */
+/* Unsigned variants: __riscv_vmmacc_vv_u{sew}m{MUL_C}[_lm{N}], accepting vuint types. */
 --
 
 For `vwmmacc.vv` (W=2), A and B use SEW/2 elements; the accumulator uses SEW.
-The type-suffix on `vd` determines the accumulator (C) SEW and CMUL:
+The type-suffix on `vd` determines the accumulator (C) SEW and MUL_C:
 
 [source,c]
 --
-/* SEW=16 accum / SEW=8 inputs,  VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* SEW=16 accum / SEW=8 inputs,  VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vint16m4_t __riscv_vwmmacc_vv_i16m4   (vint16m4_t vd, vint8m1_t  vs1, vint8m1_t  vs2, size_t vl);
-/* SEW=32 accum / SEW=16 inputs, VLEN=256, λ=2: CMUL=2.  LMUL=1 (default): */
+/* SEW=32 accum / SEW=16 inputs, VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vint32m2_t __riscv_vwmmacc_vv_i32m2   (vint32m2_t vd, vint16m1_t vs1, vint16m1_t vs2, size_t vl);
-/* SEW=64 accum / SEW=32 inputs, VLEN=256, λ=2: CMUL=1.  LMUL=1 (default): */
+/* SEW=64 accum / SEW=32 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
 vint64m1_t __riscv_vwmmacc_vv_i64m1   (vint64m1_t vd, vint32m1_t vs1, vint32m1_t vs2, size_t vl);
 --
 
@@ -1463,9 +1465,9 @@ For `vqwmmacc.vv` (W=4), A and B use SEW/4 elements:
 
 [source,c]
 --
-/* SEW=32 accum / SEW=8 inputs,  VLEN=256, λ=2: CMUL=2.  LMUL=1 (default): */
+/* SEW=32 accum / SEW=8 inputs,  VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vint32m2_t __riscv_vqwmmacc_vv_i32m2  (vint32m2_t vd, vint8m1_t  vs1, vint8m1_t  vs2, size_t vl);
-/* SEW=64 accum / SEW=16 inputs, VLEN=256, λ=2: CMUL=1.  LMUL=1 (default): */
+/* SEW=64 accum / SEW=16 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
 vint64m1_t __riscv_vqwmmacc_vv_i64m1  (vint64m1_t vd, vint16m1_t vs1, vint16m1_t vs2, size_t vl);
 --
 
@@ -1477,7 +1479,7 @@ For `vwmmacc.vv` (W=2) with SEW=8, the inputs are 4-bit integers (Zvvmmi4b):
 
 [source,c]
 --
-/* Zvvmmi4b: Int4→Int8, SEW=8, VLEN=256, λ=2: CMUL=8.  LMUL=1 (default): */
+/* Zvvmmi4b: Int4→Int8, SEW=8, VLEN=256, λ=2: MUL_C=8.  LMUL=1 (default): */
 vint8m8_t  __riscv_vwmmacc_vv_i8m8_i4m1 (vint8m8_t  vd,
                                            vint4m1_t vs1, vint4m1_t vs2, size_t vl);
 --
@@ -1486,7 +1488,7 @@ For `vqwmmacc.vv` (W=4) with SEW=16, the inputs are 4-bit integers (Zvvmmi4h):
 
 [source,c]
 --
-/* Zvvmmi4h: Int4→Int16, SEW=16, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* Zvvmmi4h: Int4→Int16, SEW=16, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vint16m4_t __riscv_vqwmmacc_vv_i16m4_i4m1(vint16m4_t vd,
                                             vint4m1_t vs1, vint4m1_t vs2, size_t vl);
 --
@@ -1510,10 +1512,10 @@ on the intrinsic name:
 
 [source,c]
 --
-/* vwmmacc.vv signed A × unsigned B; SEW=32, VLEN=256, λ=2: CMUL=2, LMUL=1 */
+/* vwmmacc.vv signed A × unsigned B; SEW=32, VLEN=256, λ=2: MUL_C=2, LMUL=1 */
 vint32m2_t __riscv_vwmmacc_vv_i32m2_su(vint32m2_t vd, vint16m1_t  vs1,
                                         vuint16m1_t vs2, size_t vl);
-/* vwmmacc.vv unsigned A × signed B; SEW=32, VLEN=256, λ=2: CMUL=2, LMUL=1 */
+/* vwmmacc.vv unsigned A × signed B; SEW=32, VLEN=256, λ=2: MUL_C=2, LMUL=1 */
 vint32m2_t __riscv_vwmmacc_vv_i32m2_us(vint32m2_t vd, vuint16m1_t vs1,
                                         vint16m1_t  vs2, size_t vl);
 --
@@ -1531,22 +1533,22 @@ For `vfmmacc.vv` (no widening, W=1), accumulator and input tiles share SEW:
 
 [source,c]
 --
-/* OFP8 E4M3, VLEN=256, λ=2: CMUL=8.  LMUL=1 (default): */
+/* OFP8 E4M3, VLEN=256, λ=2: MUL_C=8.  LMUL=1 (default): */
 vfloat8e4m3m8_t __riscv_vfmmacc_vv_f8e4m3m8(vfloat8e4m3m8_t vd,
                                               vfloat8e4m3m1_t vs1, vfloat8e4m3m1_t vs2, size_t vl);
-/* OFP8 E5M2, VLEN=256, λ=2: CMUL=8.  LMUL=1 (default): */
+/* OFP8 E5M2, VLEN=256, λ=2: MUL_C=8.  LMUL=1 (default): */
 vfloat8e5m2m8_t __riscv_vfmmacc_vv_f8e5m2m8(vfloat8e5m2m8_t vd,
                                               vfloat8e5m2m1_t vs1, vfloat8e5m2m1_t vs2, size_t vl);
-/* FP16, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* FP16, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vfloat16m4_t __riscv_vfmmacc_vv_f16m4(vfloat16m4_t vd,
                                        vfloat16m1_t vs1, vfloat16m1_t vs2, size_t vl);
-/* BF16, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* BF16, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vbfloat16m4_t __riscv_vfmmacc_vv_bf16m4(vbfloat16m4_t vd,
                                           vbfloat16m1_t vs1, vbfloat16m1_t vs2, size_t vl);
-/* FP32, VLEN=256, λ=2: CMUL=2.  LMUL=1 (default): */
+/* FP32, VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vfloat32m2_t __riscv_vfmmacc_vv_f32m2(vfloat32m2_t vd,
                                        vfloat32m1_t vs1, vfloat32m1_t vs2, size_t vl);
-/* FP64, VLEN=256, λ=2: CMUL=1.  LMUL=1 (default, CMUL=LMUL): */
+/* FP64, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default, MUL_C=LMUL): */
 vfloat64m1_t __riscv_vfmmacc_vv_f64m1(vfloat64m1_t vd,
                                        vfloat64m1_t vs1, vfloat64m1_t vs2, size_t vl);
 --
@@ -1555,19 +1557,19 @@ For `vfwmmacc.vv` (W=2), A/B use SEW/2:
 
 [source,c]
 --
-/* OFP8 E4M3 accum / OFP4 E2M1 inputs, VLEN=256, λ=2: CMUL=8.  LMUL=1 (default): */
+/* OFP8 E4M3 accum / OFP4 E2M1 inputs, VLEN=256, λ=2: MUL_C=8.  LMUL=1 (default): */
 vfloat8e4m3m8_t __riscv_vfwmmacc_vv_f8e4m3m8_f4e2m1m1(
     vfloat8e4m3m8_t vd, vfloat4e2m1m1_t vs1, vfloat4e2m1m1_t vs2, size_t vl);
-/* FP16 accum / OFP8 E4M3 inputs, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* FP16 accum / OFP8 E4M3 inputs, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vfloat16m4_t __riscv_vfwmmacc_vv_f16m4_f8e4m3m1(vfloat16m4_t vd,
                                                   vfloat8e4m3m1_t vs1, vfloat8e4m3m1_t vs2, size_t vl);
-/* BF16 accum / OFP8 E4M3 inputs, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* BF16 accum / OFP8 E4M3 inputs, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vbfloat16m4_t __riscv_vfwmmacc_vv_bf16m4_f8e4m3m1(vbfloat16m4_t vd,
                                                     vfloat8e4m3m1_t vs1, vfloat8e4m3m1_t vs2, size_t vl);
-/* FP32 accum / FP16 inputs, VLEN=256, λ=2: CMUL=2.  LMUL=1 (default): */
+/* FP32 accum / FP16 inputs, VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vfloat32m2_t __riscv_vfwmmacc_vv_f32m2(vfloat32m2_t vd,
                                         vfloat16m1_t vs1, vfloat16m1_t vs2, size_t vl);
-/* FP64 accum / FP32 inputs, VLEN=256, λ=2: CMUL=1.  LMUL=1 (default): */
+/* FP64 accum / FP32 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
 vfloat64m1_t __riscv_vfwmmacc_vv_f64m1(vfloat64m1_t vd,
                                         vfloat32m1_t vs1, vfloat32m1_t vs2, size_t vl);
 --
@@ -1576,19 +1578,19 @@ For `vfqwmmacc.vv` (W=4), A/B use SEW/4:
 
 [source,c]
 --
-/* FP16 accum / OFP4 E2M1 inputs, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* FP16 accum / OFP4 E2M1 inputs, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vfloat16m4_t __riscv_vfqwmmacc_vv_f16m4_f4e2m1m1(vfloat16m4_t vd,
                                                    vfloat4e2m1m1_t vs1, vfloat4e2m1m1_t vs2, size_t vl);
-/* BF16 accum / OFP4 E2M1 inputs, VLEN=256, λ=2: CMUL=4.  LMUL=1 (default): */
+/* BF16 accum / OFP4 E2M1 inputs, VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vbfloat16m4_t __riscv_vfqwmmacc_vv_bf16m4_f4e2m1m1(vbfloat16m4_t vd,
                                                      vfloat4e2m1m1_t vs1, vfloat4e2m1m1_t vs2, size_t vl);
-/* FP32 accum / OFP8 E4M3 inputs, VLEN=256, λ=2: CMUL=2.  LMUL=1 (default): */
+/* FP32 accum / OFP8 E4M3 inputs, VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vfloat32m2_t __riscv_vfqwmmacc_vv_f32m2_f8e4m3m1(vfloat32m2_t vd,
                                                    vfloat8e4m3m1_t vs1, vfloat8e4m3m1_t vs2, size_t vl);
-/* FP64 accum / BF16 inputs, VLEN=256, λ=2: CMUL=1.  LMUL=1 (default): */
+/* FP64 accum / BF16 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
 vfloat64m1_t __riscv_vfqwmmacc_vv_f64m1_bf16m1(vfloat64m1_t vd,
                                                  vbfloat16m1_t vs1, vbfloat16m1_t vs2, size_t vl);
-/* FP64 accum / FP16 inputs, VLEN=256, λ=2: CMUL=1.  LMUL=1 (default): */
+/* FP64 accum / FP16 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
 vfloat64m1_t __riscv_vfqwmmacc_vv_f64m1(vfloat64m1_t vd,
                                          vfloat16m1_t vs1, vfloat16m1_t vs2, size_t vl);
 --
@@ -1655,23 +1657,23 @@ vbfloat16m4_t __riscv_vfqwimmacc_vv_bf16m4_u4m1(vbfloat16m4_t vd,
 --
 ===== VLEN-portable code
 
-Because CMUL = VLEN / (SEW × λ²), the accumulator register-group multiplier
+Because MUL_C = VLEN / (SEW × λ²), the accumulator register-group multiplier
 varies across implementations with different VLEN.
-The type suffix in a multiply-accumulate intrinsic name encodes CMUL, so
-source code that hard-codes a specific CMUL value (e.g.,
+The type suffix in a multiply-accumulate intrinsic name encodes MUL_C, so
+source code that hard-codes a specific MUL_C value (e.g.,
 `__riscv_vmmacc_vv_i32m2`) is tied to a particular VLEN.
 
 The recommended approach for writing portable code mirrors the established
-practice for LMUL-agnostic RVV intrinsics: choose the _largest_ CMUL the
+practice for LMUL-agnostic RVV intrinsics: choose the _largest_ MUL_C the
 code is designed for and use its corresponding type throughout.
-On implementations where the actual CMUL is smaller (i.e. VLEN is smaller),
+On implementations where the actual MUL_C is smaller (i.e. VLEN is smaller),
 the configuration is simply illegal for the chosen (SEW, λ) and the code
-path is not entered; on implementations where CMUL is equal or larger, the
-code runs correctly because the register allocator only relies on CMUL
-registers being available, and a larger CMUL satisfies that requirement.
+path is not entered; on implementations where MUL_C is equal or larger, the
+code runs correctly because the register allocator only relies on MUL_C
+registers being available, and a larger MUL_C satisfies that requirement.
 
-In practice this means portable software should be written for a target CMUL
-(e.g. CMUL=8 for maximum portability at SEW=8), with runtime selection of
+In practice this means portable software should be written for a target MUL_C
+(e.g. MUL_C=8 for maximum portability at SEW=8), with runtime selection of
 the appropriate code path based on the result of `vsetvl`.
 
 [#integrated-matrix-insns,reftext="Instructions (in alphabetical order)"]
