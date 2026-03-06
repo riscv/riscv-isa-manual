@@ -718,6 +718,16 @@ no rounding error.  If any `scale_A[m][s]` or `scale_B[n][s]` is NaN
 (0xFF), the corresponding output element C[m, n] is set to the default NaN
 regardless of the input element values.
 
+When a non-NaN E8M0 value represents a power-of-two that overflows the
+accumulator FP format (e.g. 2^128^ cannot be represented in FP16 which
+has a maximum finite exponent of 2^15^), the converted scale value is
++∞.  The subsequent block-scale multiply follows IEEE 754 rules: +∞
+multiplied by a non-zero finite value yields ±∞ (propagating into the
+accumulator via `fp_add`); +∞ multiplied by zero yields the default NaN,
+which sets the output element to NaN via the NaN propagation rule above.
+Implementations shall handle this case as specified — not as an
+implementation-defined result.
+
 ===== Scale layout in `v0`
 
 The register `v0` holds paired E8M0 scale values at an effective element
@@ -749,11 +759,14 @@ VLEN bits — the scale data fills one register in every legal configuration.
 
 **R ≥ S proof** (tile stride is never smaller than the active count):
 
-* block_size = 32: The constraint W × LMUL ≤ 2 × SEW ensures
-  K_eff = λ × W × LMUL ≤ 2 × λ × SEW, so
+* block_size = 32: The encoding tables (<<tbl-fp-encoding-map>>,
+  <<tbl-intmx-encoding-map>>) mark all combinations with W × LMUL > 2 × SEW
+  as _reserved_, so every legal encoding satisfies W × LMUL ≤ 2 × SEW.
+  Therefore K_eff = λ × W × LMUL ≤ 2 × λ × SEW, giving
   S = ⌈K_eff / 32⌉ ≤ ⌈2 × λ × SEW / 32⌉ ≤ λ × SEW / 16 = R.
-* block_size = 16: The constraint W × LMUL ≤ SEW ensures
-  K_eff = λ × W × LMUL ≤ λ × SEW, so
+* block_size = 16: The BS=16 legality check (W × LMUL ≤ SEW, stated in
+  each instruction's Exceptions section) ensures
+  K_eff = λ × W × LMUL ≤ λ × SEW, giving
   S = ⌈K_eff / 16⌉ ≤ ⌈λ × SEW / 16⌉ ≤ λ × SEW / 16 = R.
 
 When S < R, positions _s_ ∈ [S, R) within each row are padding and their
@@ -1799,7 +1812,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
 * When `vm=0`: SEW × λ < 16.
-* When `vm=0` and `bs=1`: W × LMUL > SEW.
+* When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
 
 Operation::
 [source,sail]
@@ -1831,8 +1844,6 @@ let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
 let S : int = (K_eff + block_size - 1) / block_size;
 let R : int = lambda * EEW / 16;  // tile-strided row stride
 
-// BS=16 LMUL restriction: W × LMUL ≤ SEW
-if vm == 0 & vtype[bs] == 0b1 & (1 * LMUL > EEW) then return Illegal_Instruction();
 // Microscaling legality: SEW × λ ≥ 16
 if vm == 0 & (EEW * lambda < 16) then return Illegal_Instruction();
 
@@ -1968,6 +1979,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * _vd_ is not aligned for MUL_C.
 * When `vm=0`: SEW × λ < 16.
 * When `vm=0` and `bs=1`: W × LMUL > SEW.
+* When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
 
 Operation::
 [source,sail]
@@ -2141,6 +2153,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * _vd_ is not aligned for MUL_C.
 * When `vm=0`: SEW × λ < 16.
 * When `vm=0` and `bs=1`: W × LMUL > SEW.
+* When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
 
 Operation::
 [source,sail]
@@ -2319,6 +2332,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * _vd_ is not aligned for MUL_C.
 * SEW × λ < 16.
 * When `bs=1`: W × LMUL > SEW (i.e., 2 × LMUL > SEW).
+* _vd_, _vs1_, or _vs2_ overlaps `v0`.
 
 Operation::
 [source,sail]
@@ -2490,6 +2504,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * _vd_ is not aligned for MUL_C.
 * SEW × λ < 16.
 * When `bs=1`: W × LMUL > SEW (i.e., 4 × LMUL > SEW).
+* _vd_, _vs1_, or _vs2_ overlaps `v0`.
 
 Operation::
 [source,sail]
