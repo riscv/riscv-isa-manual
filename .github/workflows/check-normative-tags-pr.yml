@@ -1,0 +1,108 @@
+---
+name: Check Normative Tag Changes (PR)
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'normative_rule_defs/**'
+      - 'ref/**'
+      - 'scripts/check-tag-changes.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  check-tags:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for bypass label
+        id: bypass
+        run: |
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+          if echo "$LABELS" | grep -q "normative-change-approved"; then
+            echo "has_bypass=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Bypass label 'normative-change-approved' found - breaking changes will be reported but not failed."
+          else
+            echo "has_bypass=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout PR code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Build normative tags
+        run: make build-tags
+
+      - name: Check for tag changes
+        id: check
+        run: |
+          set +e
+
+          {
+            echo "## Normative Tag Change Report"
+            echo ""
+          } > tag_changes.txt
+
+          HAS_ANY_CHANGES=false
+          HAS_BREAKING_CHANGES=false
+
+          for spec in unprivileged privileged; do
+            {
+              echo "### ${spec^} Specification"
+              echo ""
+              echo '```'
+            } >> tag_changes.txt
+
+            OUTPUT=$(ruby docs-resources/tools/detect_tag_changes.rb \
+              --verbose \
+              "ref/riscv-$spec-norm-tags.json" \
+              "build/riscv-$spec-norm-tags.json" 2>&1)
+            EXIT_CODE=$?
+
+            {
+              echo "$OUTPUT"
+              echo '```'
+              echo ""
+            } >> tag_changes.txt
+
+            if echo "$OUTPUT" | grep -qE "(Added|Modified|Deleted) [0-9]+ tag"; then
+              HAS_ANY_CHANGES=true
+            fi
+
+            if [ "$EXIT_CODE" -ne 0 ]; then
+              HAS_BREAKING_CHANGES=true
+            fi
+          done
+
+          echo "has_any_changes=$HAS_ANY_CHANGES" >> "$GITHUB_OUTPUT"
+          echo "has_breaking_changes=$HAS_BREAKING_CHANGES" >> "$GITHUB_OUTPUT"
+
+      - name: Upload tag change report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: normative-tag-change-report-${{ github.event.pull_request.number }}
+          path: tag_changes.txt
+          retention-days: 7
+
+      - name: Add report to workflow summary
+        if: always()
+        run: cat tag_changes.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on breaking changes (unless bypass label is present)
+        if: steps.check.outputs.has_breaking_changes == 'true' && steps.bypass.outputs.has_bypass != 'true'
+        run: |
+          echo "::error::Breaking normative tag changes detected. Add label 'normative-change-approved' to bypass."
+          exit 1
+
+      - name: Report bypass mode
+        if: steps.check.outputs.has_breaking_changes == 'true' && steps.bypass.outputs.has_bypass == 'true'
+        run: echo "::warning::Breaking normative tag changes detected, but bypass label is present."
+
+      - name: Report normative changes detected
+        if: steps.check.outputs.has_any_changes == 'true'
+        run: echo "::warning::Normative tag changes detected (additions, modifications, or deletions)."
