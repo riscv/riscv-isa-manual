@@ -16,7 +16,7 @@
 # Building with a preinstalled docker container is recommended.
 # Install by running:
 #
-#   docker pull riscvintl/riscv-docs-base-container-image:latest
+#   docker pull ghcr.io/riscv/riscv-docs-base-container-image:latest
 #
 
 DOCS := riscv-privileged riscv-unprivileged
