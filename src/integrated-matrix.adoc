@@ -8,7 +8,7 @@ Dedicated matrix-multiply accelerators often require new register state—separa
 
 The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
 By interpreting groups of existing vector registers as two-dimensional matrix tiles, the Zvvm family of Integrated Matrix extensions delivers high arithmetic density without introducing any new architected state.
-We focus, in particular, on the computation of C ← A × B^T^ + C, where A (μ × λ) and B (ν × λ) are row-major matrix panels and C (μ × ν) is column-major.
+We focus, in particular, on the computation of C ← A × B^T^ + C, where A (μ × λ) and B (ν × λ) are row-major matrix panels and C (μ × ν) is row-major.
 
 The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
 A key design goal is that the same binary executes correctly—and achieves near-peak arithmetic throughput—across this entire range without recompilation.
@@ -30,6 +30,8 @@ The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are 
   Its register group multiplier MUL_C is determined by the tile geometry:
   MUL_C = (VLEN / SEW) / λ², where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
   The C register group may start at any vector register index that is MUL_C-aligned.
+  MUL_C ∈ {1, 2, 4, 8, 16}.
+  If MUL_C = 16, the only allowed vector register indices are 0 and 16.
 
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
   equal to SEW for non-packing variants, SEW/2 for double-packing, and SEW/4 for quad-packing variants.
@@ -347,7 +349,7 @@ The `altfmt_A` and `altfmt_B` bits are currently assigned to `vtype[9]`
 and `vtype[10]`, which fall within the immediate operand of `vsetvli`.
 These bits are expected to move outside the `vsetvli` immediate field in a
 future revision.  The likely final location is just below the `lambda[2:0]`
-bits (i.e., at `vtype[XLEN-5]` and `vtype[XLEN-6]`).
+bits (i.e., at `vtype[XLEN-5]` and `vtype[XLEN-6]`, respectively).
 ====
 
 ===== Floating-point instructions
@@ -400,6 +402,16 @@ the block size used for microscaling operations (`vm=0`).  When `vm=1`, the
 | 1 | 16 elements
 |===
 
+[NOTE]
+.Editorial Note
+====
+The `bs` bit is currently assigned to `vtype[11]`,
+which falls within the immediate operand of `vsetvli`.
+This bit is expected to move outside the `vsetvli` immediate field in a
+future revision.  The likely final location is just below the `altfmt_A` and `altfmt_B`
+bits (i.e., at `vtype[XLEN-7]`).
+====
+
 === Storage formats
 
 ==== Element packing in input tiles
@@ -442,6 +454,7 @@ contains a naturally ordered pair of 4-bit elements.  Software preparing
 input data in memory must pack adjacent elements within each byte
 accordingly.
 
+[#arithmetic-considerations]
 ==== Arithmetic considerations
 
 Each multiply-accumulate instruction computes, for every output element C[m, n]:
@@ -465,12 +478,21 @@ For non-widening instructions (W = 1), each product of two SEW-bit values is exa
 
 ===== Accumulation and rounding model (floating-point)
 
-An implementation partitions the λ × LMUL sub-dot-products for each output element into consecutive groups of G sub-dot-products.
+The resulting value of element C[m,n] for any given LMUL must match the value computed by applying a series of multiply-accumulate instructions with LMUL=1, in increasing order of vector register indices.
+Therefore, it is enough to specify the result of the computations
 
-* Within each group, the G partial results are accumulated using internal precision that requires no rounding to SEW precision inside a group.
+    C[m, n] ← C[m, n] + Σ_{k=0}^{λ × W} A[m, k] × B[k, n]
 
-* After each group, the accumulated partial sum is rounded to C's precision (SEW) using an _implementation-defined_ rounding mode and _added to the running value of C[m, n]_.
-  The rounding mode used for these intermediate additions is not required to match `frm`.
+An implementation partitions the λ sub-dot-products for each output element into consecutive groups of G sub-dot-products.
+
+* Within each group, the G partial results are accumulated into a partial sum S using internal precision that requires no rounding to SEW precision inside a group.
+
+* After each group, the accumulated partial sum S is _added to the running value of_ C[m, n] by computing
+
+    C[m, n] ← round(C[m, n] + [round](S)),
+
+where the roundings are performed with the rounding mode from `frm`.
+The rounding of partial sum S _before_ it is accumulated to the running value of C[m,n] is optional.
 
 The value of G is _implementation-defined_ and may depend on SEW, W, λ, LMUL, and the microarchitecture.
 It must satisfy:
@@ -478,9 +500,7 @@ It must satisfy:
 * G is a power of two;
 * 1 ≤ G ≤ λ.
 
-The resulting number of rounding additions to C per output element is (λ × LMUL) ÷ G.
-
-The final accumulation step—adding the fully reduced dot-product to the original value of C[m, n]—uses the dynamic rounding mode from `frm`.
+The resulting number of rounding operations per output element of C is [2](λ × LMUL) ÷ G, where the factor of 2 is present if the accumulated partial sum is rounded before being added to the running value.
 
 [NOTE]
 ====
@@ -490,12 +510,23 @@ In an *outer-product* datapath, G is typically on the order of λ (e.g. λ, λ÷
 This significantly reduces the number of expensive full-precision additions.
 
 Software must not depend on a particular value of G.
+
+It is expected an implementation will have to disclose its chosen value of G in order to be certified as compliant.
+
+The rounding of partial sum S is made optional in order to match established practices in industry and other RISC-V matrix extensions.
 ====
 
-Because G and the intermediate rounding mode are implementation-defined, two conforming implementations may produce floating-point results that differ in the least-significant bits for identical inputs.
+Because G is implementation-defined, two conforming implementations may produce floating-point results that differ in the least-significant bits for identical inputs.
 Bit-exact reproducibility of floating-point matrix multiply-accumulate results across different implementations is therefore _not_ guaranteed.
 
 Floating-point exception flags (inexact, overflow, underflow, invalid, etc.) are accumulated into `fflags`; the order in which individual exceptions are raised within a single instruction execution is implementation-defined.
+
+[NOTE]
+.Editorial Note
+====
+We could ammend the requirement that "... the G partial results are accumulated into a partial sum S using internal precision that requires no rounding to SEW precision inside a group" with the license to use the Bulk Normalization of Dot-Products (BNDP) procedure. If we do that, we must require the implementor to disclose the choice of BNDP parameters.
+Adding the license would result in more compatibility with other RISC-V matrix extensions.
+====
 
 ===== Integer accumulation
 
@@ -505,9 +536,9 @@ Because modular addition is both associative and commutative, the final result i
 [#zvvmm,reftext=Matrix-multiplication instructions (integer)]
 === Zvvmm: Extension for matrix multiplication on vector registers interpreted as 2D integer matrix tiles
 
-The `Zvvmm` family of extensions provides instructions that perform matrix multiply-accumulate on integer data, computing C ← C + A × B, where A, B, and C are matrix tiles held in the vector register file.
+The `Zvvmm` family of extensions provides instructions that perform matrix multiply-accumulate on integer data, computing C ← C + A × B^T^, where A, B, and C are matrix tiles held in the vector register file.
 
-The K-dimension of the multiplication (shared inner dimension of A and B) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
+The K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
 
     K_effective = λ × W × LMUL
 
@@ -544,7 +575,7 @@ microscaling (see <<integrated-matrix-microscaling>>).
 [#zvvfmm,reftext=Matrix-multiplication instructions (floating-point)]
 === Zvvfmm: Extension for matrix multiplication on vector registers interpreted as 2D floating-point matrix tiles
 
-The `Zvvfmm` family of extensions provides floating-point matrix multiply-accumulate instructions, computing C ← C + A × B.
+The `Zvvfmm` family of extensions provides floating-point matrix multiply-accumulate instructions, computing C ← C + A × B^T^.
 A, B, and C are matrix tiles held in the vector register file.
 
 The floating-point format of each operand tile is controlled by fields in `vtype`:
@@ -667,6 +698,10 @@ supported.  When `vm=0`, the instruction does not apply a vector mask;
 instead, `v0` supplies paired E8M0 block-scale factors for microscaling
 operation (see <<integrated-matrix-microscaling>>).
 
+===== Mixed-format inputs arithmetic considerations
+
+Whenever mixed formats are used in the computational instructions, one must follow the guidelines in <<arithmetic-considerations>>.
+
 [#integrated-matrix-microscaling]
 ==== Microscaling support (`v0.scale`)
 
@@ -699,8 +734,7 @@ applied, `v0` is not read, and the `bs` field is ignored.
 
 When microscaling is active (`vm=0`), each output element is computed as:
 
-    C[m, n] ← C[m, n] + Σ_{s=0}^{S−1} scale_A[m][s] × scale_B[n][s] ×
-                    Σ_{k ∈ block s} A[m, k] × B[k, n]
+    C[m, n] ← C[m, n] + Σ_{s=0}^{S−1} (scale_A[m][s] × scale_B[n][s] × (Σ_{k ∈ block s} A[m, k] × B[k, n]))
 
 where S = ⌈K_eff / block_size⌉ is the number of scale blocks per
 row/column, and block _s_ covers elements
@@ -1055,6 +1089,16 @@ The tile load and store instructions make use of the following parameters from t
 The resulting tile dimensions are μ = ν = VL/λ, with the accumulator tile C occupying MUL = LMUL/λ² vector registers.
 When loading A or B input tiles, `vmtl.v` and `vmttl.v` shall be used with SEW equal to the element width of the C accumulator tile.
 
+If (rs2) = 0, then the leading dimension LD is set to the _natural dimension_ of λ × LMUL.
+That is, the memory layout, with elements contiguous to each other, matches the layout of the register group being loaded/stored.
+
+[NOTE]
+====
+It is expected that implementations will optimize the case of `rs2 = x0` to load/store a vector register group with contiguous VL elements in memory.
+
+Efficient implementation of tile loads with `rs2 = x0` are essential to high-performance linear algebra kernels.
+====
+
 ==== Instructions
 
 All tile load/store instructions support two optional operands that follow `rs2` in the assembly syntax:
@@ -1070,9 +1114,9 @@ Tile load and store instructions follow the standard vector element-status seman
 
 * _Active_ elements (body, mask enabled): loads fetch from memory and write `vd`; stores read `vs3` and write to memory.
   Active elements may raise memory exceptions.
-* _Inactive_ elements (body, mask disabled): loads do not update the destination register unless `vtype.vma`=1 (mask-agnostic), in which case those elements may be overwritten with 1s.
+* _Inactive_ elements (body, mask disabled): loads never raise exceptions and do not update the destination register unless `vtype.vma`=1 (mask-agnostic), in which case those elements may be overwritten with 1s.
   Stores do not write to memory and do not raise exceptions.
-* _Tail_ elements (index ≥ VL): loads do not update the destination register unless `vtype.vta`=1 (tail-agnostic), in which case those elements may be overwritten with 1s.
+* _Tail_ elements (index ≥ VL): loads never raise exceptions and do not update the destination register unless `vtype.vta`=1 (tail-agnostic), in which case those elements may be overwritten with 1s.
   Stores do not write to memory and do not raise exceptions.
 * _Prestart_ elements (index < `vstart`): neither the destination register nor memory is updated; no exceptions are raised.
 
@@ -1096,7 +1140,7 @@ Loads a 2D matrix tile from memory into the vector register group starting at `v
 Let _linesize_ = λ × LMUL.
 For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
-    VD[i] = M[rs1 + (i / linesize) × LD + (i % linesize)]
+    VD[i] = M[rs1 + (SEW ÷ 8) × ((i / linesize) × LD + (i % linesizea))]
 
 This instruction is the correct choice when A is stored in row-major order or when B is
 stored in column-major order: in both cases the memory layout consists of _linesize_-element
@@ -1112,7 +1156,7 @@ Stores the 2D matrix tile held in the vector register group starting at `vs3` to
 Let _linesize_ = λ × LMUL.
 For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
-    M[rs1 + (i / linesize) × LD + (i % linesize)] = VS[i]
+    M[rs1 + (SEW ÷ 8) × ((i / linesize) × LD + (i % linesize))] = VS[i]
 
 ===== `vmttl.v` — Transposing Tile Load
 
@@ -1126,7 +1170,7 @@ This instruction is used when a B tile is stored in row-major order, or when an 
 Let _linesize_ = λ × LMUL.
 For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
-    VD[i] = M[rs1 + (i % linesize) × LD + (i / linesize)]
+    VD[i] = M[rs1 + (SEW ÷ 8) × ((i % linesize) × LD + (i / linesize))]
 
 ===== `vmtts.v` — Transposing Tile Store
 
@@ -1139,7 +1183,7 @@ Stores a 2D matrix tile from vector registers to memory, applying the inverse tr
 Let _linesize_ = λ × LMUL.
 For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
-    M[rs1 + (i % linesize) × LD + (i / linesize)] = VS[i]
+    M[rs1 + (SEW ÷ 8) × ((i % linesize) × LD + (i / linesize))] = VS[i]
 
 <<<
 
@@ -1149,12 +1193,13 @@ The tile dimensions are fully determined by the current vector configuration:
 
     M_tile     = VLEN / (SEW × λ)       (rows of A and C per computation)
     K_eff      = λ × W × LMUL           (shared K-dimension step)
-    N_tile     = VL / K_eff             (active columns of B and C; set via vsetvl)
-    N_tile_max = M_tile                  (maximum columns when VL = VL_max)
-    MUL_C      = VLEN / (SEW × λ²)     (C accumulator register group size)
+    N_tile     = VL / (λ × LMUL)        (active columns of B and C; set via vsetvl)
+    N_tile_max = M_tile                 (maximum columns when VL = VL_max)
+    MUL_C      = VLEN / (SEW × λ²)      (C accumulator register group size)
 
 `M_tile` is fixed by the hardware (VLEN) and the chosen SEW and λ; it cannot be changed by VL.
 `N_tile` is controlled by the programmer through VL; use `vsetvl` to select the largest `N_tile` that fits the remaining columns.
+VL must be a multiple of λ × LMUL, so only full columns can be selected.
 
 Because the multiply-accumulate instructions always read all `M_tile` rows of A independent of VL, loading an A tile requires VL = M_tile × K_eff (the natural maximum VL for the chosen LMUL).
 The B load and computation use the narrower VL = K_eff × N_tile.
@@ -1245,13 +1290,15 @@ for (j = 0; j < N; j += N_tile) {
 
 Key observations:
 
-* The A tile must be loaded with `VL = M_tile × K_eff` (the maximum VL for the
+* The A tile must be loaded with `VL = M_tile × λ × LMUL` (the maximum VL for the
   chosen LMUL) because `vfmmacc.vv` always reads all `M_tile` rows of A
   regardless of the VL set for the computation.
   A separate `vsetvl` is therefore required before each `vmtl.v` for A.
 
-* The B load and the multiply-accumulate instruction share `VL = K_eff × N_tile`,
+* The B load and the multiply-accumulate instruction share `VL = λ × LMUL × N_tile`,
   which restricts computation to the current column block.
+
+* The A and B tile loads must be performed with the target SEW (element width of the C tile).
 
 * For integer GEMM, substitute `vmmacc.vv` for `vfmmacc.vv` and set `altfmt_A`
   and `altfmt_B` in `vtype` to select the desired operand signedness.
@@ -1452,11 +1499,11 @@ The type-suffix on `vd` determines the accumulator (C) SEW and MUL_C:
 
 [source,c]
 --
-/* SEW=16 accum / SEW=8 inputs,  VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
+/* SEW=16 accum / EEW=8 inputs,  VLEN=256, λ=2: MUL_C=4.  LMUL=1 (default): */
 vint16m4_t __riscv_vwmmacc_vv_i16m4   (vint16m4_t vd, vint8m1_t  vs1, vint8m1_t  vs2, size_t vl);
-/* SEW=32 accum / SEW=16 inputs, VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
+/* SEW=32 accum / EEW=16 inputs, VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vint32m2_t __riscv_vwmmacc_vv_i32m2   (vint32m2_t vd, vint16m1_t vs1, vint16m1_t vs2, size_t vl);
-/* SEW=64 accum / SEW=32 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
+/* SEW=64 accum / EEW=32 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
 vint64m1_t __riscv_vwmmacc_vv_i64m1   (vint64m1_t vd, vint32m1_t vs1, vint32m1_t vs2, size_t vl);
 --
 
@@ -1464,9 +1511,9 @@ For `vqwmmacc.vv` (W=4), A and B use SEW/4 elements:
 
 [source,c]
 --
-/* SEW=32 accum / SEW=8 inputs,  VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
+/* SEW=32 accum / EEW=8 inputs,  VLEN=256, λ=2: MUL_C=2.  LMUL=1 (default): */
 vint32m2_t __riscv_vqwmmacc_vv_i32m2  (vint32m2_t vd, vint8m1_t  vs1, vint8m1_t  vs2, size_t vl);
-/* SEW=64 accum / SEW=16 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
+/* SEW=64 accum / EEW=16 inputs, VLEN=256, λ=2: MUL_C=1.  LMUL=1 (default): */
 vint64m1_t __riscv_vqwmmacc_vv_i64m1  (vint64m1_t vd, vint16m1_t vs1, vint16m1_t vs2, size_t vl);
 --
 
@@ -1657,23 +1704,13 @@ vbfloat16m4_t __riscv_vfqwimmacc_vv_bf16m4_u4m1(vbfloat16m4_t vd,
 ===== VLEN-portable code
 
 Because MUL_C = VLEN / (SEW × λ²), the accumulator register-group multiplier
-varies across implementations with different VLEN.
-The type suffix in a multiply-accumulate intrinsic name encodes MUL_C, so
-source code that hard-codes a specific MUL_C value (e.g.,
-`__riscv_vmmacc_vv_i32m2`) is tied to a particular VLEN.
+varies across implementations with different values of VLEN and λ, even for a fixed SEW tied to an output type.
+The type suffix in a long-form multiply-accumulate intrinsic name directly encodes MUL_C, whereas in an overloaded name that MUL_C is implicit.
+Either way, source code with IME intrinsics is tied to a specific combination of input/output types and value of MUL_C.
 
-The recommended approach for writing portable code mirrors the established
-practice for LMUL-agnostic RVV intrinsics: choose the _largest_ MUL_C the
-code is designed for and use its corresponding type throughout.
-On implementations where the actual MUL_C is smaller (i.e. VLEN is smaller),
-the configuration is simply illegal for the chosen (SEW, λ) and the code
-path is not entered; on implementations where MUL_C is equal or larger, the
-code runs correctly because the register allocator only relies on MUL_C
-registers being available, and a larger MUL_C satisfies that requirement.
-
-In practice this means portable software should be written for a target MUL_C
-(e.g. MUL_C=8 for maximum portability at SEW=8), with runtime selection of
-the appropriate code path based on the result of `vsetvl`.
+Althought it is possible to write more general assembly code, it is common industry practice to favor coding with compiler intrinsics.
+The recommended approach for writing portable code with IME intrinsics is to package multiple code paths in the same executable, each optimized for a specific value of C_MUL.
+Runtime selection of the appropriate code path is then performed based on the result of `vsetvl` and computations of MUL_C = VLEN / (SEW × λ²).
 
 [#integrated-matrix-insns,reftext="Instructions (in alphabetical order)"]
 === Instructions (in alphabetical order)
