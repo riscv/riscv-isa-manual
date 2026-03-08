@@ -1,6 +1,8 @@
 [[IME]]
 == Zvvm Family of Integrated Matrix Extensions
 
+:stem: latexmath
+
 === Introduction
 
 High-performance computing and machine learning workloads depend critically on general matrix multiplication (GEMM) over a wide range of data types and precisions.
@@ -8,7 +10,7 @@ Dedicated matrix-multiply accelerators often require new register state—separa
 
 The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
 By interpreting groups of existing vector registers as two-dimensional matrix tiles, the Zvvm family of Integrated Matrix extensions delivers high arithmetic density without introducing any new architected state.
-We focus, in particular, on the computation of C ← A × B^T^ + C, where A (μ × λ) and B (ν × λ) are row-major matrix panels and C (μ × ν) is row-major.
+We focus, in particular, on the computation of C ← A × B^T^ + C, where A (μ × λ), B (ν × λ) and C (μ × ν) are row-major matrix panels.
 
 The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
 A key design goal is that the same binary executes correctly—and achieves near-peak arithmetic throughput—across this entire range without recompilation.
@@ -21,14 +23,20 @@ The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) provide
 * <<#zvvfmm>>: multiply-accumulate instructions for floating-point matrix tiles
 * <<#zvvmtls>>: two-dimensional load/store instructions for moving data between memory and vector registers interpreted as matrix tiles
 
-==== Matrix tile geometry
+==== Matrix tile multiplication geometry
+
+The geometry of the multiplier and the tiles is defined by the new parameter `lambda` (λ) which is encoded in 3 bits in the `vtype` CSR, and vector operation parameters like the widening `W` of the multiplication encoded in the instruction, `LMUL`, `SEW` and `VLEN`.
+
+[#ime-geometry-fig]
+.Geometry of matrix tiles and element ordering for 32 element vector registers and λ=4. VRs are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case with A, B, C having the same SEW. (b) Widening case with A and B having half the SEW of C (double-packing).
+image::images/png/ime-geometry.png[width=100%, align=center, alt="Diagram of matrix tile geometry and multiplier configuration parameters."]
 
 Matrix tiles are represented using the existing RISC-V V register file and its configuration state.
 The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are stored as follows:
 
 * The _accumulator_ C is stored in a vector register group with element width SEW.
   Its register group multiplier MUL_C is determined by the tile geometry:
-  MUL_C = (VLEN / SEW) / λ², where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
+  MUL_C = (VLEN / SEW) / λ^2^, where λ is the K dimension given by the `lambda[2:0]` field in `vtype`.
   The C register group may start at any vector register index that is MUL_C-aligned.
   MUL_C ∈ {1, 2, 4, 8, 16}.
   If MUL_C = 16, the only allowed vector register indices are 0 and 16.
@@ -40,11 +48,23 @@ The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are 
   Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
   Fractional LMUL settings (LMUL < 1) are reserved and shall raise an illegal-instruction exception when used with any IME instruction.
 
+The elements in the vector registers are contiguous in the λ direction, as depicted in
+<<ime-geometry-fig>>. Tile A and C elements are sorted in row-major order while tile B^T^
+elements are sorted in column-major order. This choice allows the implementation of the
+matrix tile multiplication as inner product (eg. a systolic array) or outer product and
+simplifies the implementation of high-rank updates based outer products.
+
+[#ime-tile-lmul-fig]
+.LMUL scaling of matrix tiles for LMUL=2 (left) and LMUL=4 (right). LMUL scales the tile along the K dimension only, increasing the effective K dimension of the tile by a factor of LMUL. The blue arrows indicate the contiguous elements in the vector register groups that form the tiles.
+image::images/png/ime-tile-lmul_2_4.png[width=100%, align=center, alt="Diagram showing LMUL scaling of matrix tiles."]
+
+==== Subextensions of Zvvm
+
 Table <<tbl-subextensions>> lists all computational subextensions in the Zvvm family.
 
 [#tbl-subextensions]
 .Computational subextensions in the Zvvm family of Integrated Matrix extensions.
-[cols="1,1,3,3", options="header"]
+[cols="1,1,4,2", options="header"]
 |===
 |Extension       | Dependencies | Multiplicand Types           | Accumulator Type
 |Zvvmmi4b       ^| Zve64d       | [U]Int4, [U]Int4             | Int8
@@ -425,6 +445,10 @@ tile load instructions always transfer data at SEW granularity, every loaded
 SEW-bit position contains W contiguous narrow elements that the
 multiply-accumulate instruction consumes as a sub-dot-product.
 
+[#ime-tile-widening-fig]]
+.Element distribution and tile geometry example for L=32, SEW wide elements (left), two SEW/2 wide elements packed per SEW (middle), and four SEW/4 wide elements per SEW (right). Packing/widening by W increases the effective K dimension of the tile by a factor of W.
+image::images/png/ime-tile-widening.png[align="center"]
+
 ===== Byte-sized and wider elements (EEW ≥ 8)
 
 When the input element width is 8 bits or wider (EEW ∈ {8, 16, 32, 64}), the
@@ -457,9 +481,9 @@ accordingly.
 [#arithmetic-considerations]
 ==== Arithmetic considerations
 
-Each multiply-accumulate instruction computes, for every output element C[m, n]:
+Each multiply-accumulate instruction computes, for every output element stem:[C_{m,n}]:
 
-    C[m, n] ← C[m, n] + Σ_{k=0}^{K_eff−1} A[m, k] × B[k, n]
+stem:[C_{m,n} \leftarrow C_{m,n} + \sum_{k=0}^{K_{\text{eff}}-1} A_{m,k} \times B_{k,n}]
 
 where K_eff = λ × W × LMUL.
 This section specifies how the K_eff product terms may be grouped and when intermediate rounding is permitted.
@@ -540,7 +564,7 @@ The `Zvvmm` family of extensions provides instructions that perform matrix multi
 
 The K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
 
-    K_effective = λ × W × LMUL
+    K_eff = λ × W × LMUL
 
 A and B tiles have elements of width SEW÷W; the accumulator C has elements of width SEW (see table below).
 The signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned); the accumulator C is always signed.
@@ -548,9 +572,9 @@ Integer accumulation wraps modulo 2^SEW^.
 
 The tile dimensions follow from the widening and LMUL settings:
 
-    L_A         = LMUL × VLEN ÷ (SEW ÷ W)   (total A or B tile elements across LMUL registers)
-    K_effective = λ × W × LMUL
-    M = N       = L_A ÷ K_effective           (rows = columns of the square accumulator tile)
+    L_A    = LMUL × VLEN ÷ (SEW ÷ W)   (total A or B tile elements across LMUL registers)
+    K_eff  = λ × W × LMUL
+    M = N  = L_A ÷ K_eff               (rows = columns of the square accumulator tile)
 
 The accumulator register group has cardinality MUL_C = VLEN ÷ (SEW × λ²), independent of both W and LMUL.
 
@@ -714,6 +738,10 @@ OCP MX block size is 32 elements; however, recent research (Lee et al.,
 demonstrates that a block size of 16 significantly improves accuracy for
 activation tensors with outliers.
 
+[#ime-block-scaling-mul]
+.Block scaling multiplication example with SEW=16, λ=4, W=4, LMUL=1. Block scales are applied along A rows and B columns.
+image::images/png/ime-block-scaling.png[align="center", width="50%"]
+
 The Integrated Matrix extensions support microscaling on all floating-point
 multiply-accumulate instructions by encoding `vm=0` in the instruction and
 supplying paired E8M0 block-scale factors through `v0`.  The `bs` field in
@@ -734,21 +762,21 @@ applied, `v0` is not read, and the `bs` field is ignored.
 
 When microscaling is active (`vm=0`), each output element is computed as:
 
-    C[m, n] ← C[m, n] + Σ_{s=0}^{S−1} (scale_A[m][s] × scale_B[n][s] × (Σ_{k ∈ block s} A[m, k] × B[k, n]))
+stem:[C_{m,n} \leftarrow C_{m,n} + \sum_{s=0}^{S-1} \left( \text{scale_A}_{m,s} \times \text{scale_B}_{n,s} \times \left( \sum_{k \in \text{block } s} A_{m,k} \times B_{k,n} \right) \right)]
 
 where S = ⌈K_eff / block_size⌉ is the number of scale blocks per
 row/column, and block _s_ covers elements
 [s × block_size, min((s+1) × block_size, K_eff) − 1].
 
-`scale_A[m][s]` and `scale_B[n][s]` are power-of-two values decoded from
+stem:[\text{scale_A}_{m,s}] and stem:[\text{scale_B}_{n,s}] are power-of-two values decoded from
 8-bit E8M0 fields in `v0`.  The E8M0 format uses an 8-bit biased exponent
 (bias 127) representing values from 2^−127^ to 2^127^; the bit pattern
 0xFF encodes NaN.
 
 The per-block scales for A and B are applied as exact power-of-two
 multiplications (implemented as exponent additions) and therefore introduce
-no rounding error.  If any `scale_A[m][s]` or `scale_B[n][s]` is NaN
-(0xFF), the corresponding output element C[m, n] is set to the default NaN
+no rounding error.  If any stem:[\text{scale_A}_{m,s}] or stem:[\text{scale_B}_{n,s}] is NaN
+(0xFF), the corresponding output element stem:[C_{m,n}] is set to the default NaN
 regardless of the input element values.
 
 When a non-NaN E8M0 value represents a power-of-two that overflows the
@@ -775,8 +803,8 @@ Within each row, S = ⌈K_eff / block_size⌉ elements are active.  Element
 index _p_ = _m_ × R + _s_ addresses the scale pair for row (or column) _m_
 at block _s_.  Specifically:
 
-* `scale_A[m][s]` is the lower byte of the 16-bit element at index (m × R + s)
-* `scale_B[n][s]` is the upper byte of the 16-bit element at index (n × R + s)
+* stem:[\text{scale_A}_{m,s}] is the lower byte of the 16-bit element at index (m × R + s)
+* stem:[\text{scale_B}_{n,s}] is the upper byte of the 16-bit element at index (n × R + s)
 
 The total number of 16-bit elements spanned per tile dimension is M × R,
 where M = N = VLEN ÷ (SEW × λ).  Because M × R = (VLEN ÷ (SEW × λ)) ×
