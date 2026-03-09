@@ -10,7 +10,7 @@
 High-performance computing and machine learning workloads depend critically on general matrix multiplication (GEMM) over a wide range of data types and precisions.
 Dedicated matrix-multiply accelerators often require new register state—separate matrix register files—to achieve competitive throughput, introducing substantial architectural complexity and binary interface disruption.
 
-The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
+The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls, Zvvmttls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
 By interpreting groups of existing vector registers as two-dimensional matrix tiles, the Zvvm family of Integrated Matrix extensions delivers high arithmetic density without introducing any new architected state.
 We focus, in particular, on the computation of C ← A × B^T^ + C, where A (μ × λ), B (ν × λ) and C (μ × ν) are row-major matrix panels.
 
@@ -20,11 +20,12 @@ A key design goal is that the same binary executes correctly—and achieves near
 
 === Overview
 
-The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) provides the following subextensions:
+The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls, Zvvmttls) provides the following subextensions:
 
 * <<#zvvmm>>: multiply-accumulate instructions for integer matrix tiles
 * <<#zvvfmm>>: multiply-accumulate instructions for floating-point matrix tiles
 * <<#zvvmtls>>: two-dimensional load/store instructions for moving data between memory and vector registers interpreted as matrix tiles
+* <<#zvvmttls>>: two-dimensional transposing load/store instructions for moving data between memory and vector registers interpreted as matrix tiles
 
 ==== Matrix tile multiplication geometry
 
@@ -512,7 +513,7 @@ For non-widening instructions (W = 1), each product of two SEW-bit values is exa
 The resulting value of element stem:[C_{m,n}] for any given LMUL must match the value computed by applying a series of multiply-accumulate instructions with LMUL=1, in increasing order of vector register indices.
 Therefore, it is enough to specify the result of the computations
 
-stem:[C_{m,n} \leftarrow C_{m,n} + \sum_{k=0}^{λ W - 1} A_{m,k} \times B_{k,n}]
+stem:[C_{m,n} \leftarrow C_{m,n} + \sum_{k=0}^{\lambda W - 1} A_{m,k} \times B_{k,n}]
 
 An implementation partitions the λ sub-dot-products for each output element into consecutive groups of G sub-dot-products.
 
@@ -950,8 +951,6 @@ Tile load and store instructions follow the standard vector element-status seman
 
 | `vmtl.v vd, (rs1), rs2 [, Lλ] [, vm]`   | Order-preserving tile load
 | `vmts.v vs3, (rs1), rs2 [, Lλ] [, vm]`  | Order-preserving tile store
-| `vmttl.v vd, (rs1), rs2 [, Lλ] [, vm]`  | Transposing tile load
-| `vmtts.v vs3, (rs1), rs2 [, Lλ] [, vm]` | Transposing tile store
 |===
 
 ===== `vmtl.v` — Order-Preserving Tile Load
@@ -990,6 +989,41 @@ Order preserving tile load/store with LMUL > 1 offers optimization opportunities
 .Order preserving tile load/store with LMUL > 1 for row-major (a) and column-major ordering in memory.
 image::png/ime-vmtls-lmul.png[align="center", width="90%"]
 
+[#zvvmttls,reftext=Transposing load/store instructions for matrix tiles]
+=== Zvvmttls: Extension for loading and storing vector registers interpreted as transposed 2D matrix tiles
+
+The `Zvvmttls` extension provides instructions that transfer transposed 2D matrix tiles between memory and the vector register file without requiring a separate repacking step.
+Memory layout and tile geometry for `Zvvmttls` follows those established for the `Zvvmtls` extension.
+
+==== Instructions
+
+All tile load/store instructions support two optional operands that follow `rs2` in the assembly syntax:
+
+* An _immediate lambda_ `Lλ` (one of `L1`, `L2`, `L4`, `L8`, `L16`, `L32`, `L64`), which overrides `lambda[2:0]` from `vtype` for the duration of that instruction.
+  When omitted, the dynamic lambda from `vtype` is used.
+* A _mask_ specifier `v0.t`, which enables element-level masking using `v0` as the mask register.
+  When omitted, all elements are unmasked.
+
+When both are present, the immediate lambda precedes the mask: `vmtts.v v4,(a0),a1,L64,v0.t`.
+
+Tile load and store instructions follow the standard vector element-status semantics:
+
+* _Active_ elements (body, mask enabled): loads fetch from memory and write `vd`; stores read `vs3` and write to memory.
+  Active elements may raise memory exceptions.
+* _Inactive_ elements (body, mask disabled): loads never raise exceptions and do not update the destination register unless `vtype.vma`=1 (mask-agnostic), in which case those elements may be overwritten with 1s.
+  Stores do not write to memory and do not raise exceptions.
+* _Tail_ elements (index ≥ VL): loads never raise exceptions and do not update the destination register unless `vtype.vta`=1 (tail-agnostic), in which case those elements may be overwritten with 1s.
+  Stores do not write to memory and do not raise exceptions.
+* _Prestart_ elements (index < `vstart`): neither the destination register nor memory is updated; no exceptions are raised.
+
+[cols="2,4", options="header"]
+|===
+| Mnemonic | Description
+
+| `vmttl.v vd, (rs1), rs2 [, Lλ] [, vm]`  | Transposing tile load
+| `vmtts.v vs3, (rs1), rs2 [, Lλ] [, vm]` | Transposing tile store
+|===
+
 ===== `vmttl.v` — Transposing Tile Load
 
     vmttl.v vd, (rs1), rs2 [, Lλ] [, vm]
@@ -997,7 +1031,6 @@ image::png/ime-vmtls-lmul.png[align="center", width="90%"]
 Loads a 2D matrix tile from memory and transposes it into the vector register layout required by the matrix multiplier.
 This instruction is used when a B tile is stored in row-major order, or when an A or C tile is stored in column-major order in memory.
 `rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
-
 
 Let _linesize_ = λ × LMUL.
 For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
@@ -1235,7 +1268,7 @@ NOTE: The mechanism used for overload resolution in C is compiler-specific
 The resulting user-visible API is identical across compilers; only the internal
 implementation differs.
 
-===== Tile load and store (Zvvmtls)
+===== Tile load and store (Zvvmtls) and transposed tile load and store (Zvvmttls)
 
 The load intrinsics accept a base pointer, a leading-dimension `ld` in
 elements, and a vector-length `vl`, returning the loaded vector type.
@@ -2909,7 +2942,7 @@ Included in::
 |Minimum version
 |Lifecycle state
 
-|Zvvmtls (<<#zvvmtls>>)
+|Zvvmttls (<<#zvvmttls>>)
 |0.1
 |Draft
 |===
@@ -3009,7 +3042,7 @@ Included in::
 |Minimum version
 |Lifecycle state
 
-|Zvvmtls (<<#zvvmtls>>)
+|Zvvmttls (<<#zvvmttls>>)
 |0.1
 |Draft
 |===
@@ -3488,3 +3521,4 @@ and `vfqwimmacc.vv` respectively.  MXINT inputs are always signed;
 | vfqwimmacc | 32 | 8  | × | —     | × | —     | 1 | —     | _reserved_      | _reserved_
 | vfqwimmacc | 64 | 16 | × | Int16 | × | Int16 | × | —     | _reserved_      | _reserved_
 |===
+
