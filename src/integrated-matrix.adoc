@@ -83,7 +83,8 @@ LMUL scales the tile along the K dimension only, increasing the effective K dime
 
 === Subextensions of Zvvm
 
-Table <<tbl-subextensions>> lists all computational subextensions in the Zvvm family.
+Table <<tbl-subextensions>> lists the computational subextensions in the Zvvm family which are not related to microscaling.
+The subextensions specific to microscaling are listed separately in <<mx-subextensions-section>>.
 
 [#tbl-subextensions]
 .Computational subextensions in the Zvvm family of Integrated Matrix extensions.
@@ -632,7 +633,11 @@ pair:
 * Lower byte [7:0]: `scale_A` — the E8M0 scale for a row of A
 * Upper byte [15:8]: `scale_B` — the E8M0 scale for a column of B
 
-The row stride in `v0` is R = λ × SEW ÷ 16 (in units of 16-bit elements).
+[#ime-block-scale-v0]
+.Block scales are folded into `v0` in pairs, separated by the row stride R = λ × SEW / 16. Each block-scale pair is used for `bs` consecutive tile elements in the corresponding A row / B^T^ column. In matrix-tile representation `v0` has the paired scales arranged in the correct tile rows. In a multi-lane setup the scales are distributed across the lanes appropriately.
+image::png/ime-mx-v0-format.png[width="80%", align="center"]
+
+The row stride in `v0` is R = λ × SEW ÷ 16 in units of 16-bit elements (see <<ime-block-scale-v0>>).
 Within each row, S = ⌈K_eff / block_size⌉ elements are active.  Element
 index _p_ = _m_ × R + _s_ addresses the scale pair for row (or column) _m_
 at block _s_.  Specifically:
@@ -644,6 +649,10 @@ The total number of 16-bit elements spanned per tile dimension is M × R,
 where M = N = VLEN ÷ (SEW × λ).  Because M × R = (VLEN ÷ (SEW × λ)) ×
 (λ × SEW ÷ 16) = VLEN ÷ 16, the scale data fills exactly one register
 regardless of configuration.
+
+[#ime-mx-v0-lanes]
+.Example for the use of microscales in a 4-lane setup for two blocks per row / column. The red lines symbolize the split of the VRs across the lanes. The R-strided scales distribution in `v0` leads to the correct lane-wise block scales layout.
+image::png/ime-mx-v0-lanes.png[width="69%", align="center"]
 
 **Capacity proof:**
 
@@ -923,6 +932,12 @@ It is expected that implementations will optimize the case of `rs2 = x0` to load
 
 Efficient implementation of tile loads with `rs2 = x0` are essential to high-performance linear algebra kernels.
 ====
+
+When using a vector length lower than the maximum for the data width, the data is loaded such that it fills full rows in an A tile or columns in a B^T^ tile. The impact is sketched in <<ime-load-store-vl>>.
+
+[#ime-load-store-vl]
+.Examples of elemnent distribution for full (left) and reduced vector length matrix tile load / store operations.
+image::png/ime-load-store-vl.png[width="100%"]
 
 ==== Instructions
 
@@ -3272,6 +3287,7 @@ Included in::
 |===
 
 
+[#mx-subextensions-section]
 === Microscaling Subextensions
 
 Each microscaling subextension enables the `vm=0` / `v0.scale` encoding for
