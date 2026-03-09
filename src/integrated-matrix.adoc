@@ -2,6 +2,7 @@
 == Zvvm Family of Integrated Matrix Extensions
 
 :stem: latexmath
+:imagesdir: ../docs-resources/images
 :imagesdir: images
 
 === Introduction
@@ -16,6 +17,7 @@ We focus, in particular, on the computation of C ← A × B^T^ + C, where A (μ 
 The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
 A key design goal is that the same binary executes correctly—and achieves near-peak arithmetic throughput—across this entire range without recompilation.
 
+
 === Overview
 
 The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) provides the following subextensions:
@@ -27,10 +29,6 @@ The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls) provide
 ==== Matrix tile multiplication geometry
 
 The geometry of the multiplier and the tiles is defined by the new parameter `lambda` (λ) which is encoded in 3 bits in the `vtype` CSR, and vector operation parameters like the widening `W` of the multiplication encoded in the instruction, `LMUL`, `SEW` and `VLEN`.
-
-[#ime-geometry-fig]
-.Geometry of matrix tiles and element ordering for 32 element vector registers and λ=4. VRs are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case with A, B, C having the same SEW. (b) Widening case with A and B having half the SEW of C (double-packing).
-image::png/ime-geometry.png[width=100%, align=center, alt="Diagram of matrix tile geometry and multiplier configuration parameters."]
 
 Matrix tiles are represented using the existing RISC-V V register file and its configuration state.
 The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are stored as follows:
@@ -49,6 +47,26 @@ The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are 
   Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
   Fractional LMUL settings (LMUL < 1) are reserved and shall raise an illegal-instruction exception when used with any IME instruction.
 
+[#ime-geometry-fig]
+.Geometry of matrix tiles and element ordering for 32 element vector registers and λ=4. VRs are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case with A, B, C having the same SEW. (b) Widening case with A and B having half the SEW of C (double-packing).
+image::png/ime-geometry.png[width=100%, align=center, alt="Diagram of matrix tile geometry and multiplier configuration parameters."]
+
+The K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
+
+    K_eff = λ × W × LMUL
+
+A and B tiles have elements of width SEW÷W; the accumulator C has elements of width SEW (see table below).
+The signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned); the accumulator C is always signed.
+Integer accumulation wraps modulo 2^SEW^.
+
+The tile dimensions follow from the widening and LMUL settings:
+
+    L_A    = LMUL × VLEN ÷ (SEW ÷ W)   (total A or B tile elements across LMUL registers)
+    K_eff  = λ × W × LMUL
+    M = N  = L_A ÷ K_eff               (rows = columns of the square accumulator tile)
+
+The accumulator register group has cardinality MUL_C = VLEN ÷ (SEW × λ²), independent of both W and LMUL.
+
 The elements in the vector registers are contiguous in the λ direction, as depicted in
 <<ime-geometry-fig>>. Tile A and C elements are sorted in row-major order while tile B^T^
 elements are sorted in column-major order. This choice allows the implementation of the
@@ -56,10 +74,13 @@ matrix tile multiplication as inner product (eg. a systolic array) or outer prod
 simplifies the implementation of high-rank updates based outer products.
 
 [#ime-tile-lmul-fig]
-.LMUL scaling of matrix tiles for LMUL=2 (left) and LMUL=4 (right). LMUL scales the tile along the K dimension only, increasing the effective K dimension of the tile by a factor of LMUL. The blue arrows indicate the contiguous elements in the vector register groups that form the tiles.
+.LMUL scaling of matrix tiles for LMUL=2 (left) and LMUL=4 (right).
 image::png/ime-tile-lmul_2_4.png[width=100%, align=center, alt="Diagram showing LMUL scaling of matrix tiles."]
 
-==== Subextensions of Zvvm
+LMUL scales the tile along the K dimension only, increasing the effective K dimension of the tile by a factor of LMUL. The blue arrows indicate the contiguous elements in the vector register groups that form the tiles in the ordering of element-wise 1D vector operations.
+
+
+=== Subextensions of Zvvm
 
 Table <<tbl-subextensions>> lists all computational subextensions in the Zvvm family.
 
@@ -74,7 +95,6 @@ Table <<tbl-subextensions>> lists all computational subextensions in the Zvvm fa
 |Zvvmmb         ^| Zve64d       | [U]Int8, [U]Int8             | Int8
 |Zvvmmbh        ^| Zve64d       | [U]Int8, [U]Int8             | Int16
 |Zvvmmbw        ^| Zve64d       | [U]Int8, [U]Int8             | Int32
-|Zvvmmbd        ^| Zve64d       | [U]Int8, [U]Int8             | Int64
 |Zvvmmh         ^| Zve64d       | [U]Int16, [U]Int16           | Int16
 |Zvvmmhw        ^| Zve64d       | [U]Int16, [U]Int16           | Int32
 |Zvvmmhd        ^| Zve64d       | [U]Int16, [U]Int16           | Int64
@@ -87,7 +107,6 @@ Table <<tbl-subextensions>> lists all computational subextensions in the Zvvm fa
 |Zvvfmmofp8     ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | OFP8
 |Zvvfmmofp8h    ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | IEEE binary16
 |Zvvfmmofp8bf16 ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | BFloat16
-|Zvvfmmofp8w    ^| Zve64d       | OFP8 (E4M3 or E5M2), OFP8 (E4M3 or E5M2) | IEEE binary32
 |Zvvfmmh        ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary16
 |Zvvfmmhf       ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary32
 |Zvvfmmhd       ^| Zve64d       | IEEE binary16, IEEE binary16 | IEEE binary64
@@ -99,209 +118,6 @@ Table <<tbl-subextensions>> lists all computational subextensions in the Zvvm fa
 |Zvvfmmd        ^| Zve64d       | IEEE binary64, IEEE binary64 | IEEE binary64
 |===
 
-Microscaling subextensions that add E8M0-scaled variants of the narrow
-input formats (OFP4, OFP8) are listed separately in
-<<tbl-mx-subextensions>>.
-
-==== Encoding map
-
-The following tables enumerate every (instruction, SEW, altfmt) encoding
-point and map it to its input and output data types and the governing
-subextension.  Entries marked _reserved_ raise an illegal-instruction
-exception.
-
-===== Floating-point encoding map
-
-Mixed-format inputs (`altfmt_A` ≠ `altfmt_B`) are permitted wherever both
-input formats are defined for a given (SEW, W) combination; those
-combinations are listed explicitly in the table below.
-
-[#tbl-fp-encoding-map]
-.Floating-point multiply-accumulate encoding map
-[cols="2,1,1,1,2,1,2,1,2,2,2,2", options="header"]
-|===
-| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | altfmt | C Type | Subextension | MX BS=32 (vm=0) | MX BS=16 (vm=0)
-
-12+^e| *vfmmacc.vv (W=1)*
-
-| vfmmacc  | 8  | 8  | 0 | E4M3  | 0 | E4M3  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 8  | 8  | 0 | E4M3  | 0 | E4M3  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 8  | 8  | 1 | E5M2  | 1 | E5M2  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 8  | 8  | 1 | E5M2  | 1 | E5M2  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 8  | 8  | 0 | E4M3  | 1 | E5M2  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 8  | 8  | 0 | E4M3  | 1 | E5M2  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 8  | 8  | 1 | E5M2  | 0 | E4M3  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 8  | 8  | 1 | E5M2  | 0 | E4M3  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
-| vfmmacc  | 16 | 16 | 0 | FP16  | 0 | FP16  | 0 | FP16  | Zvvfmmh        | —                 | —
-| vfmmacc  | 16 | 16 | 0 | FP16  | 0 | FP16  | 1 | BF16  | _reserved_     | —                 | —
-| vfmmacc  | 16 | 16 | 1 | BF16  | 1 | BF16  | 0 | FP16  | _reserved_     | —                 | —
-| vfmmacc  | 16 | 16 | 1 | BF16  | 1 | BF16  | 1 | BF16  | Zvvfmmbf16     | —                 | —
-| vfmmacc  | 16 | 16 | 0 | FP16  | 1 | BF16  | 0 | FP16  | Zvvfmmh, Zvvfmmbf16 | —            | —
-| vfmmacc  | 16 | 16 | 0 | FP16  | 1 | BF16  | 1 | BF16  | Zvvfmmh, Zvvfmmbf16 | —            | —
-| vfmmacc  | 16 | 16 | 1 | BF16  | 0 | FP16  | 0 | FP16  | Zvvfmmh, Zvvfmmbf16 | —            | —
-| vfmmacc  | 16 | 16 | 1 | BF16  | 0 | FP16  | 1 | BF16  | Zvvfmmh, Zvvfmmbf16 | —            | —
-| vfmmacc  | 32 | 32 | × | FP32  | × | FP32  | 0 | FP32  | Zvvfmmf        | —                 | —
-| vfmmacc  | 32 | 32 | × | FP32  | × | FP32  | 1 | —     | _reserved_     | —                 | —
-| vfmmacc  | 64 | 64 | × | FP64  | × | FP64  | 0 | FP64  | Zvvfmmd        | —                 | —
-| vfmmacc  | 64 | 64 | × | FP64  | × | FP64  | 1 | —     | _reserved_     | —                 | —
-
-12+^e| *vfwmmacc.vv (W=2)*
-
-| vfwmmacc | 8  | 4  | 0 | E2M1  | 0 | E2M1  | 0 | E4M3  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
-| vfwmmacc | 8  | 4  | 0 | E2M1  | 0 | E2M1  | 1 | E5M2  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
-| vfwmmacc | 8  | 4  | 1 | —     | 1 | —     | × | —     | _reserved_     | —                 | —
-| vfwmmacc | 16 | 8  | 0 | E4M3  | 0 | E4M3  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
-| vfwmmacc | 16 | 8  | 0 | E4M3  | 0 | E4M3  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
-| vfwmmacc | 16 | 8  | 1 | E5M2  | 1 | E5M2  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
-| vfwmmacc | 16 | 8  | 1 | E5M2  | 1 | E5M2  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
-| vfwmmacc | 16 | 8  | 0 | E4M3  | 1 | E5M2  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
-| vfwmmacc | 16 | 8  | 0 | E4M3  | 1 | E5M2  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
-| vfwmmacc | 16 | 8  | 1 | E5M2  | 0 | E4M3  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
-| vfwmmacc | 16 | 8  | 1 | E5M2  | 0 | E4M3  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
-| vfwmmacc | 32 | 16 | 0 | FP16  | 0 | FP16  | 0 | FP32  | Zvvfmmhf       | —                 | —
-| vfwmmacc | 32 | 16 | 0 | FP16  | 0 | FP16  | 1 | —     | _reserved_     | —                 | —
-| vfwmmacc | 32 | 16 | 1 | BF16  | 1 | BF16  | 0 | FP32  | Zvvfmmbf16f    | —                 | —
-| vfwmmacc | 32 | 16 | 1 | BF16  | 1 | BF16  | 1 | —     | _reserved_     | —                 | —
-| vfwmmacc | 32 | 16 | 0 | FP16  | 1 | BF16  | 0 | FP32  | Zvvfmmhf, Zvvfmmbf16f | —         | —
-| vfwmmacc | 32 | 16 | 1 | BF16  | 0 | FP16  | 0 | FP32  | Zvvfmmhf, Zvvfmmbf16f | —         | —
-| vfwmmacc | 64 | 32 | × | FP32  | × | FP32  | 0 | FP64  | Zvvfmmfd       | —                 | —
-| vfwmmacc | 64 | 32 | × | FP32  | × | FP32  | 1 | —     | _reserved_     | —                 | —
-
-12+^e| *vfqwmmacc.vv (W=4)*
-
-| vfqwmmacc | 8  | 2 | × | —    | × | —     | × | —     | _reserved_      | —                 | —
-| vfqwmmacc | 16 | 4  | 0 | E2M1 | 0 | E2M1  | 0 | FP16  | Zvvfmmofp4h    | Zvvfmmmxfp4h     | Zvvfmmnxfp4h
-| vfqwmmacc | 16 | 4  | 0 | E2M1 | 0 | E2M1  | 1 | BF16  | Zvvfmmofp4bf16 | Zvvfmmmxfp4bf16  | Zvvfmmnxfp4bf16
-| vfqwmmacc | 16 | 4  | 1 | —    | 1 | —     | × | —     | _reserved_     | —                | —
-| vfqwmmacc | 32 | 8  | 0 | E4M3 | 0 | E4M3  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
-| vfqwmmacc | 32 | 8  | 0 | E4M3 | 0 | E4M3  | 1 | —     | _reserved_     | —                 | —
-| vfqwmmacc | 32 | 8  | 1 | E5M2 | 1 | E5M2  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
-| vfqwmmacc | 32 | 8  | 1 | E5M2 | 1 | E5M2  | 1 | —     | _reserved_     | —                 | —
-| vfqwmmacc | 32 | 8  | 0 | E4M3 | 1 | E5M2  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
-| vfqwmmacc | 32 | 8  | 1 | E5M2 | 0 | E4M3  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
-| vfqwmmacc | 64 | 16 | 0 | FP16 | 0 | FP16  | 0 | FP64  | Zvvfmmhd       | —                 | —
-| vfqwmmacc | 64 | 16 | 0 | FP16 | 0 | FP16  | 1 | —     | _reserved_     | —                 | —
-| vfqwmmacc | 64 | 16 | 1 | BF16 | 1 | BF16  | 0 | FP64  | Zvvfmmbf16d    | —                 | —
-| vfqwmmacc | 64 | 16 | 1 | BF16 | 1 | BF16  | 1 | —     | _reserved_     | —                 | —
-| vfqwmmacc | 64 | 16 | 0 | FP16 | 1 | BF16  | 0 | FP64  | Zvvfmmhd, Zvvfmmbf16d | —         | —
-| vfqwmmacc | 64 | 16 | 1 | BF16 | 0 | FP16  | 0 | FP64  | Zvvfmmhd, Zvvfmmbf16d | —         | —
-|===
-
-===== Integer encoding map
-
-`altfmt_A` and `altfmt_B` select signed (0) or unsigned (1) interpretation; the accumulator is always signed.
-`altfmt` is unused and `vm` must be 1 (`vm=0` is _reserved_) for all three instructions.
-For `vwmmacc.vv` and `vqwmmacc.vv`, `vm=0` is separately defined as `vfwimmacc.vv` and
-`vfqwimmacc.vv` (integer inputs, FP accumulator, E8M0 microscaling); see <<tbl-intmx-encoding-map>>.
-
-[#tbl-int-encoding-map]
-.Integer multiply-accumulate encoding map
-[cols="2,1,1,1,2,1,2,2,2", options="header"]
-|===
-| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | C Type | Subextension
-
-9+^e| *vmmacc.vv (W=1)*
-
-| vmmacc    | 8  | 8  | 0 | Int8   | 0 | Int8   | Int8  | Zvvmmb
-| vmmacc    | 8  | 8  | 0 | Int8   | 1 | UInt8  | Int8  | Zvvmmb
-| vmmacc    | 8  | 8  | 1 | UInt8  | 0 | Int8   | Int8  | Zvvmmb
-| vmmacc    | 8  | 8  | 1 | UInt8  | 1 | UInt8  | Int8  | Zvvmmb
-| vmmacc    | 16 | 16 | 0 | Int16  | 0 | Int16  | Int16 | Zvvmmh
-| vmmacc    | 16 | 16 | 0 | Int16  | 1 | UInt16 | Int16 | Zvvmmh
-| vmmacc    | 16 | 16 | 1 | UInt16 | 0 | Int16  | Int16 | Zvvmmh
-| vmmacc    | 16 | 16 | 1 | UInt16 | 1 | UInt16 | Int16 | Zvvmmh
-| vmmacc    | 32 | 32 | 0 | Int32  | 0 | Int32  | Int32 | Zvvmmw
-| vmmacc    | 32 | 32 | 0 | Int32  | 1 | UInt32 | Int32 | Zvvmmw
-| vmmacc    | 32 | 32 | 1 | UInt32 | 0 | Int32  | Int32 | Zvvmmw
-| vmmacc    | 32 | 32 | 1 | UInt32 | 1 | UInt32 | Int32 | Zvvmmw
-| vmmacc    | 64 | 64 | 0 | Int64  | 0 | Int64  | Int64 | Zvvmmd
-| vmmacc    | 64 | 64 | 0 | Int64  | 1 | UInt64 | Int64 | Zvvmmd
-| vmmacc    | 64 | 64 | 1 | UInt64 | 0 | Int64  | Int64 | Zvvmmd
-| vmmacc    | 64 | 64 | 1 | UInt64 | 1 | UInt64 | Int64 | Zvvmmd
-
-9+^e| *vwmmacc.vv (W=2)*
-
-| vwmmacc   | 8  | 4  | 0 | Int4   | 0 | Int4   | Int8  | Zvvmmi4b
-| vwmmacc   | 8  | 4  | 0 | Int4   | 1 | UInt4  | Int8  | Zvvmmi4b
-| vwmmacc   | 8  | 4  | 1 | UInt4  | 0 | Int4   | Int8  | Zvvmmi4b
-| vwmmacc   | 8  | 4  | 1 | UInt4  | 1 | UInt4  | Int8  | Zvvmmi4b
-| vwmmacc   | 16 | 8  | 0 | Int8   | 0 | Int8   | Int16 | Zvvmmbh
-| vwmmacc   | 16 | 8  | 0 | Int8   | 1 | UInt8  | Int16 | Zvvmmbh
-| vwmmacc   | 16 | 8  | 1 | UInt8  | 0 | Int8   | Int16 | Zvvmmbh
-| vwmmacc   | 16 | 8  | 1 | UInt8  | 1 | UInt8  | Int16 | Zvvmmbh
-| vwmmacc   | 32 | 16 | 0 | Int16  | 0 | Int16  | Int32 | Zvvmmhw
-| vwmmacc   | 32 | 16 | 0 | Int16  | 1 | UInt16 | Int32 | Zvvmmhw
-| vwmmacc   | 32 | 16 | 1 | UInt16 | 0 | Int16  | Int32 | Zvvmmhw
-| vwmmacc   | 32 | 16 | 1 | UInt16 | 1 | UInt16 | Int32 | Zvvmmhw
-| vwmmacc   | 64 | 32 | 0 | Int32  | 0 | Int32  | Int64 | Zvvmmwd
-| vwmmacc   | 64 | 32 | 0 | Int32  | 1 | UInt32 | Int64 | Zvvmmwd
-| vwmmacc   | 64 | 32 | 1 | UInt32 | 0 | Int32  | Int64 | Zvvmmwd
-| vwmmacc   | 64 | 32 | 1 | UInt32 | 1 | UInt32 | Int64 | Zvvmmwd
-
-9+^e| *vqwmmacc.vv (W=4)*
-
-| vqwmmacc  | 8  | 2  | × | —     | × | —      | —     | _reserved_
-| vqwmmacc  | 16 | 4  | 0 | Int4   | 0 | Int4   | Int16 | Zvvmmi4h
-| vqwmmacc  | 16 | 4  | 0 | Int4   | 1 | UInt4  | Int16 | Zvvmmi4h
-| vqwmmacc  | 16 | 4  | 1 | UInt4  | 0 | Int4   | Int16 | Zvvmmi4h
-| vqwmmacc  | 16 | 4  | 1 | UInt4  | 1 | UInt4  | Int16 | Zvvmmi4h
-| vqwmmacc  | 32 | 8  | 0 | Int8   | 0 | Int8   | Int32 | Zvvmmbw
-| vqwmmacc  | 32 | 8  | 0 | Int8   | 1 | UInt8  | Int32 | Zvvmmbw
-| vqwmmacc  | 32 | 8  | 1 | UInt8  | 0 | Int8   | Int32 | Zvvmmbw
-| vqwmmacc  | 32 | 8  | 1 | UInt8  | 1 | UInt8  | Int32 | Zvvmmbw
-| vqwmmacc  | 64 | 16 | 0 | Int16  | 0 | Int16  | Int64 | Zvvmmhd
-| vqwmmacc  | 64 | 16 | 0 | Int16  | 1 | UInt16 | Int64 | Zvvmmhd
-| vqwmmacc  | 64 | 16 | 1 | UInt16 | 0 | Int16  | Int64 | Zvvmmhd
-| vqwmmacc  | 64 | 16 | 1 | UInt16 | 1 | UInt16 | Int64 | Zvvmmhd
-|===
-
-
-[#tbl-intmx-encoding-map]
-===== Integer MX encoding map (`vm=0`)
-
-When `vm=0`, `vwmmacc.vv` and `vqwmmacc.vv` are decoded as `vfwimmacc.vv`
-and `vfqwimmacc.vv` respectively.  MXINT inputs are always signed;
-`altfmt_A` and `altfmt_B` must be 0 (unsigned is _reserved_).
-`altfmt` selects the FP accumulator format.
-`vmmacc.vv` with `vm=0` remains _reserved_.
-
-.Integer MX multiply-accumulate encoding map (`vm=0`)
-[cols="2,1,1,1,2,1,2,1,2,2,2", options="header"]
-|===
-| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | altfmt | C Type | MX BS=32 | MX BS=16
-
-11+^e| *vfwimmacc.vv (W=2, vm=0 of vwmmacc opcode)*
-
-| vfwimmacc | 8  | 4  | × | —     | × | —     | × | —     | _reserved_      | _reserved_
-| vfwimmacc | 16 | 8  | 0 | Int8  | 0 | Int8  | 0 | FP16  | Zvvfmmmxi8h     | Zvvfmmnxi8h
-| vfwimmacc | 16 | 8  | 0 | Int8  | 1 | UInt8 | 0 | FP16  | _reserved_      | _reserved_
-| vfwimmacc | 16 | 8  | 1 | UInt8 | 0 | Int8  | 0 | FP16  | _reserved_      | _reserved_
-| vfwimmacc | 16 | 8  | 1 | UInt8 | 1 | UInt8 | 0 | FP16  | _reserved_      | _reserved_
-| vfwimmacc | 16 | 8  | 0 | Int8  | 0 | Int8  | 1 | BF16  | Zvvfmmmxi8bf16  | Zvvfmmnxi8bf16
-| vfwimmacc | 16 | 8  | 0 | Int8  | 1 | UInt8 | 1 | BF16  | _reserved_      | _reserved_
-| vfwimmacc | 16 | 8  | 1 | UInt8 | 0 | Int8  | 1 | BF16  | _reserved_      | _reserved_
-| vfwimmacc | 16 | 8  | 1 | UInt8 | 1 | UInt8 | 1 | BF16  | _reserved_      | _reserved_
-| vfwimmacc | 32 | 16 | × | Int16 | × | Int16 | × | —     | _reserved_      | _reserved_
-| vfwimmacc | 64 | 32 | × | Int32 | × | Int32 | × | —     | _reserved_      | _reserved_
-
-11+^e| *vfqwimmacc.vv (W=4, vm=0 of vqwmmacc opcode)*
-
-| vfqwimmacc | 8  | 2  | × | —     | × | —     | × | —     | _reserved_      | _reserved_
-| vfqwimmacc | 16 | 4  | 0 | Int4  | 0 | Int4  | 0 | FP16  | Zvvfmmmxi4h     | Zvvfmmnxi4h
-| vfqwimmacc | 16 | 4  | 0 | Int4  | 1 | UInt4 | 0 | FP16  | _reserved_      | _reserved_
-| vfqwimmacc | 16 | 4  | 1 | UInt4 | 0 | Int4  | 0 | FP16  | _reserved_      | _reserved_
-| vfqwimmacc | 16 | 4  | 1 | UInt4 | 1 | UInt4 | 0 | FP16  | _reserved_      | _reserved_
-| vfqwimmacc | 16 | 4  | 0 | Int4  | 0 | Int4  | 1 | BF16  | Zvvfmmmxi4bf16  | Zvvfmmnxi4bf16
-| vfqwimmacc | 16 | 4  | 0 | Int4  | 1 | UInt4 | 1 | BF16  | _reserved_      | _reserved_
-| vfqwimmacc | 16 | 4  | 1 | UInt4 | 0 | Int4  | 1 | BF16  | _reserved_      | _reserved_
-| vfqwimmacc | 16 | 4  | 1 | UInt4 | 1 | UInt4 | 1 | BF16  | _reserved_      | _reserved_
-| vfqwimmacc | 32 | 8  | 0 | Int8  | 0 | Int8  | 0 | FP32  | Zvvfmmmxi8w     | Zvvfmmnxi8w
-| vfqwimmacc | 32 | 8  | 0 | Int8  | 1 | UInt8 | 0 | FP32  | _reserved_      | _reserved_
-| vfqwimmacc | 32 | 8  | 1 | UInt8 | 0 | Int8  | 0 | FP32  | _reserved_      | _reserved_
-| vfqwimmacc | 32 | 8  | 1 | UInt8 | 1 | UInt8 | 0 | FP32  | _reserved_      | _reserved_
-| vfqwimmacc | 32 | 8  | × | —     | × | —     | 1 | —     | _reserved_      | _reserved_
-| vfqwimmacc | 64 | 16 | × | Int16 | × | Int16 | × | —     | _reserved_      | _reserved_
-|===
 
 === New fields in the Vector Type (`vtype`) Register
 
@@ -434,6 +250,7 @@ future revision.  The likely final location is just below the `altfmt_A` and `al
 bits (i.e., at `vtype[XLEN-7]`).
 ====
 
+
 === Storage formats
 
 ==== Element packing in input tiles
@@ -480,107 +297,18 @@ contains a naturally ordered pair of 4-bit elements.  Software preparing
 input data in memory must pack adjacent elements within each byte
 accordingly.
 
-[#arithmetic-considerations]
-==== Arithmetic considerations
-
-Each multiply-accumulate instruction computes, for every output element stem:[C_{m,n}]:
-
-stem:[C_{m,n} \leftarrow C_{m,n} + \sum_{k=0}^{K_{\text{eff}}-1} A_{m,k} \times B_{k,n}]
-
-where K_eff = λ × W × LMUL.
-This section specifies how the K_eff product terms may be grouped and when intermediate rounding is permitted.
-
-===== Sub-dot-products
-
-For widening instructions (W = 2 or W = 4), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_.
-The W multiplications of (SEW÷W)-bit elements are performed and their products summed.
-
-Each product of two (SEW÷W)-bit values is _exact_ at SEW precision: the significand has at most 2 × p~input~ − 1 bits, which fits in the wider SEW format.
-The sub-dot-product can therefore be computed with very little loss at SEW or wider precision.
-
-There are K_eff ÷ W = λ × LMUL sub-dot-products per output element.
-
-For non-widening instructions (W = 1), each product of two SEW-bit values is exact at 2 × SEW bits; a sub-dot-product consists of a single product term.
-
-===== Accumulation and rounding model (floating-point)
-
-The resulting value of element C[m,n] for any given LMUL must match the value computed by applying a series of multiply-accumulate instructions with LMUL=1, in increasing order of vector register indices.
-Therefore, it is enough to specify the result of the computations
-
-    C[m, n] ← C[m, n] + Σ_{k=0}^{λ × W} A[m, k] × B[k, n]
-
-An implementation partitions the λ sub-dot-products for each output element into consecutive groups of G sub-dot-products.
-
-* Within each group, the G partial results are accumulated into a partial sum S using internal precision that requires no rounding to SEW precision inside a group.
-
-* After each group, the accumulated partial sum S is _added to the running value of_ C[m, n] by computing
-
-    C[m, n] ← round(C[m, n] + [round](S)),
-
-where the roundings are performed with the rounding mode from `frm`.
-The rounding of partial sum S _before_ it is accumulated to the running value of C[m,n] is optional.
-
-The value of G is _implementation-defined_ and may depend on SEW, W, λ, LMUL, and the microarchitecture.
-It must satisfy:
-
-* G is a power of two;
-* 1 ≤ G ≤ λ.
-
-The resulting number of rounding operations per output element of C is [2](λ × LMUL) ÷ G, where the factor of 2 is present if the accumulated partial sum is rounded before being added to the running value.
-
-[NOTE]
-====
-In a *systolic-array* datapath, G is typically 1: each sub-dot-product is rounded and added to C immediately, yielding λ × LMUL rounding additions per output element.
-
-In an *outer-product* datapath, G is typically on the order of λ (e.g. λ, λ÷2, λ÷4, or λ÷8): multiple sub-dot-products are accumulated at extended internal precision before a single rounding and C addition.
-This significantly reduces the number of expensive full-precision additions.
-
-Software must not depend on a particular value of G.
-
-It is expected an implementation will have to disclose its chosen value of G in order to be certified as compliant.
-
-The rounding of partial sum S is made optional in order to match established practices in industry and other RISC-V matrix extensions.
-====
-
-Because G is implementation-defined, two conforming implementations may produce floating-point results that differ in the least-significant bits for identical inputs.
-Bit-exact reproducibility of floating-point matrix multiply-accumulate results across different implementations is therefore _not_ guaranteed.
-
-Floating-point exception flags (inexact, overflow, underflow, invalid, etc.) are accumulated into `fflags`; the order in which individual exceptions are raised within a single instruction execution is implementation-defined.
-
-[NOTE]
-.Editorial Note
-====
-We could ammend the requirement that "... the G partial results are accumulated into a partial sum S using internal precision that requires no rounding to SEW precision inside a group" with the license to use the Bulk Normalization of Dot-Products (BNDP) procedure. If we do that, we must require the implementor to disclose the choice of BNDP parameters.
-Adding the license would result in more compatibility with other RISC-V matrix extensions.
-====
-
-===== Integer accumulation
-
-For integer multiply-accumulate instructions, all intermediate results are reduced modulo 2^SEW^.
-Because modular addition is both associative and commutative, the final result is uniquely defined regardless of the accumulation order or grouping factor.
-
 [#zvvmm,reftext=Matrix-multiplication instructions (integer)]
 === Zvvmm: Extension for matrix multiplication on vector registers interpreted as 2D integer matrix tiles
 
 The `Zvvmm` family of extensions provides instructions that perform matrix multiply-accumulate on integer data, computing C ← C + A × B^T^, where A, B, and C are matrix tiles held in the vector register file.
 
-The K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
+The following table lists the integer matrix tile multiplication instructions. The arguments are:
 
-    K_eff = λ × W × LMUL
+* `vd`: Destination vector register group containing the C matrix tile.
+* `vs1`: Source vector register (group) containing the A matrix tile.
+* `vs2`: Source vector register (group) containing the B^T^ matrix tile.
 
-A and B tiles have elements of width SEW÷W; the accumulator C has elements of width SEW (see table below).
-The signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned); the accumulator C is always signed.
-Integer accumulation wraps modulo 2^SEW^.
-
-The tile dimensions follow from the widening and LMUL settings:
-
-    L_A    = LMUL × VLEN ÷ (SEW ÷ W)   (total A or B tile elements across LMUL registers)
-    K_eff  = λ × W × LMUL
-    M = N  = L_A ÷ K_eff               (rows = columns of the square accumulator tile)
-
-The accumulator register group has cardinality MUL_C = VLEN ÷ (SEW × λ²), independent of both W and LMUL.
-
-[cols="3,1,1,1", options="header"]
+[cols="3,1,1,1", options="header", width="70%"]
 |===
 | Mnemonic | W | A/B element width | C element width
 
@@ -598,11 +326,40 @@ instructions (see <<integrated-matrix-microscaling>> and <<tbl-intmx-encoding-ma
 For floating-point multiply-accumulate instructions, `vm=0` enables
 microscaling (see <<integrated-matrix-microscaling>>).
 
+==== Arithmetic Considerations
+
+===== Integer accumulation
+
+For integer multiply-accumulate instructions, all intermediate results are reduced modulo 2^SEW^.
+Because modular addition is both associative and commutative, the final result is uniquely defined regardless of the accumulation order or grouping factor.
+
 [#zvvfmm,reftext=Matrix-multiplication instructions (floating-point)]
 === Zvvfmm: Extension for matrix multiplication on vector registers interpreted as 2D floating-point matrix tiles
 
 The `Zvvfmm` family of extensions provides floating-point matrix multiply-accumulate instructions, computing C ← C + A × B^T^.
 A, B, and C are matrix tiles held in the vector register file.
+
+The following table lists the integer matrix tile multiplication instructions. The arguments are:
+
+* `vd`: Destination vector register group containing the C matrix tile.
+* `vs1`: Source vector register (group) containing the A matrix tile.
+* `vs2`: Source vector register (group) containing the B^T^ matrix tile.
+* `v0.scale`: Block scales for A and B^T^ operands in MX-scaling mode.
+
+[cols="4,1,1,1,4", options="header"]
+|===
+| Mnemonic | W | A/B element width | C element width | Remark
+
+| `vfmmacc.vv vd, vs1, vs2[, v0.scale]`   | 1 | SEW     | SEW | floating point and MX scaled A/B tiles
+| `vfwmmacc.vv vd, vs1, vs2[, v0.scale]`  | 2 | SEW/2   | SEW | floating point and MX scaled A/B tiles
+| `vfqwmmacc.vv vd, vs1, vs2[, v0.scale]` | 4 | SEW/4   | SEW | floating point and MX scaled A/B tiles
+| `vfwimmacc.vv vd, vs1, vs2, v0.scale`  | 2 | SEW/2   | SEW | only MX-scaled integer A/B tiles
+| `vfqwimmacc.vv vd, vs1, vs2, v0.scale` | 4 | SEW/4   | SEW | only MX-scaled integer A/B tiles
+|===
+
+Vector masking is not supported on matrix multiply-accumulate instructions:
+the vm bit in the encoding selects between normal, unscaled arguments (`vm=1`)
+and microscaled MX* matrix tile arguments. For details see <<integrated-matrix-microscaling>>.
 
 The floating-point format of each operand tile is controlled by fields in `vtype`:
 
@@ -727,6 +484,80 @@ operation (see <<integrated-matrix-microscaling>>).
 ===== Mixed-format inputs arithmetic considerations
 
 Whenever mixed formats are used in the computational instructions, one must follow the guidelines in <<arithmetic-considerations>>.
+
+[#arithmetic-considerations]
+==== Arithmetic considerations
+
+Each multiply-accumulate instruction computes, for every output element stem:[C_{m,n}]:
+
+stem:[C_{m,n} \leftarrow C_{m,n} + \sum_{k=0}^{K_{\text{eff}}-1} A_{m,k} \times B_{k,n}]
+
+where K_eff = λ × W × LMUL.
+This section specifies how the K_eff product terms may be grouped and when intermediate rounding is permitted.
+
+===== Sub-dot-products
+
+For widening instructions (W = 2 or W = 4), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_.
+The W multiplications of (SEW÷W)-bit elements are performed and their products summed.
+
+Each product of two (SEW÷W)-bit values is _exact_ at SEW precision: the significand has at most 2 × p~input~ − 1 bits, which fits in the wider SEW format.
+The sub-dot-product can therefore be computed with very little loss at SEW or wider precision.
+
+There are K_eff ÷ W = λ × LMUL sub-dot-products per output element.
+
+For non-widening instructions (W = 1), each product of two SEW-bit values is exact at 2 × SEW bits; a sub-dot-product consists of a single product term.
+
+===== Accumulation and rounding model (floating-point)
+
+The resulting value of element stem:[C_{m,n}] for any given LMUL must match the value computed by applying a series of multiply-accumulate instructions with LMUL=1, in increasing order of vector register indices.
+Therefore, it is enough to specify the result of the computations
+
+stem:[C_{m,n} \leftarrow C_{m,n} + \sum_{k=0}^{λ W - 1} A_{m,k} \times B_{k,n}]
+
+An implementation partitions the λ sub-dot-products for each output element into consecutive groups of G sub-dot-products.
+
+* Within each group, the G partial results are accumulated into a partial sum S using internal precision that requires no rounding to SEW precision inside a group.
+
+* After each group, the accumulated partial sum S is _added to the running value of_ stem:[C_{m,n}] by computing
+
+stem:[C_{m,n} \leftarrow round(C_{m,n} + (round(S)))],
+
+where the roundings are performed with the rounding mode from `frm`.
+The rounding of partial sum S _before_ it is accumulated to the running value of stem:[C_{m,n}] is optional.
+
+The value of G is _implementation-defined_ and may depend on SEW, W, λ, LMUL, and the microarchitecture.
+It must satisfy:
+
+* G is a power of two;
+* 1 ≤ G ≤ λ.
+
+The resulting number of rounding operations per output element of C is [2](λ × LMUL) ÷ G, where the factor of 2 is present if the accumulated partial sum is rounded before being added to the running value.
+
+[NOTE]
+====
+In a *systolic-array* datapath, G is typically 1: each sub-dot-product is rounded and added to C immediately, yielding λ × LMUL rounding additions per output element.
+
+In an *outer-product* datapath, G is typically on the order of λ (e.g. λ, λ÷2, λ÷4, or λ÷8): multiple sub-dot-products are accumulated at extended internal precision before a single rounding and C addition.
+This significantly reduces the number of expensive full-precision additions.
+
+Software must not depend on a particular value of G.
+
+It is expected an implementation will have to disclose its chosen value of G in order to be certified as compliant.
+
+The rounding of partial sum S is made optional in order to match established practices in industry and other RISC-V matrix extensions.
+====
+
+Because G is implementation-defined, two conforming implementations may produce floating-point results that differ in the least-significant bits for identical inputs.
+Bit-exact reproducibility of floating-point matrix multiply-accumulate results across different implementations is therefore _not_ guaranteed.
+
+Floating-point exception flags (inexact, overflow, underflow, invalid, etc.) are accumulated into `fflags`; the order in which individual exceptions are raised within a single instruction execution is implementation-defined.
+
+[NOTE]
+.Editorial Note
+====
+We could ammend the requirement that "... the G partial results are accumulated into a partial sum S using internal precision that requires no rounding to SEW precision inside a group" with the license to use the Bulk Normalization of Dot-Products (BNDP) procedure. If we do that, we must require the implementor to disclose the choice of BNDP parameters.
+Adding the license would result in more compatibility with other RISC-V matrix extensions.
+====
 
 [#integrated-matrix-microscaling]
 ==== Microscaling support (`v0.scale`)
@@ -1040,52 +871,9 @@ each scale array with the correct tile stride, then `vzip.vv` pairs them:
 
 ===== Microscaling subextensions
 
-Each microscaling subextension enables the `vm=0` / `v0.scale` encoding for
-a specific (input format, accumulator format, block size) combination.
-A floating-point microscaling subextension implies its corresponding base
-subextension: for example, Zvvfmmmxfp4h implies Zvvfmmofp4h, which provides
-the underlying OFP4→FP16 instruction support.  Only narrow input formats
-(OFP4, OFP8) define FP microscaling variants.
-The integer MX subextensions (`Zvvfmmmxi*`, `Zvvfmmnxi*`) do not imply a
-base subextension: `vfwimmacc.vv` and `vfqwimmacc.vv` have no non-MX
-FP-accumulate form (the `vm=1` encoding of those opcodes is the existing
-integer-accumulate `vwmmacc.vv` / `vqwmmacc.vv`).
-The block size and implication relationships are listed in <<tbl-mx-subextensions>>.
-
-[#tbl-mx-subextensions]
-.Microscaling subextensions
-[cols="1,1,1,3,3", options="header"]
-|===
-|Extension        | BS | Implies          | Multiplicand Types                | Accumulator Type
-
-|Zvvfmmmxfp4ofp8  ^| 32 ^| Zvvfmmofp4ofp8  | MXFP4 (E8M0-scaled OFP4), MXFP4   | OFP8
-|Zvvfmmmxfp4h     ^| 32 ^| Zvvfmmofp4h     | MXFP4, MXFP4                      | IEEE binary16
-|Zvvfmmmxfp4bf16  ^| 32 ^| Zvvfmmofp4bf16  | MXFP4, MXFP4                      | BFloat16
-|Zvvfmmmxfp8     ^| 32 ^| Zvvfmmofp8      | MXFP8 (E8M0-scaled OFP8), MXFP8  | OFP8
-|Zvvfmmmxfp8h    ^| 32 ^| Zvvfmmofp8h     | MXFP8, MXFP8                     | IEEE binary16
-|Zvvfmmmxfp8bf16 ^| 32 ^| Zvvfmmofp8bf16  | MXFP8, MXFP8                     | BFloat16
-|Zvvfmmmxfp8w    ^| 32 ^| Zvvfmmofp8w     | MXFP8, MXFP8                     | IEEE binary32
-|Zvvfmmnxfp4ofp8  ^| 16 ^| Zvvfmmmxfp4ofp8  | MXFP4 (E8M0-scaled OFP4), MXFP4   | OFP8
-|Zvvfmmnxfp4h     ^| 16 ^| Zvvfmmmxfp4h     | MXFP4, MXFP4                      | IEEE binary16
-|Zvvfmmnxfp4bf16  ^| 16 ^| Zvvfmmmxfp4bf16  | MXFP4, MXFP4                      | BFloat16
-|Zvvfmmnxfp8     ^| 16 ^| Zvvfmmmxfp8     | MXFP8 (E8M0-scaled OFP8), MXFP8  | OFP8
-|Zvvfmmnxfp8h    ^| 16 ^| Zvvfmmmxfp8h    | MXFP8, MXFP8                     | IEEE binary16
-|Zvvfmmnxfp8bf16 ^| 16 ^| Zvvfmmmxfp8bf16 | MXFP8, MXFP8                     | BFloat16
-|Zvvfmmnxfp8w    ^| 16 ^| Zvvfmmmxfp8w    | MXFP8, MXFP8                     | IEEE binary32
-
-|Zvvfmmmxi8h     ^| 32 ^| —               | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary16
-|Zvvfmmmxi8bf16  ^| 32 ^| —               | MXINT8 (E8M0-scaled Int8), MXINT8 | BFloat16
-|Zvvfmmmxi8w     ^| 32 ^| —               | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary32
-|Zvvfmmmxi4h     ^| 32 ^| —               | MXINT4 (E8M0-scaled Int4), MXINT4 | IEEE binary16
-|Zvvfmmmxi4bf16  ^| 32 ^| —               | MXINT4 (E8M0-scaled Int4), MXINT4 | BFloat16
-|Zvvfmmnxi8h     ^| 16 ^| Zvvfmmmxi8h     | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary16
-|Zvvfmmnxi8bf16  ^| 16 ^| Zvvfmmmxi8bf16  | MXINT8 (E8M0-scaled Int8), MXINT8 | BFloat16
-|Zvvfmmnxi8w     ^| 16 ^| Zvvfmmmxi8w     | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary32
-|Zvvfmmnxi4h     ^| 16 ^| Zvvfmmmxi4h     | MXINT4 (E8M0-scaled Int4), MXINT4 | IEEE binary16
-|Zvvfmmnxi4bf16  ^| 16 ^| Zvvfmmmxi4bf16  | MXINT4 (E8M0-scaled Int4), MXINT4 | BFloat16
-|===
-
-NOTE: See <<Block size selection>> for LMUL restrictions when `bs=1`.
+Microscaling subextensions that add E8M0-scaled variants of the narrow
+input formats (OFP4, OFP8) are listed separately in
+<<tbl-mx-subextensions>>.
 
 [#zvvmtls,reftext=Load/store instructions for matrix tiles]
 === Zvvmtls: Extension for loading and storing vector registers interpreted as 2D matrix tiles
@@ -1116,8 +904,14 @@ The tile load and store instructions make use of the following parameters from t
 * LMUL — vector length multiplier
 * λ — selected lambda, read from `lambda[2:0]` in `vtype`
 
-The resulting tile dimensions are μ = ν = VL/λ, with the accumulator tile C occupying MUL = LMUL/λ² vector registers.
 When loading A or B input tiles, `vmtl.v` and `vmttl.v` shall be used with SEW equal to the element width of the C accumulator tile.
+<<#ime-load-store-geometry>> illustrates the memory to VR load for both row-major and column-major order for a tile with LMUL=1. 
+Physically both transfers are identical: they move contiguous segments of length _linesize_ = λ × LMUL with a stride of LD between them.
+The tile load/store instructions interpret the memory layout according to the specified leading dimension, but the resulting data layout in the VR is the same regardless of whether the source/destination matrix is stored in row-major or column-major order.
+
+[#ime-load-store-geometry]
+.Loading a matrix tile from memory for LMUL=1. The matrix is layed out linearly in memory, the leading dimension LD specifies its row size (a) or column size (b). Element indices represent the offset of the elements in memory. Blue arrows indicate the data ordering in memory/VR.
+image::png/ime-load-store-geometry.png[align="center"]
 
 If (rs2) = 0, then the leading dimension LD is set to the _natural dimension_ of λ × LMUL.
 That is, the memory layout, with elements contiguous to each other, matches the layout of the register group being loaded/stored.
@@ -1188,6 +982,14 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
     M[rs1 + (SEW ÷ 8) × ((i / linesize) × LD + (i % linesize))] = VS[i]
 
+[NOTE]
+====
+Order preserving tile load/store with LMUL > 1 offers optimization opportunities. While vmtl/vmts are very similar to vector constant-stride segment operations, the segment sizes are potentially larger.  Matching cache line size with λ × LMUL × SEW allows for full cacheline transfers.
+====
+[#ime-vmtls-lmul]
+.Order preserving tile load/store with LMUL > 1 for row-major (a) and column-major ordering in memory.
+image::png/ime-vmtls-lmul.png[align="center", width="90%"]
+
 ===== `vmttl.v` — Transposing Tile Load
 
     vmttl.v vd, (rs1), rs2 [, Lλ] [, vm]
@@ -1215,6 +1017,11 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
     M[rs1 + (SEW ÷ 8) × ((i % linesize) × LD + (i / linesize))] = VS[i]
 
+[NOTE]
+====
+Transposing loads and stores should be performed with SEW set to the width of the actual data that is being loaded and transposed. Sub-byte elements (eg. OFP4) cannot be transposed directly.
+====
+
 <<<
 
 ==== Tile geometry for multiply-accumulate
@@ -1236,7 +1043,7 @@ The B load and computation use the narrower VL = K_eff × N_tile.
 
 ==== C tile tail policy
 
-When N_tile < N_tile_max, the elements C[i, j] for 0 ≤ i < M_tile and N_tile ≤ j < N_tile_max are _C tile tail elements_.
+When N_tile < N_tile_max, the elements stem:[C_{i,j}] for 0 ≤ i < M_tile and N_tile ≤ j < N_tile_max are _C tile tail elements_.
 Multiply-accumulate instructions never read or write C tile tail elements.
 
 * If `vta` = 0 (tail-undisturbed): tail elements retain their pre-instruction values.
@@ -3410,3 +3217,255 @@ Included in::
 |0.1
 |Draft
 |===
+
+
+=== Microscaling Subextensions
+
+Each microscaling subextension enables the `vm=0` / `v0.scale` encoding for
+a specific (input format, accumulator format, block size) combination.
+A floating-point microscaling subextension implies its corresponding base
+subextension: for example, Zvvfmmmxfp4h implies Zvvfmmofp4h, which provides
+the underlying OFP4→FP16 instruction support.  Only narrow input formats
+(OFP4, OFP8) define FP microscaling variants.
+The integer MX subextensions (`Zvvfmmmxi*`, `Zvvfmmnxi*`) do not imply a
+base subextension: `vfwimmacc.vv` and `vfqwimmacc.vv` have no non-MX
+FP-accumulate form (the `vm=1` encoding of those opcodes is the existing
+integer-accumulate `vwmmacc.vv` / `vqwmmacc.vv`).
+The block size and implication relationships are listed in <<tbl-mx-subextensions>>.
+
+[#tbl-mx-subextensions]
+.Microscaling subextensions
+[cols="1,1,1,3,3", options="header"]
+|===
+|Extension        | BS | Implies          | Multiplicand Types                | Accumulator Type
+
+|Zvvfmmmxfp4ofp8  ^| 32 ^| Zvvfmmofp4ofp8  | MXFP4 (E8M0-scaled OFP4), MXFP4   | OFP8
+|Zvvfmmmxfp4h     ^| 32 ^| Zvvfmmofp4h     | MXFP4, MXFP4                      | IEEE binary16
+|Zvvfmmmxfp4bf16  ^| 32 ^| Zvvfmmofp4bf16  | MXFP4, MXFP4                      | BFloat16
+|Zvvfmmmxfp8     ^| 32 ^| Zvvfmmofp8      | MXFP8 (E8M0-scaled OFP8), MXFP8  | OFP8
+|Zvvfmmmxfp8h    ^| 32 ^| Zvvfmmofp8h     | MXFP8, MXFP8                     | IEEE binary16
+|Zvvfmmmxfp8bf16 ^| 32 ^| Zvvfmmofp8bf16  | MXFP8, MXFP8                     | BFloat16
+|Zvvfmmmxfp8w    ^| 32 ^| Zvvfmmofp8w     | MXFP8, MXFP8                     | IEEE binary32
+|Zvvfmmnxfp4ofp8  ^| 16 ^| Zvvfmmmxfp4ofp8  | MXFP4 (E8M0-scaled OFP4), MXFP4   | OFP8
+|Zvvfmmnxfp4h     ^| 16 ^| Zvvfmmmxfp4h     | MXFP4, MXFP4                      | IEEE binary16
+|Zvvfmmnxfp4bf16  ^| 16 ^| Zvvfmmmxfp4bf16  | MXFP4, MXFP4                      | BFloat16
+|Zvvfmmnxfp8     ^| 16 ^| Zvvfmmmxfp8     | MXFP8 (E8M0-scaled OFP8), MXFP8  | OFP8
+|Zvvfmmnxfp8h    ^| 16 ^| Zvvfmmmxfp8h    | MXFP8, MXFP8                     | IEEE binary16
+|Zvvfmmnxfp8bf16 ^| 16 ^| Zvvfmmmxfp8bf16 | MXFP8, MXFP8                     | BFloat16
+|Zvvfmmnxfp8w    ^| 16 ^| Zvvfmmmxfp8w    | MXFP8, MXFP8                     | IEEE binary32
+
+|Zvvfmmmxi8h     ^| 32 ^| —               | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary16
+|Zvvfmmmxi8bf16  ^| 32 ^| —               | MXINT8 (E8M0-scaled Int8), MXINT8 | BFloat16
+|Zvvfmmmxi8w     ^| 32 ^| —               | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary32
+|Zvvfmmmxi4h     ^| 32 ^| —               | MXINT4 (E8M0-scaled Int4), MXINT4 | IEEE binary16
+|Zvvfmmmxi4bf16  ^| 32 ^| —               | MXINT4 (E8M0-scaled Int4), MXINT4 | BFloat16
+|Zvvfmmnxi8h     ^| 16 ^| Zvvfmmmxi8h     | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary16
+|Zvvfmmnxi8bf16  ^| 16 ^| Zvvfmmmxi8bf16  | MXINT8 (E8M0-scaled Int8), MXINT8 | BFloat16
+|Zvvfmmnxi8w     ^| 16 ^| Zvvfmmmxi8w     | MXINT8 (E8M0-scaled Int8), MXINT8 | IEEE binary32
+|Zvvfmmnxi4h     ^| 16 ^| Zvvfmmmxi4h     | MXINT4 (E8M0-scaled Int4), MXINT4 | IEEE binary16
+|Zvvfmmnxi4bf16  ^| 16 ^| Zvvfmmmxi4bf16  | MXINT4 (E8M0-scaled Int4), MXINT4 | BFloat16
+|===
+
+NOTE: See <<Block size selection>> for LMUL restrictions when `bs=1`.
+
+
+=== Encoding map
+
+The following tables enumerate every (instruction, SEW, altfmt) encoding
+point and map it to its input and output data types and the governing
+subextension.  Entries marked _reserved_ raise an illegal-instruction
+exception.
+
+==== Floating-point encoding map
+
+Mixed-format inputs (`altfmt_A` ≠ `altfmt_B`) are permitted wherever both
+input formats are defined for a given (SEW, W) combination; those
+combinations are listed explicitly in the table below.
+
+[#tbl-fp-encoding-map]
+.Floating-point multiply-accumulate encoding map
+[cols="2,1,1,1,2,1,2,1,2,2,2,2", options="header"]
+|===
+| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | altfmt | C Type | Subextension | MX BS=32 (vm=0) | MX BS=16 (vm=0)
+
+12+^e| *vfmmacc.vv (W=1)*
+
+| vfmmacc  | 8  | 8  | 0 | E4M3  | 0 | E4M3  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 0 | E4M3  | 0 | E4M3  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 1 | E5M2  | 1 | E5M2  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 1 | E5M2  | 1 | E5M2  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 0 | E4M3  | 1 | E5M2  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 0 | E4M3  | 1 | E5M2  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 1 | E5M2  | 0 | E4M3  | 0 | E4M3  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 8  | 8  | 1 | E5M2  | 0 | E4M3  | 1 | E5M2  | Zvvfmmofp8     | Zvvfmmmxfp8      | Zvvfmmnxfp8
+| vfmmacc  | 16 | 16 | 0 | FP16  | 0 | FP16  | 0 | FP16  | Zvvfmmh        | —                 | —
+| vfmmacc  | 16 | 16 | 0 | FP16  | 0 | FP16  | 1 | BF16  | _reserved_     | —                 | —
+| vfmmacc  | 16 | 16 | 1 | BF16  | 1 | BF16  | 0 | FP16  | _reserved_     | —                 | —
+| vfmmacc  | 16 | 16 | 1 | BF16  | 1 | BF16  | 1 | BF16  | Zvvfmmbf16     | —                 | —
+| vfmmacc  | 16 | 16 | 0 | FP16  | 1 | BF16  | 0 | FP16  | Zvvfmmh, Zvvfmmbf16 | —            | —
+| vfmmacc  | 16 | 16 | 0 | FP16  | 1 | BF16  | 1 | BF16  | Zvvfmmh, Zvvfmmbf16 | —            | —
+| vfmmacc  | 16 | 16 | 1 | BF16  | 0 | FP16  | 0 | FP16  | Zvvfmmh, Zvvfmmbf16 | —            | —
+| vfmmacc  | 16 | 16 | 1 | BF16  | 0 | FP16  | 1 | BF16  | Zvvfmmh, Zvvfmmbf16 | —            | —
+| vfmmacc  | 32 | 32 | × | FP32  | × | FP32  | 0 | FP32  | Zvvfmmf        | —                 | —
+| vfmmacc  | 32 | 32 | × | FP32  | × | FP32  | 1 | —     | _reserved_     | —                 | —
+| vfmmacc  | 64 | 64 | × | FP64  | × | FP64  | 0 | FP64  | Zvvfmmd        | —                 | —
+| vfmmacc  | 64 | 64 | × | FP64  | × | FP64  | 1 | —     | _reserved_     | —                 | —
+
+12+^e| *vfwmmacc.vv (W=2)*
+
+| vfwmmacc | 8  | 4  | 0 | E2M1  | 0 | E2M1  | 0 | E4M3  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
+| vfwmmacc | 8  | 4  | 0 | E2M1  | 0 | E2M1  | 1 | E5M2  | Zvvfmmofp4ofp8 | Zvvfmmmxfp4ofp8  | Zvvfmmnxfp4ofp8
+| vfwmmacc | 8  | 4  | 1 | —     | 1 | —     | × | —     | _reserved_     | —                 | —
+| vfwmmacc | 16 | 8  | 0 | E4M3  | 0 | E4M3  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
+| vfwmmacc | 16 | 8  | 0 | E4M3  | 0 | E4M3  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
+| vfwmmacc | 16 | 8  | 1 | E5M2  | 1 | E5M2  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
+| vfwmmacc | 16 | 8  | 1 | E5M2  | 1 | E5M2  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
+| vfwmmacc | 16 | 8  | 0 | E4M3  | 1 | E5M2  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
+| vfwmmacc | 16 | 8  | 0 | E4M3  | 1 | E5M2  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
+| vfwmmacc | 16 | 8  | 1 | E5M2  | 0 | E4M3  | 0 | FP16  | Zvvfmmofp8h    | Zvvfmmmxfp8h     | Zvvfmmnxfp8h
+| vfwmmacc | 16 | 8  | 1 | E5M2  | 0 | E4M3  | 1 | BF16  | Zvvfmmofp8bf16 | Zvvfmmmxfp8bf16  | Zvvfmmnxfp8bf16
+| vfwmmacc | 32 | 16 | 0 | FP16  | 0 | FP16  | 0 | FP32  | Zvvfmmhf       | —                 | —
+| vfwmmacc | 32 | 16 | 0 | FP16  | 0 | FP16  | 1 | —     | _reserved_     | —                 | —
+| vfwmmacc | 32 | 16 | 1 | BF16  | 1 | BF16  | 0 | FP32  | Zvvfmmbf16f    | —                 | —
+| vfwmmacc | 32 | 16 | 1 | BF16  | 1 | BF16  | 1 | —     | _reserved_     | —                 | —
+| vfwmmacc | 32 | 16 | 0 | FP16  | 1 | BF16  | 0 | FP32  | Zvvfmmhf, Zvvfmmbf16f | —         | —
+| vfwmmacc | 32 | 16 | 1 | BF16  | 0 | FP16  | 0 | FP32  | Zvvfmmhf, Zvvfmmbf16f | —         | —
+| vfwmmacc | 64 | 32 | × | FP32  | × | FP32  | 0 | FP64  | Zvvfmmfd       | —                 | —
+| vfwmmacc | 64 | 32 | × | FP32  | × | FP32  | 1 | —     | _reserved_     | —                 | —
+
+12+^e| *vfqwmmacc.vv (W=4)*
+
+| vfqwmmacc | 8  | 2 | × | —    | × | —     | × | —     | _reserved_      | —                 | —
+| vfqwmmacc | 16 | 4  | 0 | E2M1 | 0 | E2M1  | 0 | FP16  | Zvvfmmofp4h    | Zvvfmmmxfp4h     | Zvvfmmnxfp4h
+| vfqwmmacc | 16 | 4  | 0 | E2M1 | 0 | E2M1  | 1 | BF16  | Zvvfmmofp4bf16 | Zvvfmmmxfp4bf16  | Zvvfmmnxfp4bf16
+| vfqwmmacc | 16 | 4  | 1 | —    | 1 | —     | × | —     | _reserved_     | —                | —
+| vfqwmmacc | 32 | 8  | 0 | E4M3 | 0 | E4M3  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
+| vfqwmmacc | 32 | 8  | 0 | E4M3 | 0 | E4M3  | 1 | —     | _reserved_     | —                 | —
+| vfqwmmacc | 32 | 8  | 1 | E5M2 | 1 | E5M2  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
+| vfqwmmacc | 32 | 8  | 1 | E5M2 | 1 | E5M2  | 1 | —     | _reserved_     | —                 | —
+| vfqwmmacc | 32 | 8  | 0 | E4M3 | 1 | E5M2  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
+| vfqwmmacc | 32 | 8  | 1 | E5M2 | 0 | E4M3  | 0 | FP32  | Zvvfmmofp8w    | Zvvfmmmxfp8w     | Zvvfmmnxfp8w
+| vfqwmmacc | 64 | 16 | 0 | FP16 | 0 | FP16  | 0 | FP64  | Zvvfmmhd       | —                 | —
+| vfqwmmacc | 64 | 16 | 0 | FP16 | 0 | FP16  | 1 | —     | _reserved_     | —                 | —
+| vfqwmmacc | 64 | 16 | 1 | BF16 | 1 | BF16  | 0 | FP64  | Zvvfmmbf16d    | —                 | —
+| vfqwmmacc | 64 | 16 | 1 | BF16 | 1 | BF16  | 1 | —     | _reserved_     | —                 | —
+| vfqwmmacc | 64 | 16 | 0 | FP16 | 1 | BF16  | 0 | FP64  | Zvvfmmhd, Zvvfmmbf16d | —         | —
+| vfqwmmacc | 64 | 16 | 1 | BF16 | 0 | FP16  | 0 | FP64  | Zvvfmmhd, Zvvfmmbf16d | —         | —
+|===
+
+==== Integer encoding map
+
+`altfmt_A` and `altfmt_B` select signed (0) or unsigned (1) interpretation; the accumulator is always signed.
+`altfmt` is unused and `vm` must be 1 (`vm=0` is _reserved_) for all three instructions.
+For `vwmmacc.vv` and `vqwmmacc.vv`, `vm=0` is separately defined as `vfwimmacc.vv` and
+`vfqwimmacc.vv` (integer inputs, FP accumulator, E8M0 microscaling); see <<tbl-intmx-encoding-map>>.
+
+[#tbl-int-encoding-map]
+.Integer multiply-accumulate encoding map
+[cols="2,1,1,1,2,1,2,2,2", options="header"]
+|===
+| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | C Type | Subextension
+
+9+^e| *vmmacc.vv (W=1)*
+
+| vmmacc    | 8  | 8  | 0 | Int8   | 0 | Int8   | Int8  | Zvvmmb
+| vmmacc    | 8  | 8  | 0 | Int8   | 1 | UInt8  | Int8  | Zvvmmb
+| vmmacc    | 8  | 8  | 1 | UInt8  | 0 | Int8   | Int8  | Zvvmmb
+| vmmacc    | 8  | 8  | 1 | UInt8  | 1 | UInt8  | Int8  | Zvvmmb
+| vmmacc    | 16 | 16 | 0 | Int16  | 0 | Int16  | Int16 | Zvvmmh
+| vmmacc    | 16 | 16 | 0 | Int16  | 1 | UInt16 | Int16 | Zvvmmh
+| vmmacc    | 16 | 16 | 1 | UInt16 | 0 | Int16  | Int16 | Zvvmmh
+| vmmacc    | 16 | 16 | 1 | UInt16 | 1 | UInt16 | Int16 | Zvvmmh
+| vmmacc    | 32 | 32 | 0 | Int32  | 0 | Int32  | Int32 | Zvvmmw
+| vmmacc    | 32 | 32 | 0 | Int32  | 1 | UInt32 | Int32 | Zvvmmw
+| vmmacc    | 32 | 32 | 1 | UInt32 | 0 | Int32  | Int32 | Zvvmmw
+| vmmacc    | 32 | 32 | 1 | UInt32 | 1 | UInt32 | Int32 | Zvvmmw
+| vmmacc    | 64 | 64 | 0 | Int64  | 0 | Int64  | Int64 | Zvvmmd
+| vmmacc    | 64 | 64 | 0 | Int64  | 1 | UInt64 | Int64 | Zvvmmd
+| vmmacc    | 64 | 64 | 1 | UInt64 | 0 | Int64  | Int64 | Zvvmmd
+| vmmacc    | 64 | 64 | 1 | UInt64 | 1 | UInt64 | Int64 | Zvvmmd
+
+9+^e| *vwmmacc.vv (W=2)*
+
+| vwmmacc   | 8  | 4  | 0 | Int4   | 0 | Int4   | Int8  | Zvvmmi4b
+| vwmmacc   | 8  | 4  | 0 | Int4   | 1 | UInt4  | Int8  | Zvvmmi4b
+| vwmmacc   | 8  | 4  | 1 | UInt4  | 0 | Int4   | Int8  | Zvvmmi4b
+| vwmmacc   | 8  | 4  | 1 | UInt4  | 1 | UInt4  | Int8  | Zvvmmi4b
+| vwmmacc   | 16 | 8  | 0 | Int8   | 0 | Int8   | Int16 | Zvvmmbh
+| vwmmacc   | 16 | 8  | 0 | Int8   | 1 | UInt8  | Int16 | Zvvmmbh
+| vwmmacc   | 16 | 8  | 1 | UInt8  | 0 | Int8   | Int16 | Zvvmmbh
+| vwmmacc   | 16 | 8  | 1 | UInt8  | 1 | UInt8  | Int16 | Zvvmmbh
+| vwmmacc   | 32 | 16 | 0 | Int16  | 0 | Int16  | Int32 | Zvvmmhw
+| vwmmacc   | 32 | 16 | 0 | Int16  | 1 | UInt16 | Int32 | Zvvmmhw
+| vwmmacc   | 32 | 16 | 1 | UInt16 | 0 | Int16  | Int32 | Zvvmmhw
+| vwmmacc   | 32 | 16 | 1 | UInt16 | 1 | UInt16 | Int32 | Zvvmmhw
+| vwmmacc   | 64 | 32 | 0 | Int32  | 0 | Int32  | Int64 | Zvvmmwd
+| vwmmacc   | 64 | 32 | 0 | Int32  | 1 | UInt32 | Int64 | Zvvmmwd
+| vwmmacc   | 64 | 32 | 1 | UInt32 | 0 | Int32  | Int64 | Zvvmmwd
+| vwmmacc   | 64 | 32 | 1 | UInt32 | 1 | UInt32 | Int64 | Zvvmmwd
+
+9+^e| *vqwmmacc.vv (W=4)*
+
+| vqwmmacc  | 8  | 2  | × | —     | × | —      | —     | _reserved_
+| vqwmmacc  | 16 | 4  | 0 | Int4   | 0 | Int4   | Int16 | Zvvmmi4h
+| vqwmmacc  | 16 | 4  | 0 | Int4   | 1 | UInt4  | Int16 | Zvvmmi4h
+| vqwmmacc  | 16 | 4  | 1 | UInt4  | 0 | Int4   | Int16 | Zvvmmi4h
+| vqwmmacc  | 16 | 4  | 1 | UInt4  | 1 | UInt4  | Int16 | Zvvmmi4h
+| vqwmmacc  | 32 | 8  | 0 | Int8   | 0 | Int8   | Int32 | Zvvmmbw
+| vqwmmacc  | 32 | 8  | 0 | Int8   | 1 | UInt8  | Int32 | Zvvmmbw
+| vqwmmacc  | 32 | 8  | 1 | UInt8  | 0 | Int8   | Int32 | Zvvmmbw
+| vqwmmacc  | 32 | 8  | 1 | UInt8  | 1 | UInt8  | Int32 | Zvvmmbw
+| vqwmmacc  | 64 | 16 | 0 | Int16  | 0 | Int16  | Int64 | Zvvmmhd
+| vqwmmacc  | 64 | 16 | 0 | Int16  | 1 | UInt16 | Int64 | Zvvmmhd
+| vqwmmacc  | 64 | 16 | 1 | UInt16 | 0 | Int16  | Int64 | Zvvmmhd
+| vqwmmacc  | 64 | 16 | 1 | UInt16 | 1 | UInt16 | Int64 | Zvvmmhd
+|===
+
+
+[#tbl-intmx-encoding-map]
+==== Integer MX encoding map (`vm=0`)
+
+When `vm=0`, `vwmmacc.vv` and `vqwmmacc.vv` are decoded as `vfwimmacc.vv`
+and `vfqwimmacc.vv` respectively.  MXINT inputs are always signed;
+`altfmt_A` and `altfmt_B` must be 0 (unsigned is _reserved_).
+`altfmt` selects the FP accumulator format.
+`vmmacc.vv` with `vm=0` remains _reserved_.
+
+.Integer MX multiply-accumulate encoding map (`vm=0`)
+[cols="2,1,1,1,2,1,2,1,2,2,2", options="header"]
+|===
+| Instruction | SEW | EEW | altfmt_A | Input A | altfmt_B | Input B | altfmt | C Type | MX BS=32 | MX BS=16
+
+11+^e| *vfwimmacc.vv (W=2, vm=0 of vwmmacc opcode)*
+
+| vfwimmacc | 8  | 4  | × | —     | × | —     | × | —     | _reserved_      | _reserved_
+| vfwimmacc | 16 | 8  | 0 | Int8  | 0 | Int8  | 0 | FP16  | Zvvfmmmxi8h     | Zvvfmmnxi8h
+| vfwimmacc | 16 | 8  | 0 | Int8  | 1 | UInt8 | 0 | FP16  | _reserved_      | _reserved_
+| vfwimmacc | 16 | 8  | 1 | UInt8 | 0 | Int8  | 0 | FP16  | _reserved_      | _reserved_
+| vfwimmacc | 16 | 8  | 1 | UInt8 | 1 | UInt8 | 0 | FP16  | _reserved_      | _reserved_
+| vfwimmacc | 16 | 8  | 0 | Int8  | 0 | Int8  | 1 | BF16  | Zvvfmmmxi8bf16  | Zvvfmmnxi8bf16
+| vfwimmacc | 16 | 8  | 0 | Int8  | 1 | UInt8 | 1 | BF16  | _reserved_      | _reserved_
+| vfwimmacc | 16 | 8  | 1 | UInt8 | 0 | Int8  | 1 | BF16  | _reserved_      | _reserved_
+| vfwimmacc | 16 | 8  | 1 | UInt8 | 1 | UInt8 | 1 | BF16  | _reserved_      | _reserved_
+| vfwimmacc | 32 | 16 | × | Int16 | × | Int16 | × | —     | _reserved_      | _reserved_
+| vfwimmacc | 64 | 32 | × | Int32 | × | Int32 | × | —     | _reserved_      | _reserved_
+
+11+^e| *vfqwimmacc.vv (W=4, vm=0 of vqwmmacc opcode)*
+
+| vfqwimmacc | 8  | 2  | × | —     | × | —     | × | —     | _reserved_      | _reserved_
+| vfqwimmacc | 16 | 4  | 0 | Int4  | 0 | Int4  | 0 | FP16  | Zvvfmmmxi4h     | Zvvfmmnxi4h
+| vfqwimmacc | 16 | 4  | 0 | Int4  | 1 | UInt4 | 0 | FP16  | _reserved_      | _reserved_
+| vfqwimmacc | 16 | 4  | 1 | UInt4 | 0 | Int4  | 0 | FP16  | _reserved_      | _reserved_
+| vfqwimmacc | 16 | 4  | 1 | UInt4 | 1 | UInt4 | 0 | FP16  | _reserved_      | _reserved_
+| vfqwimmacc | 16 | 4  | 0 | Int4  | 0 | Int4  | 1 | BF16  | Zvvfmmmxi4bf16  | Zvvfmmnxi4bf16
+| vfqwimmacc | 16 | 4  | 0 | Int4  | 1 | UInt4 | 1 | BF16  | _reserved_      | _reserved_
+| vfqwimmacc | 16 | 4  | 1 | UInt4 | 0 | Int4  | 1 | BF16  | _reserved_      | _reserved_
+| vfqwimmacc | 16 | 4  | 1 | UInt4 | 1 | UInt4 | 1 | BF16  | _reserved_      | _reserved_
+| vfqwimmacc | 32 | 8  | 0 | Int8  | 0 | Int8  | 0 | FP32  | Zvvfmmmxi8w     | Zvvfmmnxi8w
+| vfqwimmacc | 32 | 8  | 0 | Int8  | 1 | UInt8 | 0 | FP32  | _reserved_      | _reserved_
+| vfqwimmacc | 32 | 8  | 1 | UInt8 | 0 | Int8  | 0 | FP32  | _reserved_      | _reserved_
+| vfqwimmacc | 32 | 8  | 1 | UInt8 | 1 | UInt8 | 0 | FP32  | _reserved_      | _reserved_
+| vfqwimmacc | 32 | 8  | × | —     | × | —     | 1 | —     | _reserved_      | _reserved_
+| vfqwimmacc | 64 | 16 | × | Int16 | × | Int16 | × | —     | _reserved_      | _reserved_
+|===
+
