@@ -1,0 +1,208 @@
+== Ziccif Extension for Instruction-Fetch Atomicity, Version 1.0
+
+NOTE: This extension was ratified alongside the RVA20U64 profile.
+This chapter supplies an operational definition for the extension
+and adds expository material.
+
+If the Ziccif extension is implemented, main memory regions with both the
+cacheability and coherence PMAs must support instruction fetch, and any
+instruction fetches of naturally aligned power-of-2 sizes of at most
+`min(ILEN,XLEN)` bits are atomic.
+
+An implementation with the Ziccif extension fetches instructions in a manner
+equivalent to the following state machine.
+
+. Let `M` be the smallest power of 2 such that `M` {ge} `min(ILEN,XLEN)/8`.
+Let `N` be the `pc` modulo `M`.
+Atomically fetch `M` - `N` bytes from memory at address `pc`.
+Let `T` be the running total of bytes fetched, initially `M` - `N`.
+
+. If the `T` bytes fetched begin with a complete instruction of length `L` {le}
+`T`, then execute that instruction, discard the remaining `T` - `L` bytes
+fetched, and go back to step 1, using the updated `pc`.
+Otherwise, atomically fetch `M` bytes from memory at address `pc` + `T`,
+increment `T` by `M`, and repeat step 2.
+
+[NOTE]
+====
+The instruction-fetch atomicity rule supports concurrent code modification.
+When a hart modifies instruction memory and either it or another hart executes
+the modified instructions without first having executing a FENCE.I, the
+modifying hart should adhere to the following rules to ensure predictable
+behavior:
+
+- Modification stores must be single-copy atomic, hence must be naturally
+aligned.
+
+- The modified instruction must not span an aligned `M`-byte boundary,
+unless it is replaced with a shorter unconditional control transfer
+(e.g., `c.ebreak` or `c.j`) that does not itself span an `M`-byte
+boundary.
+
+- Modification stores must alter a complete instruction or complete
+instructions that do not collectively span an `M`-byte boundary,
+modulo the exception above that the first part of an instruction may be
+replaced with an unconditional control transfer instruction.
+
+- Modifications must not combine smaller instructions into a larger
+instruction but may convert a larger instruction to some number of
+smaller instructions.
+
+- Modified instruction memory must have the coherence PMA.
+
+Other well-defined code-modification strategies exist, but these rules provide
+a safe harbor.
+
+Note that the software modifying the code need not know the value of `M`.
+Because ILEN must be at least the width of the instruction being modified,
+a lower bound on `M` can be inferred from the instruction's width and XLEN.
+====
+
+Memory protection and executability PMAs are applied only to bytes that are
+not discarded by this algorithm.
+
+[NOTE]
+====
+For example, if `M`=8, `N`=0, and the PMP granularity is 4 bytes, then
+it is valid to fetch a 4-byte instruction at `pc`, even if fetching from
+`pc` + 4 would have been disallowed by PMP.
+
+For simplicity, implementations are likely to choose a PMP granularity no
+smaller than `M`.
+====
+
+== Ziccid Extension for Instruction/Data Coherence and Consistency, Version 1.0
+
+The Ziccid extension mandates more stringent requirements for consistency
+between instruction fetches and other memory accesses than those imposed by
+the base ISA.
+As described in detail in the next section, Ziccid guarantees that a hart's
+instruction fetches appear to occur in program order with respect to each
+other, and that stores eventually become visible to all harts' instruction
+fetches.
+
+[NOTE]
+====
+The primary intent of the Ziccid extension is to accelerate JIT
+compilation in multiprocessor systems.
+
+In straightforward implementations, maintaining coherence between instruction
+caches and the data-memory system suffices to satisfy this extension's
+eventuality property.
+The Ziccid extension can be viewed as a means to codify the concept of
+instruction-cache coherence.
+
+The in-order fetch property, expected by some JIT compilers, is also
+provided naturally by most straightforward microarchitectures.
+An example of a technique that might violate this property, however, is an
+instruction buffer that is populated out of program order, e.g., while fetching
+down the predicted path following an instruction-cache miss.
+Example solutions include buffering instructions only in program order, or
+keeping the buffer coherent by making the coherent instruction cache inclusive
+of the buffer.
+====
+
+[NOTE]
+====
+Under Ziccid, stores _eventually_ become visible to instruction fetches, even
+without executing a FENCE.I instruction.
+As a consequence of this requirement, the consumer thread in the following
+litmus test is guaranteed to terminate:
+
+```
+Producer:                                       Consumer:
+
+la t0, patch_me                               patch_me:
+li t1, 0x4585                                   c.li a1, 0
+sh t1, (t0)   # patch_me := c.li a1, 1          beqz a1, patch_me
+```
+
+As is the case without the Ziccid extension, software can make a store from
+the current hart visible to the hart's instruction fetches immediately by
+executing a FENCE.I instruction.
+Software can make a store from the current hart visible to another hart's
+instruction fetches by executing a FENCE W,O instruction, then sending an
+interprocessor interrupt to the remote hart, requesting that it execute
+a FENCE.I instruction.
+Alternatively, the current hart can execute a FENCE W,W instruction, then
+write a flag in memory; upon observing the flag write, the remote hart
+executes a FENCE.I instruction.
+In neither case is a data FENCE required on the remote hart.
+====
+
+The Ziccid extension depends on the Ziccif extension.
+
+NOTE: Although instruction/data consistency and instruction-fetch atomicity
+are conceptually independent properties, the former is much more useful in
+conjunction with the latter.
+
+=== Operational Model of the Ziccid Extension
+
+An implementation with the Ziccid extension behaves in a manner consistent
+with the following operational model.
+This model only applies to instruction fetches to memory regions with the
+cacheability and coherence PMAs; instruction fetches to other memory regions
+proceed as though the Ziccid extension were not implemented.
+
+NOTE: Informally, instructions in incoherent and/or uncacheable memory regions
+may be incoherently cached; this cache is flushed upon execution of a FENCE.I
+instruction.
+
+Harts have two ordered operational stages: instruction fetch and execution.
+Each hart has an instruction buffer of bounded capacity.
+Instructions are fetched from memory in program order, then inserted into the
+instruction buffer in program order.
+
+An instruction fetch is a memory read operation that appears in the global
+memory order, in program order with respect to other instruction fetches
+from the same hart.
+For each instruction byte fetched from memory, memory
+supplies the value written by the most recent store that precedes the read in
+global memory order.
+
+NOTE: This property is distinct from than the load-value axiom, in that fetches
+do not observe the local hart's stores before other harts' fetches can observe them.
+
+Instruction fetches appear in the global memory order before any explicit memory
+accesses to which they give rise.
+
+[NOTE]
+====
+Absent the execution of a FENCE.I instruction, there is no requirement that
+younger instruction fetches appear in the global memory order later than older
+explicit memory accesses.
+For example, if a program consists of two store instructions X and Y to
+distinct addresses AX and AY, then the following global orders are valid:
+
+- fetch X, fetch Y, store AX, store AY
+- fetch X, fetch Y, store AY, store AX
+- fetch X, store AX, fetch Y, store AY
+====
+
+After some amount of time, instructions are dequeued in program order from the
+instruction buffer and executed.
+
+NOTE: Therefore, absent the execution of a FENCE.I instruction,
+stores do not necessarily become visibile immediately to subsequent instruction fetches,
+though they do _eventually_ become visible to subsequent instruction fetches.
+
+Instructions are executed in program order, but instructions' explicit memory
+accesses may be reordered in any manner consistent with RVWMO.
+
+NOTE: Executing a `fence w,w` instruction between two store instructions, for
+example, suffices to guarantee that the second store will not become visible
+to any instruction fetch before the first store does.
+
+The FENCE.I instruction performs the following operations sequentially:
+
+- All of the hart's older explicit memory accesses become globally visible.
+- The instruction buffer is flushed.
+
+[NOTE]
+====
+The FENCE.I instruction in Ziccid is specified such that software written for
+non-Ziccid machines is compatible with Ziccid machines.
+For cacheable and coherent memory regions, the combination of making older
+stores globally visible and flushing the instruction buffer on FENCE.I
+suffices to implement FENCE.I's pre-Ziccid semantics for those regions.
+====
