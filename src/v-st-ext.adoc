@@ -21,14 +21,17 @@ Each hart supporting a vector extension defines two parameters:
 
 . [#norm:elen]#The maximum size in bits of a vector element that any operation can produce or consume, _ELEN_ {ge} 8, which
 must be a power of 2.#
-. [#norm:vlen]#The number of bits in a single vector register, _VLEN_ {ge} ELEN, which must be a power of 2, and must be no greater than 2^16^.#
+. [#norm:vlen]#The number of bits in a single vector register, _VLEN_ {ge} 8, which must be a power of 2, and must be no greater than 2^16^.#
 
 Standard vector extensions (<<sec-vector-extensions>>) and
 architecture profiles may set further constraints on _ELEN_ and _VLEN_.
 
-NOTE: Future extensions may allow ELEN {gt} VLEN by holding one
-element using bits from multiple vector registers, but this
-extension does not include this option.
+NOTE: Following the ratification of the V extension, this specification
+has been revised to admit the possibility of future extensions that
+allow ELEN > VLEN, wherein one element is held using bits from
+multiple vector registers.
+These relaxations have no impact on implementations with ELEN {le}
+VLEN or on existing software that assumes ELEN {le} VLEN.
 
 NOTE: The upper limit on VLEN allows software to know that indices
 will fit into 16 bits (largest VLMAX of 65,536 occurs for LMUL=8 and
@@ -280,15 +283,18 @@ register-resident vectors.
 Implementations must provide fractional LMUL settings that allow the
 narrowest supported type to occupy a fraction of a vector register
 corresponding to the ratio of the narrowest supported type's width to
-that of the largest supported type's width.  In general, the
-requirement is to support LMUL {ge} SEW~MIN~/ELEN, where SEW~MIN~ is
-the narrowest supported SEW value and ELEN is the widest supported SEW
-value.  In the standard extensions, SEW~MIN~=8.  For
+the smaller of VLEN and the largest supported type's width.
+In general, the requirement is to support LMUL {ge} SEW~MIN~/min(ELEN, VLEN),
+where SEW~MIN~ is the narrowest supported SEW value, ELEN is the widest
+supported SEW value and VLEN is the number of bits in a vector register.
+In the standard extensions, SEW~MIN~=8.  For
 standard vector extensions with ELEN=32, fractional LMULs of 1/2 and
-1/4 must be supported.  For standard vector extensions with ELEN=64,
+1/4 must be supported.  For standard vector extensions with ELEN=64 and ELEN {le} VLEN,
 fractional LMULs of 1/2, 1/4, and 1/8 must be supported.
+For a vector extensions with SEW~MIN~=8, ELEN=64 and VLEN=32, fractional LMULs of 1/2 and 1/4
+must be supported.
 
-NOTE: When LMUL < SEW~MIN~/ELEN, there is no guarantee
+NOTE: When LMUL < SEW~MIN~/min(ELEN, VLEN), there is no guarantee
 an implementation would have enough bits in the fractional vector
 register to store at least one element, as VLEN=ELEN is a
 valid implementation choice. For example, with VLEN=ELEN=32,
@@ -297,20 +303,20 @@ storage in a vector register.
 
 [[norm:vtype_sew_val]]
 For a given supported fractional LMUL setting, implementations must support
-SEW settings between SEW~MIN~ and LMUL * ELEN, inclusive.
+SEW settings between SEW~MIN~ and LMUL * min(ELEN, VLEN), inclusive.
 
 [[norm:vtype_lmul_fval_rsv]]
-The use of `vtype` encodings with LMUL < SEW~MIN~/ELEN is
+The use of `vtype` encodings with LMUL < SEW~MIN~/min(ELEN, VLEN) is
 __reserved__, but implementations can set `vill` if they do not
 support these configurations.
 
 NOTE: Requiring all implementations to set `vill` in this case would
 prohibit future use of this case in an extension, so to allow for a
-future definition of LMUL<SEW~MIN~/ELEN behavior, we
+future definition of LMUL<SEW~MIN~/min(ELEN, VLEN) behavior, we
 consider the use of this case to be __reserved__.
 
 NOTE: It is recommended that assemblers provide a warning (not an
-error) if a `vsetvli` instruction attempts to write an LMUL < SEW~MIN~/ELEN.
+error) if a `vsetvli` instruction attempts to write an LMUL < SEW~MIN~/min(ELEN, VLEN).
 
 [[norm:lmul]]
 LMUL is set by the signed `vlmul` field in `vtype` (i.e., LMUL =
@@ -776,6 +782,12 @@ lowest-numbered vector register and moving to the
 next-highest-numbered vector register in the group once each vector
 register is filled.
 
+If a vector extension supports EEW > VLEN, one element can span multiple
+vector registers and to have EEW bits to hold one element the requirement is that
+the LMUL {ge} EEW/VLEN. In this case
+each element occupies multiple consecutive vector registers, the least
+significant bits of each element go to the lower-numbered vector register.
+
 ----
  LMUL > 1 examples
 
@@ -834,6 +846,14 @@ register is filled.
  v4*n+1              7       6       5       4
  v4*n+2              B       A       9       8
  v4*n+3              F       E       D       C
+
+ VLEN=32b, SEW=64b, LMUL=4
+
+ Byte         3 2 1 0
+ v4*n               0
+ v4*n+1
+ v4*n+2             1
+ v4*n+3
 ----
 
 [[sec-mapping-mixed]]
@@ -1033,6 +1053,8 @@ LMUL=8 is reserved as this would imply a result EMUL=16.
 Widened scalar values, e.g., input and output to a widening reduction
 operation, are held in the first element of a vector register and
 have EMUL=1.
+If a vector extension supports EEW > VLEN, EEW-wide widened scalar
+values are held in a vector register group with EMUL = EEW/VLEN.
 
 ==== Vector Masking
 
@@ -1618,7 +1640,7 @@ vse64.v   vs3, (rs1), vm  #   64-bit unit-stride store
 Additional unit-stride mask load and store instructions are
 provided to transfer mask values to/from memory.  These
 operate similarly to unmasked byte loads or stores (EEW=8), except that
-the effective vector length is ``evl``=ceil(``vl``/8) (i.e. EMUL=1),
+the effective vector length is ``evl`` = ceil(``vl``/8) (i.e. EMUL=1),
 and the destination register is always written with a tail-agnostic
 policy.
 
@@ -2069,8 +2091,9 @@ handlers, and OS context switches.  Software can determine the number
 of bytes transferred by reading the `vlenb` register.
 
 [[norm:vector_ls_seg_wholereg_eew]]
-The load instructions have an EEW encoded in the `mew` and `width`
+The load instructions have the element width encoded in the `mew` and `width`
 fields following the pattern of regular unit-stride loads.
+EEW is computed as EEW=min(VLEN, EEW_encoded).
 
 NOTE: Because in-register byte layouts are identical to in-memory byte
 layouts, the same data is written to the destination register group
@@ -2079,6 +2102,12 @@ Hence, it would have sufficed to provide only EEW=8 variants.
 The full set of EEW variants is provided so that the encoded EEW can be used
 as a hint to indicate the destination register group will next be accessed
 with this EEW, which aids implementations that rearrange data internally.
+
+In vector extensions supporting ELEN > VLEN, element size can exceed
+the number of bits available in a vector register or a vector register
+group. In that case, the whole vector register load instructions
+still operate on the specified number of vector register(s), using the
+least-significant bits of the element.
 
 The vector whole register store instructions are encoded similar to
 unmasked unit-stride store of elements with EEW=8.
@@ -3898,12 +3927,10 @@ destination format is converted to the destination format's largest finite value
 === Vector Reduction Operations
 
 [#norm:vreduction_scalar_def]#Vector reduction operations take a vector register group of elements
-and a scalar held in element 0 of a vector register, and perform a
+and a scalar held in element 0 of a vector register group, and perform a
 reduction using some binary operator, to produce a scalar result in
-element 0 of a vector register.#  [#norm:vreduction_scalar_disregard_LMUL]#The scalar input and output operands
-are held in element 0 of a single vector register, not a vector
-register group, so any vector register can be the scalar source or
-destination of a vector reduction regardless of LMUL setting.#
+element 0 of a vector register group.#  [#norm:vreduction_scalar_disregard_LMUL]#The scalar input and output operands
+are held in element 0 of a group with EMUL = ceil(EEW/VLEN), regardless of LMUL setting.#
 
 [#norm:vreduction_vd_overlap_vs]#The destination vector register can overlap the source operands,
 including the mask register.#
@@ -4500,7 +4527,7 @@ around within the vector registers.
 
 The integer scalar read/write instructions transfer a single
 value between a scalar `x` register and element 0 of a vector
-register.  [#norm:vmv-x-s_vmv-s-x_ignoreLMUL]#The instructions ignore LMUL and vector register groups.#
+register group with EMUL = ceil(EEW/VLEN).  [#norm:vmv-x-s_vmv-s-x_ignoreLMUL]#The instructions ignore LMUL, EMUL is computed as ceil(EEW/VLEN).#
 
 ----
 vmv.x.s rd, vs2  # x[rd] = vs2[0] (vs1=0)
@@ -4515,7 +4542,8 @@ ignored.  If SEW < XLEN, the value is sign-extended to XLEN bits.#
 NOTE: [#norm:vmv-x-s_vstartgevl_vl0]#`vmv.x.s` performs its operation even if `vstart` {ge} `vl` or `vl`=0.#
 
 [#norm:vmv-s-x_op]#The `vmv.s.x` instruction copies the scalar integer register to element 0 of
-the destination vector register.  If SEW < XLEN, the least-significant bits
+the destination vector register group with EMUL = ceil(EEW/VLEN)).
+If SEW < XLEN, the least-significant bits
 are copied and the upper XLEN-SEW bits are ignored.  If SEW > XLEN, the value
 is sign-extended to SEW bits.  The other elements in the destination vector
 register ( 0 < index < VLEN/SEW) are treated as tail elements using the current tail agnostic/undisturbed policy.#  [#norm:vmv-s-x_vstart_ge_vl]#If `vstart` {ge} `vl`, no
@@ -4532,7 +4560,7 @@ and `vmv.s.x` are reserved.#
 
 The floating-point scalar read/write instructions transfer a single
 value between a scalar `f` register and element 0 of a vector
-register.  [#norm:vfmv-f-s_vfmv-s-f_ignoreLMUL]#The instructions ignore LMUL and vector register groups.#
+register group with EMUL = ceil(EEW/VLEN).  [#norm:vfmv-f-s_vfmv-s-f_ignoreLMUL]##The instructions ignore LMUL; EMUL is computed as ceil(EEW/VLEN).#
 
 ----
 vfmv.f.s rd, vs2  # f[rd] = vs2[0] (rs1=0)
@@ -4875,8 +4903,8 @@ e q r d c b v a    # v11 destination after vrgather using viota.m under mask
 [#norm:vmv-nr-r_op]#The `vmv<nr>r.v` instructions copy whole vector registers (i.e., all
 VLEN bits) and can copy whole vector register groups.  The `nr` value
 in the opcode is the number of individual vector registers, NREG, to
-copy.  The instructions operate as if EEW=SEW, EMUL = NREG, effective
-length `evl`= EMUL * VLEN/SEW.#
+copy.  The instructions operate as if EEW = min(VLEN, SEW), EMUL = NREG, and effective
+length `evl` = EMUL * VLEN/EEW.#
 
 NOTE: These instructions are intended to aid compilers to shuffle
 vector registers without needing to know or change `vl`.
