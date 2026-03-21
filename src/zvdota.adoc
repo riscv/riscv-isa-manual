@@ -580,13 +580,14 @@ The following is a functional description of bulk normalization:
 //
 // A[i] are IEEE-encoded floating point numbers on (e_l+p_l) bits
 // B[i] are IEEE-encoded floating point numbers on (e_r+p_r) bits
-// (MSB is sign, next e bits are biased exponent, last m bits are the mantissa)
-// exponent bias is prodOpBias
+// MSB is sign, next e_l (resp. e_r) bits are biased exponent,
+// last m_l (resp. m_r) bits are the mantissa.
+// exponent bias is lhs_bias (resp. rhs_bias)
 // p_l = m_l + 1
 // p_r = m_r + 1
 // the output is an IEEE-encoded floating-point number on (f+q) bits
 // f is the output exponent width and
-// q is the size of the output significand (q - 1 is the size of the output mantissa)
+// q is the size of the output significand (the size of the output mantissa is q-1)
 BulkNormalizedDotProduct(A[n], B[n]) {
    let maxExp = 0
    let maskExpLHS = (1 << e_l) - 1 // bitmask for left hand side exponent
@@ -600,6 +601,10 @@ BulkNormalizedDotProduct(A[n], B[n]) {
    // boundary for exponent overflow (output format)
    // this is also the output exponent for infinity and NaN
    let overflowExp = (1 << f) - 1
+   let lhs_bias = (1 << (e_l - 1)) - 1
+   let rhs_bias = (1 << (e_r - 1)) - 1
+   let res_bias = (1 << (f - 1)) - 1
+   let prodOpBias = lhs_bias + rhs_bias
 
 
    // predicate output special cases
@@ -707,7 +712,7 @@ BulkNormalizedDotProduct(A[n], B[n]) {
     let accAbs = accSign ? -accumulator : accumulator;
     let lzc = LZC(accAbs) // leading zero count assuming g + q + 1 + o width
 
-    let resExp = accumulator == 0 ? 0 : ((maxExp + o + 1 - lzc) - prodOpBias)
+    let resExp = accumulator == 0 ? 0 : ((maxExp + o + 1 - lzc) - prodOpBias + res_bias)
     let unroundedSig = (accAbs << lzc) >> (g + o + 1)
     let rawJamMask = (1 << (g + o + 1)) - 1
     let jamMask = (rawJamMask >> (lzc > (g + o + 1) ? 0 : (g + o + 1 - lzc)))
