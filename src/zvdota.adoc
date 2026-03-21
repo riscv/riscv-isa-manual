@@ -525,10 +525,10 @@ representable number.
 
 Formally, bulk normalization is characterized by multiple parameters:
 
-- `p`: the size of each factor's significand (significand product is `2p`-bit wide, signed product is `2p+1`-bit wide)
-- `e`: the size of each factor's biased exponent (the bias is `2^(e-1) - 1`)
+- `p_l`, `p_r`: the size of each left (resp. right) hand side factor's significand (significand product is `p_l + p_r`-bit wide, signed product is `p_l + p_r + 1`-bit wide)
+- `e_l`, `e_r`: the size of each left (resp. right) hand side factor's biased exponent (the bias is 2^e_l-1^ - 1 resp. 2^e_r-1^ - 1)
 - `q`: the size of the result's significand
-- `f`: the size of the result's biased exponent (the bias is `2^(f-1) - 1`)
+- `f`: the size of the result's biased exponent (the bias is 2^f-1^ - 1)
 - `n`: the number of products accumulated
 - `o`: the number of overflow bits
 - `g`: the number of guard bits
@@ -543,23 +543,24 @@ Note:: It is expected that `n` would be a constant defined by each operation/imp
 
 Note:: Given the recommendation made on `n`, RVBNA mandates a fixed value of `g` for a given format size.
 This reduces the space of possible implementations. An implementation using RVBNA for different formats with different `n` values requires support for multiple values of `g`.
-Supporting multiple values of `g` is straightforward: an implementation can build a shared accumulator datapath based on the maximum `g` value: gmax.
+Supporting multiple values of `g` is straightforward: an implementation can build a shared accumulator datapath based on the maximum `g` value: `gmax`.
 Behavior for smaller `g` values would be obtained by OR-reducing both the sticky bits defined by `gmax` and the extra `gmax - g` least significant bits of the aligned products into the least significant accumulator bit. This should not require more than a few extra gates for hardware implementations.
 
-Note:: In its current version, RVBNA is only defined for symmetric products (i.e., both factors have the same `e` and `p`). It could be later extended to asymmetric products (mixed formats) if the need arises.
+Note:: Initially, RVBNA was only defined for symmetric products (i.e., `e_l = e_r` and `p_l = p_r`). The current definition generalizes RVBNA to asymmetric products.
+It is generally expected, but not necessary, that `e_l + p_l = e_r + p_r`.
 
 Informally, RVBNA works as follows:
 
 - Computing maximum exponent `max_exp`:
 **** Computing each product and the addend **reference exponent** (details in <<#RVBNAReferenceExponent>>)
 **** Computing `max_exp`, the maximum of the **reference exponents**
-- Aligning product magnitudes on `max_exp` (2 integer bits and `2*p-2` fractional bits)
-**** Each product is extended to `q-1+g` fractional bits (right padding of `(q-1+g) - (2*p-2)` zeros)
+- Aligning product magnitudes on `max_exp` (2 integer bits and `p_l + p_r -2` fractional bits)
+**** Each product is extended to `q-1+g` fractional bits (right padding of `(q-1+g) - (p_l + p_r -2)` zeros)
 **** Each extended product is right shifted by its reference exponent subtracted from `max_exp` (discarded significand bits are OR-reduced with any trailing bits when performing RTO)
 - Rounding to odd each aligned product magnitude
 - Selecting an accumulator sign `S`, negating the aligned-rounded product(s) whose sign does not match `S`
 - Accumulating the rounded products. If the final sum is negative, negate it and negate `S` as well
-- Normalizing/Denormalizing the result and round it to odd to binary32 mantissa `M`, computing the result exponent, `E`
+- Normalizing/Denormalizing the result and round it to odd to the output format (e.g. binary32) mantissa `M`, computing the result exponent, `E`
 - Building output result from `S`, `E`, and `M`
 
 Bulk Normalization is illustrated by Figure <<#RVBNAFig>>. 4 products are aligned.
@@ -577,17 +578,22 @@ The following is a functional description of bulk normalization:
 // overflow bits, o, are defined as:
 // g = o = log2(n)
 //
-// A[i] and B[i] are IEEE-encoded floating point numbers on (e+p) bits
-// (MSB is sign, next e bits are biased exponent, last m bits are the mantissa)
-// exponent bias is prodOpBias
-// p = m + 1
+// A[i] are IEEE-encoded floating point numbers on (e_l+p_l) bits
+// B[i] are IEEE-encoded floating point numbers on (e_r+p_r) bits
+// MSB is sign, next e_l (resp. e_r) bits are biased exponent,
+// last m_l (resp. m_r) bits are the mantissa.
+// exponent bias is lhs_bias (resp. rhs_bias)
+// p_l = m_l + 1
+// p_r = m_r + 1
 // the output is an IEEE-encoded floating-point number on (f+q) bits
 // f is the output exponent width and
-// q is the size of the output significand (q - 1 is the size of the output mantissa)
+// q is the size of the output significand (the size of the output mantissa is q-1)
 BulkNormalizedDotProduct(A[n], B[n]) {
    let maxExp = 0
-   let maskExp = (1 << e) - 1 // bitmask for exponent
-   let maskMant = (1 << m) - 1 // bitmask for mantissa
+   let maskExpLHS = (1 << e_l) - 1 // bitmask for left hand side exponent
+   let maskExpRHS = (1 << e_r) - 1 // bitmask for right hand side exponent
+   let maskMantLHS = (1 << m_l) - 1 // bitmask for left hand side mantissa
+   let maskMantRHS = (1 << m_r) - 1 // bitmask for right hand side mantissa
    let prodRefExps[n] = {0} // array of product reference exponents
    let prodSigns[n] = {0} // array of product signs
    let prodSigs[n] = {0} // array of significand products
@@ -595,6 +601,10 @@ BulkNormalizedDotProduct(A[n], B[n]) {
    // boundary for exponent overflow (output format)
    // this is also the output exponent for infinity and NaN
    let overflowExp = (1 << f) - 1
+   let lhs_bias = (1 << (e_l - 1)) - 1
+   let rhs_bias = (1 << (e_r - 1)) - 1
+   let res_bias = (1 << (f - 1)) - 1
+   let prodOpBias = lhs_bias + rhs_bias
 
 
    // predicate output special cases
@@ -611,12 +621,12 @@ BulkNormalizedDotProduct(A[n], B[n]) {
     for i in 0 to n - 1
         // extracting A[i] and B[i]'s encoded exponents
         // (which are also used as reference exponents for product aligment)
-        let A_i_exp = (A[i] >> m) & maskExp
-        let B_i_exp = (B[i] >> m) & maskExp
-        let A_i_mant = (A[i] & maskMant)
-        let B_i_mant = (B[i] & maskMant)
-        let A_i_sign = (A[i] >> (e + m)) & 0x1
-        let B_i_sign = (B[i] >> (e + m)) & 0x1
+        let A_i_exp = (A[i] >> m_l) & maskExpLHS
+        let B_i_exp = (B[i] >> m_r) & maskExpRHS
+        let A_i_mant = (A[i] & maskMantLHS)
+        let B_i_mant = (B[i] & maskMantRHS)
+        let A_i_sign = (A[i] >> (e_l + m_l)) & 0x1
+        let B_i_sign = (B[i] >> (e_r + m_r)) & 0x1
 
         prodSigns[i] = A_i_sign ^ B_i_sign
 
@@ -631,8 +641,8 @@ BulkNormalizedDotProduct(A[n], B[n]) {
         let B_i_isInf = (B_i_exp == maskExp) && (B_i_mant == 0)
         let A_i_isNaN = (A_i_exp == maskExp) && (A_i_mant != 0)
         let B_i_isNaN = (B_i_exp == maskExp) && (B_i_mant != 0)
-        let A_i_isSNaN = A_i_isNaN && (A_i_mant & (1 << (m - 1))) == 0
-        let B_i_isSNaN = B_i_isNaN && (B_i_mant & (1 << (m - 1))) == 0
+        let A_i_isSNaN = A_i_isNaN && (A_i_mant & (1 << (m_l - 1))) == 0
+        let B_i_isSNaN = B_i_isNaN && (B_i_mant & (1 << (m_r - 1))) == 0
 
         let invalidProd = (A_i_isInf && B_i_isZero) || (B_i_isInf && A_i_isZero)
         let infiniteProdLHS = (A_i_isInf && !B_i_isNaN  && !B_i_isZero)
@@ -646,8 +656,8 @@ BulkNormalizedDotProduct(A[n], B[n]) {
 
         nanResult ||= A_i_isNaN || B_i_isNaN || invalidProd || invalidSum
 
-        let A_i_sig = ((!A_i_isSub) << (p - 1)) | A_i_mant
-        let B_i_sig = ((!B_i_isSub) << (p - 1)) | B_i_mant
+        let A_i_sig = ((!A_i_isSub) << (p_l - 1)) | A_i_mant
+        let B_i_sig = ((!B_i_isSub) << (p_r - 1)) | B_i_mant
 
         prodSigs[i] =  A_i_sig * B_i_sig
 
@@ -677,14 +687,14 @@ BulkNormalizedDotProduct(A[n], B[n]) {
         let alignShift = maxExp - prodRefExps[i]
 
         // aligning i-th product
-        let padRight = q + 1 + g - (2 * p)
+        let padRight = q + 1 + g - (p_l + p_r)
         alignedProducts[i] = (prodSigs[i] << padRight) >> alignShift
 
         // evaluating values of discarded bits
         // a mask is built to extract the discarded bits
-        // - mask=0 if alignShift is <= q+1+g-2*p
-        // - mask=(1 << (2*p)) - 1 if alignShift=q+1+g
-        let discardedMask = ((1 << (2*p)) - 1) >> (q + 1 + g - alignShift)
+        // - mask=0 if alignShift is <= q+1+g-(p_l + p_r)
+        // - mask=(1 << (p_l + p_r)) - 1 if alignShift=q+1+g
+        let discardedMask = ((1 << (p_l + p_r)) - 1) >> (q + 1 + g - alignShift)
         let discardedBits = prodSigs[i] & discardedMask
         let jam = (alignShift >= (q+1+g) ? prodSigs[i] : discardedBits) != 0
 
@@ -702,7 +712,7 @@ BulkNormalizedDotProduct(A[n], B[n]) {
     let accAbs = accSign ? -accumulator : accumulator;
     let lzc = LZC(accAbs) // leading zero count assuming g + q + 1 + o width
 
-    let resExp = accumulator == 0 ? 0 : ((maxExp + o + 1 - lzc) - prodOpBias)
+    let resExp = accumulator == 0 ? 0 : ((maxExp + o + 1 - lzc) - prodOpBias + res_bias)
     let unroundedSig = (accAbs << lzc) >> (g + o + 1)
     let rawJamMask = (1 << (g + o + 1)) - 1
     let jamMask = (rawJamMask >> (lzc > (g + o + 1) ? 0 : (g + o + 1 - lzc)))
@@ -739,7 +749,7 @@ BulkNormalizedDotProduct(A[n], B[n]) {
 
 Note:: In the current specification the most significant bit of the max product has a weight of `max_exp + 1`, which means that there are `q-2+g` fractional bits in the max product. `g` could be increased to `ceil(log2(n)) + 1` to ensure the number of fractional bits is at least `q-1` (identical to the output format). Numerical impacts of the value of `g` have not been evaluated.
 
-Note:: Any one of the `2*p` bits of the max product can be the leading bit due to leading zeros in subnormal inputs. It is also possible for the maximum product to have more leading zeros than the other products (including when product alignment is taken into account). This is discussed in more detailed in the next section <<#RVBNAReferenceExponent>>.
+Note:: Any one of the `p_l + p_r` bits of the max product can be its leading bit due to leading zeros in subnormal inputs. It is also possible for the maximum product to have more leading zeros than the other products (including when product alignment is taken into account). This is discussed in more detailed in the next section <<#RVBNAReferenceExponent>>.
 
 Note:: The RVBNA pseudocode assumes that operands are IEEE encoded, but this is not actually a requirement of RVBNA.
 The pseudocode can easily be generalized to other floating-point encodings (e.g. Open Compute OFP formats).
@@ -753,11 +763,11 @@ The **reference exponent** is a proxy to the product exponent used to determine 
 
 
 The **reference exponent** of a product is evaluated as the sum of the factors' biased exponents.
-If a non-zero factor is subnormal then biased `emin_normal` (`=1`) is used as its biased exponent, for purposes of computing the **reference exponent**.
+If a non-zero factor is subnormal then biased `emin_normal` (`=1`) is used as its biased exponent, for purposes of computing the **reference exponent**. Note that in that case, the value is independent from the format. More generally, unbiasing is not needed to compute the reference exponent.
 
 Note:: the minimal reference exponent for a non-zero product is `2` (`emin_normal + emin_normal`).
 
-If a product operand is zero then the product exponent is set to a value which ensures that every non-zero product is considered greater than every zero product when determining the maximum product. A zero product should not force any loss of accuracy on non-zero products.
+If a product operand is zero then the product exponent is set to a value which ensures that every non-zero product is considered greater than every zero product when determining the maximum product. A zero product should not force any loss of accuracy on non-zero products. This can be obtained by setting the product reference exponent to zero for any zero product.
 
 Note:: for a dot product where the left hand side vector and the right hand side vector have different formats then the bias used for the exponent may differ.
 This bias has no impact on the difference between the **reference exponents**.
