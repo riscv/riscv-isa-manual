@@ -1,0 +1,386 @@
+== Introduction
+
+RISC-V was designed to provide a highly modular and extensible
+instruction set, and includes a large and growing set of standard
+extensions.  In addition, users may add their own custom
+extensions. This flexibility can be used to highly optimize a
+specialized design by including only the exact set of ISA features
+required for an application, but the same flexibility also leads to a
+combinatorial explosion in possible ISA choices.  Profiles specify a
+much smaller common set of ISA choices that capture the most value for
+most users, and which thereby enable the software community to focus
+resources on building a rich software ecosystem with application and
+operating system portability across different implementations.
+
+NOTE: Another pragmatic concern is the long and unwieldy ISA strings
+required to encode common sets of extensions, which will continue to
+grow as new extensions are defined.
+
+Each profile is built on a standard base ISA plus a set of mandatory
+ISA extensions, and provides a small set of standard ISA options to
+extend the mandatory components.  Profiles provide a convenient
+shorthand for describing the ISA portions of hardware and software
+platforms, and also guide the development of common software
+toolchains shared by different platforms that use the same profile.
+The intent is that the software ecosystem focus on supporting the
+profiles' mandatory base and standard options, instead of attempting
+to support every possible combination of individual extensions.
+Similarly, hardware vendors should aim to structure their offerings
+around standard profiles to increase the likelihood their designs will
+have mainstream software support.
+
+NOTE: Profiles are not intended to prohibit the use of combinations of
+individual ISA extensions or the addition of custom extensions, which
+can continue to be used for more specialized applications albeit
+without the expectation of widespread software support or portability
+between hardware platforms.
+
+NOTE: As RISC-V evolves over time, the set of ISA features will grow,
+and new platforms will be added that may need different profiles.  To
+manage this evolution, RISC-V is adopting a model of regular annual
+releases of new ISA profiles, following an ISA roadmap managed by the
+RISC-V Technical Steering Committee.  The architecture profiles will
+also be used for branding and to advertise compatibility with the
+RISC-V standard.
+
+This document describes the general structure of RISC-V architecture
+profiles and also the specifics of the first few profiles: RVI20 is a
+generic RISC-V unprivileged software profile, and RVA20 and RVA22 are
+architecture profiles for application processors.
+
+=== Profiles versus Platforms
+
+Profiles only describe ISA features, not a complete execution
+environment.
+
+A _software_ _platform_ is a specification for an execution
+environment, in which software targeted for that software platform can
+run.
+
+A _hardware_ _platform_ is a specification for a hardware system
+(which can be viewed as a physical realization of an execution
+environment).
+
+Both software and hardware platforms include specifications for many
+features beyond details of the ISA used by RISC-V harts in the
+platform (e.g., boot process, calling convention, behavior of
+environment calls, discovery mechanism, presence of certain
+memory-mapped hardware devices, etc.).  Architecture profiles factor
+out ISA-specific definitions from platform definitions to allow ISA
+profiles to be reused across different platforms, and to be used by
+tools (e.g., compilers) that are common across many different
+platforms.
+
+A platform can add additional constraints on top of those in a
+profile.  For example, mandating an extension that is a standard
+option in the underlying profile, or constraining some
+implementation-specific parameter in the profile to lie within a
+certain range.
+
+A platform cannot remove mandates or reduce other requirements in a
+profile.
+
+NOTE: A new profile should be proposed if existing profiles do not
+match the needs of a new platform.
+
+=== Components of a Profile
+
+==== Profile Family
+
+Every profile is a member of a _profile_ _family_.  A profile family
+is a set of profiles that share the same base ISA but which vary in
+highest-supported privilege mode.  The initial two types of family
+are:
+
+- generic unprivileged instructions (I)
+- application processors running rich operating systems (A)
+
+NOTE: More profile families may be added over time.
+
+A profile family may be updated no more than annually, and the release
+calendar year is treated as part of the profile family name.
+
+Each profile family is described in more detail below.
+
+==== Profile Privilege Mode
+
+RISC-V has a layered architecture supporting multiple privilege modes,
+and most RISC-V platforms support more than one privilege mode.
+Software is usually written assuming a particular privilege mode
+during execution.  For example, application code is written assuming
+it will be run in user mode, and kernel code is written assuming it
+will be run in supervisor mode.
+
+NOTE: Software can be run in a mode different than the one for which
+it was written. For example, privileged code using privileged ISA
+features can be run in a user-mode execution environment, but will
+then cause traps into the enclosing execution environment when
+privileged instructions are executed.  This behavior might be
+exploited, for example, to emulate a privileged execution environment
+using a user-mode execution environment.
+
+The profile for a privilege mode describes the ISA features for an
+execution environment that has the eponymous privilege mode as the
+most-privileged mode available, but also includes all supported
+lower-privilege modes.  In general, available instructions vary by
+privilege mode, and the behavior of RISC-V instructions can depend on
+the current privilege mode.  For example, an S-mode profile includes
+U-mode as well as S-mode and describes the behavior of instructions
+when running in different modes in an S-mode execution environment,
+such as how an `ecall` instruction in U-mode causes a contained trap
+into an S-mode handler whereas an `ecall` in S-mode causes a requested
+trap out to the execution environment.
+
+A profile may specify that certain conditions will cause a requested
+trap (such as an `ecall` made in the highest-supported privilege mode)
+or fatal trap to the enclosing execution environment.  The profile
+does not specify the behavior of the enclosing execution environment
+in handling requested or fatal traps.
+
+NOTE: In particular, a profile does not specify the set of ECALLs
+available in the outer execution environment.  This should be
+documented in the appropriate binary interface to the outer execution
+environment (e.g., Linux user ABI, or RISC-V SEE).
+
+NOTE: In general, a profile can be implemented by an execution
+environment using any hardware or software technique that provides
+compatible functionality, including pure software emulation.
+
+A profile does not specify any invisible traps.
+
+NOTE: In particular, a profile does not constrain how invisible traps
+to a more-privileged mode can be used to emulate profile features.
+
+A more-privileged profile can always support running software to
+implement a less-privileged profile from the same profile family.  For
+example, a platform supporting the S-mode profile can run a
+supervisor-mode operating system that provides user-mode execution
+environments supporting the U-mode profile.
+
+NOTE: Instructions in a U-mode profile, which are all executed in user
+mode, have potentially different behaviors than instructions executed
+in user mode in an S-mode profile.  For this reason, a U-mode profile
+cannot be considered a subset of an S-mode profile.
+
+==== Profile ISA Features
+
+An architecture profile has a mandatory ratified base instruction set
+(RV32I or RV64I for the current profiles).  The profile also includes
+ratified ISA extensions placed into two categories:
+
+. Mandatory
+. Optional
+
+As the name implies, _Mandatory_ _ISA_ _extensions_ are a required
+part of the profile.  Implementations of the profile must provide
+these.  The combination of the profile base ISA plus the mandatory ISA
+extensions are termed the profile _mandates_, and software using the
+profile can assume these always exist.
+
+The _Optional_ category (also known as _options_) contains extensions
+that may be added as options, and which are expected to be generally
+supported as options by the software ecosystem for this profile.
+
+NOTE: The level of "support" for an Optional extension will likely
+vary greatly among different software components supporting a profile.
+Users would expect that software claiming compatibility with a profile
+would make use of any available supported options, but as a bare
+minimum software should not report errors or warnings when supported
+options are present in a system.
+
+An optional extension may comprise many individually named and
+ratified extensions but a profile option requires all constituent
+extensions are present.  In particular, unless explicitly listed as a
+profile option, individual extensions are not by themselves a profile
+option even when required as part of a profile option.  For example,
+the Zbkb extension is not by itself a profile option even though it is a
+required component of the Zkn option.
+
+NOTE: Profile optional extensions are intended to capture the
+granularity at which the broad software ecosystem is expected to cope
+with combinations of extensions.
+
+All components of a ratified profile must themselves have been
+ratified.
+
+Platforms may provide a discovery mechanism to determine what optional
+extensions are present.
+
+Extensions that are not explicitly listed in the mandatory or optional
+categories are termed _non-profile_ extensions, and are not considered
+parts of the profile.  Some non-profile extensions can be added to an
+implementation without conflicting with the mandatory or optional
+components of a profile.  In this case, the implementation is still
+compatible with the profile even though additional non-profile
+extensions are present.  Other non-profile extensions added to an
+implementation might alter or conflict with the behavior of the
+mandatory or optional extensions in a profile, in which case the
+implementation would not be compatible with the profile.
+
+NOTE: Extensions that are released after a given profile is released
+are by definition non-profile extensions.  For example, mandatory or
+optional profile extensions for a new profile might be prototyped as
+non-profile extensions on an earlier profile.
+
+==== Profile Naming Convention
+
+A profile name is a string comprised of, in order:
+
+. Prefix *RV* for RISC-V.
+. A specific profile family name string.  Initially a single letter (*I*, *M*, or *A*), but later profiles may have longer family name strings.
+. A numeric string giving the first complete calendar year for which
+the profile is ratified, represented as number of years after year
+2000, i.e., *20* for profiles built on specifications ratified during 2019. The year string will be longer than two digits in the next century.
+. A privilege mode (*U*, *S*, *M*).  Hypervisor support is treated as an option.
+. A base ISA XLEN specifier (*32*, *64*).
+
+The initial profiles based on specifications ratified in 2019 are:
+
+- RVI20U32 basic unprivileged instructions for RV32I
+- RVI20U64 basic unprivileged instructions for RV64I
+- RVA20U64, RVA20S64 64-bit application-processor profiles
+
+NOTE: Profile names are embeddable into RISC-V ISA naming strings.
+This implies that there will be no standard ISA extension with a name
+that matches the profile naming convention.  This allows tools that
+process the RISC-V ISA naming string to parse and/or process a combined
+string.
+
+==== RVA Profiles Rationale
+
+RISC-V was designed to provide a highly modular and extensible
+instruction set and includes a large and growing set of standard
+extensions, where each standard extension is a bundle of
+instruction-set features.  This is no different than other industry
+ISAs that continue to add new ISA features.  Unlike other ISAs,
+however, RISC-V has a broad set of contributors and implementers, and
+also allows users to add their own custom extensions.  For some deep
+embedded markets, highly customized processor configurations are
+desirable for efficiency, and all software is compiled, ported, and/or
+developed in-house by the same organization for that specific
+processor configuration.  However, for other markets that expect a
+substantial fraction of software to be delivered to end-customers in
+binary form, compatibility across multiple implementations from
+different RISC-V vendors is required.
+
+The RVIA ISA extension ratification process ensures that all processor
+vendors have agreed to the specification of a standard extension if
+present.  However, by themselves, the ISA extension specifications do
+not guarantee that a certain set of standard extensions will be
+present in all implementations.
+
+*The primary goal of the RVA profiles is to align processor vendors
+targeting binary software markets, so software can rely on the
+existence of a certain set of ISA features in a particular generation
+of RISC-V implementations.*
+
+Alignment is not only for compatibility, but also to ensure RISC-V is
+competitive in these markets.  The binary app markets are also
+generally those with the most competitive performance requirements
+(e.g., mobile, client, server).  RVIA cannot mandate the ISA features
+that a RISC-V binary software ecosystem should use, as each ecosystem
+will typically select the lowest-common denominator they empirically
+observe in the deployed devices in their target markets.  But RVIA can
+align hardware vendors to support a common set of features in each
+generation through the RVA profiles.  Without proactive alignment
+through RVA profiles, RISC-V will be uncompetitive, as even if a
+particular vendor implements a certain feature, if other vendors do
+not, then binary distributions will not generally use that feature and
+all implementations will suffer.  While certain features may be
+discoverable, and alternate code provided in case of presence/absence
+of a feature, the added cost to support such options is only justified
+for certain limited cases, and binary app markets will not support a
+wide range of optional features, particularly for the nascent RISC-V
+binary app ecosystems.
+
+To maintain alignment and increase RISC-V competitiveness over time,
+the mandatory set of extensions must increase over time in successive
+generations of RVA profile.  (RVA profiles may eventually have to
+deprecate previously mandatory instructions, but that is unlikely in
+the near future.)  Note that the RISC-V ISA will continue to evolve,
+regardless of whether a given software ecosystem settles on a certain
+generation of profile as the baseline for their ecosystem for many
+years or even decades.  There are many existing binary software
+ecosystems, which will migrate to RISC-V and evolve at different rates,
+and more new ones will doubtless be created over the hopefully long
+lifetime of RISC-V.  High-performance application processors require
+considerable investment, and no single binary app ecosystem can
+justify the development costs of these processors, especially for
+RISC-V in its early stage of adoption.
+
+While the heart of the profile is the set of mandatory extensions,
+there are several kinds of optional extension that serve important
+roles in the profile.
+
+The first kind are _localized_ _options_, whose presence or use
+necessarily differs along geo-political and/or jurisdictional
+boundaries, with crypto being the obvious example.  These will always
+be optional.  At least for crypto, discovery has been found to be
+perfectly acceptable to handle this optionality on other
+architectures, as the use of the extensions is well contained in
+certain libraries.
+
+The second kind of optional extension is a _development_ _option_,
+which represents a new ISA extension in an early part of its lifecycle
+but which is intended to become mandatory in a later generation of the
+RVA profile.  Processor vendors and software toolchain providers will
+have varying development schedules, and providing an optional phase in
+a new extension's lifecycle provides some flexibility while
+maintaining overall alignment, and is particularly appropriate when
+hardware or software development for the extension is complex.
+Denoting an extension as a _development_ _option_ signals to the
+community that development should be prioritized for such extensions
+as they will become mandatory.
+
+The third kind of optional extension are _expansion_ _options_, which
+are those that may have a large implementation cost but are not always
+needed in a particular platform, and which can be readily handled by
+discovery. These are also intended to remain available as expansion
+options in future versions of the profile.  Several supervisor-mode
+extensions fall into this category, e.g., Sv57, which has a notable
+PPA impact over Sv48 and is not needed on smaller platforms.  Some
+unprivileged extensions that may fall into this category are possible
+future matrix extensions.  These have large implementation costs, and
+use of matrix instructions can be readily supported with discovery and
+alternate math libraries.
+
+The fourth kind of optional extensions are _transitory_ _options_,
+where it is not clear if the extension will change to a mandatory,
+localized, or expansion option, or be possibly dropped over time.
+Cryptography provides some examples where earlier cyphers have been
+broken and are now deprecated.  RVIA used this mechanism to enable
+scalar crypto until vector crypto was ready.  Software security
+features may also be in this category, with examples of deprecated
+security features occuring in other architectures.  As another
+example, the recent avalanche of new numeric datatypes for AI/ML may
+eventually subside with a few survivors actually being used longer
+term.  Denoting an option as transitory signals to the community that
+this extension may be removed in a future profile, though the time
+scale may span many years.
+
+Except for the localized options, it could be argued that other three
+kinds of option could be left out of profiles.  Binary distributions
+of applications willing to invest in discovery can use an optional
+extension, and customers compiling their own applications can take
+advantage of the feature on a particular implementation, even when
+that system is mostly running binary distributions that ignore the new
+extension.  However, there is value in providing guidance to align
+hardware vendors and software developers around what extensions are
+worth implementing and worth discovering, by designating only a few
+important features as profile options and limiting their granularity.
+
+==== Profile-Defined Extensions
+
+These profiles include several new
+extensions defined directly in the profile text.  These
+profile-defined extensions name optional features or combinations of
+features that are already present in ratified specifications, but that
+were not previously explicitly named.  Once the profile is ratified,
+these extension definitions will move into the appropriate sections of
+the combined ISA manual. The combined ISA manual was not available at
+the start of this profile definition.  Future profile proposals will
+be presented as an update to the combined ISA manual, with new
+profile-defined extensions provided as edits to the appropriate
+sections of the combined ISA manual.
+
+//
