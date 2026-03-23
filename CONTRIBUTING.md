@@ -65,7 +65,7 @@ Outputs land in the `build/` directory.
 
 ## Repository structure
 
-- `src/` is the canonical AsciiDoc content used by `make` builds. `src/riscv-unprivileged.adoc` and `src/riscv-privileged.adoc` are the entrypoints that include chapter files.
+- `src/` is the canonical AsciiDoc content used by `make` builds. `src/riscv-spec.adoc` is the entry point that includes volume files (e.g. `unpriv.adoc` and `priv.adoc`).
 - `modules/` contains the Antora site sources. `modules/unpriv/pages` and `modules/priv/pages` mirror chapter files for the site, and `modules/*/nav.adoc` controls navigation.
 - `docs-resources/` is a submodule with shared themes, converters, schemas, and tooling.
 - `normative_rule_defs/` contains one YAML definition file per chapter for normative rules.
@@ -76,7 +76,7 @@ Outputs land in the `build/` directory.
 NOTE: New RISC-V specifications may only be developed by RISC-V International members through the formal ratification process and in accordance with the applicable Technical Steering Committee policies. Specifications cannot be introduced arbitrarily or by submitting an unsolicited pull request.
 
 1. Create `src/<extension>.adoc` with the new chapter content.
-2. Add an `include::` line in the appropriate entrypoint (`src/riscv-unprivileged.adoc` or `src/riscv-privileged.adoc`) in the correct order.
+2. Add an `include::` line in the appropriate volume (e.g. `src/unpriv.adoc` or `src/priv.adoc`) in the correct order.
 
 ## Sign your commits
 
