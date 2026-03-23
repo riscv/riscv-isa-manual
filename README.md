@@ -33,7 +33,7 @@ Alternative build methods, such as local builds and GitHub Action builds, are al
 
 ## Images not rendered for EPUB files
 
-If the eBook reader does not support embedded images, uncomment `:data-uri:` lines in `src/riscv-privileged.adoc` and `src/riscv-unprivileged.adoc`.
+If the eBook reader does not support embedded images, uncomment `:data-uri:` line in `src/riscv-spec.adoc`.
 
 ### Known devices that cannot handle embedded images
 
