@@ -8,7 +8,7 @@ echo '|=========================|'
 make build-tags
 
 # Iterate through all configured specifications
-SPECS="unprivileged privileged"
+SPECS="riscv-spec"
 for spec in $SPECS; do
   echo
   echo "|===================================|"
@@ -16,8 +16,8 @@ for spec in $SPECS; do
   echo "|===================================|"
   python3 docs-resources/tools/detect_tag_changes.py \
     --update-reference \
-    ref/riscv-$spec-norm-tags.json \
-    build/riscv-$spec-norm-tags.json
+    ref/$spec-norm-tags.json \
+    build/$spec-norm-tags.json
 done
 
 echo
