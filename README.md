@@ -10,6 +10,7 @@ The RISC-V Instruction Set Manual is organized into the following volumes:
 
 - Volume I: Unprivileged Architecture
 - Volume II: Privileged Architecture
+- Volume III: Profiles
 
 ## Official and Draft Versions
 
@@ -18,6 +19,7 @@ The RISC-V Instruction Set Manual is organized into the following volumes:
 - **HTML snapshots of the latest commit** can be viewed at the following locations:
   - [Unprivileged spec](https://riscv.github.io/riscv-isa-manual/snapshot/spec/#vol:unpriv)
   - [Privileged spec](https://riscv.github.io/riscv-isa-manual/snapshot/spec/#vol:priv)
+  - [Profiles spec](https://riscv.github.io/riscv-isa-manual/snapshot/spec/#vol:profiles)
 - **Older official versions** of the specifications are archived at the [GitHub releases archive](https://github.com/riscv/riscv-isa-manual/releases/tag/archive).
 
 The canonical list of **open-source RISC-V implementations' marchid CSR values** is available in the [marchid.md file](https://github.com/riscv/riscv-isa-manual/blob/main/marchid.md).
