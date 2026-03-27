@@ -121,6 +121,8 @@ git log --show-signature -1
 
 ## Option B: Sign commits with GPG
 
+For a comprehensive guide, see [GitHub's documentation on telling Git about your signing key](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key).
+
 ### 1. Install GPG
 - macOS:
 ```bash
@@ -136,23 +138,28 @@ sudo apt-get install gnupg
 ```bash
 gpg --full-generate-key
 ```
+Select RSA and RSA, 4096 bits, and enter your name and email (must match your GitHub account email).
 
 ### 3. List keys and copy the key ID
 ```bash
 gpg --list-secret-keys --keyid-format=long
 ```
+The key ID is the hex string after `sec rsa4096/` on the `sec` line. For example, if the output shows `sec rsa4096/3AA5C34371567BD2`, then `3AA5C34371567BD2` is your key ID.
 
 ### 4. Configure Git to sign commits
 ```bash
-git config --global user.signingkey YOUR_KEY_ID
+git config --global user.signingkey 3AA5C34371567BD2
 git config --global commit.gpgsign true
 ```
+Replace `3AA5C34371567BD2` with your actual key ID from step 3.
 
 ### 5. Export the public key and add it to GitHub
 ```bash
-gpg --armor --export YOUR_KEY_ID
+gpg --armor --export 3AA5C34371567BD2
 ```
-GitHub → Settings → **SSH and GPG keys** → **New GPG key**
+Copy the entire output (including `-----BEGIN PGP PUBLIC KEY BLOCK-----` and `-----END PGP PUBLIC KEY BLOCK-----`).
+
+GitHub → Settings → **SSH and GPG keys** → **New GPG key** → paste the public key.
 
 ### 6. Create a signed commit
 ```bash
