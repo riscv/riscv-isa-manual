@@ -105,3 +105,33 @@ Several limitations arise from this emulation approach:
 
 The Zabha extension addresses these limitations by adding support for _byte_ and
 _halfword_ atomic memory operations to the RISC-V Unprivileged ISA.
+
+=== "Zvbc32e" Extension for Vector Carry-less Multiplication for `SEW` {le} 32
+
+
+<<Zvbc>> defines vector carry-less multiplication instructions for `SEW`=64 only.
+It is not suitable for implementations with small `ELEN` (32) and incurs some inefficiencies for algorithms where at least one of the multiplication operands is limited to 32 bits (or less).
+The list of such algorithms includes the CLM-based folding algorithm used to compute the widespread 32-bit CRCs (e.g. Ethernet CRC)
+With Zvbc, only half the 64-bit element multiplication provided is exploited.
+This is due to the fact that CRC acceleration based on carry-less multiplication often relies on a product term which is a polynomial modulo the CRC.
+This limits the size of this term to the output size of the CRC.
+
+Zvbc32e defines the same vector carry-less multiplication operations as Zvbc but on smaller SEW values (32, 16, and 8 bits).
+It can be leveraged by implementations with any `ELEN` value {ge} 32.
+For implementations with small `ELEN` (32), supporting Zvbc32e brings ISA support for vector carry-less multiplication (which was not possible through Zvbc alone).
+
+Zvbc32e is also useful for implementations with `ELEN` {ge} 64, as it allows more efficient implementations of algorithms relying on 32-bit (or less) carry-less multiplications.
+Selecting only Zvbc32e allows implementations to save area while providing identical performance on those algorithms.
+
+For all implementations, `Zvbc32e` allows better implementations (less instructions and more targeted use of hardware resources) of algorithms relying on 8-bit and 16-bit carry-less multiplications (e.g. erasure coding).
+
+
+=== "Zvkgs"  Extension for Vector-Scalar GCM/GHASH
+
+One of the key use cases for the vector instructions `vghsh.vv` and `vgmul.vv` defined in <<Zvkg>> is to speed-up the Galois Counter Mode (GCM) cipher mode for a single encryption/decryption stream by computing the GHASH algorithm for multiple blocks of the same message in parallel (using the same symmetric key).
+The parallel processing accumulates and multiplies multiple blocks of the message by the same power of `H` (`H` is the encryption of `0` by the cipher key).
+The power being equal to the number of blocks processed in parallel.
+The processing completes by reducing the parallel accumulators into a single output tag.
+With `Zvkg` only, a full vector register was required to hold the multiple copies of the power of H.
+`Zvkgs` reduces the size of the vector register group needed for powers of H: it just needs to contain a 128-bit wide element group, freeing some vector registers (The exact number of freed registers depends on VLEN and LMUL).
+This exploits the same scalar element group broadcast mechanism used in other instructions defined in the vector crypto extensions (e.g. `vaesem.vs` from <<Zvkned>>).
