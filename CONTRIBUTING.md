@@ -148,14 +148,14 @@ The key ID is the hex string after `sec rsa4096/` on the `sec` line. For example
 
 ### 4. Configure Git to sign commits
 ```bash
-git config --global user.signingkey 3AA5C34371567BD2
+git config --global user.signingkey YOUR_KEY_ID
 git config --global commit.gpgsign true
 ```
 Replace `3AA5C34371567BD2` with your actual key ID from step 3.
 
 ### 5. Export the public key and add it to GitHub
 ```bash
-gpg --armor --export 3AA5C34371567BD2
+gpg --armor --export YOUR_KEY_ID
 ```
 Copy the entire output (including `-----BEGIN PGP PUBLIC KEY BLOCK-----` and `-----END PGP PUBLIC KEY BLOCK-----`).
 
