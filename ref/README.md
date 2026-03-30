@@ -21,7 +21,7 @@ Normative tags mark text that defines official RISC-V specification behavior. Ch
 
 1. **Tag Extraction**: During the build process (`make build-tags`), normative tags are extracted from AsciiDoc source files using a custom Asciidoctor backend (`docs-resources/converters/tags.rb`).
 
-2. **Change Detection**: The `detect_tag_changes.rb` script compares the newly extracted tags against these reference files to identify additions, modifications, and deletions.
+2. **Change Detection**: The `detect_tag_changes.py` script compares the newly extracted tags against these reference files to identify additions, modifications, and deletions.
 
 3. **CI Integration**: The GitHub Actions workflow (`.github/workflows/check-normative-tags.yml`) runs this check on every PR and push to detect normative changes.
 
@@ -80,7 +80,7 @@ The tag names correspond to AsciiDoc anchors prefixed with `norm:` in the source
 
 ## Related Files
 
-- `docs-resources/tools/detect_tag_changes.rb` - Change detection script
+- `docs-resources/tools/detect_tag_changes.py` - Change detection script
 - `docs-resources/converters/tags.rb` - Tag extraction backend
 - `.github/workflows/check-normative-tags.yml` - CI workflow
 - `.github/scripts/create-tag-change-issue.js` - Issue creation script

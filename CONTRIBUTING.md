@@ -65,7 +65,7 @@ Outputs land in the `build/` directory.
 
 ## Repository structure
 
-- `src/` is the canonical AsciiDoc content used by `make` builds. `src/riscv-unprivileged.adoc` and `src/riscv-privileged.adoc` are the entrypoints that include chapter files.
+- `src/` is the canonical AsciiDoc content used by `make` builds. `src/riscv-spec.adoc` is the entry point that includes volume files (e.g. `unpriv.adoc` and `priv.adoc`).
 - `modules/` contains the Antora site sources. `modules/unpriv/pages` and `modules/priv/pages` mirror chapter files for the site, and `modules/*/nav.adoc` controls navigation.
 - `docs-resources/` is a submodule with shared themes, converters, schemas, and tooling.
 - `normative_rule_defs/` contains one YAML definition file per chapter for normative rules.
@@ -76,7 +76,7 @@ Outputs land in the `build/` directory.
 NOTE: New RISC-V specifications may only be developed by RISC-V International members through the formal ratification process and in accordance with the applicable Technical Steering Committee policies. Specifications cannot be introduced arbitrarily or by submitting an unsolicited pull request.
 
 1. Create `src/<extension>.adoc` with the new chapter content.
-2. Add an `include::` line in the appropriate entrypoint (`src/riscv-unprivileged.adoc` or `src/riscv-privileged.adoc`) in the correct order.
+2. Add an `include::` line in the appropriate volume (e.g. `src/unpriv.adoc` or `src/priv.adoc`) in the correct order.
 
 ## Sign your commits
 
@@ -121,6 +121,8 @@ git log --show-signature -1
 
 ## Option B: Sign commits with GPG
 
+For a comprehensive guide, see [GitHub's documentation on telling Git about your signing key](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key).
+
 ### 1. Install GPG
 - macOS:
 ```bash
@@ -136,23 +138,28 @@ sudo apt-get install gnupg
 ```bash
 gpg --full-generate-key
 ```
+Select RSA and RSA, 4096 bits, and enter your name and email (must match your GitHub account email).
 
 ### 3. List keys and copy the key ID
 ```bash
 gpg --list-secret-keys --keyid-format=long
 ```
+The key ID is the hex string after `sec rsa4096/` on the `sec` line. For example, if the output shows `sec rsa4096/3AA5C34371567BD2`, then `3AA5C34371567BD2` is your key ID.
 
 ### 4. Configure Git to sign commits
 ```bash
 git config --global user.signingkey YOUR_KEY_ID
 git config --global commit.gpgsign true
 ```
+Replace `3AA5C34371567BD2` with your actual key ID from step 3.
 
 ### 5. Export the public key and add it to GitHub
 ```bash
 gpg --armor --export YOUR_KEY_ID
 ```
-GitHub → Settings → **SSH and GPG keys** → **New GPG key**
+Copy the entire output (including `-----BEGIN PGP PUBLIC KEY BLOCK-----` and `-----END PGP PUBLIC KEY BLOCK-----`).
+
+GitHub → Settings → **SSH and GPG keys** → **New GPG key** → paste the public key.
 
 ### 6. Create a signed commit
 ```bash
