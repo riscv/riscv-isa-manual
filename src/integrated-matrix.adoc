@@ -346,7 +346,7 @@ the `vm` bit in the encoding must be 1.
 For `vmmacc.vv`, `vm=0` is _reserved_.
 For `vwmmacc.vv`, `vqwmmacc.vv`, and `v8wmmacc.vv`, `vm=0` encodes
 `vfwimmacc.vv`, `vfqwimmacc.vv`, and `vf8wimmacc.vv` respectively —
-integer-input, floating-point-accumulate, E8M0-microscaled
+integer-input, floating-point-accumulate, microscaled
 instructions (see <<integrated-matrix-microscaling>> and <<tbl-intmx-encoding-map>>).
 For floating-point multiply-accumulate instructions, `vm=0` enables
 microscaling (see <<integrated-matrix-microscaling>>).
@@ -505,8 +505,8 @@ The K-dimension, tile-dimension formulae, MUL_C, and instruction-to-widening-fac
 
 As with the integer multiply-accumulate instructions, vector masking is not
 supported.  When `vm=0`, the instruction does not apply a vector mask;
-instead, `v0` supplies paired E8M0 block-scale factors for microscaling
-operation (see <<integrated-matrix-microscaling>>).
+instead, `v0` supplies paired block-scale factors for microscaling
+(see <<integrated-matrix-microscaling>>).
 
 ===== Mixed-format inputs arithmetic considerations
 
@@ -605,18 +605,21 @@ activation tensors with outliers.
 .Block scaling multiplication example with SEW=16, λ=4, W=4, LMUL=1. Block scales are applied along A rows and B columns.
 image::png/ime-block-scaling.png[align="center", width="50%"]
 
-The Integrated Matrix extensions support microscaling on all floating-point
-multiply-accumulate instructions by encoding `vm=0` in the instruction and
-supplying paired E8M0 block-scale factors through `v0`.  The `bs` field in
-`vtype` selects the block size (32 or 16 elements).
+The Integrated Matrix extensions support microscaling on widening
+floating-point multiply-accumulate instructions by encoding `vm=0` in the
+instruction and supplying paired block-scale factors through `v0`.
+The scale format is not implied by `v0.scale` itself; it is an inherent
+property of the input data type (e.g., MXFP8 = OFP8 with E8M0 scales,
+MXINT8 = Int8 with E8M0 scales).
+The `bs` field in `vtype` selects the block size (32 or 16 elements).
 
 The assembly syntax for a microscaled operation appends `v0.scale` as the
 final operand, analogous to `v0.t` for masked operations in the base V
 extension:
 
-    vfmmacc.vv   vd, vs1, vs2, v0.scale
     vfwmmacc.vv  vd, vs1, vs2, v0.scale
     vfqwmmacc.vv vd, vs1, vs2, v0.scale
+    vf8wmmacc.vv vd, vs1, vs2, v0.scale
 
 When `vm=0` is not specified (i.e., `vm=1`, the default), no scaling is
 applied, `v0` is not read, and the `bs` field is ignored.
@@ -631,16 +634,29 @@ where S = ⌈K_eff / block_size⌉ is the number of scale blocks per
 row/column, and block _s_ covers elements
 [s × block_size, min((s+1) × block_size, K_eff) − 1].
 
-stem:[\text{scale_A}_{m,s}] and stem:[\text{scale_B}_{n,s}] are power-of-two values decoded from
-8-bit E8M0 fields in `v0`.  The E8M0 format uses an 8-bit biased exponent
-(bias 127) representing values from 2^−127^ to 2^127^; the bit pattern
-0xFF encodes NaN.
+stem:[\text{scale_A}_{m,s}] and stem:[\text{scale_B}_{n,s}] are decoded from the
+per-block scale fields in `v0` according to the scale format associated
+with the input data type.
+If any decoded scale is NaN, the corresponding output element
+stem:[C_{m,n}] is set to the default NaN regardless of the input element
+values.
 
-The per-block scales for A and B are applied as exact power-of-two
-multiplications (implemented as exponent additions) and therefore introduce
-no rounding error.  If any stem:[\text{scale_A}_{m,s}] or stem:[\text{scale_B}_{n,s}] is NaN
-(0xFF), the corresponding output element stem:[C_{m,n}] is set to the default NaN
-regardless of the input element values.
+[#integrated-matrix-scale-formats]
+===== Scale formats
+
+The scale format is determined by the input data type, not by the
+`v0.scale` mechanism itself.  All MX data types currently defined by this
+specification use the E8M0 scale format.
+
+====== E8M0
+
+The E8M0 format (as defined by the
+_OCP Microscaling Formats (MX) v1.0 Specification_) is an 8-bit
+exponent-only format with a bias of 127, representing power-of-two values
+from 2^−127^ to 2^127^.  The bit pattern 0xFF encodes NaN.
+
+Because E8M0 values are exact powers of two, scale application is
+equivalent to exponent addition and introduces no rounding error.
 
 When a non-NaN E8M0 value represents a power-of-two that overflows the
 accumulator FP format (e.g. 2^128^ cannot be represented in FP16 which
@@ -654,12 +670,15 @@ implementation-defined result.
 
 ===== Scale layout in `v0`
 
-The register `v0` holds paired E8M0 scale values at an effective element
+The register `v0` holds paired scale values at an effective element
 width of 16 bits.  Each 16-bit element contains one (scale_A, scale_B)
-pair:
+pair, regardless of the scale format:
 
-* Lower byte [7:0]: `scale_A` — the E8M0 scale for a row of A
-* Upper byte [15:8]: `scale_B` — the E8M0 scale for a column of B
+* Lower byte [7:0]: `scale_A` — the block scale for a row of A
+* Upper byte [15:8]: `scale_B` — the block scale for a column of B
+
+The interpretation of each 8-bit field is determined by the scale format
+associated with the input data type (see <<integrated-matrix-scale-formats>>).
 
 [#ime-block-scale-v0]
 .Block scales are folded into `v0` in pairs, separated by the row stride R = λ × SEW / 16. Each block-scale pair is used for `bs` consecutive tile elements in the corresponding A row / B^T^ column. In matrix-tile representation `v0` has the paired scales arranged in the correct tile rows. In a multi-lane setup the scales are distributed across the lanes appropriately.
@@ -917,9 +936,10 @@ each scale array with the correct tile stride, then `vzip.vv` pairs them:
 
 ===== Microscaling subextensions
 
-Microscaling subextensions that add E8M0-scaled variants of the narrow
-input formats (OFP4, OFP8) are listed separately in
+Microscaling subextensions that add block-scaled variants of the narrow
+input formats (OFP4, OFP8, Int4, Int8) are listed separately in
 <<tbl-mx-subextensions>>.
+All currently defined microscaling subextensions use the E8M0 scale format.
 
 [#zvvmtls,reftext=Load/store instructions for matrix tiles]
 === Zvvmtls: Extension for loading and storing vector registers interpreted as 2D matrix tiles
@@ -1709,9 +1729,13 @@ function mat_C_idx(i : int, j : int, M : int,
 // fp_zero(EEW : int, fmt : fp_fmt) -> bits(EEW)
 //   Return the positive zero bit pattern for the given format.
 
-// e8m0_to_fp(scale : bits(8), EEW : int, fmt : fp_fmt) -> bits(EEW)
-//   Convert an 8-bit E8M0 exponent-only value (bias 127) to the corresponding
-//   power-of-two in the target format.  E8M0 0xFF maps to NaN.
+// decode_scale(scale : bits(8), scale_fmt : scale_format,
+//              EEW : int, fmt : fp_fmt) -> bits(EEW)
+//   Decode an 8-bit block-scale value in the given scale format to the
+//   corresponding value in the target FP format.  The scale format is
+//   determined by the input data type (e.g., E8M0 for all current MX types).
+//   For E8M0: converts an exponent-only value (bias 127) to a power-of-two;
+//   the bit pattern 0xFF maps to NaN.
 
 // int_to_fp(x : int, EEW : int, fmt : fp_fmt, rm : rounding_mode) -> bits(EEW)
 //   Convert a mathematical integer x to the nearest representable value in
@@ -1764,12 +1788,15 @@ function decode_gemm_geometry(W : int, vl_divisor_is_lambda : bool) -> gemm_geom
   struct { EEW_C, EEW_A, LMUL, lambda, K_eff, M, N, MUL_C, epr_A, epr_C }
 }
 
-// Read and unpack paired E8M0 block scales from v0 for block index s.
+// Read and unpack paired block scales from v0 for block index s.
+// The scale format (e.g. E8M0) is determined by the input data type
+// and passed as scale_fmt.
 // When vm=1 (no microscaling), returns (1.0, false).
 // When vm=0, reads paired 16-bit scale element from v0 and returns
 // (scale_A × scale_B, is_nan).
 function read_block_scales(vm : bit, i : int, j : int, s : int,
                            R : int, EEW_C : int, fmt_C : fp_fmt,
+                           scale_fmt : scale_format,
                            rm : rounding_mode) -> (bits(EEW_C), bool) = {
   let pair_A : bits(16) =
     if vm == 0
@@ -1782,11 +1809,11 @@ function read_block_scales(vm : bit, i : int, j : int, s : int,
 
   let sA : bits(EEW_C) =
     if vm == 0
-    then e8m0_to_fp(pair_A[7..0], EEW_C, fmt_C)
+    then decode_scale(pair_A[7..0], scale_fmt, EEW_C, fmt_C)
     else fp_one(EEW_C, fmt_C);
   let sB : bits(EEW_C) =
     if vm == 0
-    then e8m0_to_fp(pair_B[15..8], EEW_C, fmt_C)
+    then decode_scale(pair_B[15..8], scale_fmt, EEW_C, fmt_C)
     else fp_one(EEW_C, fmt_C);
 
   let blk_scale : bits(EEW_C) = fp_mul(sA, sB, EEW_C, fmt_C, rm);
@@ -1970,9 +1997,10 @@ The floating-point format for A and B elements is selected independently by
 format is selected by `altfmt`, interpreted for width SEW.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
 +
-When `vm=0` (`v0.scale`), the register `v0` supplies paired E8M0 block-scale
-factors for microscaling (see <<integrated-matrix-microscaling>>).  The `bs`
-field in `vtype` selects the block size (32 or 16 elements).
+When `vm=0` (`v0.scale`), the register `v0` supplies paired block-scale
+factors for microscaling; the scale format is determined by the input data
+type (see <<integrated-matrix-microscaling>>).  The `bs` field in `vtype`
+selects the block size (32 or 16 elements).
 +
 Only SEW ∈ {32, 64} is valid (giving EEW = 4 or 8); SEW ∈ {8, 16} is _reserved_.
 
@@ -2015,7 +2043,7 @@ foreach (j from 0 to (g.N - 1)) {
 
     foreach (s from 0 to (S - 1)) {
       let (blk_scale, is_nan) = read_block_scales(vm, i, j, s, R,
-                                                   g.EEW_C, fmt_C, rm);
+                                                   g.EEW_C, fmt_C, E8M0, rm);
       if is_nan then { nan_out = true; break };
 
       let k_lo : int = s * block_size;
@@ -2181,9 +2209,10 @@ The floating-point format for A and B elements is selected independently by
 format is selected by `altfmt`, interpreted for width SEW.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
 +
-When `vm=0` (`v0.scale`), the register `v0` supplies paired E8M0 block-scale
-factors for microscaling (see <<integrated-matrix-microscaling>>).  The `bs`
-field in `vtype` selects the block size (32 or 16 elements).
+When `vm=0` (`v0.scale`), the register `v0` supplies paired block-scale
+factors for microscaling; the scale format is determined by the input data
+type (see <<integrated-matrix-microscaling>>).  The `bs` field in `vtype`
+selects the block size (32 or 16 elements).
 
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
@@ -2221,7 +2250,7 @@ foreach (j from 0 to (g.N - 1)) {
 
     foreach (s from 0 to (S - 1)) {
       let (blk_scale, is_nan) = read_block_scales(vm, i, j, s, R,
-                                                   g.EEW_C, fmt_C, rm);
+                                                   g.EEW_C, fmt_C, E8M0, rm);
       if is_nan then { nan_out = true; break };
 
       let k_lo : int = s * block_size;
@@ -2303,9 +2332,10 @@ The floating-point format for A and B elements is selected independently by
 format is selected by `altfmt`, interpreted for width SEW.
 All operations use the dynamic rounding mode from `frm`; floating-point exception flags accumulate in `fflags`.
 +
-When `vm=0` (`v0.scale`), the register `v0` supplies paired E8M0 block-scale
-factors for microscaling (see <<integrated-matrix-microscaling>>).  The `bs`
-field in `vtype` selects the block size (32 or 16 elements).
+When `vm=0` (`v0.scale`), the register `v0` supplies paired block-scale
+factors for microscaling; the scale format is determined by the input data
+type (see <<integrated-matrix-microscaling>>).  The `bs` field in `vtype`
+selects the block size (32 or 16 elements).
 
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
@@ -2343,7 +2373,7 @@ foreach (j from 0 to (g.N - 1)) {
 
     foreach (s from 0 to (S - 1)) {
       let (blk_scale, is_nan) = read_block_scales(vm, i, j, s, R,
-                                                   g.EEW_C, fmt_C, rm);
+                                                   g.EEW_C, fmt_C, E8M0, rm);
       if is_nan then { nan_out = true; break };
 
       let k_lo : int = s * block_size;
@@ -2389,7 +2419,7 @@ Included in::
 ==== vfwimmacc.vv
 
 Synopsis::
-Integer-Input Widening Floating-Point-Accumulate Matrix Multiply-Accumulate with E8M0 Microscaling
+Integer-Input Widening Floating-Point-Accumulate Matrix Multiply-Accumulate with Microscaling
 
 Mnemonic::
 vfwimmacc.vv _vd_, _vs1_, _vs2_, v0.scale
@@ -2413,7 +2443,7 @@ the integer-input FP-accumulate MX form.  `vwmmacc.vv` requires `vm=1`.
 
 Description::
 Computes the exact integer matrix-matrix product T = vs1 × vs2 block by block,
-scales each block by the paired E8M0 factors in `v0`, and accumulates the
+scales each block by the paired scale factors in `v0`, and accumulates the
 scaled result into the floating-point accumulator _vd_: C ← C + scale_A × scale_B × T.
 The widening factor is 2 applied to the K dimension.
 +
@@ -2427,7 +2457,7 @@ VL selects how many columns of B (and C) are updated; VL must be a multiple of K
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
 +
-The register `v0` supplies paired E8M0 block-scale factors using the same
+The register `v0` supplies paired block-scale factors using the same
 tile-strided layout as `vfwmmacc.vv` (see <<integrated-matrix-microscaling>>).
 The `bs` field in `vtype` selects the block size (32 or 16 elements).
 +
@@ -2483,7 +2513,7 @@ foreach (j from 0 to (g.N - 1)) {
 
     foreach (s from 0 to (S - 1)) {
       let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
-                                                   g.EEW_C, fmt_C, rm);
+                                                   g.EEW_C, fmt_C, E8M0, rm);
       if is_nan then { nan_out = true; break };
 
       let k_lo : int = s * block_size;
@@ -2524,7 +2554,7 @@ Included in::
 ==== vf8wimmacc.vv
 
 Synopsis::
-Integer-Input 8× Widening Floating-Point-Accumulate Matrix Multiply-Accumulate with E8M0 Microscaling
+Integer-Input 8× Widening Floating-Point-Accumulate Matrix Multiply-Accumulate with Microscaling
 
 Mnemonic::
 vf8wimmacc.vv _vd_, _vs1_, _vs2_, v0.scale
@@ -2548,7 +2578,7 @@ the integer-input FP-accumulate MX form.  `v8wmmacc.vv` requires `vm=1`.
 
 Description::
 Computes the exact integer matrix-matrix product T = vs1 × vs2 block by block,
-scales each block by the paired E8M0 factors in `v0`, and accumulates the
+scales each block by the paired scale factors in `v0`, and accumulates the
 scaled result into the floating-point accumulator _vd_: C ← C + scale_A × scale_B × T.
 The widening factor is 8 applied to the K dimension.
 +
@@ -2562,7 +2592,7 @@ VL selects how many columns of B (and C) are updated; VL must be a multiple of K
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
 +
-The register `v0` supplies paired E8M0 block-scale factors using the same
+The register `v0` supplies paired block-scale factors using the same
 tile-strided layout as `vf8wmmacc.vv` (see <<integrated-matrix-microscaling>>).
 The `bs` field in `vtype` selects the block size (32 or 16 elements).
 +
@@ -2610,7 +2640,7 @@ foreach (j from 0 to (g.N - 1)) {
 
     foreach (s from 0 to (S - 1)) {
       let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
-                                                   g.EEW_C, fmt_C, rm);
+                                                   g.EEW_C, fmt_C, E8M0, rm);
       if is_nan then { nan_out = true; break };
 
       let k_lo : int = s * block_size;
@@ -2651,7 +2681,7 @@ Included in::
 ==== vfqwimmacc.vv
 
 Synopsis::
-Integer-Input Quad-Widening Floating-Point-Accumulate Matrix Multiply-Accumulate with E8M0 Microscaling
+Integer-Input Quad-Widening Floating-Point-Accumulate Matrix Multiply-Accumulate with Microscaling
 
 Mnemonic::
 vfqwimmacc.vv _vd_, _vs1_, _vs2_, v0.scale
@@ -2675,7 +2705,7 @@ the integer-input FP-accumulate MX form.  `vqwmmacc.vv` requires `vm=1`.
 
 Description::
 Computes the exact integer matrix-matrix product T = vs1 × vs2 block by block,
-scales each block by the paired E8M0 factors in `v0`, and accumulates the
+scales each block by the paired scale factors in `v0`, and accumulates the
 scaled result into the floating-point accumulator _vd_: C ← C + scale_A × scale_B × T.
 The widening factor is 4 applied to the K dimension.
 +
@@ -2689,7 +2719,7 @@ VL selects how many columns of B (and C) are updated; VL must be a multiple of K
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
 +
-The register `v0` supplies paired E8M0 block-scale factors using the same
+The register `v0` supplies paired block-scale factors using the same
 tile-strided layout as `vfqwmmacc.vv` (see <<integrated-matrix-microscaling>>).
 The `bs` field in `vtype` selects the block size (32 or 16 elements).
 +
@@ -2745,7 +2775,7 @@ foreach (j from 0 to (g.N - 1)) {
 
     foreach (s from 0 to (S - 1)) {
       let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
-                                                   g.EEW_C, fmt_C, rm);
+                                                   g.EEW_C, fmt_C, E8M0, rm);
       if is_nan then { nan_out = true; break };
 
       let k_lo : int = s * block_size;
@@ -3593,7 +3623,7 @@ combinations are listed explicitly in the table below.
 `altfmt` is unused and `vm` must be 1 (`vm=0` is _reserved_) for all four instructions.
 For `vwmmacc.vv`, `vqwmmacc.vv`, and `v8wmmacc.vv`, `vm=0` is separately defined as
 `vfwimmacc.vv`, `vfqwimmacc.vv`, and `vf8wimmacc.vv`
-(integer inputs, FP accumulator, E8M0 microscaling); see <<tbl-intmx-encoding-map>>.
+(integer inputs, FP accumulator, microscaling); see <<tbl-intmx-encoding-map>>.
 
 [#tbl-int-encoding-map]
 .Integer multiply-accumulate encoding map
