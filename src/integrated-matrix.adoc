@@ -681,20 +681,25 @@ The interpretation of each 8-bit field is determined by the scale format
 associated with the input data type (see <<integrated-matrix-scale-formats>>).
 
 [#ime-block-scale-v0]
-.Block scales are folded into `v0` in pairs, separated by the row stride R = λ × SEW / 16. Each block-scale pair is used for `bs` consecutive tile elements in the corresponding A row / B^T^ column. In matrix-tile representation `v0` has the paired scales arranged in the correct tile rows. In a multi-lane setup the scales are distributed across the lanes appropriately.
+.Block scales are folded into `v0` in pairs, separated by the row stride R = λ × SEW / _pw_. Each block-scale pair is used for `bs` consecutive tile elements in the corresponding A row / B^T^ column. In matrix-tile representation `v0` has the paired scales arranged in the correct tile rows. In a multi-lane setup the scales are distributed across the lanes appropriately.
 image::png/ime-mx-v0-format.png[width="80%", align="center"]
 
-The row stride in `v0` is R = λ × SEW ÷ 16 in units of 16-bit elements (see <<ime-block-scale-v0>>).
+Let _sw_ = scale_width_of(scale_fmt) be the width in bits of a single scale
+value and _pw_ = 2 × _sw_ the width of a (scale_A, scale_B) pair.
+For E8M0: _sw_ = 8, _pw_ = 16.
+
+The row stride in `v0` is R = λ × SEW ÷ _pw_ in units of _pw_-bit elements
+(see <<ime-block-scale-v0>>).
 Within each row, S = ⌈K_eff / block_size⌉ elements are active.  Element
 index _p_ = _m_ × R + _s_ addresses the scale pair for row (or column) _m_
 at block _s_.  Specifically:
 
-* stem:[\text{scale_A}_{m,s}] is the lower byte of the 16-bit element at index (m × R + s)
-* stem:[\text{scale_B}_{n,s}] is the upper byte of the 16-bit element at index (n × R + s)
+* stem:[\text{scale_A}_{m,s}] is the lower _sw_ bits of the _pw_-bit element at index (m × R + s)
+* stem:[\text{scale_B}_{n,s}] is the upper _sw_ bits of the _pw_-bit element at index (n × R + s)
 
-The total number of 16-bit elements spanned per tile dimension is M × R,
+The total number of _pw_-bit elements spanned per tile dimension is M × R,
 where M = N = VLEN ÷ (SEW × λ).  Because M × R = (VLEN ÷ (SEW × λ)) ×
-(λ × SEW ÷ 16) = VLEN ÷ 16, the scale data fills exactly one register
+(λ × SEW ÷ _pw_) = VLEN ÷ _pw_, the scale data fills exactly one register
 regardless of configuration.
 
 [#ime-mx-v0-lanes]
@@ -703,10 +708,11 @@ image::png/ime-mx-v0-lanes.png[width="69%", align="center"]
 
 **Capacity proof:**
 
-M × R = (VLEN ÷ (SEW × λ)) × (λ × SEW ÷ 16) = VLEN ÷ 16.
+M × R = (VLEN ÷ (SEW × λ)) × (λ × SEW ÷ _pw_) = VLEN ÷ _pw_.
 
-Each of the VLEN ÷ 16 positions is a 16-bit element, so the total is exactly
-VLEN bits — the scale data fills one register in every legal configuration.
+Each of the VLEN ÷ _pw_ positions is a _pw_-bit element, so the total is
+exactly VLEN bits — the scale data fills one register in every legal
+configuration.
 
 **R ≥ S proof** (tile stride is never smaller than the active count):
 
@@ -714,11 +720,13 @@ VLEN bits — the scale data fills one register in every legal configuration.
   <<tbl-intmx-encoding-map>>) mark all combinations with W × LMUL > 2 × SEW
   as _reserved_, so every legal encoding satisfies W × LMUL ≤ 2 × SEW.
   Therefore K_eff = λ × W × LMUL ≤ 2 × λ × SEW, giving
-  S = ⌈K_eff / 32⌉ ≤ ⌈2 × λ × SEW / 32⌉ ≤ λ × SEW / 16 = R.
+  S = ⌈K_eff / 32⌉ ≤ ⌈2 × λ × SEW / 32⌉ ≤ λ × SEW / _pw_ = R
+  (for _pw_ ≤ 16).
 * block_size = 16: The BS=16 legality check (W × LMUL ≤ SEW, stated in
   each instruction's Exceptions section) ensures
   K_eff = λ × W × LMUL ≤ λ × SEW, giving
-  S = ⌈K_eff / 16⌉ ≤ ⌈λ × SEW / 16⌉ ≤ λ × SEW / 16 = R.
+  S = ⌈K_eff / 16⌉ ≤ ⌈λ × SEW / 16⌉ ≤ λ × SEW / _pw_ = R
+  (for _pw_ ≤ 16).
 
 When S < R, positions _s_ ∈ [S, R) within each row are padding and their
 contents are ignored by the instruction.
@@ -792,9 +800,11 @@ specification: each block of 4-bit signed two's-complement elements shares a
 single E8M0 exponent-only scale factor, following the same block-scaling
 semantics as MXINT8 but with 4-bit elements.
 
-Microscaling requires SEW × λ ≥ 16 to ensure that the paired 16-bit scale
-elements fit within `v0`.  Configurations where SEW × λ < 16 with `vm=0`
-raise an illegal-instruction exception.
+Microscaling requires SEW × λ ≥ _pw_ (the scale-pair width: 2 × _sw_) to
+ensure that the paired scale elements fit within `v0`.
+For E8M0 (_sw_ = 8, _pw_ = 16) this reduces to SEW × λ ≥ 16.
+Configurations where SEW × λ < _pw_ with `vm=0` raise an
+illegal-instruction exception.
 
 Microscaling is particularly useful with narrow input formats (OFP4, OFP8)
 where the limited dynamic range of the per-element format is compensated by
@@ -848,7 +858,7 @@ If the pre-paired tile-strided data is already contiguous in memory (M × R
     vle16.v  v0, (a0)
 ----
 
-This works for all SEW values since M × R = VLEN ÷ 16 always.
+This works for all SEW values since M × R = VLEN ÷ _pw_ always (where _pw_ is the scale-pair width).
 
 *Options 3–5 — Constructing from separate `scale_A` / `scale_B` arrays:*
 
@@ -1729,13 +1739,21 @@ function mat_C_idx(i : int, j : int, M : int,
 // fp_zero(EEW : int, fmt : fp_fmt) -> bits(EEW)
 //   Return the positive zero bit pattern for the given format.
 
-// decode_scale(scale : bits(8), scale_fmt : scale_format,
+// scale_width_of(sfmt : scale_format) -> int
+//   Return the width in bits of a single scale value for the given format.
+//   E8M0 → 8.  Future formats may return 16.
+function scale_width_of(sfmt : scale_format) -> int =
+  match sfmt {
+    E8M0 => 8
+  }
+
+// decode_scale(scale : bits(sw), scale_fmt : scale_format,
 //              EEW : int, fmt : fp_fmt) -> bits(EEW)
-//   Decode an 8-bit block-scale value in the given scale format to the
-//   corresponding value in the target FP format.  The scale format is
-//   determined by the input data type (e.g., E8M0 for all current MX types).
-//   For E8M0: converts an exponent-only value (bias 127) to a power-of-two;
-//   the bit pattern 0xFF maps to NaN.
+//   Decode a block-scale value of width sw = scale_width_of(scale_fmt)
+//   in the given scale format to the corresponding value in the target
+//   FP format.  The scale format is determined by the input data type.
+//   For E8M0: converts an 8-bit exponent-only value (bias 127) to a
+//   power-of-two; the bit pattern 0xFF maps to NaN.
 
 // int_to_fp(x : int, EEW : int, fmt : fp_fmt, rm : rounding_mode) -> bits(EEW)
 //   Convert a mathematical integer x to the nearest representable value in
@@ -1790,30 +1808,34 @@ function decode_gemm_geometry(W : int, vl_divisor_is_lambda : bool) -> gemm_geom
 
 // Read and unpack paired block scales from v0 for block index s.
 // The scale format (e.g. E8M0) is determined by the input data type
-// and passed as scale_fmt.
+// and passed as scale_fmt.  The per-scale width (sw) and pair width
+// (pw = 2 × sw) are derived from the scale format.
 // When vm=1 (no microscaling), returns (1.0, false).
-// When vm=0, reads paired 16-bit scale element from v0 and returns
+// When vm=0, reads a pw-bit scale-pair element from v0 and returns
 // (scale_A × scale_B, is_nan).
 function read_block_scales(vm : bit, i : int, j : int, s : int,
                            R : int, EEW_C : int, fmt_C : fp_fmt,
                            scale_fmt : scale_format,
                            rm : rounding_mode) -> (bits(EEW_C), bool) = {
-  let pair_A : bits(16) =
+  let sw : int = scale_width_of(scale_fmt);
+  let pw : int = 2 * sw;
+
+  let pair_A : bits(pw) =
     if vm == 0
-    then read_single_element(16, i * R + s, zvreg(0))
-    else 0x0000;
-  let pair_B : bits(16) =
+    then read_single_element(pw, i * R + s, zvreg(0))
+    else zeros(pw);
+  let pair_B : bits(pw) =
     if vm == 0
-    then read_single_element(16, j * R + s, zvreg(0))
-    else 0x0000;
+    then read_single_element(pw, j * R + s, zvreg(0))
+    else zeros(pw);
 
   let sA : bits(EEW_C) =
     if vm == 0
-    then decode_scale(pair_A[7..0], scale_fmt, EEW_C, fmt_C)
+    then decode_scale(pair_A[sw-1..0], scale_fmt, EEW_C, fmt_C)
     else fp_one(EEW_C, fmt_C);
   let sB : bits(EEW_C) =
     if vm == 0
-    then decode_scale(pair_B[15..8], scale_fmt, EEW_C, fmt_C)
+    then decode_scale(pair_B[2*sw-1..sw], scale_fmt, EEW_C, fmt_C)
     else fp_one(EEW_C, fmt_C);
 
   let blk_scale : bits(EEW_C) = fp_mul(sA, sB, EEW_C, fmt_C, rm);
@@ -1862,10 +1884,14 @@ function int_block_dot(i : int, j : int, k_lo : int, k_hi : int,
 }
 
 // Check microscaling legality constraints.
-// Raises Illegal_Instruction if SEW × λ < 16 or (for BS=16) W × LMUL > SEW.
+// Raises Illegal_Instruction if SEW × λ < pw (pair width) or
+// (for BS=16) W × LMUL > SEW.  The pair width is derived from the
+// scale format: pw = 2 × scale_width_of(scale_fmt).
 function check_microscaling_legality(W : int, LMUL : int,
-                                     EEW_C : int, lambda : int) -> unit = {
-  if EEW_C * lambda < 16 then return Illegal_Instruction();
+                                     EEW_C : int, lambda : int,
+                                     scale_fmt : scale_format) -> unit = {
+  let pw : int = 2 * scale_width_of(scale_fmt);
+  if EEW_C * lambda < pw then return Illegal_Instruction();
   if vtype[bs] == 0b1 & (W * LMUL > EEW_C) then return Illegal_Instruction()
 }
 
@@ -1913,9 +1939,10 @@ function fp_scaled_gemm(g : gemm_geom,
                         scale_fmt : scale_format,
                         rm : rounding_mode,
                         vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  let pw : int = 2 * scale_width_of(scale_fmt);
   let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
   let S : int = (g.K_eff + block_size - 1) / block_size;
-  let R : int = g.lambda * g.EEW_C / 16;
+  let R : int = g.lambda * g.EEW_C / pw;
 
   foreach (j from 0 to (g.N - 1)) {
     foreach (i from 0 to (g.M - 1)) {
@@ -1952,9 +1979,10 @@ function int_scaled_gemm(g : gemm_geom,
                          fmt_C : fp_fmt, scale_fmt : scale_format,
                          rm : rounding_mode,
                          vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  let pw : int = 2 * scale_width_of(scale_fmt);
   let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
   let S : int = (g.K_eff + block_size - 1) / block_size;
-  let R : int = g.lambda * g.EEW_C / 16;
+  let R : int = g.lambda * g.EEW_C / pw;
 
   foreach (j from 0 to (g.N - 1)) {
     foreach (i from 0 to (g.M - 1)) {
@@ -2129,7 +2157,7 @@ if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(8, false);
 
-if vm == 0 then check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda);
+if vm == 0 then check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
@@ -2300,7 +2328,7 @@ Operation::
 --
 let g : gemm_geom = decode_gemm_geometry(4, false);
 
-if vm == 0 then check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda);
+if vm == 0 then check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
@@ -2396,7 +2424,7 @@ Operation::
 --
 let g : gemm_geom = decode_gemm_geometry(2, false);
 
-if vm == 0 then check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda);
+if vm == 0 then check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
@@ -2505,7 +2533,7 @@ if EEW_C_check == 64 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(2, false);
 
-check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda);
+check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
@@ -2603,7 +2631,7 @@ if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(8, false);
 
-check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda);
+check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
@@ -2706,7 +2734,7 @@ if EEW_C_check == 64 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(4, false);
 
-check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda);
+check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
