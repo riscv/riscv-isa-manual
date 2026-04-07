@@ -1868,6 +1868,120 @@ function check_microscaling_legality(W : int, LMUL : int,
   if EEW_C * lambda < 16 then return Illegal_Instruction();
   if vtype[bs] == 0b1 & (W * LMUL > EEW_C) then return Illegal_Instruction()
 }
+
+// ─── Top-level GEMM operations ─────────────────────────────────────────
+//
+// Each instruction decodes its parameters and dispatches to one of the
+// following four operations.
+
+// Integer GEMM: C (integer) += A (integer) × B (integer), no scaling.
+function int_gemm(g : gemm_geom, signed_A : bool, signed_B : bool,
+                  vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  foreach (j from 0 to (g.N - 1)) {
+    foreach (i from 0 to (g.M - 1)) {
+      let c_flat : int = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
+      let c_bits : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
+      var acc : int = signed(c_bits);
+      acc = acc + int_block_dot(i, j, 0, g.K_eff - 1, g,
+                                signed_A, signed_B, vs1, vs2);
+      write_single_element(g.EEW_C, c_flat, vd, to_bits_unsafe(g.EEW_C, acc))
+    }
+  }
+}
+
+// FP GEMM: C (FP) += A (FP) × B (FP), no scaling.
+function fp_gemm(g : gemm_geom,
+                 fmt_A : fp_fmt, fmt_B : fp_fmt, fmt_C : fp_fmt,
+                 rm : rounding_mode,
+                 vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  foreach (j from 0 to (g.N - 1)) {
+    foreach (i from 0 to (g.M - 1)) {
+      let c_flat : int       = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
+      var acc : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
+      acc = fp_add(acc, fp_block_dot(i, j, 0, g.K_eff - 1, g,
+                                     fmt_A, fmt_B, fmt_C, rm, vs1, vs2),
+                   g.EEW_C, fmt_C, rm);
+      write_single_element(g.EEW_C, c_flat, vd, acc)
+    }
+  }
+}
+
+// FP scaled GEMM: C (FP) += scale_A × scale_B × (A (FP) × B (FP)),
+// with block scales from v0.
+function fp_scaled_gemm(g : gemm_geom,
+                        fmt_A : fp_fmt, fmt_B : fp_fmt, fmt_C : fp_fmt,
+                        scale_fmt : scale_format,
+                        rm : rounding_mode,
+                        vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
+  let S : int = (g.K_eff + block_size - 1) / block_size;
+  let R : int = g.lambda * g.EEW_C / 16;
+
+  foreach (j from 0 to (g.N - 1)) {
+    foreach (i from 0 to (g.M - 1)) {
+      let c_flat : int          = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
+      var acc : bits(g.EEW_C)   = read_single_element(g.EEW_C, c_flat, vd);
+      var nan_out : bool = false;
+
+      foreach (s from 0 to (S - 1)) {
+        let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
+                                                     g.EEW_C, fmt_C, scale_fmt, rm);
+        if is_nan then { nan_out = true; break };
+
+        let k_lo : int = s * block_size;
+        let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
+        let blk_acc : bits(g.EEW_C) = fp_block_dot(i, j, k_lo, k_hi, g,
+                                                     fmt_A, fmt_B, fmt_C, rm,
+                                                     vs1, vs2);
+        acc = fp_add(acc, fp_mul(blk_scale, blk_acc, g.EEW_C, fmt_C, rm),
+                     g.EEW_C, fmt_C, rm)
+      };
+
+      if nan_out then
+        write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
+      else
+        write_single_element(g.EEW_C, c_flat, vd, acc)
+    }
+  }
+}
+
+// Integer-input scaled GEMM: C (FP) += scale_A × scale_B × (A (int) × B (int)),
+// with block scales from v0.  Integer products are exact; the sum is converted
+// to FP before scaling and accumulation.
+function int_scaled_gemm(g : gemm_geom,
+                         fmt_C : fp_fmt, scale_fmt : scale_format,
+                         rm : rounding_mode,
+                         vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
+  let S : int = (g.K_eff + block_size - 1) / block_size;
+  let R : int = g.lambda * g.EEW_C / 16;
+
+  foreach (j from 0 to (g.N - 1)) {
+    foreach (i from 0 to (g.M - 1)) {
+      let c_flat : int      = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
+      var acc : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
+      var nan_out : bool = false;
+
+      foreach (s from 0 to (S - 1)) {
+        let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
+                                                     g.EEW_C, fmt_C, scale_fmt, rm);
+        if is_nan then { nan_out = true; break };
+
+        let k_lo : int = s * block_size;
+        let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
+        let dot  : int = int_block_dot(i, j, k_lo, k_hi, g, true, true, vs1, vs2);
+        let fp_sum : bits(g.EEW_C) = int_to_fp(dot, g.EEW_C, fmt_C, rm);
+        acc = fp_add(acc, fp_mul(blk_scale, fp_sum, g.EEW_C, fmt_C, rm),
+                     g.EEW_C, fmt_C, rm)
+      };
+
+      if nan_out then
+        write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
+      else
+        write_single_element(g.EEW_C, c_flat, vd, acc)
+    }
+  }
+}
 --
 
 <<<
@@ -1932,15 +2046,7 @@ let g : gemm_geom = decode_gemm_geometry(8, true);
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    let c_bits : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    var acc : int = signed(c_bits);
-    acc = acc + int_block_dot(i, j, 0, g.K_eff - 1, g, signed_A, signed_B, vs1, vs2);
-    write_single_element(g.EEW_C, c_flat, vd, to_bits_unsafe(g.EEW_C, acc))
-  }
-};
+int_gemm(g, signed_A, signed_B, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2023,44 +2129,17 @@ if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(8, false);
 
-// Microscaling checks (only apply when vm=0)
 if vm == 0 then check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda);
-
-let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
-let S : int = (g.K_eff + block_size - 1) / block_size;
-let R : int = g.lambda * g.EEW_C / 16;
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int          = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    var acc : bits(g.EEW_C)   = read_single_element(g.EEW_C, c_flat, vd);
-    var nan_out : bool = false;
-
-    foreach (s from 0 to (S - 1)) {
-      let (blk_scale, is_nan) = read_block_scales(vm, i, j, s, R,
-                                                   g.EEW_C, fmt_C, E8M0, rm);
-      if is_nan then { nan_out = true; break };
-
-      let k_lo : int = s * block_size;
-      let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
-      let blk_acc : bits(g.EEW_C) = fp_block_dot(i, j, k_lo, k_hi, g,
-                                                   fmt_A, fmt_B, fmt_C, rm,
-                                                   vs1, vs2);
-      acc = fp_add(acc, fp_mul(blk_scale, blk_acc, g.EEW_C, fmt_C, rm),
-                   g.EEW_C, fmt_C, rm)
-    };
-
-    if nan_out then
-      write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
-    else
-      write_single_element(g.EEW_C, c_flat, vd, acc)
-  }
-};
+if vm == 0 then
+  fp_scaled_gemm(g, fmt_A, fmt_B, fmt_C, E8M0, rm, vs1, vs2, vd)
+else
+  fp_gemm(g, fmt_A, fmt_B, fmt_C, rm, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2139,16 +2218,7 @@ let fmt_B : fp_fmt       = fp_format_of(g.EEW_C, vtype[altfmt_B]);
 let fmt_C : fp_fmt       = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int       = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    var acc : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    acc = fp_add(acc, fp_block_dot(i, j, 0, g.K_eff - 1, g,
-                                   fmt_A, fmt_B, fmt_C, rm, vs1, vs2),
-                 g.EEW_C, fmt_C, rm);
-    write_single_element(g.EEW_C, c_flat, vd, acc)
-  }
-};
+fp_gemm(g, fmt_A, fmt_B, fmt_C, rm, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2230,44 +2300,17 @@ Operation::
 --
 let g : gemm_geom = decode_gemm_geometry(4, false);
 
-// Microscaling checks (only apply when vm=0)
 if vm == 0 then check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda);
-
-let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
-let S : int = (g.K_eff + block_size - 1) / block_size;
-let R : int = g.lambda * g.EEW_C / 16;
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int          = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    var acc : bits(g.EEW_C)   = read_single_element(g.EEW_C, c_flat, vd);
-    var nan_out : bool = false;
-
-    foreach (s from 0 to (S - 1)) {
-      let (blk_scale, is_nan) = read_block_scales(vm, i, j, s, R,
-                                                   g.EEW_C, fmt_C, E8M0, rm);
-      if is_nan then { nan_out = true; break };
-
-      let k_lo : int = s * block_size;
-      let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
-      let blk_acc : bits(g.EEW_C) = fp_block_dot(i, j, k_lo, k_hi, g,
-                                                   fmt_A, fmt_B, fmt_C, rm,
-                                                   vs1, vs2);
-      acc = fp_add(acc, fp_mul(blk_scale, blk_acc, g.EEW_C, fmt_C, rm),
-                   g.EEW_C, fmt_C, rm)
-    };
-
-    if nan_out then
-      write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
-    else
-      write_single_element(g.EEW_C, c_flat, vd, acc)
-  }
-};
+if vm == 0 then
+  fp_scaled_gemm(g, fmt_A, fmt_B, fmt_C, E8M0, rm, vs1, vs2, vd)
+else
+  fp_gemm(g, fmt_A, fmt_B, fmt_C, rm, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2353,44 +2396,17 @@ Operation::
 --
 let g : gemm_geom = decode_gemm_geometry(2, false);
 
-// Microscaling checks (only apply when vm=0)
 if vm == 0 then check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda);
-
-let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
-let S : int = (g.K_eff + block_size - 1) / block_size;
-let R : int = g.lambda * g.EEW_C / 16;
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int          = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    var acc : bits(g.EEW_C)   = read_single_element(g.EEW_C, c_flat, vd);
-    var nan_out : bool = false;
-
-    foreach (s from 0 to (S - 1)) {
-      let (blk_scale, is_nan) = read_block_scales(vm, i, j, s, R,
-                                                   g.EEW_C, fmt_C, E8M0, rm);
-      if is_nan then { nan_out = true; break };
-
-      let k_lo : int = s * block_size;
-      let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
-      let blk_acc : bits(g.EEW_C) = fp_block_dot(i, j, k_lo, k_hi, g,
-                                                   fmt_A, fmt_B, fmt_C, rm,
-                                                   vs1, vs2);
-      acc = fp_add(acc, fp_mul(blk_scale, blk_acc, g.EEW_C, fmt_C, rm),
-                   g.EEW_C, fmt_C, rm)
-    };
-
-    if nan_out then
-      write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
-    else
-      write_single_element(g.EEW_C, c_flat, vd, acc)
-  }
-};
+if vm == 0 then
+  fp_scaled_gemm(g, fmt_A, fmt_B, fmt_C, E8M0, rm, vs1, vs2, vd)
+else
+  fp_gemm(g, fmt_A, fmt_B, fmt_C, rm, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2483,53 +2499,21 @@ Operation::
 [source,sail]
 --
 let EEW_C_check : int = 2 ^ get_sew_pow();
-// SEW=8 (Int4 → OFP8) is reserved
 if EEW_C_check == 8  then return Illegal_Instruction();
-// SEW=32 is reserved
 if EEW_C_check == 32 then return Illegal_Instruction();
-// SEW=64 is reserved
 if EEW_C_check == 64 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(2, false);
 
 check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda);
 
-// MXINT inputs are always signed
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
-
-let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
-let S : int = (g.K_eff + block_size - 1) / block_size;
-let R : int = g.lambda * g.EEW_C / 16;
 
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int      = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    var acc : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    var nan_out : bool = false;
-
-    foreach (s from 0 to (S - 1)) {
-      let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
-                                                   g.EEW_C, fmt_C, E8M0, rm);
-      if is_nan then { nan_out = true; break };
-
-      let k_lo : int = s * block_size;
-      let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
-      let dot  : int = int_block_dot(i, j, k_lo, k_hi, g, true, true, vs1, vs2);
-      let fp_sum : bits(g.EEW_C) = int_to_fp(dot, g.EEW_C, fmt_C, rm);
-      acc = fp_add(acc, fp_mul(blk_scale, fp_sum, g.EEW_C, fmt_C, rm),
-                   g.EEW_C, fmt_C, rm)
-    };
-
-    if nan_out then
-      write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
-    else
-      write_single_element(g.EEW_C, c_flat, vd, acc)
-  }
-};
+int_scaled_gemm(g, fmt_C, E8M0, rm, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2621,42 +2605,13 @@ let g : gemm_geom = decode_gemm_geometry(8, false);
 
 check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda);
 
-// MXINT inputs are always signed
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
-
-let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
-let S : int = (g.K_eff + block_size - 1) / block_size;
-let R : int = g.lambda * g.EEW_C / 16;
 
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int      = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    var acc : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    var nan_out : bool = false;
-
-    foreach (s from 0 to (S - 1)) {
-      let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
-                                                   g.EEW_C, fmt_C, E8M0, rm);
-      if is_nan then { nan_out = true; break };
-
-      let k_lo : int = s * block_size;
-      let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
-      let dot  : int = int_block_dot(i, j, k_lo, k_hi, g, true, true, vs1, vs2);
-      let fp_sum : bits(g.EEW_C) = int_to_fp(dot, g.EEW_C, fmt_C, rm);
-      acc = fp_add(acc, fp_mul(blk_scale, fp_sum, g.EEW_C, fmt_C, rm),
-                   g.EEW_C, fmt_C, rm)
-    };
-
-    if nan_out then
-      write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
-    else
-      write_single_element(g.EEW_C, c_flat, vd, acc)
-  }
-};
+int_scaled_gemm(g, fmt_C, E8M0, rm, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2745,53 +2700,21 @@ Operation::
 [source,sail]
 --
 let EEW_C_check : int = 2 ^ get_sew_pow();
-// SEW=8 (EEW=2) is reserved
 if EEW_C_check == 8  then return Illegal_Instruction();
-// SEW=32 with altfmt=1 is reserved
 if EEW_C_check == 32 & vtype[altfmt] == 0b1 then return Illegal_Instruction();
-// SEW=64 is reserved
 if EEW_C_check == 64 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(4, false);
 
 check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda);
 
-// MXINT inputs are always signed
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
-
-let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
-let S : int = (g.K_eff + block_size - 1) / block_size;
-let R : int = g.lambda * g.EEW_C / 16;
 
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int      = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    var acc : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    var nan_out : bool = false;
-
-    foreach (s from 0 to (S - 1)) {
-      let (blk_scale, is_nan) = read_block_scales(0b0, i, j, s, R,
-                                                   g.EEW_C, fmt_C, E8M0, rm);
-      if is_nan then { nan_out = true; break };
-
-      let k_lo : int = s * block_size;
-      let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
-      let dot  : int = int_block_dot(i, j, k_lo, k_hi, g, true, true, vs1, vs2);
-      let fp_sum : bits(g.EEW_C) = int_to_fp(dot, g.EEW_C, fmt_C, rm);
-      acc = fp_add(acc, fp_mul(blk_scale, fp_sum, g.EEW_C, fmt_C, rm),
-                   g.EEW_C, fmt_C, rm)
-    };
-
-    if nan_out then
-      write_single_element(g.EEW_C, c_flat, vd, fp_defaultNaN(g.EEW_C, fmt_C))
-    else
-      write_single_element(g.EEW_C, c_flat, vd, acc)
-  }
-};
+int_scaled_gemm(g, fmt_C, E8M0, rm, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -2868,15 +2791,7 @@ let g : gemm_geom = decode_gemm_geometry(1, false);
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    let c_bits : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    var acc : int = signed(c_bits);
-    acc = acc + int_block_dot(i, j, 0, g.K_eff - 1, g, signed_A, signed_B, vs1, vs2);
-    write_single_element(g.EEW_C, c_flat, vd, to_bits_unsafe(g.EEW_C, acc))
-  }
-};
+int_gemm(g, signed_A, signed_B, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -3354,15 +3269,7 @@ let g : gemm_geom = decode_gemm_geometry(4, true);
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    let c_bits : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    var acc : int = signed(c_bits);
-    acc = acc + int_block_dot(i, j, 0, g.K_eff - 1, g, signed_A, signed_B, vs1, vs2);
-    write_single_element(g.EEW_C, c_flat, vd, to_bits_unsafe(g.EEW_C, acc))
-  }
-};
+int_gemm(g, signed_A, signed_B, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
@@ -3435,15 +3342,7 @@ let g : gemm_geom = decode_gemm_geometry(2, true);
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
 
-foreach (j from 0 to (g.N - 1)) {
-  foreach (i from 0 to (g.M - 1)) {
-    let c_flat : int = mat_C_idx(i, j, g.M, g.MUL_C, g.lambda, g.epr_C);
-    let c_bits : bits(g.EEW_C) = read_single_element(g.EEW_C, c_flat, vd);
-    var acc : int = signed(c_bits);
-    acc = acc + int_block_dot(i, j, 0, g.K_eff - 1, g, signed_A, signed_B, vs1, vs2);
-    write_single_element(g.EEW_C, c_flat, vd, to_bits_unsafe(g.EEW_C, acc))
-  }
-};
+int_gemm(g, signed_A, signed_B, vs1, vs2, vd);
 RETIRE_SUCCESS
 --
 
