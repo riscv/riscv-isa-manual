@@ -131,7 +131,9 @@ OPTIONS_TAGS := --trace \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=WARN
-OPTIONS := $(OPTIONS_TAGS) -r ./src/lib/volume-xrefs.rb
+OPTIONS := $(OPTIONS_TAGS) \
+           -r ./src/lib/volume-xrefs.rb \
+           -r ./src/lib/macros.rb
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
