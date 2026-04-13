@@ -42,15 +42,16 @@ The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are 
   If MUL_C = 16, the only allowed vector register indices are 0 and 16.
 
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
-  equal to SEW for non-packing variants, SEW/2 for double-packing, SEW/4 for quad-packing, and SEW/8 for octo-packing variants.
-  The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-packing,
-  2 for double-packing, 4 for quad-packing, and 8 for octo-packing instructions.
+  equal to SEW for non-widening variants, SEW/2 for double-widening, SEW/4 for quad-widening, and SEW/8 for octo-widening variants.
+  For widening variants, the narrow input elements are packed W per SEW-wide register slot.
+  The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-widening,
+  2 for double-widening, 4 for quad-widening, and 8 for octo-widening instructions.
   LMUL scales the A and B register groups along the K dimension only and does not affect C.
   Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
   Fractional LMUL settings (LMUL < 1) are reserved and shall raise an illegal-instruction exception when used with any IME instruction.
 
 [#ime-geometry-fig]
-.Geometry of matrix tiles and element ordering for 32 element vector registers and λ=4. VRs are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case with A, B, C having the same SEW. (b) Widening case with A and B having half the SEW of C (double-packing).
+.Geometry of matrix tiles and element ordering for 32 element vector registers and λ=4. VRs are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case (W=1) with A, B, C having the same SEW. (b) Double-widening case (W=2) with A and B at half the SEW of C, packed two per SEW-wide slot.
 image::png/ime-geometry.png[width=100%, align=center, alt="Diagram of matrix tile geometry and multiplier configuration parameters."]
 
 The K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
@@ -281,14 +282,14 @@ immediate field.
 For non-widening multiply-accumulate instructions (W=1), the input elements
 A and B have the same width as the accumulator (SEW) and no packing occurs.
 
-For widening instructions (W=2 or W=4), each input register group holds
+For widening instructions (W=2, W=4, or W=8), each input register group holds
 elements at the effective input element width EEW = SEW ÷ W.  Because
 tile load instructions always transfer data at SEW granularity, every loaded
 SEW-bit position contains W contiguous narrow elements that the
 multiply-accumulate instruction consumes as a sub-dot-product.
 
 [#ime-tile-widening-fig]]
-.Element distribution and tile geometry example for L=32, SEW wide elements (left), two SEW/2 wide elements packed per SEW (middle), and four SEW/4 wide elements per SEW (right). Packing/widening by W increases the effective K dimension of the tile by a factor of W.
+.Element distribution and tile geometry example for L=32, SEW wide elements (left), two SEW/2 wide elements packed per SEW (middle), and four SEW/4 wide elements per SEW (right). Widening by a factor W (with the corresponding packing of W narrow elements per SEW-wide slot) increases the effective K dimension of the tile by a factor of W.
 image::png/ime-tile-widening.png[align="center"]
 
 ===== Byte-sized and wider elements (EEW ≥ 8)
@@ -511,7 +512,7 @@ not apply.
 
 All multiply and add operations use the dynamic rounding mode from `frm`; floating-point exception flags are accumulated into `fflags`.
 
-The K-dimension, tile-dimension formulae, MUL_C, and instruction-to-widening-factor mapping are the same as for the integer family (see <<zvvmm>>); the floating-point mnemonics are `vfmmacc.vv` (W=1), `vfwmmacc.vv` (W=2), and `vfqwmmacc.vv` (W=4).
+The K-dimension, tile-dimension formulae, MUL_C, and instruction-to-widening-factor mapping are the same as for the integer family (see <<zvvmm>>); the floating-point mnemonics are `vfmmacc.vv` (W=1), `vfwmmacc.vv` (W=2), `vfqwmmacc.vv` (W=4), and `vf8wmmacc.vv` (W=8).
 
 As with the integer multiply-accumulate instructions, vector masking is not
 supported.  When `vm=0`, the instruction does not apply a vector mask;
@@ -534,7 +535,7 @@ This section specifies how the K_eff product terms may be grouped and when inter
 
 ===== Sub-dot-products
 
-For widening instructions (W = 2 or W = 4), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_.
+For widening instructions (W = 2, W = 4, or W = 8), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_.
 The W multiplications of (SEW÷W)-bit elements are performed and their products summed.
 
 Each product of two (SEW÷W)-bit values is _exact_ at SEW precision: the significand has at most 2 × p~input~ − 1 bits, which fits in the wider SEW format.
@@ -1265,8 +1266,9 @@ Key observations:
   and `altfmt_B` in `vtype` to select the desired operand signedness.
   The load instructions are unchanged.
 
-* For widening variants (W=2 or W=4), use `vfwmmacc.vv`/`vfqwmmacc.vv` or
-  `vwmmacc.vv`/`vqwmmacc.vv`.
+* For widening variants (W=2, W=4, or W=8), use `vfwmmacc.vv`,
+  `vfqwmmacc.vv`, or `vf8wmmacc.vv` (FP), or `vwmmacc.vv`, `vqwmmacc.vv`,
+  or `v8wmmacc.vv` (integer).
   The narrower A and B element widths are encoded in the multiply-accumulate
   instruction; the tile load instructions require no modification.
 
