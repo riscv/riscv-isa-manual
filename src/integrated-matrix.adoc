@@ -976,7 +976,7 @@ The tile dimensions are fully determined by the current `vtype` settings (SEW, V
 The tile load and store instructions make use of the following parameters from the CSRs:
 
 * SEW — element width
-* VL — active vector length (must be a multiple of λ)
+* VL — active vector length (must be a multiple of λ × LMUL, the line size)
 * LMUL — vector length multiplier
 * λ — selected lambda, read from `lambda[2:0]` in `vtype`
 
@@ -1150,10 +1150,10 @@ The tile dimensions are fully determined by the current vector configuration:
 
 `M_tile` is fixed by the hardware (VLEN) and the chosen SEW and λ; it cannot be changed by VL.
 `N_tile` is controlled by the programmer through VL; use `vsetvl` to select the largest `N_tile` that fits the remaining columns.
-VL must be a multiple of λ × LMUL, so only full columns can be selected.
+VL (set via `vsetvli` at `vtype.SEW` = the C element width) must be a multiple of λ × LMUL, so only full columns can be selected.
 
-Because the multiply-accumulate instructions always read all `M_tile` rows of A independent of VL, loading an A tile requires VL = M_tile × K_eff (the natural maximum VL for the chosen LMUL).
-The B load and computation use the narrower VL = K_eff × N_tile.
+Because the multiply-accumulate instructions always read all `M_tile` rows of A independent of VL, loading an A tile requires VL = M_tile × λ × LMUL (the natural maximum VL for the chosen LMUL).
+The B load and computation use the narrower VL = λ × LMUL × N_tile.
 
 ==== C tile tail policy
 
@@ -1776,7 +1776,7 @@ struct gemm_geom = {
   epr_C   : int,   // elements per register at EEW_C
 }
 
-function decode_gemm_geometry(W : int, vl_divisor_is_lambda : bool) -> gemm_geom = {
+function decode_gemm_geometry(W : int) -> gemm_geom = {
   let SEW_pow  : int = get_sew_pow();
   let EEW_C    : int = 2 ^ SEW_pow;
   let EEW_A    : int = EEW_C / W;
@@ -1793,9 +1793,10 @@ function decode_gemm_geometry(W : int, vl_divisor_is_lambda : bool) -> gemm_geom
 
   let K_eff : int = lambda * W * LMUL;
 
-  // VL divisibility: integer widening divides by lambda;
-  // all other instructions divide by K_eff.
-  let vl_div : int = if vl_divisor_is_lambda then lambda else K_eff;
+  // VL divisibility: VL must be a multiple of lambda × LMUL.
+  // N_tile is the number of active columns of B and C.
+  // Assumes VL is set via vsetvli at vtype.SEW = C element width.
+  let vl_div : int = lambda * LMUL;
   let N      : int = unsigned(vl) / vl_div;
   let M      : int = (LMUL * vlen / EEW_A) / K_eff;
   let MUL_C  : int = M / lambda;
@@ -2046,7 +2047,7 @@ layout).
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
 Accumulation is modular (wraps at 2^SEW^).
@@ -2058,7 +2059,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 +
 * `vm` = 0 (_reserved_).
 * SEW < 32 (EEW = SEW÷8 would be sub-nibble).
-* VL is not a multiple of λ.
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2069,7 +2070,7 @@ Operation::
 if vm == 0 then return Illegal_Instruction();
 if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(8, true);
+let g : gemm_geom = decode_gemm_geometry(8);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
@@ -2125,7 +2126,7 @@ layout).
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷8; the C
 format is selected by `altfmt`, interpreted for width SEW.
@@ -2142,7 +2143,7 @@ Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
 +
 * SEW < 32 (EEW = SEW÷8 would be sub-nibble).
-* VL is not a multiple of K_effective (= λ × 8 × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2155,7 +2156,7 @@ Operation::
 --
 if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(8, false);
+let g : gemm_geom = decode_gemm_geometry(8);
 
 if vm == 0 then check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
@@ -2216,7 +2217,7 @@ _vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×
 layout).  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B` in `vtype` (see <<mixed-format-inputs>>);
 the C accumulator format is selected by `altfmt`.
@@ -2229,7 +2230,7 @@ Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
 +
 * `vm` = 0 (_reserved_).
-* VL is not a multiple of K_effective (= λ × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2239,7 +2240,7 @@ Operation::
 --
 if vm == 0 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(1, false);
+let g : gemm_geom = decode_gemm_geometry(1);
 
 let fmt_A : fp_fmt       = fp_format_of(g.EEW_C, vtype[altfmt_A]);
 let fmt_B : fp_fmt       = fp_format_of(g.EEW_C, vtype[altfmt_B]);
@@ -2301,7 +2302,7 @@ layout).
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷4; the C
 format is selected by `altfmt`, interpreted for width SEW.
@@ -2315,7 +2316,7 @@ selects the block size (32 or 16 elements).
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
 +
-* VL is not a multiple of K_effective (= λ × 4 × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2326,7 +2327,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 Operation::
 [source,sail]
 --
-let g : gemm_geom = decode_gemm_geometry(4, false);
+let g : gemm_geom = decode_gemm_geometry(4);
 
 if vm == 0 then check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
@@ -2397,7 +2398,7 @@ layout).
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷2; the C
 format is selected by `altfmt`, interpreted for width SEW.
@@ -2411,7 +2412,7 @@ selects the block size (32 or 16 elements).
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
 +
-* VL is not a multiple of K_effective (= λ × 2 × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2422,7 +2423,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 Operation::
 [source,sail]
 --
-let g : gemm_geom = decode_gemm_geometry(2, false);
+let g : gemm_geom = decode_gemm_geometry(2);
 
 if vm == 0 then check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
@@ -2497,7 +2498,7 @@ register layout).
 _vs1_ and _vs2_ have integer elements of width SEW÷2; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
 +
@@ -2515,7 +2516,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * SEW = 64 (reserved encoding).
 * `altfmt_A` = 1 (reserved; MXINT inputs are signed).
 * `altfmt_B` = 1 (reserved; MXINT inputs are signed).
-* VL is not a multiple of K_effective (= λ × 2 × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2531,7 +2532,7 @@ if EEW_C_check == 8  then return Illegal_Instruction();
 if EEW_C_check == 32 then return Illegal_Instruction();
 if EEW_C_check == 64 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(2, false);
+let g : gemm_geom = decode_gemm_geometry(2);
 
 check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
@@ -2600,7 +2601,7 @@ register layout).
 _vs1_ and _vs2_ have integer elements of width SEW÷8; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
 +
@@ -2616,7 +2617,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * SEW < 32 (reserved encoding).
 * `altfmt_A` = 1 (reserved; MXINT inputs are signed).
 * `altfmt_B` = 1 (reserved; MXINT inputs are signed).
-* VL is not a multiple of K_effective (= λ × 8 × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2629,7 +2630,7 @@ Operation::
 --
 if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(8, false);
+let g : gemm_geom = decode_gemm_geometry(8);
 
 check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
@@ -2698,7 +2699,7 @@ register layout).
 _vs1_ and _vs2_ have integer elements of width SEW÷4; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
 +
@@ -2716,7 +2717,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * SEW = 64 (reserved encoding).
 * `altfmt_A` = 1 (reserved; MXINT inputs are signed).
 * `altfmt_B` = 1 (reserved; MXINT inputs are signed).
-* VL is not a multiple of K_effective (= λ × 4 × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2732,7 +2733,7 @@ if EEW_C_check == 8  then return Illegal_Instruction();
 if EEW_C_check == 32 & vtype[altfmt] == 0b1 then return Illegal_Instruction();
 if EEW_C_check == 64 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(4, false);
+let g : gemm_geom = decode_gemm_geometry(4);
 
 check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
@@ -2794,8 +2795,7 @@ _vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×
 layout).  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of
-K_effective.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
 Accumulation is modular (wraps at 2^SEW^).
@@ -2804,7 +2804,7 @@ Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
 +
 * `vm` = 0 (_reserved_).
-* VL is not a multiple of K_effective (= λ × LMUL).
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -2814,7 +2814,7 @@ Operation::
 --
 if vm == 0 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(1, false);
+let g : gemm_geom = decode_gemm_geometry(1);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
@@ -3274,7 +3274,7 @@ layout).
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
 Accumulation is modular (wraps at 2^SEW^).
@@ -3282,7 +3282,7 @@ Accumulation is modular (wraps at 2^SEW^).
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
 +
-* VL is not a multiple of λ.
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -3292,7 +3292,7 @@ Operation::
 --
 if vm == 0 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(4, true);
+let g : gemm_geom = decode_gemm_geometry(4);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
@@ -3347,7 +3347,7 @@ layout).
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ.
+VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
 Accumulation is modular (wraps at 2^SEW^).
@@ -3355,7 +3355,7 @@ Accumulation is modular (wraps at 2^SEW^).
 Exceptions::
 _Illegal Instruction_ is raised if any of the following conditions holds:
 +
-* VL is not a multiple of λ.
+* VL is not a multiple of λ × LMUL.
 * MUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for MUL_C.
@@ -3365,7 +3365,7 @@ Operation::
 --
 if vm == 0 then return Illegal_Instruction();
 
-let g : gemm_geom = decode_gemm_geometry(2, true);
+let g : gemm_geom = decode_gemm_geometry(2);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
