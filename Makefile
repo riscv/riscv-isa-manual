@@ -154,6 +154,7 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
+check-xrefs: $(addprefix $(BUILD_DIR)/, $(addsuffix .check-xrefs, $(DOCS)))
 check-tags:
 	@bash ./scripts/check-tag-changes.sh
 
@@ -166,7 +167,7 @@ update-ref: $(DOCS_NORM_TAGS)
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
 build-norm-rules: build-norm-rules-json build-norm-rules-html check-tags
-build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
+build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html check-xrefs
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
@@ -221,6 +222,10 @@ $(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_
 	mkdir -p $@.workdir/build
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) --html $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
+
+$(BUILD_DIR)/%.check-xrefs: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+	$(WORKDIR_SETUP)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) -v $(OPTIONS) $(REQUIRES) $< 2>&1 | grep 'possible invalid reference' && exit 1 || [ $$? -eq 0 ] $(DOCKER_QUOTE)
 
 # Update docker image to latest
 docker-pull-latest:
