@@ -1,0 +1,303 @@
+[[ext:zcmt]]
+=== ext:zcmt[] Standard Extension for Compressed Table Jumps
+
+The ext:zcmt[] extension adds table-jump instructions, which improve code density
+when procedures have many call sites.
+It also adds the csr:jvt[] CSR.
+The csr:jvt[] CSR requires a state enable if Smstateen is implemented. See
+<<csrs-jvt>> for details.
+
+The ext:zcmt[] extension conflicts with the ext:zcd[] extension.
+
+NOTE: ext:zcmt[] is primarily targeted at embedded class CPUs due to implementation
+complexity. Additionally, it is not compatible with RVA profiles.
+
+The ext:zcmt[] extension depends on the extlink:zca[] and extlink:zicsr[] extensions.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|yes
+|yes
+|cm.jt _index_
+|<<#insns-cm_jt>>
+
+|yes
+|yes
+|cm.jalt _index_
+|<<#insns-cm_jalt>>
+
+|===
+
+[#insns-tablejump,reftext="Table Jump Overview"]
+==== Table Jump Overview
+
+_cm.jt_ (<<#insns-cm_jt>>) and _cm.jalt_ (<<#insns-cm_jalt>>) are referred to as table jump.
+
+[#norm:Zcmt_table]#Table jump uses a 256-entry XLEN wide table in instruction memory to contain function addresses.
+The table must be a minimum of 64-byte aligned.#
+
+[#norm:Zcmt_endian]#Table entries follow the current data endianness. This is different from normal instruction fetch which is always little-endian.#
+
+_cm.jt_ and _cm.jalt_ encodings index the table, giving access to functions within the full XLEN wide address space.
+
+This is used as a form of dictionary compression to reduce the code size of _jal_ / _auipc+jalr_ / _jr_ / _auipc+jr_ instructions.
+
+Table jump allows the linker to replace the following instruction sequences with a _cm.jt_ or _cm.jalt_ encoding, and an entry in the table:
+
+* 32-bit _j_ calls
+* 32-bit _jal_ ra calls
+* 64-bit _auipc+jr_ calls to fixed locations
+* 64-bit _auipc+jalr ra_ calls to fixed locations
+** The _auipc+jr/jalr_ sequence is used because the offset from the PC is out of the ±1{nbsp}MB range.
+
+If a return address stack is implemented, then as _cm.jalt_ is equivalent to _jal ra_, it pushes to the stack.
+
+==== jvt
+
+[#norm:Zcmt_entry_sz]#The base of the table is in the jvt CSR (see <<csrs-jvt>>), each table entry is XLEN bits.#
+
+If the same function is called with and without linking then it must have two entries in the table.
+This is typically caused by the same function being called with and without tail calling.
+
+[#tablejump-fault-handling]
+==== Table Jump Fault handling
+
+[#norm:Zcmt_fetch]#For a table jump instruction, the table entry that the instruction selects is considered an extension of the instruction itself.
+Hence, the execution of a table jump instruction involves two instruction fetches, the first to read the instruction (_cm.jt_/_cm.jalt_)
+and the second to read from the jump vector table (JVT). Both instruction fetches are _implicit_ reads, and both require
+execute permission; read permission is irrelevant. It is recommended that the second fetch be ignored for hardware triggers and breakpoints.#
+
+Memory writes to the jump vector table require an instruction barrier (_fence.i_) to guarantee that they are visible to the instruction fetch.
+
+Multiple contexts may have different jump vector tables. JVT may be switched between them without an instruction barrier
+if the tables have not been updated in memory since the last _fence.i_.
+
+[#norm:Zcmt_trap]#If an exception occurs on either instruction fetch, xEPC is set to the PC of the table jump instruction,  xCAUSE is set as expected for the type of fault and xTVAL (if not set to zero) contains the fetch address which caused the fault.#
+
+<<<
+[#csrs-jvt,reftext="jvt CSR, table jump base vector and control register"]
+==== jvt CSR
+
+Synopsis::
+
+Table jump base vector and control register
+
+Address:
+
+0x017
+
+Permissions:
+
+URW
+
+Format (RV32):
+
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  6, name: 'mode',  attr: ['6'] },
+    { bits: 26, name: 'base[XLEN-1:6] (WARL)',  attr: ['XLEN-6'] },
+],config:{bits:32}}
+....
+
+Format (RV64):
+
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  6, name: 'mode',  attr: ['6'] },
+    { bits: 58, name: 'base[XLEN-1:6] (WARL)',  attr: ['XLEN-6'] },
+],config:{bits:64}}
+....
+
+Description::
+
+[#norm:jvt_reg]#The _jvt_ register is an XLEN-bit *WARL* read/write register that holds the jump table configuration, consisting of the jump table base address (BASE) and the jump table mode (MODE).#
+
+[#norm:jvt_op]#If ext:zcmt[] is implemented then _jvt_ must also be implemented, but can contain a read-only value. If _jvt_ is writable, the set of values the register may hold can vary by implementation. The value in the BASE field must always be aligned on a 64-byte boundary.
+Note that the CSR contains only bits XLEN-1 through 6 of the address _base_. When computing jump-table accesses, the lower six bits of _base_ are filled with zeroes to obtain an XLEN-bit jump-table base address _jvt.base_ that is always aligned on a 64-byte boundary.#
+
+[#norm:jvt_base_vm]#_jvt.base_ is a virtual address, whenever virtual memory is enabled.#
+
+The memory pointed to by _jvt.base_ is treated as instruction memory for the purpose of executing table jump instructions, implying execute access permission.
+
+[#JVT-config-table]
+._jvt.mode_ definition
+[width="60%",options=header]
+|=============================================================================================
+| jvt.mode | Comment
+| 000000 | Jump table mode
+| others | *reserved for future standard use*
+|=============================================================================================
+
+[#norm:jvt_mode_acc]#_jvt.mode_ is a *WARL* field, so can only be programmed to modes which are implemented.# Therefore the discovery mechanism is to
+attempt to program different modes and read back the values to see which are available. Jump table mode _must_ be implemented.
+
+[NOTE]
+====
+in future the RISC-V Unified Discovery method will report the available modes.
+====
+
+Architectural State:
+
+_jvt_ CSR adds architectural state to the system software context (such as an OS process), therefore must be saved/restored on context switches.
+<<<
+[#insns-cm_jt,reftext="Jump via table"]
+==== cm.jt
+
+Synopsis::
+
+jump via table
+
+Mnemonic::
+
+cm.jt _index_
+
+Encoding (RV32, RV64):
+
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  2, name: 0x2,      attr: ['C2'] },
+    { bits:  8, name: 'index',  attr: [] },
+    { bits:  3, name: 0x0,      attr: [] },
+    { bits:  3, name: 0x5,      attr: ['FUNCT3'] },
+],config:{bits:16}}
+....
+
+[NOTE]
+====
+For this encoding to decode as _cm.jt_, _index<32_, otherwise it decodes as _cm.jalt_, see <<insns-cm_jalt>>.
+====
+
+[NOTE]
+====
+If jvt.mode = 0 (Jump Table Mode) then _cm.jt_ behaves as specified here. If jvt.mode is a reserved value, then _cm.jt_ is also reserved. In the future other defined values of jvt.mode may change the behaviour of _cm.jt_.
+====
+
+Assembly Syntax:
+
+[source,asm]
+----
+cm.jt index
+----
+
+Description::
+
+[#norm:cm-jt_op]#_cm.jt_ reads an entry from the jump vector table in memory and jumps to the address that was read.#
+
+For further information see <<insns-tablejump>>.
+
+Prerequisites::
+
+None
+
+32-bit equivalent:
+
+No direct equivalent encoding exists.
+
+<<<
+
+[#insns-cm_jt-SAIL,reftext="cm.jt SAIL code"]
+Operation::
+
+[source,sail]
+----
+//This is not SAIL, it's pseudocode. The SAIL hasn't been written yet.
+
+# table_address is temporary internal state, it doesn't represent a real register
+# InstMemory is byte indexed
+
+switch(XLEN) {
+  32:  table_address[XLEN-1:0] = jvt.base + (index<<2);
+  64:  table_address[XLEN-1:0] = jvt.base + (index<<3);
+}
+
+//fetch from the jump table
+pc = InstMemory[table_address][XLEN-1:0]&~0x1;  // Clear bit 0.
+
+----
+
+<<<
+[#insns-cm_jalt,reftext="Jump and link via table"]
+==== cm.jalt
+
+Synopsis::
+
+jump via table with optional link
+
+Mnemonic::
+
+cm.jalt _index_
+
+Encoding (RV32, RV64):
+
+[wavedrom, , svg]
+....
+{reg:[
+    { bits:  2, name: 0x2,      attr: ['C2'] },
+    { bits:  8, name: 'index',  attr: [] },
+    { bits:  3, name: 0x0,      attr: [] },
+    { bits:  3, name: 0x5,      attr: ['FUNCT3'] },
+],config:{bits:16}}
+....
+
+[NOTE]
+====
+For this encoding to decode as _cm.jalt_, _index>=32_, otherwise it decodes as _cm.jt_, see <<insns-cm_jt>>.
+====
+
+[NOTE]
+====
+If jvt.mode = 0 (Jump Table Mode) then _cm.jalt_ behaves as specified here. If jvt.mode is a reserved value, then _cm.jalt_ is also reserved. In the future other defined values of jvt.mode may change the behaviour of _cm.jalt_.
+====
+
+Assembly Syntax:
+
+[source,asm]
+----
+cm.jalt index
+----
+
+Description::
+
+[#norm:cm-jalt_op]#_cm.jalt_ reads an entry from the jump vector table in memory and jumps to the address that was read, linking to _ra_.#
+
+For further information see <<insns-tablejump>>.
+
+Prerequisites::
+
+None
+
+32-bit equivalent:
+
+No direct equivalent encoding exists.
+
+<<<
+
+[#insns-cm_jalt-SAIL,reftext="cm.jalt SAIL code"]
+Operation::
+
+[source,sail]
+----
+//This is not SAIL, it's pseudocode. The SAIL hasn't been written yet.
+
+# table_address is temporary internal state, it doesn't represent a real register
+# InstMemory is byte indexed
+
+switch(XLEN) {
+  32:  table_address[XLEN-1:0] = jvt.base + (index<<2);
+  64:  table_address[XLEN-1:0] = jvt.base + (index<<3);
+}
+
+//fetch from the jump table
+
+ra = pc+2;
+pc = InstMemory[table_address][XLEN-1:0]&~0x1;  // Clear bit 0.
+
+----
