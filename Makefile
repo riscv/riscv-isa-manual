@@ -164,7 +164,8 @@ check-tags:
 # Required by GitHub pre-commit checks for this repo.
 update-ref: $(DOCS_NORM_TAGS)
 	cp -f $(DOCS_NORM_TAGS) ref
-	sed -i -e '$$a\' ref/*.json
+	sed -i .bak -e '$$a\' ref/*.json
+	rm ref/*.bak
 
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
