@@ -31,6 +31,21 @@ The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls, Zvvmttl
 
 The geometry of the multiplier and the tiles is defined by the new parameter `lambda` (λ) which is encoded in 3 bits in the `vtype` CSR, and vector operation parameters like the widening `W` of the multiplication encoded in the instruction, `LMUL`, `SEW` and `VLEN`.
 
+The Zvvm family uses the parameter `W` to describe both the arithmetic widening ratio
+and the corresponding packing of input elements within each `SEW`-wide storage position.
+
+When `W = 1`, the instruction is _non-widening_: each input element has width `SEW`,
+no packing occurs, and the accumulator C also has width `SEW`.
+
+When `W > 1`, the instruction is _widening_: each input element has width `SEW/W`,
+and `W` such narrow input elements are packed into each `SEW`-wide storage position.
+The accumulator C still has width `SEW`.
+
+Thus, "packing" refers to the storage layout of the inputs in the vector registers,
+whereas "widening" refers to the arithmetic relationship between the input element width
+and the accumulator element width. In this specification, these two views are coupled by
+the same parameter `W`.
+
 Matrix tiles are represented using the existing RISC-V V register file and its configuration state.
 The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are stored as follows:
 
@@ -38,19 +53,20 @@ The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are 
   Its register group multiplier MUL_C is determined by the tile geometry:
   MUL_C = (VLEN / SEW) / λ^2^, where λ is the tile-layout parameter decoded from the `lambda[2:0]` field in `vtype`.
   The C register group may start at any vector register index that is MUL_C-aligned.
+  λ^2^ must divide (VLEN / SEW) such that
   MUL_C ∈ {1, 2, 4, 8, 16}.
   If MUL_C = 16, the only allowed vector register indices are 0 and 16.
+  In general, the vector register index for the C register group must be a mulitple of MUL_C.
 
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
-  equal to SEW for non-packing variants, SEW/2 for double-packing, SEW/4 for quad-packing, and SEW/8 for octo-packing variants.
-  The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-packing,
-  2 for double-packing, 4 for quad-packing, and 8 for octo-packing instructions.
+  equal to SEW for non-widening variants (`W=1`), and equal to SEW/2, SEW/4, or SEW/8 for widening variants (`W=2`, `W=4`, or `W=8`), with the narrower input elements packed within each `SEW`-wide storage position.
+  The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-widening instructions, 2 for 2× widening instructions, 4 for 4× widening instructions, and 8 for 8× widening instructions.
   LMUL scales the A and B register groups along the K dimension only and does not affect C.
   Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
   Fractional LMUL settings (LMUL < 1) are reserved and shall raise an illegal-instruction exception when used with any IME instruction.
 
 [#ime-geometry-fig]
-.Geometry of matrix tiles and element ordering for 32 element vector registers and λ=4. VRs are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case with A, B, C having the same SEW. (b) Widening case with A and B having half the SEW of C (double-packing).
+.Geometry of matrix tiles and element ordering for 32 element vector registers and λ=4. VRs are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case with A, B, and C having the same SEW. (b) Widening case with A and B having half the SEW of C, with two narrow input elements packed into each SEW-wide storage position.
 image::png/ime-geometry.png[width=100%, align=center, alt="Diagram of matrix tile geometry and multiplier configuration parameters."]
 
 The K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
@@ -312,7 +328,7 @@ Their meaning depends on whether the instruction is a floating-point or integer 
 
 The `altfmt_A` and `altfmt_B` bits are located at `vtype[XLEN-5]` and
 `vtype[XLEN-6]`, immediately below the `lambda[2:0]` field.
-These positions are outside the `vsetvli` immediate field and must be
+These positions are outside the `vsetvli` or `vsetivli` immediate field and must be
 configured via `vsetvl` (with the full `vtype` value in a register) or
 `vsetivli`.
 
@@ -370,19 +386,18 @@ The `bs` bit is located at `vtype[XLEN-7]`, immediately below `altfmt_B`.
 Like `altfmt_A` and `altfmt_B`, this position is outside the `vsetvli`
 immediate field.
 
-
 === Storage formats
 
 ==== Element packing in input tiles
 
-For non-widening multiply-accumulate instructions (W=1), the input elements
-A and B have the same width as the accumulator (SEW) and no packing occurs.
+For non-widening multiply-accumulate instructions (`W=1`), the input elements
+A and B have the same width as the accumulator (`SEW`), and no packing occurs.
 
-For widening instructions (W=2 or W=4), each input register group holds
-elements at the effective input element width EEW = SEW ÷ W.  Because
-tile load instructions always transfer data at SEW granularity, every loaded
-SEW-bit position contains W contiguous narrow elements that the
-multiply-accumulate instruction consumes as a sub-dot-product.
+For widening multiply-accumulate instructions (`W>1`), each input register group holds
+elements at the effective input element width `EEW = SEW ÷ W`. Because tile load
+instructions always transfer data at `SEW` granularity, every loaded `SEW`-bit storage
+position contains `W` contiguous packed narrow elements that the multiply-accumulate
+instruction consumes as a sub-dot-product.
 
 [#ime-tile-widening-fig]
 .Element distribution and tile geometry example for L=32, SEW wide elements (left), two SEW/2 wide elements packed per SEW (middle), and four SEW/4 wide elements per SEW (right). Packing/widening by W increases the effective K dimension of the tile by a factor of W.
@@ -557,10 +572,10 @@ Likewise, for 8-bit inputs, `altfmt_A` and `altfmt_B` independently select
 E4M3 or E5M2.  All four combinations are covered by the same OFP8
 subextension for the given output format.
 
-NOTE: Mixed OFP8 inputs (E4M3 × E5M2) are only permitted with widening
-instructions (`vfwmmacc.vv`, `vfqmmacc.vv`), not with `vfmmacc.vv`
-(OFP8 → OFP8), because the exact product (up to 7 significand bits) exceeds
-the OFP8 output precision (p ≤ 4).
+// NOTE: Mixed OFP8 inputs (E4M3 × E5M2) are only permitted with widening
+// instructions (`vfwmmacc.vv`, `vfqmmacc.vv`), not with `vfmmacc.vv`
+// (OFP8 → OFP8), because the exact product (up to 7 significand bits) exceeds
+// the OFP8 output precision (p ≤ 4).
 
 ===== 16-bit inputs (IEEE binary16, BFloat16)
 
@@ -3204,7 +3219,7 @@ let eff_lambda : int =
     }
   };
 
-let LD     : int      = unsigned(X(rs2));
+var LD     : int      = unsigned(X(rs2));
 let vm_val            = read_vmask(num_elem, vm, zvreg);
 let linesize : int    = eff_lambda * LMUL;
 
@@ -3302,7 +3317,7 @@ let eff_lambda : int =
     }
   };
 
-let LD     : int   = unsigned(X(rs2));
+var LD     : int   = unsigned(X(rs2));
 let vm_val         = read_vmask(num_elem, vm, zvreg);
 let linesize : int = eff_lambda * LMUL;
 
@@ -3404,7 +3419,7 @@ let eff_lambda : int =
     }
   };
 
-let LD     : int   = unsigned(X(rs2));
+var LD     : int   = unsigned(X(rs2));
 let vm_val         = read_vmask(num_elem, vm, zvreg);
 let linesize : int = eff_lambda * LMUL;
 
@@ -3504,7 +3519,7 @@ let eff_lambda : int =
     }
   };
 
-let LD     : int   = unsigned(X(rs2));
+var LD     : int   = unsigned(X(rs2));
 let vm_val         = read_vmask(num_elem, vm, zvreg);
 let linesize : int = eff_lambda * LMUL;
 
