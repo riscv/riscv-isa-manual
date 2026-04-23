@@ -59,10 +59,8 @@ The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are 
   In general, the vector register index for the C register group must be a mulitple of MUL_C.
 
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
-  equal to SEW for non-widening variants (W=1), SEW/2 for double-widening (W=2), SEW/4 for quad-widening (W=4), and SEW/8 for octo-widening (W=8) variants.
-  For widening variants, the narrow input elements are packed W per SEW-wide register slot.
-  The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-widening,
-  2 for double-widening, 4 for quad-widening, and 8 for octo-widening instructions.
+  equal to SEW for non-widening variants (`W=1`), and equal to SEW/2, SEW/4, or SEW/8 for widening variants (`W=2`, `W=4`, or `W=8`), with the narrower input elements packed within each `SEW`-wide storage position.
+  The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-widening instructions, 2 for 2× widening instructions, 4 for 4× widening instructions, and 8 for 8× widening instructions.
   LMUL scales the A and B register groups along the K dimension only and does not affect C.
   Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
   Fractional LMUL settings (LMUL < 1) are reserved and shall raise an illegal-instruction exception when used with any IME instruction.
@@ -395,13 +393,13 @@ immediate field.
 For non-widening multiply-accumulate instructions (`W=1`), the input elements
 A and B have the same width as the accumulator (`SEW`), and no packing occurs.
 
-For widening multiply-accumulate instructions (W=2, W=4, or W=8), each input register group holds
-elements at the effective input element width EEW = SEW ÷ W.  Because
-tile load instructions always transfer data at SEW granularity, every loaded
-SEW-bit storage position contains W contiguous packed narrow elements that the
-multiply-accumulate instruction consumes as a sub-dot-product.
+For widening multiply-accumulate instructions (`W>1`), each input register group holds
+elements at the effective input element width `EEW = SEW ÷ W`. Because tile load
+instructions always transfer data at `SEW` granularity, every loaded `SEW`-bit storage
+position contains `W` contiguous packed narrow elements that the multiply-accumulate
+instruction consumes as a sub-dot-product.
 
-[#ime-tile-widening-fig]]
+[#ime-tile-widening-fig]
 .Element distribution and tile geometry example for L=32, SEW wide elements (left), two SEW/2 wide elements packed per SEW (middle), and four SEW/4 wide elements per SEW (right). Widening by a factor W (with the corresponding packing of W narrow elements per SEW-wide slot) increases the effective K dimension of the tile by a factor of W.
 image::png/ime-tile-widening.png[align="center"]
 
@@ -583,8 +581,8 @@ The encoding `altfmt_A` = 1 or `altfmt_B` = 1 is _reserved_ for 4-bit inputs.
 Likewise, for 8-bit inputs, `altfmt_A` and `altfmt_B` independently select
 E4M3 or E5M2.  All four combinations — including mixed E4M3 × E5M2 — are
 covered by the same OFP8 subextension for the given output format and are
-permitted on all three instructions (`vfmmacc.vv`, `vfwmmacc.vv`,
-`vfqwmmacc.vv`).  Each A × B product is computed at sufficient internal
+permitted on all four instructions (`vfmmacc.vv`, `vfwmmacc.vv`,
+`vfqmmacc.vv`, `vf8wmmacc.vv`).  Each A × B product is computed at sufficient internal
 precision and rounded once to the C accumulator format; see
 <<mixed-format-inputs>>.
 
@@ -633,7 +631,7 @@ Final accumulation into the C accumulator format uses the dynamic rounding mode 
 Any intermediate grouping, partial-sum formation, and optional rounding of partial sums follow <<arithmetic-considerations>>.
 Floating-point exception flags are accumulated into `fflags`.
 
-The K-dimension, tile-dimension formulae, MUL_C, and instruction-to-widening-factor mapping are the same as for the integer family (see <<zvvmm>>); the floating-point mnemonics are `vfmmacc.vv` (W=1), `vfwmmacc.vv` (W=2), `vfqwmmacc.vv` (W=4), and `vf8wmmacc.vv` (W=8).
+The K-dimension, tile-dimension formulae, MUL_C, and instruction-to-widening-factor mapping are the same as for the integer family (see <<zvvmm>>); the floating-point mnemonics are `vfmmacc.vv` (W=1), `vfwmmacc.vv` (W=2), `vfqmmacc.vv` (W=4), and `vf8wmmacc.vv` (W=8).
 
 As with the integer multiply-accumulate instructions, vector masking is not
 supported.  When `vm=0`, the instruction does not apply a vector mask;
@@ -656,8 +654,8 @@ This section specifies how the K_eff product terms may be grouped and when inter
 
 ===== Sub-dot-products
 
-For widening instructions (W = 2, W = 4, or W = 8), the W narrow input-element pairs packed within one accumulator-width (SEW-bit) position form a natural computational unit called a _sub-dot-product_.
-The W multiplications of (SEW÷W)-bit elements are performed and their products summed.
+When `W > 1`, the `W` narrow input-element pairs packed within one accumulator-width (`SEW`-bit) position form a natural computational unit called a _sub-dot-product_.
+The `W` multiplications of (`SEW÷W`)-bit elements are performed and their products summed.
 
 Each product of two (SEW÷W)-bit values is _exact_ at SEW precision: the significand has at most 2 × p~input~ − 1 bits, which fits in the wider SEW format.
 The sub-dot-product can therefore be computed with very little loss at `SEW` or wider precision.
@@ -1292,7 +1290,7 @@ The tile dimensions are fully determined by the current vector configuration:
 
 `M_tile` is fixed by the hardware (VLEN) and the chosen SEW and λ; it cannot be changed by VL.
 `N_tile` is controlled by the programmer through VL; use `vsetvl` to select the largest `N_tile` that fits the remaining columns.
-VL (set via `vsetvli` at `vtype.SEW` = the C element width) must be a multiple of λ × LMUL, so only full columns can be selected.
+VL (set via `vset{i}vl{i}` at `vtype.SEW` = the C element width) must be a multiple of λ × LMUL, so only full columns can be selected.
 
 Because the multiply-accumulate instructions always read all `M_tile` rows of A independent of VL, loading an A tile requires VL = M_tile × λ × LMUL (the natural maximum VL for the chosen LMUL).
 The B load and computation use the narrower VL = λ × LMUL × N_tile.
@@ -1398,7 +1396,7 @@ Key observations:
   The load instructions are unchanged.
 
 * For widening variants (W=2, W=4, or W=8), use `vfwmmacc.vv`,
-  `vfqwmmacc.vv`, or `vf8wmmacc.vv` (FP), or `vwmmacc.vv`, `vqwmmacc.vv`,
+  `vfqmmacc.vv`, or `vf8wmmacc.vv` (FP), or `vwmmacc.vv`, `vqmmacc.vv`,
   or `v8wmmacc.vv` (integer).
   The narrower A and B element widths are encoded in the multiply-accumulate
   instruction; the tile load instructions require no modification.
