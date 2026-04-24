@@ -1,0 +1,58 @@
+[[app:atomics-examples]]
+=== Atomics Assembly Code Examples
+
+The following examples are provided as non-normative text to help explain the
+RISC-V atomics ISA.
+
+==== Compare-and-Swap Using LR/SC
+
+insn:lr[]/insn:sc[] can be used to construct lock-free data structures. An
+example using insn:lr[]/insn:sc[] to implement a compare-and-swap (CAS) function
+is shown in the following listing. If inlined, CAS functionality only takes four
+instructions.
+
+[source,asm]
+.Sample code for compare-and-swap function using LR/SC.
+--
+    # a0 holds address of memory location
+    # a1 holds expected value
+    # a2 holds desired value
+    # a0 holds return value, 0 if successful, !0 otherwise
+cas:
+    lr.w t0, (a0)        # Load original value.
+    bne t0, a1, fail     # Doesn't match, so fail.
+    sc.w t0, a2, (a0)    # Try to update.
+    bnez t0, cas         # Retry if store-conditional failed.
+    li a0, 0             # Set return to success.
+    jr ra                # Return.
+fail:
+    li a0, 1             # Set return to failure.
+    jr ra                # Return.
+--
+
+==== Test-and-Test-and-Set Spinlock
+
+An example code sequence for a critical section guarded by a
+test-and-test-and-set (TTAS) spinlock is shown in the following listing. Note
+that the first AMO is marked _aq_ to order the lock acquisition before the
+critical section, and the second AMO is marked _rl_ to order the critical
+section before the lock relinquishment. We recommend the use of this AMO swap
+idiom for both lock acquire and release to simplify the implementation of
+speculative lock elision cite:[Rajwar:2001:SLE].
+
+[source,asm]
+.Sample code for mutual exclusion. `a0` contains the address of the lock.
+--
+    li           t0, 1        # Initialize swap value.
+again:
+    lw           t1, (a0)     # Check if lock is held.
+    bnez         t1, again    # Retry if held.
+    amoswap.w.aq t1, t0, (a0) # Attempt to acquire lock.
+    bnez         t1, again    # Retry if held.
+    # ...
+    # Critical section.
+    # ...
+    amoswap.w.rl x0, x0, (a0) # Release lock by storing 0.
+--
+
+//
