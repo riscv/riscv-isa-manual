@@ -129,29 +129,11 @@ insn:amocas.q[] is as follows:
 ====
 Some algorithms may load the previous data value of a memory location into the
 register used as the compare data value source by a ext:zacas[] instruction. When
-using a insn:zacas[] instruction that uses a register pair to source the compare value,
+using a ext:zacas[] instruction that uses a register pair to source the compare value,
 the two registers may be loaded using two individual loads. The two individual
 loads may read an inconsistent pair of values but that is not an issue since the
 insn:amocas[] operation itself uses an atomic load-pair from memory to obtain the
 data value for its comparison.
-
-The following example code sequence illustrates the use of insn:amocas.d[] in a RV32
-implementation to atomically increment a 64-bit counter.
-[listing]
-# a0 - address of the counter.
-increment:
-  lw   a2, (a0)      # Load current counter value using
-  lw   a3, 4(a0)     # two individual loads.
-retry:
-  mv   a6, a2        # Save the low 32 bits of the current value.
-  mv   a7, a3        # Save the high 32 bits of the current value.
-  addi a4, a2, 1     # Increment the low 32 bits.
-  sltu a1, a4, a2    # Determine if there is a carry out.
-  add  a5, a3, a1    # Add the carry if any to high 32 bits.
-  amocas.d.aqrl a2, a4, (a0)
-  bne  a2, a6, retry # If amocas.d failed then retry
-  bne  a3, a7, retry # using current values loaded by amocas.d.
-  ret
 ====
 
 Just as for AMOs in the ext:zaamo[] extension,
@@ -183,45 +165,4 @@ treated as an AMO for the purposes of the RVWMO PPO rules.
 
 [#norm:Zacas_amocas_w_permission]#An insn:amocas.w/d/q[] instruction always requires write permissions.#
 
-[NOTE]
-====
-The following example code sequence illustrates the use of insn:amocas.q[] to
-implement the _enqueue_ operation for a non-blocking concurrent queue using the
-algorithm outlined in cite:[queue]. The algorithm atomically operates on a
-pointer and its associated modification counter using the insn:amocas.q[] instruction
-to avoid the ABA problem.
-
-[listing]
-# Enqueue operation of a non-blocking concurrent queue.
-# Data structures used by the queue:
-#   structure pointer_t {ptr:   node_t *, count: uint64_t}
-#   structure node_t    {next: pointer_t, value: data type}
-#   structure queue_t   {Head: pointer_t, Tail:  pointer_t}
-# Inputs to the procedure:
-#   a0 - address of Tail variable
-#   a4 - address of a new node to insert at tail
-enqueue:
-  ld   a6, (a0)          # a6 = Tail.ptr
-  ld   a7, 8(a0)         # a7 = Tail.count
-  ld   a2, (a6)          # a2 = Tail.ptr->next.ptr
-  ld   a3, 8(a6)         # a3 = Tail.ptr->next.count
-  ld   t1, (a0)
-  ld   t2, 8(a0)
-  bne  a6, t1, enqueue   # Retry if Tail & next are not consistent
-  bne  a7, t2, enqueue   # Retry if Tail & next are not consistent
-  bne  a2, x0, move_tail # Was tail pointing to the last node?
-  mv   t1, a2            # Save Tail.ptr->next.ptr
-  mv   t2, a3            # Save Tail.ptr->next.count
-  addi a5, a3, 1         # Link the node at the end of the list
-  amocas.q.aqrl a2, a4, (a6)
-  bne  a2, t1, enqueue   # Retry if CAS failed
-  bne  a3, t2, enqueue   # Retry if CAS failed
-  addi a5, a7, 1         # Update Tail to the inserted node
-  amocas.q.aqrl a6, a4, (a0)
-  ret                    # Enqueue done
-move_tail:               # Tail was not pointing to the last node
-  addi a3, a7, 1         # Try to swing Tail to the next node
-  amocas.q.aqrl a6, a2, (a0)
-  j    enqueue           # Retry
-
-====
+//
