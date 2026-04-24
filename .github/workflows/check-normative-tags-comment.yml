@@ -1,0 +1,195 @@
+---
+# ============================================================================
+# Workflow: Check Normative Tag Changes (Comment)
+# ----------------------------------------------------------------------------
+# Purpose:
+#   Post or update the "Normative Rule Changes Detected" comment on a pull
+#   request after the read-only `check-normative-tags-pr.yml` workflow
+#   completes. The comment summarises the diff between the PR's built
+#   normative tags and the committed reference files under ref/, so that
+#   reviewers can quickly tell whether a PR (intentionally or not) adds,
+#   modifies, or deletes normatively tagged text.
+#
+# Why this is a separate workflow:
+#   The companion `check-normative-tags-pr.yml` workflow runs on the
+#   `pull_request` event and is intentionally read-only: PR code is
+#   untrusted (anyone, including fork authors, can modify `make build-tags`
+#   or any script it calls), so we must never give that workflow write
+#   access to the repository, issues, or pull requests.
+#
+#   This workflow instead runs on `workflow_run: completed`, which is
+#   triggered *after* the PR workflow finishes. Crucially, `workflow_run`
+#   always executes the copy of the workflow file that is committed on the
+#   default branch and runs under the base repository's permissions —
+#   never the PR's code. This lets us safely grant `pull-requests: write`
+#   here without exposing it to arbitrary PR input.
+#
+#   This split is the pattern explicitly recommended by GitHub Security Lab
+#   for commenting on PRs from forks. See:
+#   https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+#
+# Inputs (from the triggering workflow's artifact):
+#   Artifact name: `normative-tag-change-report`
+#     - tag_changes.txt : the rendered Markdown report body.
+#     - pr_number.txt   : the PR number this report belongs to. This is
+#                         required because `workflow_run.pull_requests` is
+#                         empty for PRs opened from forks, so we cannot
+#                         derive the PR number from the event payload.
+#
+# Expected results:
+#   - When the PR workflow reports no changes: this workflow exits early
+#     and does nothing (no comment is created or updated).
+#   - When the PR workflow reports additions/modifications/deletions: a
+#     single bot comment titled "Normative Rule Changes Detected" is
+#     created on the PR, or the existing one is updated in place (see
+#     the de-duplication logic in `.github/scripts/comment-pr-changes.js`).
+#   - If the PR workflow itself failed to produce an artifact (e.g. build
+#     error), this workflow exits cleanly without posting, so reviewers
+#     are not spammed with half-formed reports.
+# ============================================================================
+
+name: Check Normative Tag Changes (Comment)
+
+on:
+  workflow_run:
+    # Must match the `name:` of check-normative-tags-pr.yml exactly.
+    workflows: ["Check Normative Tag Changes (PR)"]
+    types:
+      - completed
+
+# Least-privilege permissions. `pull-requests: write` is what lets us post
+# the comment; `actions: read` is needed to list/download artifacts from
+# the triggering workflow run.
+permissions:
+  pull-requests: write
+  actions: read
+  contents: read
+
+jobs:
+  post-comment:
+    runs-on: ubuntu-latest
+    # Only act on successful PR workflow runs that actually originated
+    # from a pull_request event. Skipping non-PR triggers (e.g. a manual
+    # re-run of the PR workflow on a branch) avoids spurious comment
+    # attempts.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      # ----------------------------------------------------------------------
+      # Locate the `normative-tag-change-report` artifact produced by the
+      # triggering run. We use the REST API (not actions/download-artifact's
+      # cross-run shortcut) so we can handle the "artifact missing" case
+      # gracefully without failing the whole workflow.
+      # ----------------------------------------------------------------------
+      - name: Download tag change report artifact
+        id: download
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('fs');
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+            });
+
+            const match = artifacts.data.artifacts.find(
+              a => a.name === 'normative-tag-change-report'
+            );
+            if (!match) {
+              core.info('No normative-tag-change-report artifact found; nothing to comment.');
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            const zip = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: match.id,
+              archive_format: 'zip',
+            });
+
+            fs.writeFileSync('report.zip', Buffer.from(zip.data));
+            core.setOutput('found', 'true');
+
+      # Unzip the downloaded artifact into the workspace so subsequent
+      # steps can read `tag_changes.txt` and `pr_number.txt` as plain files.
+      - name: Extract artifact
+        if: steps.download.outputs.found == 'true'
+        run: unzip -o report.zip
+
+      # ----------------------------------------------------------------------
+      # Read the PR number and the report body, export them to the job's
+      # environment, and decide whether a comment should actually be posted
+      # (i.e. whether the report contains any Added/Modified/Deleted rows).
+      # ----------------------------------------------------------------------
+      - name: Load report into environment
+        id: load
+        if: steps.download.outputs.found == 'true'
+        run: |
+          if [ ! -f pr_number.txt ] || [ ! -f tag_changes.txt ]; then
+            echo "Expected files missing from artifact; skipping."
+            echo "should_comment=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_NUMBER=$(tr -d '[:space:]' < pr_number.txt)
+          if [ -z "$PR_NUMBER" ]; then
+            echo "pr_number.txt was empty; skipping."
+            echo "should_comment=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+          # Only comment when the report actually contains change rows.
+          # This keeps unrelated PRs (that happened to touch src/ but did
+          # not alter any normative tags) from getting noisy bot comments.
+          if grep -qE "(Added|Modified|Deleted) [0-9]+ tag" tag_changes.txt; then
+            echo "should_comment=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_comment=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "TAG_CHANGES<<EOF"
+            cat tag_changes.txt
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      # ----------------------------------------------------------------------
+      # Check out the BASE repo (default branch) to pick up the trusted
+      # copy of `.github/scripts/comment-pr-changes.js`. We deliberately
+      # do NOT check out the PR head: that code is untrusted and would
+      # defeat the purpose of this split-workflow design.
+      # ----------------------------------------------------------------------
+      - name: Checkout base branch scripts
+        if: steps.load.outputs.should_comment == 'true'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # ----------------------------------------------------------------------
+      # Post or update the bot comment on the PR. The existing
+      # comment-pr-changes.js script already handles de-duplication by
+      # searching for a prior bot comment containing "Normative Rule
+      # Changes Detected" and updating it in place, so repeated runs on
+      # the same PR do not create duplicate comments.
+      # ----------------------------------------------------------------------
+      - name: Post or update PR comment
+        if: steps.load.outputs.should_comment == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_NUMBER: ${{ steps.load.outputs.pr_number }}
+        with:
+          script: |
+            // `comment-pr-changes.js` reads `context.payload.pull_request.number`
+            // in its normal (pull_request-triggered) usage. When we invoke it
+            // from a `workflow_run` event that field is absent, so we patch
+            // the payload with the PR number we recovered from the artifact.
+            context.payload.pull_request = { number: Number(process.env.PR_NUMBER) };
+
+            const script = require('./.github/scripts/comment-pr-changes.js');
+            const tagChanges = process.env.TAG_CHANGES;
+            await script({ github, context, tagChanges });

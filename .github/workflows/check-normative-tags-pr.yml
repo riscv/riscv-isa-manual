@@ -1,4 +1,44 @@
 ---
+# ============================================================================
+# Workflow: Check Normative Tag Changes (PR)
+# ----------------------------------------------------------------------------
+# Purpose:
+#   Detect additions, modifications, and deletions of normatively tagged text
+#   in pull requests against this repository. Produces a human-readable diff
+#   report comparing the PR's built tags against the committed reference
+#   files under ref/.
+#
+# Security model:
+#   This workflow runs on the `pull_request` event, which means it executes
+#   *untrusted* PR code (anyone can open a PR, including from a fork). For
+#   that reason this workflow is deliberately **read-only**:
+#     - `permissions:` is restricted to `contents: read`.
+#     - It does NOT post PR comments or create issues itself.
+#     - It does NOT have access to repository secrets beyond the default
+#       GITHUB_TOKEN, which from forks is read-only anyway.
+#
+#   The PR comment ("Normative Rule Changes Detected") is posted by a
+#   separate, trusted workflow (`check-normative-tags-comment.yml`) that
+#   runs on the base branch via the `workflow_run` event. That workflow
+#   downloads the artifact uploaded here and posts the comment with
+#   `pull-requests: write` permission. This two-workflow split is the
+#   GitHub-recommended pattern for safely commenting on PRs from forks.
+#   See: https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+#
+# Expected results:
+#   - A workflow summary showing any Added / Modified / Deleted tags per
+#     specification (unprivileged, privileged).
+#   - An uploaded artifact named `normative-tag-change-report` containing
+#     `tag_changes.txt` (the report) and `pr_number.txt` (the PR number
+#     this report belongs to — needed by the commenting workflow because
+#     `workflow_run.pull_requests` is empty for fork PRs).
+#   - A check failure if *breaking* changes (modifications or deletions)
+#     are detected, unless the PR carries the label
+#     `normative-change-approved`.
+#   - Shortly after this workflow completes, the companion workflow will
+#     post or update a "Normative Rule Changes Detected" comment on the PR.
+# ============================================================================
+
 name: Check Normative Tag Changes (PR)
 
 on:
@@ -9,6 +49,9 @@ on:
       - 'ref/**'
       - 'scripts/check-tag-changes.sh'
 
+# Read-only by design. All write operations (issue creation, PR comments,
+# reference-file updates) happen in other workflows triggered on trusted
+# events (`push` on main, or `workflow_run` completion).
 permissions:
   contents: read
 
@@ -17,6 +60,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ----------------------------------------------------------------------
+      # Detect the opt-in bypass label on the PR. Maintainers can add the
+      # `normative-change-approved` label to acknowledge that a breaking
+      # change (modification/deletion of a normative tag) is intentional,
+      # which prevents this workflow from failing the PR.
+      # ----------------------------------------------------------------------
       - name: Check for bypass label
         id: bypass
         run: |
@@ -28,15 +77,29 @@ jobs:
             echo "has_bypass=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # ----------------------------------------------------------------------
+      # Check out the PR head. `persist-credentials: false` ensures the
+      # auth token is not written to the local git config, so a malicious
+      # build step in the PR can't use it to push. Submodules are fetched
+      # because the tag-detection scripts under docs-resources/ are a
+      # submodule.
+      # ----------------------------------------------------------------------
       - name: Checkout PR code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
           persist-credentials: false
 
+      # Build the current PR's normative tag JSON files into build/.
       - name: Build normative tags
         run: make build-tags
 
+      # ----------------------------------------------------------------------
+      # Run the tag-change detector for every specification. The detector
+      # exits non-zero when modifications or deletions are found (treated
+      # as breaking), and zero when only additions or no changes exist.
+      # We capture both the report text and the has-any/has-breaking flags.
+      # ----------------------------------------------------------------------
       - name: Check for tag changes
         id: check
         run: |
@@ -81,18 +144,40 @@ jobs:
           echo "has_any_changes=$HAS_ANY_CHANGES" >> "$GITHUB_OUTPUT"
           echo "has_breaking_changes=$HAS_BREAKING_CHANGES" >> "$GITHUB_OUTPUT"
 
+      # ----------------------------------------------------------------------
+      # Persist the PR number alongside the report. The companion
+      # `check-normative-tags-comment.yml` workflow runs on `workflow_run`
+      # and cannot rely on `github.event.workflow_run.pull_requests` because
+      # that array is empty for PRs opened from forks. Embedding the PR
+      # number in the artifact is the documented workaround.
+      # ----------------------------------------------------------------------
+      - name: Record PR number for the commenting workflow
+        if: always()
+        run: echo "${{ github.event.pull_request.number }}" > pr_number.txt
+
+      # ----------------------------------------------------------------------
+      # Upload BOTH files (report + PR number) under a fixed artifact name.
+      # The commenting workflow looks up artifacts by this exact name, so
+      # it must not include variable data such as the PR number.
+      # ----------------------------------------------------------------------
       - name: Upload tag change report
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: normative-tag-change-report-${{ github.event.pull_request.number }}
-          path: tag_changes.txt
+          name: normative-tag-change-report
+          path: |
+            tag_changes.txt
+            pr_number.txt
           retention-days: 7
 
+      # Mirror the report into the PR's Checks > Summary tab for quick
+      # inspection without downloading the artifact.
       - name: Add report to workflow summary
         if: always()
         run: cat tag_changes.txt >> "$GITHUB_STEP_SUMMARY"
 
+      # Hard-fail the check on breaking changes unless the bypass label
+      # is present. Additions alone never fail the check.
       - name: Fail on breaking changes (unless bypass label is present)
         if: steps.check.outputs.has_breaking_changes == 'true' && steps.bypass.outputs.has_bypass != 'true'
         run: |
