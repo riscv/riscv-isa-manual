@@ -69,3 +69,4 @@ CVA5          | OpenHW Group                    | [Lesley Shannon](mailto:lesley
 River         | Midstall Software               | [Inquiry](mailto:inquire@midstall.com)                      | 49               | https://github.com/MidstallSoftware/river
 Raptor        | Yu Jin                          | [Yu Jin](mailto:lambda.jinyu@gmail.com)                     | 50               | https://github.com/Kingfish404/raptor-chip
 Sargantana    | BSC-LOCA                        | [Narcís Rodas](mailto:narcis.rodaquiroga@bsc.es)            | 51               | https://github.com/bsc-loca/sargantana
+KianV Stealth | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 52               | https://github.com/splinedrive/kianRiscV
