@@ -1,29 +1,29 @@
-[[zalrsc]]
-=== "Zalrsc" Extension for Load-Reserved/Store-Conditional Instructions
+[[ext:zalrsc]]
+=== ext:zalrsc[] Extension for Load-Reserved/Store-Conditional Instructions
 
 include::images/wavedrom/load-reserve-st-conditional.edn[]
 
 Complex atomic memory operations on a single memory word or doubleword
-are performed with the load-reserved (LR) and store-conditional (SC)
-instructions. [#norm:lr_w_op]#LR.W loads a word from the address in _rs1_, places the
-sign-extended value in _rd_, and registers a _reservation set_—a set of
-bytes that subsumes the bytes in the addressed word.# [#norm:sc_w_success]#SC.W conditionally
-writes a word in _rs2_ to the address in _rs1_: the SC.W succeeds only
+are performed with the load-reserved (insn:lr[]) and store-conditional (insn:sc[])
+instructions. [#norm:lr_w_op]#insn:lr.w[] loads a word from the address in _rs1_, places the
+sign-extended value in _rd_, and registers a _reservation set_--a set of
+bytes that subsumes the bytes in the addressed word.# [#norm:sc_w_success]#insn:sc.w[] conditionally
+writes a word in _rs2_ to the address in _rs1_: the insn:sc.w[] succeeds only
 if the reservation is still valid and the reservation set contains the
-bytes being written. If the SC.W succeeds, the instruction writes the
-word in _rs2_ to memory, and it writes zero to _rd_.# [#norm:sc_w_failure]#If the SC.W fails,
+bytes being written. If the insn:sc.w[] succeeds, the instruction writes the
+word in _rs2_ to memory, and it writes zero to _rd_.# [#norm:sc_w_failure]#If the insn:sc.w[] fails,
 the instruction does not write to memory, and it writes a nonzero value
 to _rd_.#
-[#norm:sc_retire_permission]#No SC.W instruction shall retire unless it passes memory permission checks,#
+[#norm:sc_retire_permission]#No insn:sc.w[] instruction shall retire unless it passes memory permission checks,#
 [#norm:sc_failed_side_effects]#but it is UNSPECIFIED whether any side effects of implicit address translation
 and protection memory accesses (such as setting a page-table entry D bit)
-occur on a failed SC.W.#
-[#norm:sc_failed_as_store]#For the purposes of memory protection, a failed SC.W may be
+occur on a failed insn:sc.w[].#
+[#norm:sc_failed_as_store]#For the purposes of memory protection, a failed insn:sc.w[] may be
 treated like a store.#
 [#norm:sc_reservation_invalidate]#Regardless of success or failure, executing an
-SC.W instruction invalidates any reservation held by this hart.# [#norm:lr_sc_rv64]#LR.D and
-SC.D act analogously on doublewords and are only available on RV64. For
-RV64, LR.W and SC.W sign-extend the value placed in _rd_.#
+insn:sc.w[] instruction invalidates any reservation held by this hart.# [#norm:lr_sc_rv64]#insn:lr.d[] and
+insn:sc.d[] act analogously on doublewords and are only available on RV64. For
+RV64, insn:lr.w[] and insn:sc.w[] sign-extend the value placed in _rd_.#
 
 [NOTE]
 ====
@@ -67,11 +67,11 @@ assume the failure code will be non-zero.#
 ====
 We reserve a failure code of 1 to mean ''unspecified'' so that simple
 implementations may return this value using the existing multiplexer required
-for the SLT/SLTU instructions. More specific failure codes might be
+for the insn:slt[]/insn:sltu[] instructions. More specific failure codes might be
 defined in future versions or extensions to the ISA.
 ====
 
-[#norm:lr_sc_alignment]#For LR and SC, the Zalrsc extension requires that the address held in _rs1_
+[#norm:lr_sc_alignment]#For insn:lr[] and insn:sc[], the ext:zalrsc[] extension requires that the address held in _rs1_
 be naturally aligned to the size of the operand (i.e., eight-byte
 aligned for _doublewords_ and four-byte aligned for _words_). If the
 address is not naturally aligned, an address-misaligned exception or an
@@ -81,49 +81,49 @@ complete except for the misalignment, if the misaligned access should
 not be emulated.#
 [NOTE]
 ====
-Emulating misaligned LR/SC sequences is impractical in most systems.
+Emulating misaligned insn:lr[]/insn:sc[] sequences is impractical in most systems.
 
-Misaligned LR/SC sequences also raise the possibility of accessing
+Misaligned insn:lr[]/insn:sc[] sequences also raise the possibility of accessing
 multiple reservation sets at once, which present definitions do not
 provide for.
 ====
 
 [#norm:lr_reservation_set_size]#An implementation can register an arbitrarily large reservation set on
-each LR, provided the reservation set includes all bytes of the
-addressed data word or doubleword.# [#norm:sc_pairs_latest_lr]#An SC can only pair with the most
-recent LR in program order.# [#norm:sc_success_conditions]#An SC may succeed only if no store from
+each insn:lr[], provided the reservation set includes all bytes of the
+addressed data word or doubleword.# [#norm:sc_pairs_latest_lr]#An insn:sc[] can only pair with the most
+recent insn:lr[] in program order.# [#norm:sc_success_conditions]#An insn:sc[] may succeed only if no store from
 another hart to the reservation set can be observed to have occurred
-between the LR and the SC, and if there is no other SC between the LR
-and itself in program order.# [#norm:sc_device_write_failure]#An SC may succeed only if no write from a
-device other than a hart to the bytes accessed by the LR instruction can
-be observed to have occurred between the LR and SC.# Note this LR might
+between the insn:lr[] and the insn:sc[], and if there is no other insn:sc[] between the
+insn:lr[] and itself in program order.# [#norm:sc_device_write_failure]#An insn:sc[] may succeed only if no write from a
+device other than a hart to the bytes accessed by the insn:lr[] instruction can
+be observed to have occurred between the insn:lr[] and insn:sc[].# Note this insn:lr[] might
 have had a different effective address and data size, but reserved the
-SC's address as part of the reservation set.
+insn:sc[]'s address as part of the reservation set.
 
 [NOTE]
 ====
-Following this model, in systems with memory translation, an SC is
-allowed to succeed if the earlier LR reserved the same location using an
+Following this model, in systems with memory translation, an insn:sc[] is
+allowed to succeed if the earlier insn:lr[] reserved the same location using an
 alias with a different virtual address, but is also allowed to fail if
 the virtual address is different.
 
 To accommodate legacy devices and buses, writes from devices other than
 RISC-V harts are only required to invalidate reservations when they
-overlap the bytes accessed by the LR. These writes are not required to
+overlap the bytes accessed by the insn:lr[]. These writes are not required to
 invalidate the reservation when they access other bytes in the
 reservation set.
 ====
 
-[#norm:sc_addr_not_in_reservation_fail]#The SC must fail if the address is not within the reservation set of the
-most recent LR in program order.# [#norm:sc_other_hart_store_fail]#The SC must fail if a store to the
+[#norm:sc_addr_not_in_reservation_fail]#The insn:sc[] must fail if the address is not within the reservation set of the
+most recent insn:lr[] in program order.# [#norm:sc_other_hart_store_fail]#The insn:sc[] must fail if a store to the
 reservation set from another hart can be observed to occur between the
-LR and SC.# [#norm:sc_other_device_write_fail]#The SC must fail if a write from some other device to the
-bytes accessed by the LR can be observed to occur between the LR and SC.#
+insn:lr[] and insn:sc[].# [#norm:sc_other_device_write_fail]#The insn:sc[] must fail if a write from some other device to the
+bytes accessed by the insn:lr[] can be observed to occur between the insn:lr[] and insn:sc[].#
 (If such a device writes the reservation set but does not write the
-bytes accessed by the LR, the SC may or may not fail.) [#norm:sc_intervening_sc_fail]#An SC must fail
-if there is another SC (to any address) between the LR and the SC in
+bytes accessed by the insn:lr[], the insn:sc[] may or may not fail.) [#norm:sc_intervening_sc_fail]#An insn:sc[] must fail
+if there is another insn:sc[] (to any address) between the insn:lr[] and the insn:sc[] in
 program order.# [#norm:lr_sc_atomicity_axiom]#The precise statement of the atomicity requirements for
-successful LR/SC sequences is defined by the Atomicity Axiom in
+successful insn:lr[]/insn:sc[] sequences is defined by the Atomicity Axiom in
 <<rvwmo>>.#
 
 [NOTE]
@@ -141,103 +141,77 @@ used to forcibly invalidate any existing load reservation:
 * if necessary when changing virtual to physical address mappings, such
 as when migrating pages that might contain an active reservation.
 
-The invalidation of a hart's reservation when it executes an LR or SC
-imply that a hart can only hold one reservation at a time, and that an
-SC can only pair with the most recent LR, and LR with the next following
-SC, in program order. This is a restriction to the Atomicity Axiom in
+The invalidation of a hart's reservation when it executes an insn:lr[] or
+insn:sc[] imply that a hart can only hold one reservation at a time, and that an
+insn:sc[] can only pair with the most recent insn:lr[], and insn:lr[] with the next following
+insn:sc[], in program order. This is a restriction to the Atomicity Axiom in
 <<rvwmo>> that ensures software runs correctly on
 expected common implementations that operate in this manner.
 ====
 
-[#norm:sc_not_observable_before_lr]#An SC instruction can never be observed by another RISC-V hart before
-the LR instruction that established the reservation.#
+[#norm:sc_not_observable_before_lr]#An insn:sc[] instruction can never be observed by another RISC-V hart before
+the insn:lr[] instruction that established the reservation.#
 
 [NOTE]
 ====
-The LR/SC sequence
-can be given acquire semantics by setting the _aq_ bit on the LR
-instruction. The LR/SC sequence can be given release semantics by
-by setting the _rl_ bit on the SC instruction.  Assuming
-suitable mappings for other atomic operations, setting the
-_aq_ bit on the LR instruction, and setting the
-_rl_ bit on the SC instruction makes the LR/SC
-sequence sequentially consistent in the C\++ `memory_order_seq_cst`
-sense. Such a sequence does not act as a fence for ordering ordinary
-load and store instructions before and after the sequence. Specific
-instruction mappings for other C++ atomic operations,
-or stronger notions of "sequential consistency", may require both
-bits to be set on either or both of the LR or SC instruction.
+The insn:lr[]/insn:sc[] sequence can be given acquire semantics by setting the
+_aq_ bit on the insn:lr[] instruction. The insn:lr[]/insn:sc[] sequence can be
+given release semantics by by setting the _rl_ bit on the insn:sc[] instruction.
+Assuming suitable mappings for other atomic operations, setting the _aq_ bit on
+the insn:lr[] instruction, and setting the _rl_ bit on the insn:sc[] instruction
+makes the insn:lr[]/insn:sc[] sequence sequentially consistent in the {cpp}
+`memory_order_seq_cst` sense. Such a sequence does not act as a fence for
+ordering ordinary load and store instructions before and after the sequence.
+Specific instruction mappings for other {cpp} atomic operations,
+or stronger notions of sequential consistency, may require both
+bits to be set on either or both of the insn:lr[] or insn:sc[] instruction.
 
-If neither bit is set on either LR or SC, the LR/SC sequence can be
+If neither bit is set on either insn:lr[] or insn:sc[], the insn:lr[]/insn:sc[] sequence can be
 observed to occur before or after surrounding memory operations from the
-same RISC-V hart. This can be appropriate when the LR/SC sequence is
+same RISC-V hart. This can be appropriate when the insn:lr[]/insn:sc[] sequence is
 used to implement a parallel reduction operation.
 ====
 
-[#norm:lr_sc_aq_rl_software_rule]#Software should not set the _rl_ bit on an LR instruction unless the
-_aq_ bit is also set, nor should software set the _aq_ bit on an SC
-instruction unless the _rl_ bit is also set. LR._rl_ and SC._aq_
-instructions are not guaranteed to provide any stronger ordering than
-those with both bits clear, but may result in lower performance.#
-
-[NOTE]
-====
-[[cas]]
-[source,asm]
-.Sample code for compare-and-swap function using LR/SC.
-        # a0 holds address of memory location
-        # a1 holds expected value
-        # a2 holds desired value
-        # a0 holds return value, 0 if successful, !0 otherwise
-    cas:
-        lr.w t0, (a0)        # Load original value.
-        bne t0, a1, fail     # Doesn't match, so fail.
-        sc.w t0, a2, (a0)    # Try to update.
-        bnez t0, cas         # Retry if store-conditional failed.
-        li a0, 0             # Set return to success.
-        jr ra                # Return.
-    fail:
-        li a0, 1             # Set return to failure.
-        jr ra                # Return.
-
-LR/SC can be used to construct lock-free data structures. An example
-using LR/SC to implement a compare-and-swap function is shown in
-<<cas>>. If inlined, compare-and-swap functionality need only take four instructions.
-====
+[#norm:lr_sc_aq_rl_software_rule]#Software should not set the _rl_ bit on an
+insn:lr[] instruction unless the _aq_ bit is also set, nor should software set
+the _aq_ bit on an insn:sc[] instruction unless the _rl_ bit is also set.
+insn:lr.rl[] and insn:sc.aq[] instructions are not guaranteed to provide any
+stronger ordering than those with both bits clear, but may result in lower
+performance.#
 
 [[sec:lrscseq]]
 ==== Eventual Success of Store-Conditional Instructions
 
-The Zalrsc extension defines _constrained LR/SC loops_, which have
+The ext:zalrsc[] extension defines _constrained insn:lr[]/insn:sc[] loops_, which have
 the following properties:
 
-* [#norm:constrained_lrsc_loop_size]#The loop comprises only an LR/SC sequence and code to retry the
+* [#norm:constrained_lrsc_loop_size]#The loop comprises only an insn:lr[]/insn:sc[] sequence and code to retry the
 sequence in the case of failure, and must comprise at most 16
 instructions placed sequentially in memory.#
-* [#norm:constrained_lrsc_instruction_set]#An LR/SC sequence begins with an LR instruction and ends with an SC
-instruction. The dynamic code executed between the LR and SC
-instructions can only contain instructions from the base ''I''
-instruction set, excluding loads, stores, backward jumps, taken backward
-branches, JALR, FENCE, and SYSTEM instructions.#
-[#norm:constrained_lrsc_compressed_allowed]#Compressed forms of the aforementioned ''I'' instructions in the
-C (hence Zca) and Zcb extensions are also permitted.#
-* [#norm:constrained_lrsc_retry_code]#The code to retry a failing LR/SC sequence can contain backwards jumps
-and/or branches to repeat the LR/SC sequence, but otherwise has the same
-constraint as the code between the LR and SC.#
-* [#norm:lrsc_eventuality_region]#The LR and SC addresses must lie within a memory region with the
-_LR/SC eventuality_ property. The execution environment is responsible
+* [#norm:constrained_lrsc_instruction_set]#An insn:lr[]/insn:sc[] sequence begins with an insn:lr[] instruction and ends with an
+insn:sc[] instruction. The dynamic code executed between the insn:lr[] and
+insn:sc[] instructions can only contain instructions from the
+ext:i[] or ext:e[] base instruction set, excluding loads, stores, backward jumps, taken backward
+branches, insn:jalr[], insn:fence[], and insn:system[] instructions.#
+[#norm:constrained_lrsc_compressed_allowed]#Compressed forms of the aforementioned ext:i[] or ext:e[] instructions in the
+ext:c[] (hence ext:zca[]) and ext:zcb[] extensions are also permitted.#
+* [#norm:constrained_lrsc_retry_code]#The code to retry a failing insn:lr[]/insn:sc[] sequence can contain backwards jumps
+and/or branches to repeat the insn:lr[]/insn:sc[] sequence, but otherwise has the same
+constraint as the code between the insn:lr[] and insn:sc[].#
+* [#norm:lrsc_eventuality_region]#The insn:lr[] and insn:sc[] addresses must lie within a memory region with the
+_insn:lr[]/insn:sc[] eventuality_ property. The execution environment is responsible
 for communicating which regions have this property.#
-* [#norm:lrsc_same_address_and_size]#The SC must be to the same effective address and of the same data size
-as the latest LR executed by the same hart.#
+* [#norm:lrsc_same_address_and_size]#The insn:sc[] must be to the same effective address and of the same data size
+as the latest insn:lr[] executed by the same hart.#
 
-[#norm:unconstrained_lrsc_no_progress]#LR/SC sequences that do not lie within constrained LR/SC loops are
-_unconstrained_. Unconstrained LR/SC sequences might succeed on some
+[#norm:unconstrained_lrsc_no_progress]#insn:lr[]/insn:sc[] sequences that do not lie within constrained insn:lr[]/insn:sc[] loops are
+_unconstrained_. Unconstrained insn:lr[]/insn:sc[] sequences might succeed on some
 attempts on some implementations, but might never succeed on other
 implementations.#
 
 [NOTE]
 ====
-We restricted the length of LR/SC loops to fit within 64 contiguous
+We restricted the length of insn:lr[]/insn:sc[] loops to fit within 64 contiguous
 instruction bytes in the base ISA to avoid undue restrictions on
 instruction cache and TLB size and associativity. Similarly, we
 disallowed other loads and stores within the loops to avoid restrictions
@@ -248,60 +222,60 @@ operations and integer multiply/divide were disallowed to simplify the
 operating system's emulation of these instructions on implementations
 lacking appropriate hardware support.
 
-Software is not forbidden from using unconstrained LR/SC sequences, but
+Software is not forbidden from using unconstrained insn:lr[]/insn:sc[] sequences, but
 portable software must detect the case that the sequence repeatedly
 fails, then fall back to an alternate code sequence that does not rely
-on an unconstrained LR/SC sequence. Implementations are permitted to
-unconditionally fail any unconstrained LR/SC sequence.
+on an unconstrained insn:lr[]/insn:sc[] sequence. Implementations are permitted to
+unconditionally fail any unconstrained insn:lr[]/insn:sc[] sequence.
 ====
 
-[#norm:constrained_lrsc_forward_progress_intro]#If a hart _H_ enters a constrained LR/SC loop, the execution environment
+[#norm:constrained_lrsc_forward_progress_intro]#If a hart _H_ enters a constrained insn:lr[]/insn:sc[] loop, the execution environment
 must guarantee that one of the following events eventually occurs#:
 
-* [#norm:constrained_lrsc_forward_progress_sc]#_H_ or some other hart executes a successful SC to the reservation set
-of the LR instruction in _H_'s constrained LR/SC loops.#
+* [#norm:constrained_lrsc_forward_progress_sc]#_H_ or some other hart executes a successful insn:sc[] to the reservation set
+of the insn:lr[] instruction in _H_'s constrained insn:lr[]/insn:sc[] loops.#
 * [#norm:constrained_lrsc_forward_progress_store_amo]#Some other hart executes an unconditional store or AMO instruction to
-the reservation set of the LR instruction in _H_'s constrained LR/SC
-loop, or some other device in the system writes to that reservation set.#
-* [#norm:constrained_lrsc_forward_progress_branch]#_H_ executes a branch or jump that exits the constrained LR/SC loop.#
+the reservation set of the insn:lr[] instruction in _H_'s constrained
+insn:lr[]/insn:sc[] loop, or some other device in the system writes to that reservation set.#
+* [#norm:constrained_lrsc_forward_progress_branch]#_H_ executes a branch or jump that exits the constrained insn:lr[]/insn:sc[] loop.#
 * [#norm:constrained_lrsc_forward_progress_trap]#_H_ traps.#
 
 [NOTE]
 ====
-Note that these definitions permit an implementation to fail an SC
-instruction occasionally for any reason, provided the aforementioned
+Note that these definitions permit an implementation to fail an
+insn:sc[] instruction occasionally for any reason, provided the aforementioned
 guarantee is not violated.
 
 As a consequence of the eventuality guarantee, if some harts in an
-execution environment are executing constrained LR/SC loops, and no
+execution environment are executing constrained insn:lr[]/insn:sc[] loops, and no
 other harts or devices in the execution environment execute an
 unconditional store or AMO to that reservation set, then at least one
-hart will eventually exit its constrained LR/SC loop. By contrast, if
+hart will eventually exit its constrained insn:lr[]/insn:sc[] loop. By contrast, if
 other harts or devices continue to write to that reservation set, it is
-not guaranteed that any hart will exit its LR/SC loop.
+not guaranteed that any hart will exit its insn:lr[]/insn:sc[] loop.
 
 Loads and load-reserved instructions do not by themselves impede the
-progress of other harts' LR/SC sequences. We note this constraint
+progress of other harts' insn:lr[]/insn:sc[] sequences. We note this constraint
 implies, among other things, that loads and load-reserved instructions
 executed by other harts (possibly within the same core) cannot impede
-LR/SC progress indefinitely. For example, cache evictions caused by
-another hart sharing the cache cannot impede LR/SC progress
+insn:lr[]/insn:sc[] progress indefinitely. For example, cache evictions caused by
+another hart sharing the cache cannot impede insn:lr[]/insn:sc[] progress
 indefinitely. Typically, this implies reservations are tracked
 independently of evictions from any shared cache. Similarly, cache
-misses caused by speculative execution within a hart cannot impede LR/SC
-progress indefinitely.
+misses caused by speculative execution within a hart cannot impede
+insn:lr[]/insn:sc[] progress indefinitely.
 
-These definitions admit the possibility that SC instructions may
+These definitions admit the possibility that insn:sc[] instructions may
 spuriously fail for implementation reasons, provided progress is
 eventually made.
 
 One advantage of CAS is that it guarantees that some hart eventually
-makes progress, whereas an LR/SC atomic sequence could livelock
+makes progress, whereas an insn:lr[]/insn:sc[] atomic sequence could livelock
 indefinitely on some systems. To avoid this concern, we added an
-architectural guarantee of livelock freedom for certain LR/SC sequences.
+architectural guarantee of livelock freedom for certain insn:lr[]/insn:sc[] sequences.
 
 Earlier versions of this specification imposed a stronger
 starvation-freedom guarantee. However, the weaker livelock-freedom
-guarantee is sufficient to implement the C11 and C++11 languages, and is
+guarantee is sufficient to implement the C11 and {cpp}11 languages, and is
 substantially easier to provide in some microarchitectural styles.
 ====

@@ -1,0 +1,125 @@
+[[app:atomics-examples]]
+=== Atomics Assembly Code Examples
+
+The following examples are provided as non-normative text to help explain the
+RISC-V atomics ISA.
+
+==== Compare-and-Swap Using LR/SC
+
+insn:lr[]/insn:sc[] can be used to construct lock-free data structures. An
+example using insn:lr[]/insn:sc[] to implement a compare-and-swap (CAS) function
+is shown in the following listing. If inlined, CAS functionality only takes four
+instructions.
+
+[source,asm]
+.Sample code for compare-and-swap function using LR/SC.
+--
+    # a0 holds address of memory location
+    # a1 holds expected value
+    # a2 holds desired value
+    # a0 holds return value, 0 if successful, !0 otherwise
+cas:
+    lr.w t0, (a0)        # Load original value.
+    bne t0, a1, fail     # Doesn't match, so fail.
+    sc.w t0, a2, (a0)    # Try to update.
+    bnez t0, cas         # Retry if store-conditional failed.
+    li a0, 0             # Set return to success.
+    jr ra                # Return.
+fail:
+    li a0, 1             # Set return to failure.
+    jr ra                # Return.
+--
+
+==== Test-and-Test-and-Set Spinlock
+
+An example code sequence for a critical section guarded by a
+test-and-test-and-set (TTAS) spinlock is shown in the following listing. Note
+that the first AMO is marked _aq_ to order the lock acquisition before the
+critical section, and the second AMO is marked _rl_ to order the critical
+section before the lock relinquishment. We recommend the use of this AMO swap
+idiom for both lock acquire and release to simplify the implementation of
+speculative lock elision cite:[Rajwar:2001:SLE].
+
+[source,asm]
+.Sample code for mutual exclusion. `a0` contains the address of the lock.
+--
+    li           t0, 1        # Initialize swap value.
+again:
+    lw           t1, (a0)     # Check if lock is held.
+    bnez         t1, again    # Retry if held.
+    amoswap.w.aq t1, t0, (a0) # Attempt to acquire lock.
+    bnez         t1, again    # Retry if held.
+    # ...
+    # Critical section.
+    # ...
+    amoswap.w.rl x0, x0, (a0) # Release lock by storing 0.
+--
+
+==== Incrementing a 64-bit Counter Atomically on RV32
+
+The following example code sequence illustrates the use of insn:amocas.d[] in a
+RV32 implementation to atomically increment a 64-bit counter.
+
+[source,asm]
+.Sample code for atomic 64-bit counter increment on 32-bit machine.
+--
+# a0 - address of the counter.
+increment:
+    lw   a2, (a0)      # Load current counter value using
+    lw   a3, 4(a0)     # two individual loads.
+retry:
+    mv   a6, a2        # Save the low 32 bits of the current value.
+    mv   a7, a3        # Save the high 32 bits of the current value.
+    addi a4, a2, 1     # Increment the low 32 bits.
+    sltu a1, a4, a2    # Determine if there is a carry out.
+    add  a5, a3, a1    # Add the carry if any to high 32 bits.
+    amocas.d.aqrl a2, a4, (a0)
+    bne  a2, a6, retry # If amocas.d failed then retry
+    bne  a3, a7, retry # using current values loaded by amocas.d.
+    ret
+--
+
+==== Non-blocking Concurrent Queue
+
+The following example code sequence illustrates the use of insn:amocas.q[] to
+implement the _enqueue_ operation for a non-blocking concurrent queue using the
+algorithm outlined in cite:[queue]. The algorithm atomically operates on a pointer
+and its associated modification counter using the insn:amocas.q[] instruction to
+avoid the ABA problem.
+
+[source,asm]
+.Sample code for enqueue operation of a non-blocking concurrent queue.
+--
+# Data structures used by the queue:
+#   structure pointer_t {ptr:   node_t *, count: uint64_t}
+#   structure node_t    {next: pointer_t, value: data type}
+#   structure queue_t   {Head: pointer_t, Tail:  pointer_t}
+# Inputs to the procedure:
+#   a0 - address of Tail variable
+#   a4 - address of a new node to insert at tail
+enqueue:
+    ld   a6, (a0)          # a6 = Tail.ptr
+    ld   a7, 8(a0)         # a7 = Tail.count
+    ld   a2, (a6)          # a2 = Tail.ptr->next.ptr
+    ld   a3, 8(a6)         # a3 = Tail.ptr->next.count
+    ld   t1, (a0)
+    ld   t2, 8(a0)
+    bne  a6, t1, enqueue   # Retry if Tail & next are not consistent
+    bne  a7, t2, enqueue   # Retry if Tail & next are not consistent
+    bne  a2, x0, move_tail # Was tail pointing to the last node?
+    mv   t1, a2            # Save Tail.ptr->next.ptr
+    mv   t2, a3            # Save Tail.ptr->next.count
+    addi a5, a3, 1         # Link the node at the end of the list
+    amocas.q.aqrl a2, a4, (a6)
+    bne  a2, t1, enqueue   # Retry if CAS failed
+    bne  a3, t2, enqueue   # Retry if CAS failed
+    addi a5, a7, 1         # Update Tail to the inserted node
+    amocas.q.aqrl a6, a4, (a0)
+    ret                    # Enqueue done
+move_tail:                 # Tail was not pointing to the last node
+    addi a3, a7, 1         # Try to swing Tail to the next node
+    amocas.q.aqrl a6, a2, (a0)
+    j    enqueue           # Retry
+--
+
+//
