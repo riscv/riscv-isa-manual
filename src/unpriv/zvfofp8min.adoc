@@ -1,0 +1,108 @@
+=== ext:zvfofp8min[] OFP8 Conversion Extension, Version 0.9
+
+The ext:zvfofp8min[] extension provides basic support for the 8-bit
+floating-point formats OFP8 E4M3 and OFP8 E5M2.
+
+The ext:zvfofp8min[] extension requires the extlink:zve32f[] extension.
+
+NOTE: Although ext:zvfofp8min[] will often be paired with the BF16 vector
+extensions extlink:zvfbfmin[] and extlink:zvfbfwma[], it does not require them,
+as sometimes ext:zvfofp8min[] is only used to widen OFP8 values for
+use as inputs to BF16 matrix-multiplication extensions.
+
+NOTE: In some applications, the OFP8 formats are used to directly represent
+numerical values.
+In other applications, they are used as components of a block floating-point
+format, such as the one described in the
+https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf[OCP
+Microscaling specification].
+The conversion instructions defined in this extension support both use cases.
+Software can convert OFP8 values to BF16 or FP32, then apply the scaling factor
+in the higher-precision format, using, for example, a inst:vfmul.vf[] instruction.
+Future vector or matrix extensions might provide direct support for
+microscaling if the need becomes quantitatively demonstrable.
+
+NOTE: Only vector support for the OFP8 formats is currently proposed, as these
+formats are used almost exclusively in highly data-parallel computations.
+
+The canonical NaN for both E4M3 and E5M2 is `0x7f`.
+
+=== OFP8 to BF16 conversion instructions
+
+The existing inst:vfwcvtbf16.f.f.v[] instruction is used to convert from the OFP8
+formats to BF16.
+When SEW=8 and csr::altfmt[]=0, this instruction converts a vector of OFP8 E4M3
+values in `vs2` to a vector of BF16 values, writing the result to `vd`.
+No rounding occurs, and no floating-point exception flags are set.
+When SEW=8 and csr::altfmt[]=1, the instruction instead treats `vs2` as a vector of
+OFP8 E5M2 values, but behaves identically otherwise.
+
+NOTE: Conversion to FP32, FP16, and integer formats is accomplished by first
+converting to BF16, then using existing instructions in the ext:zvfbfmin[], ext:zvfbfa[],
+ext:zvfhmin[], and ext:zve32f[] extensions.
+Conversion from OFP8 directly to FP32 is not a common operation, as OFP8 values
+are typically used as multiplicands.
+The multiplication operation can itself widen the result if needed.
+
+NOTE: Conversion between the two OFP8 formats is an uncommon operation, but it
+can be accomplished by first converting to BF16, then using one of the
+instructions defined in the following section.
+
+=== BF16 to OFP8 conversion instructions
+
+The existing inst:vfncvtbf16.f.f.w[] instruction is used to convert from BF16 to the
+OFP8 formats.
+When SEW=8 and csr::altfmt[]=0, this instruction converts a vector of BF16 values in
+`vs2` to a vector of OFP8 E4M3 values, writing the result to `vd`.
+Since E4M3 cannot represent infinity, infinite results are converted to the
+canonical NaN.
+When SEW=8 and csr::altfmt[]=1, the instruction converts to OFP8 E5M2 instead.
+In this case, however, infinite results are representable.
+In both cases, results are rounded using the dynamic rounding mode in
+the csr:frm[] register, and floating-point exceptions are reported in the csr:fflags[]
+register as for other floating-point conversions.
+
+The OFP8 standard additionally defines saturating conversions, in which
+infinite results are converted to the maximum-magnitude finite value of the
+same sign.
+A new instruction, inst:vfncvtbf16.sat.f.f.w[], implements this operation.
+It is defined for SEW=8 and csr::altfmt[]=0, and for SEW=8 and csr::altfmt[]=1,
+performing the same function as inst:vfncvtbf16.f.f.w[] except for the saturation
+property.
+It is encoded like inst:vfncvtbf16.f.f.w[], but with `vs1`=11111.
+
+NOTE: Conversion from 8-bit integer to OFP8 is accomplished by first converting
+to BF16 using instructions in the ext:zvfbfa[] extension, then using the instructions
+defined in this section.
+
+=== FP32 to OFP8 conversion instructions
+
+A new instruction to convert from FP32 to the OFP8 formats, inst:vfncvt.f.f.q[], is
+added.
+When SEW=8 and csr::altfmt[]=0, this instruction converts a vector of FP32 values in
+`vs2` (with EMUL=4×LMUL) to a vector of OFP8 E4M3 values, writing the result to
+`vd` (with EMUL=LMUL).
+Since E4M3 cannot represent infinity, infinite results are converted to the
+canonical NaN.
+When SEW=8 and csr::altfmt[]=1, the instruction converts to OFP8 E5M2 instead.
+In this case, however, infinite results are representable.
+In both cases, results are rounded using the dynamic rounding mode in
+the csr:frm[] register, and floating-point exceptions are reported in the csr:fflags[]
+register as for other floating-point conversions.
+inst:vfncvt.f.f.q[] is encoded like inst:vfncvt.f.f.w[], but with `vs1`=11001.
+
+Another new instruction, inst:vfncvt.sat.f.f.q[], is defined for SEW=8 and
+csr::altfmt[]=0, and for SEW=8 and csr::altfmt[]=1, performing the same function as the
+inst:vfncvt.f.f.q[] instruction, but with saturation (i.e. infinite results are
+converted to the maximum-magnitude finite value of the same sign).
+inst:vfncvt.sat.f.f.q[] is encoded like inst:vfncvt.f.f.w[], but with `vs1`=11011.
+
+NOTE: An alternative design would have been to first convert from FP32 to BF16,
+rounding to odd, then use the instructions defined in the previous section to
+convert to OFP8.
+However, FP32 to OFP8 conversion is common enough to justify the direct
+conversion.
+
+NOTE: Conversion from FP16 and 16-bit integer formats is accomplished by first
+converting to FP32 using instructions in the ext:zvfhmin[] and ext:zve32f[] extensions,
+then using the instructions defined in this section.
