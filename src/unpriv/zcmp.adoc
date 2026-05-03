@@ -3,43 +3,43 @@
 
 The ext:zcmp[] extension adds instructions that substantially reduce the
 static code size of procedure prologues and epilogues.
-The instructions it adds are collectively referred to as PUSH/POP:
+The instructions it adds are collectively referred to as insn:push[]/insn:pop[]:
 
 * <<#insns-cm_push>>
 * <<#insns-cm_pop>>
 * <<#insns-cm_popret>>
 * <<#insns-cm_popretz>>
 
-The term PUSH refers to _cm.push_.
+The term insn:push[] refers to insn:cm.push[].
 
-The term POP refers to _cm.pop_.
+The term insn:pop[] refers to insn:cm.pop[].
 
-The term POPRET refers to _cm.popret and cm.popretz_.
+The term insn:popret[] refers to insn:cm.popret[] and insn:cm.popretz[].
 
 Common details for these instructions are in this section.
 
-==== PUSH/POP functional overview
+==== insn:push[]/insn:pop[] functional overview
 
-PUSH, POP, POPRET are used to reduce the size of function prologues and epilogues.
+insn:push[], insn:pop[], insn:popret[] are used to reduce the size of function prologues and epilogues.
 
-. The PUSH instruction
+. The insn:push[] instruction
 ** adjusts the stack pointer to create the stack frame
 ** pushes (stores) the registers specified in the register list to the stack frame
 
-. The POP instruction
+. The insn:pop[] instruction
 ** pops (loads) the registers in the register list from the stack frame
 ** adjusts the stack pointer to destroy the stack frame
 
-. The POPRET instructions
+. The insn:popret[] instructions
 ** pop (load) the registers in the register list from the stack frame
-** _cm.popretz_ also moves zero into _a0_ as the return value
+** insn:cm.popretz[] also moves zero into _a0_ as the return value
 ** adjust the stack pointer  to destroy the stack frame
 ** execute a _ret_ instruction to return from the function
 
 <<<
 ==== Example usage
 
-This example gives an illustration of the use of PUSH and POPRET.
+This example gives an illustration of the use of insn:push[] and insn:popret[].
 
 The function _processMarkers_ in the EMBench benchmark picojpeg in the following file on github: https://github.com/embench/embench-iot/blob/master/src/picojpeg/libpicojpeg.c[libpicojpeg.c]
 
@@ -97,7 +97,7 @@ with the GCC option _-msave-restore_ the output is the following:
    10866:       71e0106f                j       11f84 <__riscv_restore_12>
 ----
 
-with PUSH/POPRET this reduces to
+with insn:push[]/insn:popret[] this reduces to
 
 [source,asm]
 ----
@@ -108,8 +108,8 @@ with PUSH/POPRET this reduces to
 ----
 
 The prologue / epilogue reduce from 60-bytes in the original code, to 14-bytes with _-msave-restore_,
-and to 4-bytes with PUSH and POPRET.
-As well as reducing the code-size PUSH and POPRET eliminate the branches from
+and to 4-bytes with insn:push[] and insn:popret[].
+As well as reducing the code-size insn:push[] and insn:popret[] eliminate the branches from
 calling the millicode _save/restore_ routines and so may also perform better.
 
 [NOTE]
@@ -119,7 +119,7 @@ The calls to _<riscv_save_0>/<riscv_restore_0>_ become 64-bit when the target fu
 
 [NOTE]
 ====
-POP is typically used in tail-calling sequences where _ret_ is not used to return to _ra_ after destroying the stack frame.
+insn:pop[] is typically used in tail-calling sequences where _ret_ is not used to return to _ra_ after destroying the stack frame.
 ====
 
 [#pushpop-areg-list]
@@ -128,19 +128,19 @@ POP is typically used in tail-calling sequences where _ret_ is not used to retur
 
 The instructions all automatically adjust the stack pointer by enough to cover the memory required for the registers being saved or restored.
 Additionally the _spimm_ field in the encoding allows the stack pointer to be adjusted in additional increments of 16-bytes. There is only a small restricted
-range available in the encoding; if the range is insufficient then a separate _c.addi16sp_ can be used to increase the range.
+range available in the encoding; if the range is insufficient then a separate insn:c.addi16sp[] can be used to increase the range.
 
 ===== Register list handling
 
 There is no support for the _\{ra, s0-s10}_ register list without also adding _s11_. Therefore the _\{ra, s0-s11}_ register list must be used in this case.
 
 [#pushpop-idempotent-memory]
-==== PUSH/POP Fault handling
+==== insn:push[]/insn:pop[] Fault handling
 
 [[norm:Zcmp_reexecute]]
 Correct execution requires that _sp_ refers to idempotent memory (also see <<pushpop_non-idem-mem>>), because the core must be able to
 handle traps detected during the sequence.
-The entire PUSH/POP sequence is re-executed after returning from the trap handler, and multiple traps are possible during the sequence.
+The entire insn:push[]/insn:pop[] sequence is re-executed after returning from the trap handler, and multiple traps are possible during the sequence.
 
 [#norm:Zcmp_trap]#If a trap occurs during the sequence then _xEPC_ is updated with the PC of the instruction, _xTVAL_ (if not read-only-zero) updated with the bad address if it was an access fault and _xCAUSE_ updated with the type of trap.#
 
@@ -150,9 +150,9 @@ NOTE: It is implementation defined whether interrupts can also be taken during t
 [#pushpop-software-view]
 ==== Software view of execution
 
-===== Software view of the PUSH sequence
+===== Software view of the insn:push[] sequence
 
-From a software perspective the PUSH sequence appears as:
+From a software perspective the insn:push[] sequence appears as:
 
 * A sequence of stores writing the bytes required by the pseudocode
 ** The bytes may be written in any order.
@@ -165,12 +165,12 @@ From a software perspective the PUSH sequence appears as:
 If an implementation allows interrupts during the sequence, and the interrupt handler uses _sp_ to allocate stack memory, then any stores which were executed before the interrupt may be overwritten by the handler. This is safe because the memory is idempotent and the stores will be re-executed when execution resumes.
 ====
 
-[#norm:Zcmp_push_sp_commit]#The stack pointer adjustment must only be committed only when it is certain that the entire PUSH instruction will commit.#
+[#norm:Zcmp_push_sp_commit]#The stack pointer adjustment must only be committed only when it is certain that the entire insn:push[] instruction will commit.#
 
 [[norm:Zcmp_bus_fault]]
 Stores may also return imprecise faults from the bus.
 It is platform defined whether the core implementation waits for the bus responses before continuing to the final stage of the sequence,
-or handles errors responses after completing the PUSH instruction.
+or handles errors responses after completing the insn:push[] instruction.
 
 <<<
 
@@ -202,25 +202,25 @@ sw  ra,-28(sp)
 addi sp, sp, -64
 ----
 
-===== Software view of the POP/POPRET sequence
+===== Software view of the insn:pop[]/insn:popret[] sequence
 
-From a software perspective the POP/POPRET sequence appears as:
+From a software perspective the insn:pop[]/insn:popret[] sequence appears as:
 
 * A sequence of loads reading the bytes required by the pseudocode.
 ** The bytes may be loaded in any order.
 ** The bytes may be grouped into larger accesses.
 ** Any of the bytes may be loaded multiple times.
 * A stack pointer adjustment
-* An optional `li a0, 0`
-* An optional `ret`
+* An optional insn:li[a0,0]
+* An optional insn:ret[]
 
 If a trap occurs during the sequence, then any loads which were executed before the trap may update architectural state.
 The loads will be re-executed once the trap handler completes, so the values will be overwritten.
 Therefore it is permitted for an implementation to update some of the destination registers before taking a fault.
 
-[#norm:Zcmp_pop_sp_commit]#The optional `li a0, 0`, stack pointer adjustment and optional `ret` must only be committed only when it is certain that the entire POP/POPRET instruction will commit.#
+[#norm:Zcmp_pop_sp_commit]#The optional insn:li[a0,0], stack pointer adjustment and optional insn:ret[] must only be committed only when it is certain that the entire insn:pop[]/insn:popret[] instruction will commit.#
 
-For POPRET once the stack pointer adjustment has been committed the `ret` must execute.
+For insn:popret[] once the stack pointer adjustment has been committed the insn:ret[] must execute.
 
 <<<
 For example:
@@ -253,22 +253,22 @@ ret
 [[pushpop_non-idem-mem,Non-idempotent memory handling]]
 ==== Non-idempotent memory handling
 
-An implementation may have a requirement to issue a PUSH/POP instruction to non-idempotent memory.
+An implementation may have a requirement to issue a insn:push[]/insn:pop[] instruction to non-idempotent memory.
 
-If the core implementation does not support PUSH/POP to non-idempotent memories, the core may use an idempotency PMA to detect it and take a
-load (POP/POPRET) or store (PUSH) access-fault exception in order to avoid unpredictable results.
+If the core implementation does not support insn:push[]/insn:pop[] to non-idempotent memories, the core may use an idempotency PMA to detect it and take a
+load (insn:pop[]/insn:popret[]) or store (insn:push[]) access-fault exception in order to avoid unpredictable results.
 
 Software should only use these instructions on non-idempotent memory regions when software can tolerate the required memory accesses
 being issued repeatedly in the case that they cause exceptions.
 
 <<<
 
-==== Example RV32I PUSH/POP sequences
+==== Example RV32I insn:push[]/insn:pop[] sequences
 
 The examples are included show the load/store series expansion and the stack adjustment.
-Examples of _cm.popret_ and _cm.popretz_ are not included, as the difference in the expanded sequence from _cm.pop_ is trivial in all cases.
+Examples of insn:cm.popret[] and insn:cm.popretz[] are not included, as the difference in the expanded sequence from insn:cm.pop[] is trivial in all cases.
 
-===== cm.push  \{ra, s0-s2}, -64
+===== insn:cm.push[\{ra, s0-s2},-64]
 
 Encoding: _rlist_=7, _spimm_=3
 
@@ -283,7 +283,7 @@ sw  ra, -16(sp);
 addi sp, sp, -64;
 ----
 
-===== cm.push \{ra, s0-s11}, -112
+===== insn:cm.push[\{ra, s0-s11},-112]
 
 Encoding: _rlist_=15, _spimm_=3
 
@@ -309,7 +309,7 @@ addi sp, sp, -112;
 
 <<<
 
-===== cm.pop   \{ra}, 16
+===== insn:cm.pop[\{ra},16]
 
 Encoding: _rlist_=4, _spimm_=0
 
@@ -321,7 +321,7 @@ lw   ra, 12(sp);
 addi sp, sp, 16;
 ----
 
-===== cm.pop \{ra, s0-s3}, 48
+===== insn:cm.pop[\{ra, s0-s3},48]
 
 Encoding: _rlist_=8, _spimm_=1
 
@@ -337,7 +337,7 @@ lw   ra, 28(sp);
 addi sp, sp, 48;
 ----
 
-===== cm.pop \{ra, s0-s4}, 64
+===== insn:cm.pop[\{ra, s0-s4},64]
 
 Encoding: _rlist_=9, _spimm_=2
 
@@ -357,7 +357,7 @@ addi sp, sp, 64;
 
 <<<
 [#insns-cm_push,reftext="cm.push"]
-==== cm.push
+==== insn:cm.push[]
 
 Synopsis::
 
@@ -365,7 +365,7 @@ Create stack frame: store ra and 0 to 12 saved registers to the stack frame, opt
 
 Mnemonic::
 
-cm.push _\{reg_list}, -stack_adj_
+insn:cm.push[\{reg_list},-stack_adj]
 
 Encoding (RV32, RV64):
 
@@ -382,7 +382,7 @@ Encoding (RV32, RV64):
 
 [NOTE]
 ====
-_rlist_ values 0 to 3 are reserved for a future EABI variant called _cm.push.e_
+_rlist_ values 0 to 3 are reserved for a future EABI variant called insn:cm.push.e[]
 ====
 
 Assembly Syntax:
@@ -551,7 +551,7 @@ sp-=stack_adj;
 
 <<<
 [#insns-cm_pop,reftext="cm.pop"]
-==== cm.pop
+==== insn:cm.pop[]
 
 Synopsis::
 
@@ -559,7 +559,7 @@ Destroy stack frame: load ra and 0 to 12 saved registers from the stack frame, d
 
 Mnemonic::
 
-cm.pop  _\{reg_list}, stack_adj_
+insn:cm.pop[\{reg_list},stack_adj]
 
 Encoding (RV32, RV64):
 
@@ -576,7 +576,7 @@ Encoding (RV32, RV64):
 
 [NOTE]
 ====
-_rlist_ values 0 to 3 are reserved for a future EABI variant called _cm.pop.e_
+_rlist_ values 0 to 3 are reserved for a future EABI variant called insn:cm.pop.e[]
 ====
 
 Assembly Syntax:
@@ -743,7 +743,7 @@ sp+=stack_adj;
 
 <<<
 [#insns-cm_popretz,reftext="cm.popretz"]
-==== cm.popretz
+==== insn:cm.popretz[]
 
 Synopsis::
 
@@ -751,7 +751,7 @@ Destroy stack frame: load ra and 0 to 12 saved registers from the stack frame, d
 
 Mnemonic::
 
-cm.popretz _\{reg_list}, stack_adj_
+insn:cm.popretz[\{reg_list},stack_adj]
 
 Encoding (RV32, RV64):
 
@@ -768,7 +768,7 @@ Encoding (RV32, RV64):
 
 [NOTE]
 ====
-_rlist_ values 0 to 3 are reserved for a future EABI variant called _cm.popretz.e_
+_rlist_ values 0 to 3 are reserved for a future EABI variant called insn:cm.popretz.e[]
 ====
 
 Assembly Syntax:
@@ -926,7 +926,7 @@ The final section of pseudocode executes atomically, and only executes if the se
 
 [NOTE]
 ====
-The _li a0, 0_ *could* be executed more than once, but is included in the atomic section for convenience.
+The insn:li[a0,0] *could* be executed more than once, but is included in the atomic section for convenience.
 ====
 
 [source,sail]
@@ -940,7 +940,7 @@ asm("ret");
 
 <<<
 [#insns-cm_popret,reftext="cm.popret"]
-==== cm.popret
+==== insn:cm.popret[]
 
 Synopsis::
 
@@ -948,7 +948,7 @@ Destroy stack frame: load ra and 0 to 12 saved registers from the stack frame, d
 
 Mnemonic::
 
-cm.popret _\{reg_list}, stack_adj_
+insn:cm.popret[\{reg_list},stack_adj]
 
 Encoding (RV32, RV64):
 
@@ -1134,7 +1134,7 @@ asm("ret");
 <<<
 
 [#insns-cm_mvsa01,reftext="Move a0-a1 into two different s0-s7 registers"]
-==== cm.mvsa01
+==== insn:cm.mvsa01[]
 
 Synopsis::
 
@@ -1142,7 +1142,7 @@ Move a0-a1 into two registers of s0-s7
 
 Mnemonic::
 
-cm.mvsa01 _r1s'_, _r2s'_
+insn:cm.mvsa01[r1s',r2s']
 
 Encoding (RV32, RV64):
 
@@ -1179,7 +1179,7 @@ The mapping between them is specified in the pseudocode below.
 
 [NOTE]
 ====
-The _s_ register mapping is taken from the UABI, and may not match the currently unratified EABI. _cm.mvsa01.e_ may be included in the future.
+The _s_ register mapping is taken from the UABI, and may not match the currently unratified EABI. insn:cm.mvsa01.e[] may be included in the future.
 ====
 
 Prerequisites::
@@ -1207,7 +1207,7 @@ X[xreg2] = X[11];
 <<<
 
 [#insns-cm_mva01s,reftext="Move two s0-s7 registers into a0-a1"]
-==== cm.mva01s
+==== insn:cm.mva01s[]
 
 Synopsis::
 
@@ -1215,7 +1215,7 @@ Move two s0-s7 registers into a0-a1
 
 Mnemonic::
 
-cm.mva01s _r1s'_, _r2s'_
+insn:cm.mva01s[r1s',r2s']
 
 Encoding (RV32, RV64):
 
@@ -1247,7 +1247,7 @@ The mapping between them is specified in the pseudocode below.
 
 [NOTE]
 ====
-The _s_ register mapping is taken from the UABI, and may not match the currently unratified EABI. _cm.mva01s.e_ may be included in the future.
+The _s_ register mapping is taken from the UABI, and may not match the currently unratified EABI. insn:cm.mva01s.e[] may be included in the future.
 ====
 
 Prerequisites::
