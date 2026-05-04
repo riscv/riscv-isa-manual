@@ -142,6 +142,7 @@ REQUIRES := --require=asciidoctor-bibtex \
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
 .PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref
+.PHONY: generate-rvwmo-listings check-rvwmo-listings
 
 all: build
 
@@ -159,6 +160,12 @@ build-tags: $(DOCS_NORM_TAGS)
 check-xrefs: $(addprefix $(BUILD_DIR)/, $(addsuffix .check-xrefs, $(DOCS)))
 check-tags:
 	@bash ./scripts/check-tag-changes.sh
+
+generate-rvwmo-listings:
+	python3 scripts/generate_rvwmo_source_dest_listings.py
+
+check-rvwmo-listings:
+	python3 scripts/generate_rvwmo_source_dest_listings.py --check
 
 # Copy built normative tags JSON files to ref directory and use sed to ensure they end with a newline.
 # Required by GitHub pre-commit checks for this repo.
