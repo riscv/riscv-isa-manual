@@ -28,7 +28,7 @@ MONTHYEAR := $(shell date -j -f "%Y%m%d" "$(DATE)" +"%B %Y" 2>/dev/null || date 
 CITATION_DESCRIPTION := $(DATE)-$(RELEASE_TYPE)
 ifeq ($(RELEASE_TYPE), draft)
   WATERMARK_OPT := -a draft-watermark
-  RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
+  RELEASE_DESCRIPTION := DRAFT—NOT AN OFFICIAL RELEASE
 else ifeq ($(RELEASE_TYPE), intermediate)
   WATERMARK_OPT :=
   RELEASE_DESCRIPTION := Intermediate Release
