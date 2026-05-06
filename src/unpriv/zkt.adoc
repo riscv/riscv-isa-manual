@@ -1,0 +1,362 @@
+[[ext:zkt]]
+=== ext:zkt[] Data-Independent Execution Latency Extension
+
+The Zkt extension attests that the machine has data-independent execution
+time for a safe subset of instructions. This property is commonly called
+_"constant-time"_ although should not be taken with that literal meaning.
+
+All currently defined cryptographic instructions (Zk* and Zbk* extensions) are on
+this list, together with a set of relevant supporting instructions from
+I, M, C, and B extensions.
+
+
+.Note to software developers
+[NOTE,caption="SH"]
+====
+Failure to prevent leakage of sensitive parameters via the direct
+timing channel is considered a serious security vulnerability and will
+typically result in a CERT CVE security advisory.
+====
+
+==== Scope and Goal
+
+An "ISA contract" is made between a programmer and the RISC-V implementation
+that Zkt instructions do not leak information about processed secret data
+(plaintext, keying information, or other "sensitive security parameters" --
+FIPS 140-3 term) through differences in execution latency. Zkt does _not_
+define a set of instructions available in the core; it just restricts the
+behaviour of certain instructions if those are implemented.
+
+Currently, the scope of this chapter is within scalar RV32/RV64 processors.
+Vector cryptography instructions (and appropriate vector support instructions)
+will be added later, as will other security-related functions that wish
+to assert leakage-free execution latency properties.
+
+Loads, stores, conditional branches are excluded, along with a set of
+instructions that are rarely necessary to process secret data. Also excluded
+are instructions for which workarounds exist in standard cryptographic
+middleware due to the limitations of other ISA processors.
+
+The stated goal is that OpenSSL, BoringSSL (Android), the Linux Kernel,
+and similar trusted software will not have directly observable
+timing side channels when compiled and running on a Zkt-enabled RISC-V target.
+The Zkt extension explicitly states many of the common latency assumptions
+made by cryptography developers.
+
+[#norm:zkt_optional_instr]#Vendors do not have to implement all of the list's instructions to be Zkt
+compliant;# however, [#norm:zkt_impl_must_constant_latency]#if they claim to have Zkt and implement any of the listed instructions, it must have data-independent latency.#
+
+For example, many simple RV32I and RV64I cores (without Multiply, Compressed,
+Bitmanip, or Cryptographic extensions) are technically compliant with Zkt.
+A constant-time AES can be implemented on them using "bit-slice" techniques,
+but it will be excruciatingly slow when compared to implementation with AES
+instructions. There are no guarantees that even a bit-sliced cipher
+implementation (largely based on boolean logic instructions) is secure on a
+core without Zkt attestation.
+
+Out-of-order implementations adhering to Zkt are still free to fuse, crack,
+change or even ignore sequences of instructions, so long as the optimisations
+are applied deterministically, and not based on operand data.
+The guiding principle should be that no information about the data being
+operated on should be leaked based on the execution latency.
+
+[NOTE]
+====
+It is left to future extensions or other techniques to tackle the problem
+of data-independent execution in implementations which advanced out-of-order
+capabilities which use value prediction, or which are otherwise data-dependent.
+====
+
+.Note to software developers
+[WARNING,caption="SH"]
+====
+Programming techniques can only mitigate leakage directly caused by
+arithmetic, caches, and branches. Other ISAs have had micro-architectural
+issues such as Spectre, Meltdown, Speculative Store Bypass, Rogue System
+Register Read, Lazy FP State Restore, Bounds Check Bypass Store, TLBleed,
+and L1TF/Foreshadow, etc. See e.g.
+link:https://github.com/nsacyber/Hardware-and-Firmware-Security-Guidance[NSA Hardware and Firmware Security Guidance]
+
+It is not within the remit of this proposal to mitigate these
+_micro-architectural_ leakages.
+====
+
+==== Background
+
+* Timing attacks are much more powerful than was realised before the 2010s,
+which has led to a significant mitigation effort in current cryptographic
+code-bases.
+* Cryptography developers use static and dynamic security testing tools
+to trace the handling of secret information and detect occasions where it
+influences a branch or is used for a table lookup.
+* Architectural testing for Zkt can be pragmatic and semi-formal;
+_security by design_ against basic timing attacks can usually be achieved via
+conscious implementation (of relevant iterative multi-cycle instructions or
+instructions composed of micro-ops) in way that avoids data-dependent latency.
+* Laboratory testing may utilize statistical timing attack leakage analysis
+techniques such as those described in ISO/IEC 17825 cite:[IS16].
+* Binary executables should not contain secrets in the instruction encodings
+(Kerckhoffs's principle), so instruction timing may leak information about
+immediates, ordering of input registers, etc. There may be an exception to this
+in systems where a binary loader modifies the executable for purposes of
+relocation -- and it is desirable to keep the execution location (PC) secret.
+This is why instructions such as LUI, AUIPC, and ADDI are on the list.
+* The rules used by audit tools are relatively simple to understand.
+Very briefly; we call the plaintext, secret keys, expanded keys, nonces,
+and other such variables "secrets". A secret variable (arithmetically)
+modifying any other variable/register turns that into a secret too.
+If a secret ends up in address calculation affecting a load or store, that
+is a violation. If a secret affects a branch's condition, that is also a
+violation. A secret variable location or register becomes a non-secret via
+specific zeroization/sanitisation or by being declared ciphertext
+(or otherwise no-longer-secret information). In essence, secrets can only
+"touch" instructions on the Zkt list while they are secrets.
+
+==== Specific Instruction Rationale
+
+* HINT instruction forms (typically encodings with _rd_=`x0`) are excluded from
+the data-independent time requirement.
+* Floating point (F, D, Q, L extensions) are currently excluded from the
+constant-time requirement as they have very few applications in standardised
+cryptography. We may consider adding floating point add, sub, multiply as a
+constant time requirement for some floating point extension in case a specific
+algorithm (such as the PQC Signature algorithm Falcon) becomes critical.
+*  Cryptographers typically assume division to be variable-time (while
+multiplication is constant time) and implement their Montgomery reduction
+routines with that assumption.
+* Zicsr, Zifencei are excluded.
+* Some instructions are on the list simply because we see no harm in
+including them in testing scope.
+
+
+==== Programming Information
+
+For background information on secure programming "models", see:
+
+* Thomas Pornin: _"Why Constant-Time Crypto?"_ (A great introduction to timing assumptions.) https://www.bearssl.org/constanttime.html
+* Jean-Philippe Aumasson: _"Guidelines for low-level cryptography software."_
+(A list of recommendations.) https://github.com/veorq/cryptocoding
+* Peter Schwabe: _"Timing Attacks and Countermeasures."_
+(Lecture slides -- nice references.)
+https://summerschool-croatia.cs.ru.nl/2016/slides/PeterSchwabe.pdf
+* Adam Langley: _"ctgrind."_ (This is from 2010 but is still relevant.)
+https://www.imperialviolet.org/2010/04/01/ctgrind.html
+* Kris Kwiatkowski: _"Constant-time code verification with Memory Sanitizer."_
+https://www.amongbytes.com/post/20210709-testing-constant-time/
+* For early examples of timing attack vulnerabilities, see
+https://www.kb.cert.org/vuls/id/997481 and related academic papers.
+
+
+[[zkt]]
+==== Zkt listings
+
+The following instructions are included in the `Zkt` subset
+They are listed here grouped by their original parent extension.
+
+.Note to implementers
+[NOTE, caption="SH"]
+====
+You do not need to implement all of these instructions to implement `Zkt`.
+Rather, every one of these instructions that the core does implement must
+adhere to the requirements of `Zkt`.
+====
+
+===== RVI (Base Instruction Set)
+
+Only basic arithmetic and `slt*` (for carry computations) are included.
+The data-independent timing requirement does not apply to HINT instruction
+encoding forms of these instructions.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | lui   _rd_, _imm_
+| {check} | {check} | auipc _rd_, _imm_
+| {check} | {check} | addi  _rd_, _rs1_, _imm_
+| {check} | {check} | slti  _rd_, _rs1_, _imm_
+| {check} | {check} | sltiu _rd_, _rs1_, _imm_
+| {check} | {check} | xori  _rd_, _rs1_, _imm_
+| {check} | {check} | ori   _rd_, _rs1_, _imm_
+| {check} | {check} | andi  _rd_, _rs1_, _imm_
+| {check} | {check} | slli  _rd_, _rs1_, _imm_
+| {check} | {check} | srli  _rd_, _rs1_, _imm_
+| {check} | {check} | srai  _rd_, _rs1_, _imm_
+| {check} | {check} | add   _rd_, _rs1_, _rs2_
+| {check} | {check} | sub   _rd_, _rs1_, _rs2_
+| {check} | {check} | sll   _rd_, _rs1_, _rs2_
+| {check} | {check} | slt   _rd_, _rs1_, _rs2_
+| {check} | {check} | sltu  _rd_, _rs1_, _rs2_
+| {check} | {check} | xor   _rd_, _rs1_, _rs2_
+| {check} | {check} | srl   _rd_, _rs1_, _rs2_
+| {check} | {check} | sra   _rd_, _rs1_, _rs2_
+| {check} | {check} | or    _rd_, _rs1_, _rs2_
+| {check} | {check} | and   _rd_, _rs1_, _rs2_
+|          | {check} | addiw _rd_, _rs1_, _imm_
+|          | {check} | slliw _rd_, _rs1_, _imm_
+|          | {check} | srliw _rd_, _rs1_, _imm_
+|          | {check} | sraiw _rd_, _rs1_, _imm_
+|          | {check} | addw  _rd_, _rs1_, _rs2_
+|          | {check} | subw  _rd_, _rs1_, _rs2_
+|          | {check} | sllw  _rd_, _rs1_, _rs2_
+|          | {check} | srlw  _rd_, _rs1_, _rs2_
+|          | {check} | sraw  _rd_, _rs1_, _rs2_
+|===
+
+===== Zicond (Conditional Zero)
+
+All instructions are included.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | czero.eqz _rd_, _rs1_, _rs2_
+| {check} | {check} | czero.nez _rd_, _rs1_, _rs2_
+|===
+
+===== RVM (Multiply)
+
+Multiplication is included; division and remaindering excluded.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | mul    _rd_, _rs1_, _rs2_
+| {check} | {check} | mulh   _rd_, _rs1_, _rs2_
+| {check} | {check} | mulhsu _rd_, _rs1_, _rs2_
+| {check} | {check} | mulhu  _rd_, _rs1_, _rs2_
+|          | {check} | mulw   _rd_, _rs1_, _rs2_
+|===
+
+===== ext:zca[] (Compressed)
+
+Same criteria as in RVI. Organised by quadrants.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | c.nop
+| {check} | {check} | c.addi
+|          | {check} | c.addiw
+| {check} | {check} | c.lui
+| {check} | {check} | c.srli
+| {check} | {check} | c.srai
+| {check} | {check} | c.andi
+| {check} | {check} | c.sub
+| {check} | {check} | c.xor
+| {check} | {check} | c.or
+| {check} | {check} | c.and
+|          | {check} | c.subw
+|          | {check} | c.addw
+| {check} | {check} | c.slli
+| {check} | {check} | c.mv
+| {check} | {check} | c.add
+|===
+
+===== Zcb Extension
+
+These instructions are compressed versions of I and M instructions that are
+included in Zkt.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| {check} | {check} | c.mul       | <<insns-c_mul>>
+| {check} | {check} | c.not       | <<insns-c_not>>
+| {check} | {check} | c.zext.b    | <<insns-c_zext_b>>
+|===
+
+===== RVK (Scalar Cryptography)
+
+All K-specific instructions are included.
+Additionally, `seed` CSR latency should be independent of `ES16` state output
+`entropy` bits, as that is a sensitive security parameter.
+See <<crypto_scalar_appx_es_access>>.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| {check} |          | aes32dsi     | <<insns-aes32dsi>>
+| {check} |          | aes32dsmi    | <<insns-aes32dsmi>>
+| {check} |          | aes32esi     | <<insns-aes32esi>>
+| {check} |          | aes32esmi    | <<insns-aes32esmi>>
+|          | {check} | aes64ds      | <<insns-aes64ds>>
+|          | {check} | aes64dsm     | <<insns-aes64dsm>>
+|          | {check} | aes64es      | <<insns-aes64es>>
+|          | {check} | aes64esm     | <<insns-aes64esm>>
+|          | {check} | aes64im      | <<insns-aes64im>>
+|          | {check} | aes64ks1i    | <<insns-aes64ks1i>>
+|          | {check} | aes64ks2     | <<insns-aes64ks2>>
+| {check} | {check} | sha256sig0   | <<insns-sha256sig0>>
+| {check} | {check} | sha256sig1   | <<insns-sha256sig1>>
+| {check} | {check} | sha256sum0   | <<insns-sha256sum0>>
+| {check} | {check} | sha256sum1   | <<insns-sha256sum1>>
+| {check} |          | sha512sig0h  | <<insns-sha512sig0h>>
+| {check} |          | sha512sig0l  | <<insns-sha512sig0l>>
+| {check} |          | sha512sig1h  | <<insns-sha512sig1h>>
+| {check} |          | sha512sig1l  | <<insns-sha512sig1l>>
+| {check} |          | sha512sum0r  | <<insns-sha512sum0r>>
+| {check} |          | sha512sum1r  | <<insns-sha512sum1r>>
+|          | {check} | sha512sig0   | <<insns-sha512sig0>>
+|          | {check} | sha512sig1   | <<insns-sha512sig1>>
+|          | {check} | sha512sum0   | <<insns-sha512sum0>>
+|          | {check} | sha512sum1   | <<insns-sha512sum1>>
+| {check} | {check} | sm3p0        | <<insns-sm3p0>>
+| {check} | {check} | sm3p1        | <<insns-sm3p1>>
+| {check} | {check} | sm4ed        | <<insns-sm4ed>>
+| {check} | {check} | sm4ks        | <<insns-sm4ks>>
+|===
+
+
+===== RVB (Bitmanip)
+
+The <<zbkb-sc>>, <<zbkc-sc>> and <<zbkx-sc>> extensions are included in their entirety.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| {check} | {check} |  clmul       | <<insns-clmul-sc>>
+| {check} | {check} |  clmulh      | <<insns-clmulh-sc>>
+| {check} | {check} |  xperm4      | <<insns-xperm4-sc>>
+| {check} | {check} |  xperm8      | <<insns-xperm8-sc>>
+| {check} | {check} |  ror         | <<insns-ror-sc>>
+| {check} | {check} |  rol         | <<insns-rol-sc>>
+| {check} | {check} |  rori        | <<insns-rori-sc>>
+|          | {check} |  rorw        | <<insns-rorw-sc>>
+|          | {check} |  rolw        | <<insns-rolw-sc>>
+|          | {check} |  roriw       | <<insns-roriw-sc>>
+| {check} | {check} |  andn        | <<insns-andn-sc>>
+| {check} | {check} |  orn         | <<insns-orn-sc>>
+| {check} | {check} |  xnor        | <<insns-xnor-sc>>
+| {check} | {check} |  pack        | <<insns-pack-sc>>
+| {check} | {check} |  packh       | <<insns-packh-sc>>
+|          | {check} |  packw       | <<insns-packw-sc>>
+| {check} | {check} |  brev8       | <<insns-brev8-sc>>
+| {check} | {check} |  rev8        | <<insns-rev8-sc>>
+| {check} |          |  zip         | <<insns-zip-sc>>
+| {check} |          |  unzip       | <<insns-unzip-sc>>
+|===
+
