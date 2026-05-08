@@ -164,6 +164,84 @@ Implementations can always trap to machine-mode software handlers to provide
 exceptional default values.
 ====
 
+[[nanboxing]]
+:sectnums!:
+[discrete]
+=== NaN Boxing of Narrower Values
+:sectnums:
+
+[[norm:fp_nan-boxing]]
+When multiple floating-point precisions are supported, then valid values of
+narrower _n_-bit types, _n_<FLEN, are represented in the lower _n_ bits of an
+FLEN-bit NaN value, in a process termed _NaN-boxing_. The upper bits of a valid
+NaN-boxed value must be all 1s. Valid NaN-boxed _n_-bit values therefore appear
+as negative quiet NaNs (qNaNs) when viewed as any wider _m_-bit value,
+_n_ < _m_ {le} FLEN. Any operation that writes a narrower result to an `f`
+register must write all 1s to the uppermost FLEN-_n_ bits to yield a legal
+NaN-boxed value.
+
+[NOTE]
+====
+Software might not know the current type of data stored in a floating-point
+register but has to be able to save and restore the register values, hence the
+result of using wider operations to transfer narrower values has to be defined.
+A common case is for callee-saved registers, but a standard convention is also
+desirable for features including variadic functions, user-level threading
+libraries, virtual machine migration, and debugging.
+====
+
+Floating-point _n_-bit transfer operations move external values held in the
+IEEE 754-2008 formats into and out of the `f` registers, and comprise
+floating-point loads and stores (insn:fl*[] and insn:fs*[]) and floating-point
+move instructions (insn:fmv.\*.x[] and insn:fmv.x.*[]).
+[#norm:FP_transfer_instrs_narrow_transfer_in]#A narrower _n_-bit transfer,
+_n_<FLEN, into the `f` registers will create a valid NaN-boxed value#.
+[#norm:FP_transfer_instrs_narrow_transfer_out]#A narrower _n_-bit transfer out
+of the floating-point registers will transfer the lower _n_ bits of the register
+ignoring the upper FLEN-_n_ bits#.
+
+[[norm:FP_nontransfer_instrs_improper_nan-boxed_input]]
+Apart from transfer operations described in the previous paragraph, all other
+floating-point operations on narrower __n__-bit operations, _n_<FLEN, check if
+the input operands are correctly NaN-boxed, i.e., all upper FLEN-_n_ bits are 1.
+If so, the _n_ least-significant bits of the input are used as the input value,
+otherwise the input value is treated as an _n_-bit canonical NaN.
+
+The NaN-boxing scheme can be applied recursively when an implementation supports
+more than two precisions. For instance, with ext:f[], ext:d[], and ext:zfh[],
+a register may hold a half-precision value to be NaN-boxed inside a
+single-precision value which is itself NaN-boxed inside a double-precision
+value.
+
+[NOTE]
+====
+Earlier versions of the specification did not define the behavior of feeding the
+results of narrower or wider operands into an operation, except to require that
+wider saves and restores would preserve the value of a narrower operand. The new
+definition removes this implementation-specific behavior, while still
+accommodating both non-recoded and recoded implementations of the floating-point
+unit. The new definition also helps catch software errors by propagating NaNs if
+values are used incorrectly.
+
+Non-recoded implementations unpack and pack the operands to the IEEE 754-2008
+format on the input and output of every floating-point operation. The NaN-boxing
+cost to a non-recoded implementation is primarily in checking if the upper bits
+of a narrower operation represent a legal NaN-boxed value, and in writing all 1s
+to the upper bits of a result.
+
+Recoded implementations use a more convenient internal format to represent
+floating-point values, with an added exponent bit to allow all values to be held
+normalized. The cost to the recoded implementation is primarily the extra
+tagging needed to track the internal types and sign bits, but this can be done
+without adding new state bits by recoding NaNs internally in the exponent field.
+Small modifications are needed to the pipelines used to transfer values in and
+out of the recoded format, but the datapath and latency costs are minimal. The
+recoding process has to handle shifting of input subnormal values for wide
+operands in any case, and extracting the NaN-boxed value is a similar process to
+normalization except for skipping over leading-1 bits instead of skipping over
+leading-0 bits, allowing the datapath multiplexing to be shared.
+====
+
 include::f-st-ext.adoc[]
 include::d-st-ext.adoc[]
 include::q-st-ext.adoc[]
