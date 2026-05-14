@@ -9,10 +9,10 @@ RV32I was designed to be sufficient to form a compiler target and to
 support modern operating system environments. The ISA was also designed
 to reduce the hardware required in a minimal implementation. RV32I
 contains 40 unique instructions, though a simple implementation might
-cover the ECALL/EBREAK instructions with a single SYSTEM hardware
-instruction that always traps and might be able to implement the FENCE
-instruction as a NOP, reducing base instruction count to 38 total. RV32I
-can emulate almost any other ISA extension (except the A extension,
+cover the insn:ecall[]/insn:ebreak[] instructions with a single insn:system[] hardware
+instruction that always traps and might be able to implement the insn:fence[]
+instruction as a insn:nop[], reducing base instruction count to 38 total. RV32I
+can emulate almost any other ISA extension (except the ext:a[] extension,
 which requires additional hardware support for atomicity).
 
 In practice, a hardware implementation including the machine-mode
@@ -21,7 +21,7 @@ privileged architecture will also require the 6 CSR instructions.
 Subsets of the base integer ISA might be useful for pedagogical
 purposes, but the base has been defined such that there should be little
 incentive to subset a real hardware implementation beyond omitting
-support for misaligned memory accesses and treating all SYSTEM
+support for misaligned memory accesses and treating all insn:system[]
 instructions as a single trap.
 ====
 
@@ -40,8 +40,8 @@ Most of the commentary for RV32I also applies to the RV64I base.
 
 <<gprs>> shows the unprivileged state for the base integer ISA.
 [#norm:rv32i_xreg_sz]#For RV32I, the 32 `x` registers are each 32 bits wide,
-i.e., `XLEN=32`.# [#norm:x0eq0]#Register `x0` is hardwired with all bits equal to 0.#
-[#norm:rv32i_rv64i_other_xregs]#General purpose registers `x1`-`x31` hold values that various
+i.e., XLEN=32.# [#norm:x0eq0]#Register `x0` is hardwired with all bits equal to 0.#
+[#norm:rv32i_rv64i_other_xregs]#General purpose registers `x1`{endash}``x31`` hold values that various
 instructions interpret as a collection of Boolean values, or as two's
 complement signed binary integers or unsigned binary integers.#
 
@@ -97,12 +97,14 @@ For resource-constrained embedded applications, we have defined the
 RV32E subset, which only has 16 registers
 (<<rv32e>>).
 ====
+
 ==== Base Instruction Formats
+
 In the base RV32I ISA, there are four core instruction formats
 (R/I/S/U), as shown in <<base_instr>>. All are a fixed 32 bits in length.
-The base ISA has `IALIGN=32`, meaning that instructions must be aligned on a four-byte boundary in memory.
+The base ISA has IALIGN=32, meaning that instructions must be aligned on a four-byte boundary in memory.
 [#norm:taken_cti_misaligned_exc]#An instruction-address-misaligned exception is generated on a taken branch
-or unconditional jump if the target address is not `IALIGN-bit` aligned.
+or unconditional jump if the target address is not IALIGN-bit aligned.
 This exception is reported on the branch or jump instruction, not on the target instruction.#
 [#norm:cond_br_no_ia_misaligned_exc_not_taken]#No instruction-address-misaligned exception is generated
 for a conditional branch that is not taken.#
@@ -139,7 +141,7 @@ bit 31 of the instruction to speed sign-extension circuitry.
 
 include::images/wavedrom/instruction-formats.edn[]
 [[base_instr,Base instruction formats]]
-RISC-V base instruction formats. Each immediate subfield is labeled with the bit position (imm[x]) in the immediate value being produced, rather than the bit position within the instruction's immediate field as is usually done.
+RISC-V base instruction formats. Each immediate subfield is labeled with the bit position (_imm[x]_) in the immediate value being produced, rather than the bit position within the instruction's immediate field as is usually done.
 
 [NOTE]
 ====
@@ -173,8 +175,8 @@ The only difference between the S and B formats is that the 12-bit
 immediate field is used to encode branch offsets in multiples of 2 in
 the B format. Instead of shifting all bits in the instruction-encoded
 immediate left by one in hardware as is conventionally done, the middle
-bits (imm[10:1]) and sign bit stay in fixed positions, while the lowest
-bit in S format (inst[7]) encodes a high-order bit in B format.
+bits (_imm[10:1]_) and sign bit stay in fixed positions, while the lowest
+bit in S format (_inst[7]_) encodes a high-order bit in B format.
 
 Similarly, the only difference between the U and J formats is that the
 20-bit immediate is shifted left by 12 bits to form U immediates and by
@@ -184,7 +186,7 @@ formats and with each other.
 
 <<immtypes>> shows the immediates produced by
 each of the base instruction formats, and is labeled to show which
-instruction bit (inst[_y_]) produces each bit of the immediate value.
+instruction bit (_inst[y]_) produces each bit of the immediate value.
 
 [[immtypes, Immediate types]]
 include::images/wavedrom/i-immediate.edn[]
@@ -199,7 +201,7 @@ include::images/wavedrom/u-immediate.edn[]
 include::images/wavedrom/j-immediate.edn[]
 
 
-The fields are labeled with the instruction bits used to construct their value.  Sign extensions always uses inst[31].
+The fields are labeled with the instruction bits used to construct their value.  Sign extensions always uses _inst[31]_.
 
 [NOTE]
 ====
@@ -223,7 +225,7 @@ common short forward branches have straightforward immediate encodings.
 
 ==== Integer Computational Instructions
 
-Most integer computational instructions operate on `XLEN` bits of values
+Most integer computational instructions operate on XLEN bits of values
 held in the integer register file. Integer computational instructions
 are either encoded as register-immediate operations using the I-type
 format or as register-register operations using the R-type format. The
@@ -238,11 +240,11 @@ on integer arithmetic operations in the base instruction set, as many
 overflow checks can be cheaply implemented using RISC-V branches.
 Overflow checking for unsigned addition requires only a single
 additional branch instruction after the addition:
-`add t0, t1, t2; bltu t0, t1, overflow`.
+insn:add[t0,t1,t2]; insn:bltu[t0,t1,overflow].
 
 For signed addition, if one operand's sign is known, overflow checking
 requires only a single branch after the addition:
-`addi t0, t1, +imm; blt t0, t1, overflow`. This covers the common case
+insn:addi[t0,t1,+imm]; insn:blt[t0,t1,overflow]. This covers the common case
 of addition with an immediate operand.
 
 For general signed addition, three additional instructions after the
@@ -252,14 +254,14 @@ negative.
 
 [source,asm]
 ....
-         add t0, t1, t2
-         slti t3, t2, 0
-         slt t4, t0, t1
-         bne t3, t4, overflow
+    add t0, t1, t2
+    slti t3, t2, 0
+    slt t4, t0, t1
+    bne t3, t4, overflow
 ....
 
 In RV64I, checks of 32-bit signed additions can be optimized further by
-comparing the results of ADD and ADDW on the operands.
+comparing the results of insn:add[] and insn:addw[] on the operands.
 ====
 
 ===== Integer Register-Immediate Instructions
@@ -267,22 +269,22 @@ comparing the results of ADD and ADDW on the operands.
 include::images/wavedrom/integer-computational.edn[]
 //.Integer Computational Instructions
 
-[#norm:addi_op]#ADDI adds the sign-extended 12-bit immediate to register _rs1_.#
+[#norm:addi_op]#insn:addi[] adds the sign-extended 12-bit immediate to register _rs1_.#
 [#norm:addi_overflow]#Arithmetic overflow is ignored and the result is simply the low XLEN bits of the result.#
-ADDI _rd, rs1, 0_ is used to implement the MV _rd, rs1_ assembler pseudoinstruction.
+insn:addi[rd,rs1,0] is used to implement the insn:mv[rd,rs1] assembler pseudoinstruction.
 
-[#norm:slti_sltiu_op]#SLTI (set less than immediate) places the value 1 in register _rd_ if
+[#norm:slti_sltiu_op]#insn:slti[] (set less than immediate) places the value 1 in register _rd_ if
 register _rs1_ is less than the sign-extended immediate when both are
-treated as signed numbers, else 0 is written to _rd_. SLTIU is similar
+treated as signed numbers, else 0 is written to _rd_. insn:sltiu[] is similar
 but compares the values as unsigned numbers (i.e., the immediate is
 first sign-extended to XLEN bits then treated as an unsigned number).#
-Note, SLTIU _rd, rs1, 1_ sets _rd_ to 1 if _rs1_ equals zero, otherwise
-sets _rd_ to 0 (assembler pseudoinstruction SEQZ _rd, rs_).
+Note, insn:sltiu[rd,rs1,1] sets _rd_ to 1 if _rs1_ equals zero, otherwise
+sets _rd_ to 0 (assembler pseudoinstruction insn:seqz[rd,rs]).
 
-[#norm:andi_ori_xori_op]#ANDI, ORI, XORI are logical operations that perform bitwise AND, OR, and
+[#norm:andi_ori_xori_op]#insn:andi[], insn:ori[], insn:xori[] are logical operations that perform bitwise AND, OR, and
 XOR on register _rs1_ and the sign-extended 12-bit immediate and place
 the result in _rd_.#
-Note, XORI _rd, rs1, -1_ performs a bitwise logical inversion of register _rs1_ (assembler pseudoinstruction NOT _rd, rs_).
+Note, insn:xori[rd,rs1,-1] performs a bitwise logical inversion of register _rs1_ (assembler pseudoinstruction insn:not[rd,rs]).
 
 include::images/wavedrom/int-comp-slli-srli-srai.edn[]
 [[int-comp-slli-srli-srai]]
@@ -292,40 +294,40 @@ Shifts by a constant are encoded as a specialization of the I-type
 format. The operand to be shifted is in _rs1_, and the shift amount is
 encoded in the lower 5 bits of the I-immediate field. The right-shift
 type is encoded in bit 30.
-[#norm:slli_op]#SLLI is a logical left shift (zeros are shifted into the lower bits);#
-[#norm:srli_op]#SRLI is a logical right shift (zeros are shifted into the upper bits);# and
-[#norm:srai_op]#SRAI is an arithmetic right shift (the original sign bit is copied into the vacated upper bits).#
+[#norm:slli_op]#insn:slli[] is a logical left shift (zeros are shifted into the lower bits);#
+[#norm:srli_op]#insn:srli[] is a logical right shift (zeros are shifted into the upper bits);# and
+[#norm:srai_op]#insn:srai[] is an arithmetic right shift (the original sign bit is copied into the vacated upper bits).#
 
 include::images/wavedrom/int-comp-lui-aiupc.edn[]
 [[int-comp-lui-aiupc]]
 //.Integer register-immediate, U-immediate
 
-LUI (load upper immediate) is used to build 32-bit constants and uses the U-type format.
-[#norm:lui_op]#LUI places the 32-bit U-immediate value into the
+insn:lui[] (load upper immediate) is used to build 32-bit constants and uses the U-type format.
+[#norm:lui_op]#insn:lui[] places the 32-bit U-immediate value into the
 destination register _rd_, filling in the lowest 12 bits with zeros.#
 
-AUIPC (add upper immediate to `pc`) is used to build `pc`-relative
+insn:auipc[] (add upper immediate to `pc`) is used to build `pc`-relative
 addresses and uses the U-type format.
-[#norm:auipc_op]#AUIPC forms a 32-bit offset from
+[#norm:auipc_op]#insn:auipc[] forms a 32-bit offset from
 the U-immediate, filling in the lowest 12 bits with zeros, adds this
-offset to the address of the AUIPC instruction, then places the result
+offset to the address of the insn:auipc[] instruction, then places the result
 in register _rd_.#
 
 [NOTE]
 ====
-The assembly syntax for `lui` and `auipc` does not represent the lower
+The assembly syntax for insn:lui[] and insn:auipc[] does not represent the lower
 12 bits of the U-immediate, which are always zero.
 
-The AUIPC instruction supports two-instruction sequences to access
-arbitrary offsets from the PC for both control-flow transfers and data
-accesses. The combination of an AUIPC and the 12-bit immediate in a JALR
-can transfer control to any 32-bit PC-relative address, while an AUIPC
+The insn:auipc[] instruction supports two-instruction sequences to access
+arbitrary offsets from the `pc` for both control-flow transfers and data
+accesses. The combination of an insn:auipc[] and the 12-bit immediate in a insn:jalr[]
+can transfer control to any 32-bit `pc`-relative address, while an insn:auipc[]
 plus the 12-bit immediate offset in regular load or store instructions
-can access any 32-bit PC-relative data address.
+can access any 32-bit `pc`-relative data address.
 
-The current PC can be obtained by setting the U-immediate to 0. Although
-a JAL +4 instruction could also be used to obtain the local PC (of the
-instruction following the JAL), it might cause pipeline breaks in
+The current `pc` can be obtained by setting the U-immediate to 0. Although
+a insn:jal[] +4 instruction could also be used to obtain the local `pc` (of the
+instruction following the insn:jal[]), it might cause pipeline breaks in
 simpler microarchitectures or pollute BTB structures in more complex
 microarchitectures.
 ====
@@ -340,50 +342,51 @@ include::images/wavedrom/int-reg-reg.edn[]
 [[int-reg-reg]]
 //.Integer register-register
 
-[#norm:add_op]#ADD performs the addition of _rs1_ and _rs2_.#
-[#norm:sub_op]#SUB performs the subtraction of _rs2_ from _rs1_.#
+[#norm:add_op]#insn:add[] performs the addition of _rs1_ and _rs2_.#
+[#norm:sub_op]#insn:sub[] performs the subtraction of _rs2_ from _rs1_.#
 [#norm:add_sub_overflow]#Overflows are ignored and the low XLEN bits of results are written to the destination _rd_.#
-[#norm:slt_sltu_op]#SLT and SLTU perform signed and unsigned compares respectively, writing 1 to _rd_ if
+[#norm:slt_sltu_op]#insn:slt[] and insn:sltu[] perform signed and unsigned compares respectively, writing 1 to _rd_ if
 _rs1_ < _rs2_, 0 otherwise.#
-Note, SLTU _rd_, _x0_, _rs2_ sets _rd_ to 1 if _rs2_ is not equal to zero,
-otherwise sets _rd_ to zero (assembler pseudoinstruction SNEZ _rd, rs_).
-[#norm:and_or_xor_op]#AND, OR, and XOR perform bitwise logical operations.#
+Note, insn:sltu[rd,x0,rs2] sets _rd_ to 1 if _rs2_ is not equal to zero,
+otherwise sets _rd_ to zero (assembler pseudoinstruction insn:snez[rd,rs]).
+[#norm:and_or_xor_op]#insn:and[], insn:or[], and insn:xor[] perform bitwise logical operations.#
 
-[#norm:sll_srl_sra_op]#SLL, SRL, and SRA perform logical left, logical right, and arithmetic
+[#norm:sll_srl_sra_op]#insn:sll[], insn:srl[], and insn:sra[] perform logical left, logical right, and arithmetic
 right shifts on the value in register _rs1_ by the shift amount held in
 the lower 5 bits of register _rs2_.#
 
-===== NOP Instruction
+===== insn:nop[] Instruction
 
 include::images/wavedrom/nop.edn[]
 [[nop]]
 //.NOP instructions
 
-[#norm:nop_op]#The NOP instruction does not change any architecturally visible state,
+[#norm:nop_op]#The insn:nop[] instruction does not change any architecturally visible state,
 except for advancing the `pc` and incrementing any applicable
-performance counters.# [#norm:nop_enc]#NOP is encoded as ADDI _x0, x0, 0_.#
+performance counters.# [#norm:nop_enc]#insn:nop[] is encoded as insn:addi[x0,x0,0].#
 
 [NOTE]
 ====
-NOPs can be used to align code segments to microarchitecturally
+insn:nop[]s can be used to align code segments to microarchitecturally
 significant address boundaries, or to leave space for inline code
-modifications. Although there are many possible ways to encode a NOP, we
-define a canonical NOP encoding to allow microarchitectural
+modifications. Although there are many possible ways to encode a insn:nop[], we
+define a canonical insn:nop[] encoding to allow microarchitectural
 optimizations as well as for more readable disassembly output. The other
-NOP encodings are made available for <<rv32i-hints>>.
+insn:nop[] encodings are made available for <<rv32i-hints>>.
 
-ADDI was chosen for the NOP encoding as this is most likely to take
+insn:addi[] was chosen for the insn:nop[] encoding as this is most likely to take
 fewest resources to execute across a range of systems (if not optimized
 away in decode). In particular, the instruction only reads one register.
-Also, an ADDI functional unit is more likely to be available in a
+Also, an insn:addi[] functional unit is more likely to be available in a
 superscalar design as adds are the most common operation. In particular,
-address-generation functional units can execute ADDI using the same
+address-generation functional units can execute insn:addi[] using the same
 hardware needed for base+offset address calculations, while
-register-register ADD or logical/shift operations require additional
+register-register insn:add[] or logical/shift operations require additional
 hardware.
 ====
 
 ==== Control Transfer Instructions
+
 RV32I provides two types of control transfer instructions: unconditional
 jumps and conditional branches.
 [#norm:no_cti_delay_slots]#Control transfer instructions in RV32I
@@ -394,11 +397,11 @@ occurs on the target of a jump or taken branch, the exception is
 reported on the target instruction, not on the jump or branch instruction.#
 
 ===== Unconditional Jumps
-The jump and link (JAL) instruction uses the J-type format, where the
+The jump and link (insn:jal[]) instruction uses the J-type format, where the
 J-immediate encodes a signed offset in multiples of 2 bytes.
 [#norm:jal_target]#The offset is sign-extended and added to the address of the jump instruction to
-form the jump target address.# Jumps can therefore target a {pm}1 MiB range.
-[#norm:jal_op]#JAL stores the address of the instruction
+form the jump target address.# Jumps can therefore target a {pm}1{nbsp}MiB range.
+[#norm:jal_op]#insn:jal[] stores the address of the instruction
 following the jump (`pc`+4) into register _rd_.#
 The standard software calling convention uses `x1` as the return address register and `x5` as
 an alternate link register.
@@ -413,14 +416,14 @@ calling convention, and has an encoding that is only one bit different
 than the regular link register.
 ====
 
-Plain unconditional jumps (assembler pseudoinstruction J) are encoded as
-a JAL with _rd_=`x0`.
+Plain unconditional jumps (assembler pseudoinstruction insn:j[]) are encoded as
+a insn:jal[] with _rd_=`x0`.
 
 include::images/wavedrom/ct-unconditional.edn[]
 [[ct-unconditional]]
 //.The unconditional-jump instruction, JAL
 
-The indirect jump instruction JALR (jump and link register) uses the I-type encoding.
+The indirect jump instruction insn:jalr[] (jump and link register) uses the I-type encoding.
 [#norm:jalr_target]#The target address is obtained by adding the
 sign-extended 12-bit I-immediate to the register _rs1_, then setting the
 least-significant bit of the result to zero.#
@@ -429,10 +432,10 @@ instruction following the jump (`pc`+4) is written to register _rd_.#
 Register `x0` can be used as the destination if the result is not
 required.
 
-Plain unconditional indirect jumps (assembler pseudoinstruction JR) are
-encoded as a JALR with _rd_=`x0`.
+Plain unconditional indirect jumps (assembler pseudoinstruction insn:jr[]) are
+encoded as a insn:jalr[] with _rd_=`x0`.
 Procedure returns in the standard calling convention (assembler
-pseudoinstruction RET) are encoded as a JALR with _rd_=`x0`, _rs1_=`x1`, and
+pseudoinstruction insn:ret[]) are encoded as a insn:jalr[] with _rd_=`x0`, _rs1_=`x1`, and
 _imm_=0.
 
 include::images/wavedrom/ct-unconditional-2.edn[]
@@ -441,37 +444,37 @@ include::images/wavedrom/ct-unconditional-2.edn[]
 
 [NOTE]
 ====
-The unconditional jump instructions all use PC-relative addressing to
-help support position-independent code. The JALR instruction was defined
+The unconditional jump instructions all use `pc`-relative addressing to
+help support position-independent code. The insn:jalr[] instruction was defined
 to enable a two-instruction sequence to jump anywhere in a 32-bit
-absolute address range. A LUI instruction can first load _rs1_ with the
-upper 20 bits of a target address, then JALR can add in the lower bits.
-Similarly, AUIPC then JALR can jump anywhere in a 32-bit `pc`-relative
+absolute address range. A insn:lui[] instruction can first load _rs1_ with the
+upper 20 bits of a target address, then insn:jalr[] can add in the lower bits.
+Similarly, insn:auipc[] then insn:jalr[] can jump anywhere in a 32-bit `pc`-relative
 address range.
 
-Note that the JALR instruction does not treat the 12-bit immediate as
+Note that the insn:jalr[] instruction does not treat the 12-bit immediate as
 multiples of 2 bytes, unlike the conditional branch instructions. This
 avoids one more immediate format in hardware. In practice, most uses of
-JALR will have either a zero immediate or be paired with a LUI or AUIPC,
+insn:jalr[] will have either a zero immediate or be paired with a insn:lui[] or insn:auipc[],
 so the slight reduction in range is not significant.
 
-Clearing the least-significant bit when calculating the JALR target
+Clearing the least-significant bit when calculating the insn:jalr[] target
 address both simplifies the hardware slightly and allows the low bit of
 function pointers to be used to store auxiliary information. Although
 there is potentially a slight loss of error checking in this case, in
 practice jumps to an incorrect instruction address will usually quickly
 raise an exception.
 
-When used with a base _rs1_=`x0`, JALR can be used to
-implement a single instruction subroutine call to the lowest 2 KiB or highest
-2 KiB address region from anywhere in the address space, which could be used
+When used with a base _rs1_=`x0`, insn:jalr[] can be used to
+implement a single instruction subroutine call to the lowest 2{nbsp}KiB or highest
+2{nbsp}KiB address region from anywhere in the address space, which could be used
 to implement fast calls to a small runtime library. Alternatively, an
 ABI could dedicate a general-purpose register to point to a library
 elsewhere in the address space.
 ====
 
 [[norm:jump_misaligned_exception]]
-The JAL and JALR instructions will generate an
+The insn:jal[] and insn:jalr[] instructions will generate an
 instruction-address-misaligned exception if the target address is not
 aligned to a four-byte boundary.
 
@@ -480,19 +483,19 @@ aligned to a four-byte boundary.
 [[norm:jump_misaligned_c_no_exception]]
 Instruction-address-misaligned exceptions are not possible on machines
 with IALIGN=16, e.g., those with the
-compressed instruction-set extension, C.
+compressed instruction-set extension, ext:c[].
 ====
 
 Return-address prediction stacks are a common feature of
 high-performance instruction-fetch units, but require accurate detection
 of instructions used for procedure calls and returns to be effective.
 For RISC-V, hints as to the instructions' usage are encoded implicitly
-via the register numbers used. A JAL instruction should push the return
+via the register numbers used. A insn:jal[] instruction should push the return
 address onto a return-address stack (RAS) only when _rd_ is `x1` or
-`x5`. JALR instructions should push/pop a RAS as shown in <<rashints>>.
+`x5`. insn:jalr[] instructions should push/pop a RAS as shown in <<rashints>>.
 
 [[rashints]]
-.Return-address stack prediction hints encoded in the register operands of a JALR instruction.
+.Return-address stack prediction hints encoded in the register operands of a insn:jalr[] instruction.
 [%autowidth,float="center",align="center",cols="^,^,^,<",options="header"]
 |===
 |_rd_ is _x1/x5_ |_rs1_ is _x1/x5_ |_rd_=_rs1_ |RAS action
@@ -520,33 +523,33 @@ When two different link registers (`x1` and `x5`) are given as _rs1_ and
 _rd_, then the RAS is both popped and pushed to support coroutines. If
 _rs1_ and _rd_ are the same link register (either `x1` or `x5`), the RAS
 is only pushed to enable macro-op fusion of the sequences:
-`lui ra, imm20; jalr ra, imm12(ra)_ and _auipc ra, imm20; jalr ra, imm12(ra)`
+insn:lui[ra,imm20]; insn:jalr[ra,imm12(ra)] and insn:auipc[ra,imm20]; insn:jalr[ra,imm12(ra)].
 ====
 
 ===== Conditional Branches
 
 All branch instructions use the B-type instruction format.
-[#norm:br_target]#The 12-bit B-immediate encodes signed offsets in multiples of 2 bytes. The offset
+[#norm:br_target]#The 12-bit B-immediate encodes signed offsets in multiples-of-two bytes. The offset
 is sign-extended and added to the address of the branch instruction to give the target address.#
-The conditional branch range is {pm}4 KiB.
+The conditional branch range is {pm}4{nbsp}KiB.
 
 include::images/wavedrom/ct-conditional.edn[]
 [[ct-conditional]]
 //.Conditional branches
 
 Branch instructions compare two registers.
-[#norm:beq_bne_op]#BEQ and BNE take the branch if registers _rs1_ and _rs2_ are equal or unequal respectively.#
-[#norm:blt_bltu_op]#BLT and BLTU take the branch if _rs1_ is less than _rs2_, using signed and
+[#norm:beq_bne_op]#insn:beq[] and insn:bne[] take the branch if registers _rs1_ and _rs2_ are equal or unequal respectively.#
+[#norm:blt_bltu_op]#insn:blt[] and insn:bltu[] take the branch if _rs1_ is less than _rs2_, using signed and
 unsigned comparison respectively.#
-[#norm:bge_bgeu_op]#BGE and BGEU take the branch if _rs1_ is greater than or equal to _rs2_,
+[#norm:bge_bgeu_op]#insn:bge[] and insn:bgeu[] take the branch if _rs1_ is greater than or equal to _rs2_,
 using signed and unsigned comparison respectively.#
-Note, BGT, BGTU, BLE, and BLEU can be synthesized by
-reversing the operands to BLT, BLTU, BGE, and BGEU, respectively.
+Note, insn:bgt[], insn:bgtu[], insn:ble[], and insn:bleu[] can be synthesized by
+reversing the operands to insn:blt[], insn:bltu[], insn:bge[], and insn:bgeu[], respectively.
 
 [NOTE]
 ====
-Signed array bounds may be checked with a single BLTU instruction, since
-any negative index will compare greater than any nonnegative bound.
+Signed array bounds may be checked with a single insn:bltu[] instruction, since
+any negative index will compare greater than any non-negative bound.
 ====
 
 Software should be optimized such that the sequential code path is the
@@ -556,10 +559,10 @@ predicted taken and forward branches as not taken, at least the first
 time they are encountered. Dynamic predictors should quickly learn any
 predictable branch behavior.
 
-Unlike some other architectures, the RISC-V jump (JAL with _rd_=`x0`)
+Unlike some other architectures, the RISC-V jump (insn:jal[] with _rd_=`x0`)
 instruction should always be used for unconditional branches instead of
 a conditional branch instruction with an always-true condition. RISC-V
-jumps are also PC-relative and support a much wider offset range than
+jumps are also `pc`-relative and support a much wider offset range than
 branches, and will not pollute conditional-branch prediction tables.
 
 [NOTE]
@@ -608,7 +611,7 @@ techniques improve.
 We note that various microarchitectural techniques exist to dynamically
 convert unpredictable short forward branches into internally predicated
 code to avoid the cost of flushing pipelines on a branch mispredict cite:[heil-tr1996], cite:[Klauser-1998], cite:[Kim-micro2005] and
-have been implemented in commercial processors  cite:[ibmpower7]. The simplest techniques
+have been implemented in commercial processors cite:[ibmpower7]. The simplest techniques
 just reduce the penalty of recovering from a mispredicted short forward
 branch by only flushing instructions in the branch shadow instead of the
 entire fetch pipeline, or by fetching instructions from both sides using
@@ -631,7 +634,7 @@ instruction-address-misaligned exception will not be raised.#
 [[norm:branch_misaligned_c_no_exception]]
 Instruction-address-misaligned exceptions are not possible on machines
 with IALIGN=16, e.g., those with the
-compressed instruction-set extension, C.
+compressed instruction-set extension, ext:c[].
 ====
 
 [[ldst]]
@@ -683,13 +686,13 @@ sign-extended 12-bit offset.#
 [#norm:load_op]#Loads copy a value from memory to register _rd_.#
 [#norm:store_op]#Stores copy the value in register _rs2_ to memory.#
 
-[#norm:lw_op]#The LW instruction loads a 32-bit value from memory into _rd_.#
-[#norm:lh_op]#LH loads a 16-bit value from memory, then sign-extends to 32-bits before storing
+[#norm:lw_op]#The insn:lw[] instruction loads a 32-bit value from memory into _rd_.#
+[#norm:lh_op]#insn:lh[] loads a 16-bit value from memory, then sign-extends to 32-bits before storing
 in _rd_.#
-[#norm:lhu_op]#LHU loads a 16-bit value from memory but then zero extends to
+[#norm:lhu_op]#insn:lhu[] loads a 16-bit value from memory but then zero extends to
 32-bits before storing in _rd_.#
-[#norm:lb_lbu_op]#LB and LBU are defined analogously for 8-bit values.#
-[#norm:sw_sh_sb_op]#The SW, SH, and SB instructions store 32-bit, 16-bit, and
+[#norm:lb_lbu_op]#insn:lb[] and insn:lbu[] are defined analogously for 8-bit values.#
+[#norm:sw_sh_sb_op]#The insn:sw[], insn:sh[], and insn:sb[] instructions store 32-bit, 16-bit, and
 8-bit values from the low bits of register _rs2_ to memory.#
 
 Regardless of EEI, [#norm:ldst_no_exc_aligned]#loads and stores whose effective addresses are
@@ -770,19 +773,19 @@ include::images/wavedrom/mem-order.edn[]
 //.Memory ordering instructions
 
 [[insn:fence]]
-FENCE instructions are used to order device I/O and memory accesses as
+insn:fence[] instructions are used to order device I/O and memory accesses as
 viewed by other RISC-V harts and external devices or coprocessors. Any
 combination of device input (I), device output (O), memory reads \(R),
 and memory writes (W) may be ordered with respect to any combination of
 the same. Informally, no other RISC-V hart or external device can
-observe any operation in the _successor_ set following a FENCE before
-any operation in the _predecessor_ set preceding the FENCE.
+observe any operation in the _successor_ set following a insn:fence[] before
+any operation in the _predecessor_ set preceding the insn:fence[].
 <<memorymodel>> provides a precise description
 of the RISC-V memory consistency model.
 
-FENCE instructions also order memory reads and writes made by the
+insn:fence[] instructions also order memory reads and writes made by the
 hart as observed by memory reads and writes made by an external device.
-However, FENCE instructions do not order observations of events made by an external
+However, insn:fence[] instructions do not order observations of events made by an external
 device using any other signaling mechanism.
 
 [NOTE]
@@ -790,8 +793,8 @@ device using any other signaling mechanism.
 A device might observe an access to a memory location via some external
 communication mechanism, e.g., a memory-mapped control register that
 drives an interrupt signal to an interrupt controller. This
-communication is outside the scope of the FENCE ordering mechanism and
-hence FENCE instructions can provide no guarantee on when a change in
+communication is outside the scope of the insn:fence[] ordering mechanism and
+hence insn:fence[] instructions can provide no guarantee on when a change in
 the interrupt signal is visible to the interrupt controller. Specific
 devices might provide additional ordering guarantees to reduce software
 overhead but those are outside the scope of the RISC-V memory model.
@@ -813,51 +816,50 @@ FENCE instruction.
 |===
 |_fm_ field |Mnemonic suffix|Meaning
 |0000 |_none_ |Normal Fence
-|1000 |.TSO |With `FENCE RW,RW`: exclude write-to-read ordering; otherwise: _Reserved for future use._
+|1000 |.TSO |With insn:fence[RW,RW]: exclude write-to-read ordering; otherwise: _Reserved for future use._
 |_other_|_other_ |_Reserved for future use._
 |===
 
-The FENCE mode field _fm_ defines the semantics of the FENCE instruction.
-[#norm:fence_op]#A `FENCE`
-(with _fm_=`0000`) orders all memory operations in its predecessor set
+The insn:fence[] mode field _fm_ defines the semantics of the insn:fence[] instruction.
+[#norm:fence_op]#A insn:fence[] (with _fm_=`0000`) orders all memory operations in its predecessor set
 before all memory operations in its successor set.#
 
-A `FENCE.TSO` instruction is encoded as a FENCE instruction
+A insn:fence.tso[] instruction is encoded as a insn:fence[] instruction
 with _fm_=`1000`, _predecessor_=`RW`, and _successor_=`RW`.
-[#norm:fence-tso_op]#`FENCE.TSO` orders
+[#norm:fence-tso_op]#insn:fence.tso[] orders
 all load operations in its predecessor set before all memory operations
 in its successor set, and all store operations in its predecessor set
-before all store operations in its successor set. This leaves `non-AMO`
-store operations in the `FENCE.TSO's` predecessor set unordered with
-`non-AMO` loads in its successor set.#
+before all store operations in its successor set. This leaves _non-AMO_
+store operations in the _insn:fence.tso[]'s_ predecessor set unordered with
+_non-AMO_ loads in its successor set.#
 
 [NOTE]
 ====
 [[norm:fence-tso_ordering_rw_rw_ok]]
-Because `FENCE RW,RW` imposes a superset of the orderings that `FENCE.TSO`
-imposes, it is correct to ignore the _fm_ field and implement `FENCE.TSO` as
-`FENCE RW,RW`.
+Because insn:fence[RW,RW] imposes a superset of the orderings that
+insn:fence.tso[] imposes, it is correct to ignore the _fm_ field and implement insn:fence.tso[] as
+insn:fence[RW,RW].
 ====
 
 [NOTE]
 ====
-The FENCE.TSO instruction was incorrectly described as optional in 2019.
-However, FENCE.TSO is encoded within the standard FENCE encoding such that
+The insn:fence.tso[] instruction was incorrectly described as optional in 2019.
+However, insn:fence.tso[] is encoded within the standard insn:fence[] encoding such that
 implementations must treat it as a simple global fence if they do not support
 TSO optimizations, as specified in the previous note.
-As software can always assume without any penalty that FENCE.TSO is being
+As software can always assume without any penalty that insn:fence.tso[] is being
 exploited by a hardware implementation, there is no advantage to making the
 instruction an option.
 ====
 
-[#norm:fence_unused_flds_rsv]#The unused fields in the FENCE
-instructions, _rs1_ and _rd_, are reserved
+[#norm:fence_unused_flds_rsv]#The unused fields in the
+insn:fence[] instructions, _rs1_ and _rd_, are reserved
 for finer-grain fences in future extensions. For forward compatibility,
 base implementations shall ignore these fields#, and standard software
 shall zero these fields. Likewise, many _fm_ and predecessor/successor
 set settings are also reserved for future use.
 Base implementations shall treat all such reserved configurations as
-`FENCE` instructions (with _fm_=`0000`), and standard software shall use only
+insn:fence[] instructions (with _fm_=`0000`), and standard software shall use only
 non-reserved configurations.
 
 [NOTE]
@@ -870,12 +872,12 @@ ordering to avoid unnecessary serialization within a device-driver hart
 and also to support alternative non-memory paths to control added
 coprocessors or I/O devices. Simple implementations may additionally
 ignore the _predecessor_ and _successor_ fields and always execute a
-conservative FENCE on all operations.
+conservative insn:fence[] on all operations.
 ====
 
 [[ecall-ebreak]]
 ==== Environment Call and Breakpoints
-`SYSTEM` instructions are used to access system functionality that might
+insn:system[] instructions are used to access system functionality that might
 require privileged access and are encoded using the I-type instruction
 format. These can be divided into two main classes: those that
 atomically read-modify-write control and status registers (CSRs), and
@@ -886,7 +888,7 @@ unprivileged instructions are described in the following section.
 
 [NOTE]
 ====
-The SYSTEM instructions are defined to allow simpler implementations to
+The insn:system[] instructions are defined to allow simpler implementations to
 always trap to a single software trap handler. More sophisticated
 implementations might execute more of each system instruction in
 hardware.
@@ -899,16 +901,16 @@ include::images/wavedrom/env-call-breakpoint.edn[]
 These two instructions cause a precise requested trap to the supporting
 execution environment.
 
-[#norm:ecall_op1]#The `ECALL` instruction is used to make a service request to the execution environment.#
-The `EEI` will define how parameters for the service request
+[#norm:ecall_op1]#The insn:ecall[] instruction is used to make a service request to the execution environment.#
+The EEI will define how parameters for the service request
 are passed, but usually these will be in defined locations in the
 integer register file.
 
-[#norm:ebreak_op1]#The `EBREAK` instruction is used to return control to a debugging environment.#
+[#norm:ebreak_op1]#The insn:ebreak[] instruction is used to return control to a debugging environment.#
 
 [NOTE]
 ====
-ECALL and EBREAK were previously named SCALL and SBREAK. The
+insn:ecall[] and insn:ebreak[] were previously named SCALL and SBREAK. The
 instructions have the same functionality and encoding, but were renamed
 to reflect that they can be used more generally than to call a
 supervisor-level operating system or debugger.
@@ -916,17 +918,17 @@ supervisor-level operating system or debugger.
 
 [NOTE]
 ====
-EBREAK was primarily designed to be used by a debugger to cause
-execution to stop and fall back into the debugger. EBREAK is also used
+insn:ebreak[] was primarily designed to be used by a debugger to cause
+execution to stop and fall back into the debugger. insn:ebreak[] is also used
 by the standard GCC compiler to mark code paths that should not be
 executed.
 
-Another use of EBREAK is to support "`semihosting`", where the execution
+Another use of insn:ebreak[] is to support "`semihosting`", where the execution
 environment includes a debugger that can provide services over an
-alternate system call interface built around the EBREAK instruction.
-Because the RISC-V base ISAs do not provide more than one EBREAK
+alternate system call interface built around the insn:ebreak[] instruction.
+Because the RISC-V base ISAs do not provide more than one insn:ebreak[]
 instruction, RISC-V semihosting uses a special sequence of instructions
-to distinguish a semihosting EBREAK from a debugger inserted EBREAK.
+to distinguish a semihosting insn:ebreak[] from a debugger inserted insn:ebreak[].
 
 [source,asm]
 ....
@@ -939,13 +941,13 @@ Note that these three instructions must be 32-bit-wide instructions,
 i.e., they mustn't be among the compressed 16-bit instructions
 in the extlink:zca[] extension.
 
-The shift NOP instructions are still considered available for use as
+The shift insn:nop[] instructions are still considered available for use as
 HINTs.
 
 Semihosting is a form of service call and would be more naturally
-encoded as an ECALL using an existing ABI, but this would require the
-debugger to be able to intercept ECALLs, which is a newer addition to
-the debug standard. We intend to move over to using ECALLs with a
+encoded as an insn:ecall[] using an existing ABI, but this would require the
+debugger to be able to intercept insn:ecall[]s, which is a newer addition to
+the debug standard. We intend to move over to using insn:ecall[]s with a
 standard ABI, in which case, semihosting can share a service ABI with an
 existing standard.
 
@@ -960,13 +962,13 @@ for semihosting calls in newer designs.
 
 RV32I reserves a large encoding space for HINT instructions, which are
 usually used to communicate performance hints to the microarchitecture.
-Like the NOP instruction, [#norm:hints_op]#HINTs do not change any architecturally
+Like the insn:nop[] instruction, [#norm:hints_op]#HINTs do not change any architecturally
 visible state, except for advancing the `pc` and any applicable
 performance counters. Implementations are always allowed to ignore the
 encoded hints.#
 
 [#norm:hints_enc]#Most RV32I HINTs are encoded as integer computational instructions with
-_rd_=`x0`. The other RV32I HINTs are encoded as FENCE instructions with
+_rd_=`x0`. The other RV32I HINTs are encoded as insn:fence[] instructions with
 a null predecessor or successor set and with _fm_=0.#
 
 [NOTE]
@@ -974,15 +976,15 @@ a null predecessor or successor set and with _fm_=0.#
 These HINT encodings have been chosen so that simple implementations can
 ignore HINTs altogether, and instead execute a HINT as a regular
 instruction that happens not to mutate the architectural state. For
-example, ADD is a HINT if the destination register is `x0`; the five-bit
+example, insn:add[] is a HINT if the destination register is `x0`; the five-bit
 _rs1_ and _rs2_ fields encode arguments to the HINT. However, a simple
-implementation can simply execute the HINT as an ADD of _rs1_ and _rs2_
+implementation can simply execute the HINT as an insn:add[] of _rs1_ and _rs2_
 that writes `x0`, which has no architecturally visible effect.
 
-As another example, a FENCE instruction with a zero _pred_ field and a
+As another example, a insn:fence[] instruction with a zero _pred_ field and a
 zero _fm_ field is a HINT; the _succ_, _rs1_, and _rd_ fields encode the
 arguments to the HINT. A simple implementation can simply execute the
-HINT as a FENCE that orders the null set of prior memory accesses before
+HINT as a insn:fence[] that orders the null set of prior memory accesses before
 whichever subsequent memory accesses are encoded in the _succ_ field.
 Since the intersection of the predecessor and successor sets is null,
 the instruction imposes no memory orderings, and so it has no
@@ -1009,73 +1011,73 @@ hints, security tags, and instrumentation flags for simulation/emulation.
 |===
 |Instruction |Constraints |Code Points |Purpose
 
-|LUI |_rd_=`x0` |2^20^ .8+<.^m|_Designated for future standard use_
+|insn:lui[] |_rd_=`x0` |2^20^ .8+<.^m|_Designated for future standard use_
 
-|AUIPC |_rd_=`x0` |2^20^
+|insn:auipc[] |_rd_=`x0` |2^20^
 
-|ADDI |_rd_=`x0`, and either _rs1_{ne}``x0`` or _imm_{ne}0 |2^17^−1
+|insn:addi[] |_rd_=`x0`, and either _rs1_{ne}``x0`` or _imm_{ne}0 |2^17^−1
 
-|ANDI |_rd_=`x0` |2^17^
+|insn:andi[] |_rd_=`x0` |2^17^
 
-|ORI |_rd_=`x0` |2^17^
+|insn:ori[] |_rd_=`x0` |2^17^
 
-|XORI |_rd_=`x0` |2^17^
+|insn:xori[] |_rd_=`x0` |2^17^
 
-|ADD |_rd_=`x0`, _rs1_{ne}``x0`` |2^10^−32
+|insn:add[] |_rd_=`x0`, _rs1_{ne}``x0`` |2^10^−32
 
-|ADD |_rd_=`x0`, _rs1_=`x0`, _rs2_{ne}``x2-x5`` | 28
+|insn:add[] |_rd_=`x0`, _rs1_=`x0`, _rs2_{ne}``x2``{endash}``x5`` | 28
 
-|ADD |_rd_=`x0`, _rs1_=`x0`, _rs2_=`x2-x5` |4|(_rs2_=`x2`) NTL.P1 +
+|insn:add[] |_rd_=`x0`, _rs1_=`x0`, _rs2_=`x2`{endash}``x5`` |4|(_rs2_=`x2`) NTL.P1 +
 (_rs2_=`x3`) NTL.PALL +
 (_rs2_=`x4`) NTL.S1 +
 (_rs2_=`x5`) NTL.ALL
 
-|SLLI |_rd_=`x0`, _rs1_=`x0`, _shamt_=31 |1|Semihosting entry marker
+|insn:slli[] |_rd_=`x0`, _rs1_=`x0`, _shamt_=31 |1|Semihosting entry marker
 
-|SRAI |_rd_=`x0`, _rs1_=`x0`, _shamt_=7 |1|Semihosting exit marker
+|insn:srai[] |_rd_=`x0`, _rs1_=`x0`, _shamt_=7 |1|Semihosting exit marker
 
-|SUB |_rd_=`x0` |2^10^ .11+<.^m|_Designated for future standard use_
+|insn:sub[] |_rd_=`x0` |2^10^ .11+<.^m|_Designated for future standard use_
 
-|AND |_rd_=`x0` |2^10^
+|insn:and[] |_rd_=`x0` |2^10^
 
-|OR |_rd_=`x0` |2^10^
+|insn:or[] |_rd_=`x0` |2^10^
 
-|XOR |_rd_=`x0` |2^10^
+|insn:xor[] |_rd_=`x0` |2^10^
 
-|SLL |_rd_=`x0` |2^10^
+|insn:sll[] |_rd_=`x0` |2^10^
 
-|SRL |_rd_=`x0` |2^10^
+|insn:srl[] |_rd_=`x0` |2^10^
 
-|SRA |_rd_=`x0` |2^10^
+|insn:sra[] |_rd_=`x0` |2^10^
 
-|FENCE |_rd_=`x0`, _rs1_{ne}``x0``, _fm_=0, and either _pred_=0 or _succ_=0| 2^10^−63
+|insn:fence[] |_rd_=`x0`, _rs1_{ne}``x0``, _fm_=0, and either _pred_=0 or _succ_=0| 2^10^−63
 
-|FENCE |_rd_{ne}``x0``, _rs1_=`x0`, _fm_=0, and either _pred_=0 or _succ_=0| 2^10^−63
+|insn:fence[] |_rd_{ne}``x0``, _rs1_=`x0`, _fm_=0, and either _pred_=0 or _succ_=0| 2^10^−63
 
-|FENCE |_rd_=_rs1_=`x0`, _fm_=0, _pred_=0, _succ_{ne}0 |15
+|insn:fence[] |_rd_=_rs1_=`x0`, _fm_=0, _pred_=0, _succ_{ne}0 |15
 
-|FENCE |_rd_=_rs1_=`x0`, _fm_=0, _pred_{ne}W, _succ_=0 |15
+|insn:fence[] |_rd_=_rs1_=`x0`, _fm_=0, _pred_{ne}W, _succ_=0 |15
 
-|FENCE |_rd_=_rs1_=`x0`, _fm_=0, _pred_=W, _succ_=0 |1 |PAUSE
+|insn:fence[] |_rd_=_rs1_=`x0`, _fm_=0, _pred_=W, _succ_=0 |1 |PAUSE
 
 4+|
 
-|SLTI |_rd_=`x0` |2^17^ .7+<.^m|_Designated for custom use_
+|insn:slti[] |_rd_=`x0` |2^17^ .7+<.^m|_Designated for custom use_
 
-|SLTIU |_rd_=`x0` |2^17^
+|insn:sltiu[] |_rd_=`x0` |2^17^
 
-|SLLI |_rd_=`x0`, and either _rs1_{ne}``x0`` or _shamt_{ne}31 |2^10^−1
+|insn:slli[] |_rd_=`x0`, and either _rs1_{ne}``x0`` or _shamt_{ne}31 |2^10^−1
 
-|SRLI |_rd_=`x0` |2^10^
+|insn:srli[] |_rd_=`x0` |2^10^
 
-|SRAI |_rd_=`x0`, and either _rs1_{ne}``x0`` or _shamt_{ne}7 |2^10^−1
+|insn:srai[] |_rd_=`x0`, and either _rs1_{ne}``x0`` or _shamt_{ne}7 |2^10^−1
 
-|SLT |_rd_=`x0` |2^10^
+|insn:slt[] |_rd_=`x0` |2^10^
 
-|SLTU |_rd_=`x0` |2^10^
+|insn:sltu[] |_rd_=`x0` |2^10^
 |===
 
-NOTE: `slli x0, x0, 0x1f` and `srai x0, x0, 7` were previously designated as
+NOTE: insn:slli[x0,x0,0x1f] and insn:srai[x0,x0,7] were previously designated as
 custom HINTs, but they have been appropriated for use in semihosting calls, as
 described in <<ecall-ebreak>>.
 To reflect their usage in practice, the base ISA spec has been changed to
