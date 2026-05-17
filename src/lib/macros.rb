@@ -19,6 +19,8 @@ require 'asciidoctor/extensions'
 #
 # csrlink:foo[]           <<csr:foo, `foo`>>
 # csrlink:foo[bar]        <<csr:foo_bar, `foo.BAR`>>
+#
+# qty:16[KiB]             16{nbsp}KiB
 
 module RVFormat
   def self.instruction(name, args)
@@ -36,7 +38,7 @@ module RVFormat
   end
 
   def self.process(processor, parent, name)
-    processor.create_inline parent, :quoted, parent.apply_subs(name, [:quotes])
+    processor.create_inline parent, :quoted, parent.apply_subs(name, [:attributes, :quotes])
   end
 
   def self.process_xref(processor, parent, name, ref)
@@ -105,6 +107,18 @@ Asciidoctor::Extensions.register do
       ref = "csr:#{name}#{field.empty? ? "" : "_#{field}"}".downcase
 
       RVFormat.process_xref(self, parent, RVFormat.csr(name, field), ref)
+    end
+  end
+
+  inline_macro :qty do
+    process do |parent, value, args|
+      if args.empty?
+        parent.document.logger.fatal "macro qty:#{value}[] takes exactly one argument"
+      end
+
+      str = "#{value}{nbsp}#{args.fetch(1)}"
+
+      RVFormat.process(self, parent, str)
     end
   end
 end
