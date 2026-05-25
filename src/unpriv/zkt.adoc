@@ -1,0 +1,362 @@
+[[ext:zkt]]
+=== ext:zkt[] Extension for Data-Independent Execution Latency
+
+The ext:zkt[] extension attests that the machine has data-independent execution
+time for a safe subset of instructions. This property is commonly called
+_"`constant-time`"_ although should not be taken with that literal meaning.
+
+All currently defined cryptographic instructions (ext:zk*[] and ext:zbk*[] extensions) are on
+this list, together with a set of relevant supporting instructions from
+ext:i[], ext:m[], ext:c[], and ext:b[] extensions.
+
+
+.Note to software developers
+[NOTE,caption="SH"]
+====
+Failure to prevent leakage of sensitive parameters via the direct
+timing channel is considered a serious security vulnerability and will
+typically result in a CERT CVE security advisory.
+====
+
+==== Scope and Goal
+
+An "`ISA contract`" is made between a programmer and the RISC-V implementation
+that ext:zkt[] instructions do not leak information about processed secret data
+(plaintext, keying information, or other "`sensitive security parameters`" --
+FIPS 140-3 term) through differences in execution latency. ext:zkt[] does _not_
+define a set of instructions available in the core; it just restricts the
+behaviour of certain instructions if those are implemented.
+
+Currently, the scope of this chapter is within scalar RV32/RV64 processors.
+Vector cryptography instructions (and appropriate vector support instructions)
+will be added later, as will other security-related functions that wish
+to assert leakage-free execution latency properties.
+
+Loads, stores, conditional branches are excluded, along with a set of
+instructions that are rarely necessary to process secret data. Also excluded
+are instructions for which workarounds exist in standard cryptographic
+middleware due to the limitations of other ISA processors.
+
+The stated goal is that OpenSSL, BoringSSL (Android), the Linux Kernel,
+and similar trusted software will not have directly observable
+timing side channels when compiled and running on a ext:zkt[]-enabled RISC-V target.
+The ext:zkt[] extension explicitly states many of the common latency assumptions
+made by cryptography developers.
+
+[#norm:zkt_optional_instr]#Vendors do not have to implement all of the list's instructions to be
+ext:zkt[] compliant;# however, [#norm:zkt_impl_must_constant_latency]#if they claim to have ext:zkt[] and implement any of the listed instructions, it must have data-independent latency.#
+
+For example, many simple RV32I and RV64I cores (without Multiply, Compressed,
+Bitmanip, or Cryptographic extensions) are technically compliant with ext:zkt[].
+A constant-time AES can be implemented on them using "`bit-slice`" techniques,
+but it will be excruciatingly slow when compared to implementation with AES
+instructions. There are no guarantees that even a bit-sliced cipher
+implementation (largely based on boolean logic instructions) is secure on a
+core without ext:zkt[] attestation.
+
+Out-of-order implementations adhering to ext:zkt[] are still free to fuse, crack,
+change or even ignore sequences of instructions, so long as the optimisations
+are applied deterministically, and not based on operand data.
+The guiding principle should be that no information about the data being
+operated on should be leaked based on the execution latency.
+
+[NOTE]
+====
+It is left to future extensions or other techniques to tackle the problem
+of data-independent execution in implementations which advanced out-of-order
+capabilities which use value prediction, or which are otherwise data-dependent.
+====
+
+.Note to software developers
+[WARNING,caption="SH"]
+====
+Programming techniques can only mitigate leakage directly caused by
+arithmetic, caches, and branches. Other ISAs have had micro-architectural
+issues such as Spectre, Meltdown, Speculative Store Bypass, Rogue System
+Register Read, Lazy FP State Restore, Bounds Check Bypass Store, TLBleed,
+and L1TF/Foreshadow, etc. See e.g.
+link:https://github.com/nsacyber/Hardware-and-Firmware-Security-Guidance[NSA Hardware and Firmware Security Guidance]
+
+It is not within the remit of this proposal to mitigate these
+_micro-architectural_ leakages.
+====
+
+==== Background
+
+* Timing attacks are much more powerful than was realised before the 2010s,
+which has led to a significant mitigation effort in current cryptographic
+code-bases.
+* Cryptography developers use static and dynamic security testing tools
+to trace the handling of secret information and detect occasions where it
+influences a branch or is used for a table lookup.
+* Architectural testing for ext:zkt[] can be pragmatic and semi-formal;
+_security by design_ against basic timing attacks can usually be achieved via
+conscious implementation (of relevant iterative multi-cycle instructions or
+instructions composed of micro-ops) in way that avoids data-dependent latency.
+* Laboratory testing may utilize statistical timing attack leakage analysis
+techniques such as those described in ISO/IEC 17825 cite:[IS16].
+* Binary executables should not contain secrets in the instruction encodings
+(Kerckhoffs's principle), so instruction timing may leak information about
+immediates, ordering of input registers, etc. There may be an exception to this
+in systems where a binary loader modifies the executable for purposes of
+relocation -- and it is desirable to keep the execution location (`pc`) secret.
+This is why instructions such as insn:lui[], insn:auipc[], and insn:addi[] are on the list.
+* The rules used by audit tools are relatively simple to understand.
+Very briefly; we call the plaintext, secret keys, expanded keys, nonces,
+and other such variables "`secrets`". A secret variable (arithmetically)
+modifying any other variable/register turns that into a secret too.
+If a secret ends up in address calculation affecting a load or store, that
+is a violation. If a secret affects a branch's condition, that is also a
+violation. A secret variable location or register becomes a non-secret via
+specific zeroization/sanitisation or by being declared ciphertext
+(or otherwise no-longer-secret information). In essence, secrets can only
+"`touch`" instructions on the ext:zkt[] list while they are secrets.
+
+==== Specific Instruction Rationale
+
+* HINT instruction forms (typically encodings with _rd_=`x0`) are excluded from
+the data-independent time requirement.
+* Floating point (ext:f[], ext:d[], and ext:q[] extensions) are currently excluded from the
+constant-time requirement as they have very few applications in standardised
+cryptography. We may consider adding floating point add, sub, multiply as a
+constant time requirement for some floating point extension in case a specific
+algorithm (such as the PQC Signature algorithm Falcon) becomes critical.
+*  Cryptographers typically assume division to be variable-time (while
+multiplication is constant time) and implement their Montgomery reduction
+routines with that assumption.
+* ext:zicsr[], ext:zifencei[] are excluded.
+* Some instructions are on the list simply because we see no harm in
+including them in testing scope.
+
+
+==== Programming Information
+
+For background information on secure programming "`models`", see:
+
+* Thomas Pornin: _"`Why Constant-Time Crypto?`"_ (A great introduction to timing assumptions.) https://www.bearssl.org/constanttime.html
+* Jean-Philippe Aumasson: _"`Guidelines for low-level cryptography software.`"_
+(A list of recommendations.) https://github.com/veorq/cryptocoding
+* Peter Schwabe: _"`Timing Attacks and Countermeasures.`"_
+(Lecture slides -- nice references.)
+https://summerschool-croatia.cs.ru.nl/2016/slides/PeterSchwabe.pdf
+* Adam Langley: _"`ctgrind.`"_ (This is from 2010 but is still relevant.)
+https://www.imperialviolet.org/2010/04/01/ctgrind.html
+* Kris Kwiatkowski: _"`Constant-time code verification with Memory Sanitizer.`"_
+https://www.amongbytes.com/post/20210709-testing-constant-time/
+* For early examples of timing attack vulnerabilities, see
+https://www.kb.cert.org/vuls/id/997481 and related academic papers.
+
+
+==== Zkt listings
+
+The following instructions are included in the ext:zkt[] subset
+They are listed here grouped by their original parent extension.
+
+.Note to implementers
+[NOTE, caption="SH"]
+====
+You do not need to implement all of these instructions to implement ext:zkt[].
+Rather, every one of these instructions that the core does implement must
+adhere to the requirements of ext:zkt[].
+====
+
+===== RVI (Base Instruction Set)
+
+Only basic arithmetic and insn:slt*[] (for carry computations) are included.
+The data-independent timing requirement does not apply to HINT instruction
+encoding forms of these instructions.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | insn:lui[rd,imm]
+| {check} | {check} | insn:auipc[rd,imm]
+| {check} | {check} | insn:addi[rd,rs1,imm]
+| {check} | {check} | insn:slti[rd,rs1,imm]
+| {check} | {check} | insn:sltiu[rd,rs1,imm]
+| {check} | {check} | insn:xori[rd,rs1,imm]
+| {check} | {check} | insn:ori[rd,rs1,imm]
+| {check} | {check} | insn:andi[rd,rs1,imm]
+| {check} | {check} | insn:slli[rd,rs1,imm]
+| {check} | {check} | insn:srli[rd,rs1,imm]
+| {check} | {check} | insn:srai[rd,rs1,imm]
+| {check} | {check} | insn:add[rd,rs1,rs2]
+| {check} | {check} | insn:sub[rd,rs1,rs2]
+| {check} | {check} | insn:sll[rd,rs1,rs2]
+| {check} | {check} | insn:slt[rd,rs1,rs2]
+| {check} | {check} | insn:sltu[rd,rs1,rs2]
+| {check} | {check} | insn:xor[rd,rs1,rs2]
+| {check} | {check} | insn:srl[rd,rs1,rs2]
+| {check} | {check} | insn:sra[rd,rs1,rs2]
+| {check} | {check} | insn:or[rd,rs1,rs2]
+| {check} | {check} | insn:and[rd,rs1,rs2]
+|         | {check} | insn:addiw[rd,rs1,imm]
+|         | {check} | insn:slliw[rd,rs1,imm]
+|         | {check} | insn:srliw[rd,rs1,imm]
+|         | {check} | insn:sraiw[rd,rs1,imm]
+|         | {check} | insn:addw[rd,rs1,rs2]
+|         | {check} | insn:subw[rd,rs1,rs2]
+|         | {check} | insn:sllw[rd,rs1,rs2]
+|         | {check} | insn:srlw[rd,rs1,rs2]
+|         | {check} | insn:sraw[rd,rs1,rs2]
+|===
+
+===== ext:zicond[] (Conditional Zero)
+
+All instructions are included.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | insn:czero.eqz[rd,rs1,rs2]
+| {check} | {check} | insn:czero.nez[rd,rs1,rs2]
+|===
+
+===== RVM (Multiply)
+
+Multiplication is included; division and remaindering excluded.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | insn:mul[rd,rs1,rs2]
+| {check} | {check} | insn:mulh[rd,rs1,rs2]
+| {check} | {check} | insn:mulhsu[rd,rs1,rs2]
+| {check} | {check} | insn:mulhu[rd,rs1,rs2]
+|         | {check} | insn:mulw[rd,rs1,rs2]
+|===
+
+===== ext:zca[] (Compressed)
+
+Same criteria as in RVI. Organised by quadrants.
+
+[%header,cols="^1,^1,4"]
+|===
+|RV32
+|RV64
+|Mnemonic
+
+| {check} | {check} | insn:c.nop[]
+| {check} | {check} | insn:c.addi[]
+|         | {check} | insn:c.addiw[]
+| {check} | {check} | insn:c.lui[]
+| {check} | {check} | insn:c.srli[]
+| {check} | {check} | insn:c.srai[]
+| {check} | {check} | insn:c.andi[]
+| {check} | {check} | insn:c.sub[]
+| {check} | {check} | insn:c.xor[]
+| {check} | {check} | insn:c.or[]
+| {check} | {check} | insn:c.and[]
+|         | {check} | insn:c.subw[]
+|         | {check} | insn:c.addw[]
+| {check} | {check} | insn:c.slli[]
+| {check} | {check} | insn:c.mv[]
+| {check} | {check} | insn:c.add[]
+|===
+
+===== ext:zcb[] Extension
+
+These instructions are compressed versions of ext:i[] and ext:m[] instructions that are
+included in ext:zkt[].
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| {check} | {check} | c.mul       | <<insns-c_mul>>
+| {check} | {check} | c.not       | <<insns-c_not>>
+| {check} | {check} | c.zext.b    | <<insns-c_zext_b>>
+|===
+
+===== RVK (Scalar Cryptography)
+
+All K-specific instructions are included.
+Additionally, csr:seed[] CSR latency should be independent of `ES16` state output
+csr::[entropy] bits, as that is a sensitive security parameter.
+See <<crypto_scalar_appx_es_access>>.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| {check} |         | insn:aes32dsi[]     | <<insns-aes32dsi>>
+| {check} |         | insn:aes32dsmi[]    | <<insns-aes32dsmi>>
+| {check} |         | insn:aes32esi[]     | <<insns-aes32esi>>
+| {check} |         | insn:aes32esmi[]    | <<insns-aes32esmi>>
+|         | {check} | insn:aes64ds[]      | <<insns-aes64ds>>
+|         | {check} | insn:aes64dsm[]     | <<insns-aes64dsm>>
+|         | {check} | insn:aes64es[]      | <<insns-aes64es>>
+|         | {check} | insn:aes64esm[]     | <<insns-aes64esm>>
+|         | {check} | insn:aes64im[]      | <<insns-aes64im>>
+|         | {check} | insn:aes64ks1i[]    | <<insns-aes64ks1i>>
+|         | {check} | insn:aes64ks2[]     | <<insns-aes64ks2>>
+| {check} | {check} | insn:sha256sig0[]   | <<insns-sha256sig0>>
+| {check} | {check} | insn:sha256sig1[]   | <<insns-sha256sig1>>
+| {check} | {check} | insn:sha256sum0[]   | <<insns-sha256sum0>>
+| {check} | {check} | insn:sha256sum1[]   | <<insns-sha256sum1>>
+| {check} |         | insn:sha512sig0h[]  | <<insns-sha512sig0h>>
+| {check} |         | insn:sha512sig0l[]  | <<insns-sha512sig0l>>
+| {check} |         | insn:sha512sig1h[]  | <<insns-sha512sig1h>>
+| {check} |         | insn:sha512sig1l[]  | <<insns-sha512sig1l>>
+| {check} |         | insn:sha512sum0r[]  | <<insns-sha512sum0r>>
+| {check} |         | insn:sha512sum1r[]  | <<insns-sha512sum1r>>
+|         | {check} | insn:sha512sig0[]   | <<insns-sha512sig0>>
+|         | {check} | insn:sha512sig1[]   | <<insns-sha512sig1>>
+|         | {check} | insn:sha512sum0[]   | <<insns-sha512sum0>>
+|         | {check} | insn:sha512sum1[]   | <<insns-sha512sum1>>
+| {check} | {check} | insn:sm3p0[]        | <<insns-sm3p0>>
+| {check} | {check} | insn:sm3p1[]        | <<insns-sm3p1>>
+| {check} | {check} | insn:sm4ed[]        | <<insns-sm4ed>>
+| {check} | {check} | insn:sm4ks[]        | <<insns-sm4ks>>
+|===
+
+
+===== RVB (Bitmanip)
+
+The extlink:zbkb[], extlink:zbkc[] and extlink:zbkx[] extensions are included in their entirety.
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+| {check} | {check} |  insn:clmul[]       | <<insns-clmul-sc>>
+| {check} | {check} |  insn:clmulh[]      | <<insns-clmulh-sc>>
+| {check} | {check} |  insn:xperm4[]      | <<insns-xperm4-sc>>
+| {check} | {check} |  insn:xperm8[]      | <<insns-xperm8-sc>>
+| {check} | {check} |  insn:ror[]         | <<insns-ror-sc>>
+| {check} | {check} |  insn:rol[]         | <<insns-rol-sc>>
+| {check} | {check} |  insn:rori[]        | <<insns-rori-sc>>
+|         | {check} |  insn:rorw[]        | <<insns-rorw-sc>>
+|         | {check} |  insn:rolw[]        | <<insns-rolw-sc>>
+|         | {check} |  insn:roriw[]       | <<insns-roriw-sc>>
+| {check} | {check} |  insn:andn[]        | <<insns-andn-sc>>
+| {check} | {check} |  insn:orn[]         | <<insns-orn-sc>>
+| {check} | {check} |  insn:xnor[]        | <<insns-xnor-sc>>
+| {check} | {check} |  insn:pack[]        | <<insns-pack-sc>>
+| {check} | {check} |  insn:packh[]       | <<insns-packh-sc>>
+|         | {check} |  insn:packw[]       | <<insns-packw-sc>>
+| {check} | {check} |  insn:brev8[]       | <<insns-brev8-sc>>
+| {check} | {check} |  insn:rev8[]        | <<insns-rev8-sc>>
+| {check} |         |  insn:zip[]         | <<insns-zip-sc>>
+| {check} |         |  insn:unzip[]       | <<insns-unzip-sc>>
+|===
+
+//
