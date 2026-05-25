@@ -1,0 +1,196 @@
+[[ext:zvbc]]
+=== ext:zvbc[] Vector Extension for Carry-less Multiplication
+
+This extension provides carry-less multiplication instructions on vector
+registers.
+[#norm:Zvbc_dependent_Zve64x]#ext:zvbc[] depends upon the ext:zve64x[] extension.#
+
+[#norm:Zvbc_sew64only]#The instructions in ext:zvbc[] are only defined for SEW=64.#
+
+[[insns-vclmul, Vector Carry-less Multiply]]
+==== insn:vclmul.vv[] and insn:vclmul.vx[]
+
+Synopsis::
+Vector Carry-less Multiply by vector or scalar - returning low half of product.
+
+Mnemonic::
+insn:vclmul.vv[vd,vs2,vs1,vm] +
+insn:vclmul.vx[vd,vs2,rs1,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001100'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001100'},
+]}
+....
+Reserved Encodings::
+* [#norm:vclmul_sewn64_rsv]#SEW is any value other than 64#
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_/_rs1_ | input  |  multiplier
+| _vs2_       | input  |  multiplicand
+| _vd_        | output | carry-less product low
+|===
+
+Description::
+Produces the low half of 128-bit carry-less product.
+
+[#norm:vclmul_op]#Each 64-bit element in the _vs2_ vector register is carry-less multiplied by
+either each 64-bit element in _vs1_ (vector-vector), or the 64-bit value
+from integer register _rs1_ (vector-scalar). The result is the least
+significant 64 bits of the carry-less product.#
+
+[NOTE]
+====
+The 64-bit carry-less multiply instructions can be used for implementing GCM in the absence of the ext:zvkg[] extension.
+We do not make these instructions exclusive as the 64-bit carry-less multiply is readily derived from the
+instructions in the ext:zvkg[] extension and can have utility in other areas.
+Likewise, we treat other SEW values as reserved so as not to preclude
+future extensions from using this opcode with different element widths.
+For example, a future extension might define an SEW=32 version of this instruction to enable ext:zve32*[] implementations to have
+vector carry-less multiplication instructions.
+====
+
+Operation::
+[source,sail]
+--
+
+
+function clause execute (VCLMUL(vs2, vs1, vd, suffix)) = {
+
+  foreach (i from vstart to vl-1) {
+    let op1 : bits (64) = if suffix =="vv" then get_velem(vs1,i)
+                          else zext_or_truncate_to_sew(X(vs1));
+    let op2 : bits (64) = get_velem(vs2,i);
+    let product : bits (64) = clmul(op1,op2,SEW);
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+
+function clmul(x, y, width) = {
+  let result : bits(width) = zeros();
+  foreach (i from 0 to (width - 1)) {
+    if y[i] == 1 then result = result ^ (x << i);
+  }
+  result
+}
+--
+
+[[insns-vclmulh, Vector Carry-less Multiply Return High Half]]
+==== insn:vclmulh.vv[] and insn:vclmulh.vx[]
+
+Synopsis::
+Vector Carry-less Multiply by vector or scalar - returning high half of product.
+
+Mnemonic::
+insn:vclmulh.vv[vd,vs2,vs1,vm] +
+insn:vclmulh.vx[vd,vs2,rs1,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001101'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '001101'},
+]}
+....
+Reserved Encodings::
+* [#norm:vclmulh_sewn64_rsv]#SEW is any value other than 64#
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_ | input  | multiplier
+| _vs2_ | input  | multiplicand
+| _vd_  | output | carry-less product high
+|===
+
+Description::
+Produces the high half of 128-bit carry-less product.
+
+[#norm:vclmulh_op]#Each 64-bit element in the _vs2_ vector register is carry-less multiplied by
+either each 64-bit element in _vs1_ (vector-vector), or the 64-bit value
+from integer register _rs1_ (vector-scalar). The result is the most
+significant 64 bits of the carry-less product.#
+
+Operation::
+[source,sail]
+--
+function clause execute (VCLMULH(vs2, vs1, vd, suffix)) = {
+
+  foreach (i from vstart to vl-1) {
+    let op1 : bits (64) = if suffix =="vv" then get_velem(vs1,i)
+                          else zext_or_truncate_to_sew(X(vs1));
+    let op2 : bits (64) = get_velem(vs2, i);
+    let product : bits (64) = clmulh(op1, op2, SEW);
+    set_velem(vd, i, product);
+  }
+  RETIRE_SUCCESS
+}
+
+function clmulh(x, y, width) = {
+  let result : bits(width) = 0;
+  foreach (i from 1 to (width - 1)) {
+    if y[i] == 1 then result = result ^ (x >> (width - i));
+  }
+  result
+}
+
+--
+
+//

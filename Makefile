@@ -28,7 +28,7 @@ MONTHYEAR := $(shell date -j -f "%Y%m%d" "$(DATE)" +"%B %Y" 2>/dev/null || date 
 CITATION_DESCRIPTION := $(DATE)-$(RELEASE_TYPE)
 ifeq ($(RELEASE_TYPE), draft)
   WATERMARK_OPT := -a draft-watermark
-  RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
+  RELEASE_DESCRIPTION := DRAFT—NOT AN OFFICIAL RELEASE
 else ifeq ($(RELEASE_TYPE), intermediate)
   WATERMARK_OPT :=
   RELEASE_DESCRIPTION := Intermediate Release
@@ -131,7 +131,9 @@ OPTIONS_TAGS := --trace \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=WARN
-OPTIONS := $(OPTIONS_TAGS) -r ./src/lib/volume-xrefs.rb
+OPTIONS := $(OPTIONS_TAGS) \
+           -r ./src/lib/volume-xrefs.rb \
+           -r ./src/lib/macros.rb
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
@@ -162,7 +164,8 @@ check-tags:
 # Required by GitHub pre-commit checks for this repo.
 update-ref: $(DOCS_NORM_TAGS)
 	cp -f $(DOCS_NORM_TAGS) ref
-	sed -i -e '$$a\' ref/*.json
+	sed -i .bak -e '$$a\' ref/*.json
+	rm ref/*.bak
 
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
@@ -190,19 +193,19 @@ $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/converters/tags.rb
 	$(WORKDIR_SETUP)
