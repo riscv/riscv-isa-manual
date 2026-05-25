@@ -12,6 +12,10 @@ on:
 jobs:
   dco_check:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: write
     steps:
       - name: Check for DCO
         uses: actions/github-script@v6
@@ -22,6 +26,7 @@ jobs:
               console.log('Could not get pull request from context, exiting');
               return;
             }
+
             const { data: commits } = await github.rest.pulls.listCommits({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -43,12 +48,19 @@ jobs:
                 https://github.com/riscv/docs-spec-template/blob/main/CONTRIBUTING.md
 
                 Once you have signed your commits, you will need to force-push your changes.
-              `;
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: comment,
-              });
+                `;
+
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: comment,
+                });
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                core.warning(`Could not post DCO comment: ${message}`);
+              }
+
               core.setFailed('DCO check failed. One or more commits are not signed off.');
             }
