@@ -2,7 +2,7 @@
 
 [![RISC-V ISA Build](https://github.com/riscv/riscv-isa-manual/actions/workflows/isa-build.yml/badge.svg)](https://github.com/riscv/riscv-isa-manual/actions/workflows/isa-build.yml)
 
-This repository contains the source files for the RISC-V Instruction Set Manual, which consists of the Unprivileged and Privileged volumes. The preface of each document indicates the version of each standard that has been formally ratified by RISC-V International.
+This repository contains the source files for the RISC-V Instruction Set Manual.
 
 This work is licensed under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/). See the [LICENSE](LICENSE) file for details.
 
@@ -11,6 +11,8 @@ The RISC-V Instruction Set Manual is organized into the following volumes:
 - Volume I: Unprivileged Architecture
 - Volume II: Privileged Architecture
 - Volume III: Profiles
+
+ The preface of each volume indicates the version of each standard that has been formally ratified by RISC-V International.
 
 ## Official and Draft Versions
 
