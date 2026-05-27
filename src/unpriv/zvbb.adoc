@@ -1,0 +1,809 @@
+[[ext:zvbb]]
+=== ext:zvbb[] Vector Extension for Basic Bit Manipulation
+
+This extension provides basic bit-manipulation instructions on vector registers.
+[#norm:Zvbb_dependent_Zve32x]#ext:zvbb[] depends upon the ext:zve32x[] extension.#
+
+[#norm:Zvbb_eew]#ext:zvbb[] provides support for EEW of 8, 16, and 32.#
+[#norm:Zvbb_eew_Zve64x]#If ext:zve64x[] is supported then ext:zvbb[] also adds support for EEW=64.#
+
+[[insns-vandn, Vector And-Not]]
+==== insn:vandn.vv[] and insn:vandn.vx[]
+
+Synopsis::
+Bitwise And-Not
+
+Mnemonic::
+insn:vandn.vv[vd,vs2,vs1,vm] +
+insn:vandn.vx[vd,vs2,rs1,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '000001'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '000001'},
+]}
+....
+
+Vector-Vector Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_ | input  | Op1  (to be inverted)
+| _vs2_ | input  | Op2
+| _vd_  | output | Result
+|===
+
+Vector-Scalar Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _rs1_     | input  | Op1  (to be inverted)
+| _vs2_     | input  | Op2
+| _vd_      | output | Result
+|===
+
+Description::
+A bitwise _and-not_ operation is performed.
+
+[#norm:vandn_op]#Each bit of `Op1` is inverted and logically ANDed with the corresponding bits in _vs2_.#
+[#norm:vandn-vx_rs1]#In the vector-scalar version, `Op1` is the sign-extended or truncated value in scalar register _rs1_.#
+[#norm:vandn-vv_vs1]#In the vector-vector version, `Op1` is _vs1_.#
+
+[NOTE]
+.Note on necessity of instruction
+====
+This instruction is performance-critical to SHA3. Specifically, the Chi step of the FIPS 202 Keccak Permutation.
+Emulating it via 2 instructions is expected to have significant performance impact.
+The insn:*.vv[] form of the instruction is what is needed for SHA3; the insn:*.vx[] form was added for completeness.
+====
+
+[NOTE]
+====
+There is no insn:*.vi[] version of this instruction because the same functionality can be achieved by using an inversion
+of the immediate value with the insn:vand.vi[] instruction.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (VANDN(vs2, vs1, vd, suffix)) = {
+  foreach (i from vstart to vl-1) {
+    let op1 = match suffix {
+      "vv" => get_velem(vs1, SEW, i),
+      "vx" => sext_or_truncate_to_sew(X(vs1))
+    };
+    let op2 = get_velem(vs2, SEW, i);
+    set_velem(vd, EEW=SEW, i, ~op1 & op2);
+  }
+  RETIRE_SUCCESS
+}
+
+--
+
+[[insns-vbrev, Vector Reverse Bits in Elements]]
+==== insn:vbrev.v[]
+
+Synopsis::
+Vector Reverse Bits in Elements
+
+Mnemonic::
+insn:vbrev.v[vd,vs2,vm]
+
+Encoding (Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '01010'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010010'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs2_ | input  | Input elements
+| _vd_  | output | Elements with bits reversed
+|===
+
+Description::
+[#norm:vbrev-v_op]#A bit reversal is performed on the bits of each element.#
+
+Operation::
+[source,sail]
+--
+function clause execute (VBREV(vs2)) = {
+
+  foreach (i from vstart to vl-1) {
+    let input = get_velem(vs2, SEW, i);
+    let output : bits(SEW) = 0;
+    foreach (i from 0 to SEW-1)
+      let output[SEW-1-i] = input[i];
+    set_velem(vd, SEW, i, output)
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vbrev8, Vector Reverse Bits in Bytes]]
+==== insn:vbrev8.v[]
+
+Synopsis::
+Vector Reverse Bits in Bytes
+
+Mnemonic::
+insn:vbrev8.v[vd,vs2,vm]
+
+Encoding (Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '01000'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010010'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs2_ | input  | Input elements
+| _vd_  | output | Elements with bit-reversed bytes
+|===
+
+Description::
+[#norm:vbrev8-v_op]#A bit reversal is performed on the bits of each byte.#
+
+[NOTE]
+====
+This instruction is commonly used for GCM when the ext:zvkg[] extension is not implemented.
+This byte-wise instruction is defined for all SEWs to eliminate the need to change SEW when operating on wider elements.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (VBREV8(vs2)) = {
+
+  foreach (i from vstart to vl-1) {
+    let input = get_velem(vs2, SEW, i);
+    let output : bits(SEW) = 0;
+    foreach (i from 0 to SEW-8 by 8)
+      let output[i+7..i] = reverse_bits_in_byte(input[i+7..i]);
+    set_velem(vd, SEW, i, output)
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vclz, Vector Count Leading Zeros]]
+==== insn:vclz.v[]
+
+Synopsis::
+Vector Count Leading Zeros
+
+Mnemonic::
+insn:vclz.v[vd,vs2,vm]
+
+Encoding (Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '01100'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010010'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs2_ | input  | Input elements
+| _vd_  | output | Count of leading zero bits
+|===
+
+Description::
+[#norm:vclz-v_op]#A leading zero count is performed on each element.#
+
+[#norm:vclz-v_op_zeroinput]#The result for zero-valued inputs is the value SEW.#
+
+Operation::
+[source,sail]
+--
+function clause execute (VCLZ(vs2)) = {
+
+  foreach (i from vstart to vl-1) {
+    let input = get_velem(vs2, SEW, i);
+    for (j = (SEW - 1); j >= 0;  j--)
+      if [input[j]] == 0b1 then break;
+    set_velem(vd, SEW, i, SEW - 1 - j)
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vcpop, Vector Population Count]]
+==== insn:vcpop.v[]
+
+Synopsis::
+Count the number of bits set in each element
+
+Mnemonic::
+insn:vcpop.v[vd,vs2,vm]
+
+Encoding (Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '01110'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010010'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs2_ | input  | Input elements
+| _vd_  | output | Count of bits set
+|===
+
+Description::
+[#norm:vcpop-v_op]#A population count is performed on each element.#
+
+Operation::
+[source,sail]
+--
+function clause execute (VCPOP(vs2)) = {
+
+  foreach (i from vstart to vl-1) {
+    let input = get_velem(vs2, SEW, i);
+    let output : bits(SEW) = 0;
+    for (j = 0; j < SEW;  j++)
+      output = output + input[j];
+    set_velem(vd, SEW, i, output)
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vctz, Vector Count Trailing Zeros]]
+==== insn:vctz.v[]
+
+Synopsis::
+Vector Count Trailing Zeros
+
+Mnemonic::
+insn:vctz.v[vd,vs2,vm]
+
+Encoding (Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '01101'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010010'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs2_ | input  | Input elements
+| _vd_  | output | Count of trailing zero bits
+|===
+
+Description::
+[#norm:vctz-v_op]#A trailing zero count is performed on each element.#
+
+// The result for zero-valued inputs is the value SEW.
+
+Operation::
+[source,sail]
+--
+function clause execute (VCTZ(vs2)) = {
+
+  foreach (i from vstart to vl-1) {
+    let input = get_velem(vs2, SEW, i);
+    for (j = 0; j < SEW;  j++)
+      if [input[j]] == 0b1 then break;
+    set_velem(vd, SEW, i, j)
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vrev8, Vector Reverse Bytes]]
+==== insn:vrev8.v[]
+
+Synopsis::
+Vector Reverse Bytes
+
+Mnemonic::
+insn:vrev8.v[vd,vs2,vm]
+
+Encoding (Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPMVV'},
+{bits: 5, name: '01001'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010010'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs2_ | input  | Input elements
+| _vd_  | output | Byte-reversed elements
+|===
+
+Description::
+[#norm:vrev8-v_op]#A byte reversal is performed on each element of _vs2_, effectively performing an endian swap.#
+
+[NOTE]
+====
+This element-wise endian swapping is needed for several cryptographic algorithms including SHA2 and SM3.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (VREV8(vs2)) = {
+  foreach (i from vstart to vl-1) {
+    input = get_velem(vs2, SEW, i);
+    let output : SEW = 0;
+    let j = SEW - 1;
+    foreach (k from 0 to (SEW - 8) by 8) {
+      output[k..(k + 7)] = input[(j - 7)..j];
+      j = j - 8;
+    set_velem(vd, SEW, i, output)
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vrol, Vector Rotate Left]]
+==== insn:vrol.vv[] and insn:vrol.vx[]
+
+Synopsis::
+Vector rotate left by vector/scalar.
+
+Mnemonic::
+insn:vrol.vv[vd,vs2,vs1,vm] +
+insn:vrol.vx[vd,vs2,rs1,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010101'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010101'},
+]}
+....
+
+Vector-Vector Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_ | input  | Rotate amount
+| _vs2_ | input  | Data
+| _vd_  | output | Rotated data
+|===
+
+Vector-Scalar Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _rs1_     | input  | Rotate amount
+| _vs2_     | input  | Data
+| _vd_      | output | Rotated data
+|===
+
+Description::
+A bitwise left rotation is performed on each element of _vs2_
+
+[#norm:vrol_op]#The elements in _vs2_ are rotated left by the rotate amount specified by either
+the corresponding elements of _vs1_ (vector-vector), or integer register _rs1_
+(vector-scalar).
+Only the low log2(SEW) bits of the rotate-amount value are used, all other
+bits are ignored.#
+
+[NOTE]
+====
+There is no immediate form of this instruction (i.e., insn:vrol.vi[]) as the same result can be achieved by negating
+the rotate amount and using the immediate form of rotate right instruction (i.e., insn:vror.vi[]).
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (VROL_VV(vs2, vs1, vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=SEW, i,
+      get_velem(vs2, i) <<< (get_velem(vs1, i) & (SEW-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+
+function clause execute (VROL_VX(vs2, rs1, vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=SEW, i,
+      get_velem(vs2, i) <<< (X(rs1) & (SEW-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+
+--
+
+[[insns-vror, Vector Rotate Right]]
+==== insn:vror.vv[], insn:vror.vx[], and insn:vror.vi[]
+
+Synopsis::
+Vector rotate right by vector/scalar/immediate.
+
+Mnemonic::
+insn:vror.vv[vd,vs2,vs1,vm] +
+insn:vror.vx[vd,vs2,rs1,vm] +
+insn:vror.vi[vd,vs2,uimm,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010100'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '010100'},
+]}
+....
+
+Encoding (Vector-Immediate)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVI'},
+{bits: 5, name: 'uimm[4:0]'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 1, name: 'i5'},
+{bits: 5, name: '01010'},
+]}
+....
+
+Vector-Vector Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_ | input  | Rotate amount
+| _vs2_ | input  | Data
+| _vd_  | output | Rotated data
+|===
+
+Vector-Scalar/Immediate Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _rs1_/_uimm_ | input  | Rotate amount
+| _vs2_        | input  | Data
+| _vd_         | output | Rotated data
+|===
+
+
+Description::
+A bitwise right rotation is performed on each element of _vs2_.
+
+[#norm:vror_op]#The elements in _vs2_ are rotated right by the rotate amount specified by either
+the corresponding elements of _vs1_ (vector-vector), integer register _rs1_
+(vector-scalar), or an immediate value (vector-immediate).
+Only the low log2(SEW) bits of the rotate-amount value are used, all other
+bits are ignored.#
+
+Operation::
+[source,sail]
+--
+function clause execute (VROR_VV(vs2, vs1, vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=SEW, i,
+      get_velem(vs2, i) >>> (get_velem(vs1, i) & (SEW-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+
+function clause execute (VROR_VX(vs2, rs1, vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=SEW, i,
+      get_velem(vs2, i) >>> (X(rs1) & (SEW-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+
+function clause execute (VROR_VI(vs2, uimm[5:0], vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=SEW, i,
+      get_velem(vs2, i) >>> (uimm[5:0] & (SEW-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vwsll, Vector Widening Shift Left Logical]]
+==== insn:vwsll.vv[], insn:vwsll.vx[], and insn:vwsll.vi[]
+
+Synopsis::
+Vector widening shift left logical by vector/scalar/immediate.
+
+Mnemonic::
+insn:vwsll.vv[vd,vs2,vs1,vm] +
+insn:vwsll.vx[vd,vs2,rs1,vm] +
+insn:vwsll.vi[vd,vs2,uimm,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110101'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110101'},
+]}
+....
+
+Encoding (Vector-Immediate)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVI'},
+{bits: 5, name: 'uimm[4:0]'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110101'},
+]}
+....
+
+Vector-Vector Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_ | input  | Shift amount
+| _vs2_ | input  | Data
+| _vd_  | output | Shifted data
+|===
+
+Vector-Scalar/Immediate Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2,2"]
+|===
+|Register
+|Direction
+|EEW
+|Definition
+
+| _rs1_/_uimm_ | input  | SEW   | Shift amount
+| _vs2_        | input  | SEW   | Data
+| _vd_         | output | 2*SEW | Shifted data
+|===
+
+
+Description::
+A widening logical shift left is performed on each element of _vs2_.
+
+[#norm:vwsll_op]#The elements in _vs2_ are zero-extended to 2{times}SEW bits, then shifted left
+by the shift amount specified by either
+the corresponding elements of _vs1_ (vector-vector), integer register _rs1_
+(vector-scalar), or an immediate value (vector-immediate).
+Only the low log2(2{times}SEW) bits of the shift-amount value are used, all other
+bits are ignored.#
+
+Operation::
+[source,sail]
+--
+function clause execute (VWSLL_VV(vs2, vs1, vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=2*SEW, i,
+      get_velem(vs2, i) << (get_velem(vs1, i) & ((2*SEW)-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+
+function clause execute (VWSLL_VX(vs2, rs1, vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=2*SEW, i,
+      get_velem(vs2, i) << (X(rs1) & ((2*SEW)-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+
+function clause execute (VWSLL_VI(vs2, uimm[4:0], vd)) = {
+  foreach (i from vstart to vl - 1) {
+    set_velem(vd, EEW=2*SEW, i,
+      get_velem(vs2, i) << (uimm[4:0] & ((2*SEW)-1))
+    )
+  }
+  RETIRE_SUCCESS
+}
+--
+
+//
