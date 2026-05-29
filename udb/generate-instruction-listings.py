@@ -16,28 +16,30 @@ def build_database(files):
     return db
 
 def extensions_defined_in(inst):
-    if 'definedBy' not in inst:
-        raise Exception(f"{inst['name']} missing 'definedBy' key")
-
     def helper(x):
-        if len(x) != 1:
-            raise Exception(f"{inst['name']} has malformed 'definedBy' key")
         key = next(iter(x))
         value = x[key]
         match key:
+            case 'name':
+                return [value]
             case 'extension':
-                return value
-            case 'anyOf':
-                return map(helper, value)
+                return helper(value)
+            case 'anyOf' | 'oneOf':
+                return [item for sublist in map(helper, value) for item in sublist]
             case 'allOf':
+                value = {k: v for d in x[key] for k, v in d.items()}
                 if len(value) == 2 and 'xlen' in value and 'extension' in value:
-                    return f"{value['extension']} (RV{value['xlen']})"
-                print(inst['definedBy'])
-                raise value
+                    res = helper(value['extension'])
+                    return list(map(lambda x: f"{x} (RV{value['xlen']})", res))
+                if len(value) == 2 and 'not' in value and 'name' in value:
+                    return helper(value)
+                if len(value) == 1 and 'name' in value:
+                    return helper(value)
+                raise Exception(f"{inst['name']} has unrecognized 'allOf' pattern {value}")
             case _:
                 raise Exception(f"{inst['name']} has unknown 'definedBy' key {key}")
 
-    helper(inst['definedBy'])
+    return helper(inst['definedBy'])
 
 def main():
     parser = argparse.ArgumentParser()
@@ -53,7 +55,7 @@ def main():
     db = build_database(args.yamls)
 
     for inst in db['instruction'].values():
-        extensions_defined_in(inst)
+        print(inst['name'] + " " + str(extensions_defined_in(inst)))
 
 if __name__ == "__main__":
     main()
