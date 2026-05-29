@@ -70,3 +70,4 @@ River         | Midstall Software               | [Inquiry](mailto:inquire@midst
 Raptor        | Yu Jin                          | [Yu Jin](mailto:lambda.jinyu@gmail.com)                     | 50               | https://github.com/Kingfish404/raptor-chip
 Sargantana    | BSC-LOCA                        | [Narcís Rodas](mailto:narcis.rodaquiroga@bsc.es)            | 51               | https://github.com/bsc-loca/sargantana
 KianV Stealth | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 52               | https://github.com/splinedrive/kianRiscV
+RVController  | April Kolwey (cheapie)          | [April Kolwey](mailto:cheapiephp@gmail.com)                 | 53               | https://cheapiesystems.com/git/rvcontroller/
