@@ -24,6 +24,7 @@ DOCS := riscv-spec
 RELEASE_TYPE ?= draft
 DATE ?= $(shell date +%Y%m%d)
 MONTHYEAR := $(shell date -j -f "%Y%m%d" "$(DATE)" +"%B %Y" 2>/dev/null || date -d "$(DATE)" +"%B %Y")
+YEAR := $(shell date -j -f "%Y%m%d" "$(DATE)" +"%Y" 2>/dev/null || date -d "$(DATE)" +"%Y")
 
 CITATION_DESCRIPTION := $(DATE)-$(RELEASE_TYPE)
 ifeq ($(RELEASE_TYPE), draft)
@@ -39,6 +40,8 @@ else ifeq ($(RELEASE_TYPE), official)
 else
   $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
 endif
+
+RELEASE_DESCRIPTION_HTML := $(RELEASE_DESCRIPTION).  © RISC-V International, $(YEAR).
 
 DOCKER_BIN ?= docker
 DOCKER_INTERACTIVE=$(shell [ -t 0 ] && echo "-it --init")
@@ -197,7 +200,7 @@ $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) -a revremark='$(RELEASE_DESCRIPTION_HTML)' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
