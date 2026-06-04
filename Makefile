@@ -24,11 +24,12 @@ DOCS := riscv-spec
 RELEASE_TYPE ?= draft
 DATE ?= $(shell date +%Y%m%d)
 MONTHYEAR := $(shell date -j -f "%Y%m%d" "$(DATE)" +"%B %Y" 2>/dev/null || date -d "$(DATE)" +"%B %Y")
+YEAR := $(shell date -j -f "%Y%m%d" "$(DATE)" +"%Y" 2>/dev/null || date -d "$(DATE)" +"%Y")
 
 CITATION_DESCRIPTION := $(DATE)-$(RELEASE_TYPE)
 ifeq ($(RELEASE_TYPE), draft)
   WATERMARK_OPT := -a draft-watermark
-  RELEASE_DESCRIPTION := DRAFT---NOT AN OFFICIAL RELEASE
+  RELEASE_DESCRIPTION := DRAFT—NOT AN OFFICIAL RELEASE
 else ifeq ($(RELEASE_TYPE), intermediate)
   WATERMARK_OPT :=
   RELEASE_DESCRIPTION := Intermediate Release
@@ -39,6 +40,8 @@ else ifeq ($(RELEASE_TYPE), official)
 else
   $(error Unknown build type; use RELEASE_TYPE={draft, intermediate, official})
 endif
+
+RELEASE_DESCRIPTION_HTML := $(RELEASE_DESCRIPTION).  © RISC-V International, $(YEAR).
 
 DOCKER_BIN ?= docker
 DOCKER_INTERACTIVE=$(shell [ -t 0 ] && echo "-it --init")
@@ -131,7 +134,9 @@ OPTIONS_TAGS := --trace \
            $(XTRA_ADOC_OPTS) \
            -D build \
            --failure-level=WARN
-OPTIONS := $(OPTIONS_TAGS) -r ./src/lib/volume-xrefs.rb
+OPTIONS := $(OPTIONS_TAGS) \
+           -r ./src/lib/volume-xrefs.rb \
+           -r ./src/lib/macros.rb
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
@@ -154,6 +159,7 @@ build-pdf: $(DOCS_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
+check-xrefs: $(addprefix $(BUILD_DIR)/, $(addsuffix .check-xrefs, $(DOCS)))
 check-tags:
 	@bash ./scripts/check-tag-changes.sh
 
@@ -161,12 +167,13 @@ check-tags:
 # Required by GitHub pre-commit checks for this repo.
 update-ref: $(DOCS_NORM_TAGS)
 	cp -f $(DOCS_NORM_TAGS) ref
-	sed -i -e '$$a\' ref/*.json
+	sed -i .bak -e '$$a\' ref/*.json
+	rm ref/*.bak
 
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
 build-norm-rules: build-norm-rules-json build-norm-rules-html check-tags
-build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
+build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html check-xrefs
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
@@ -189,19 +196,19 @@ $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) -a revremark='$(RELEASE_DESCRIPTION_HTML)' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
-	@echo -e '\n  Built \e]8;;file://$(abspath $@)\e\\$@\e]8;;\e\\\n'
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/converters/tags.rb
 	$(WORKDIR_SETUP)
@@ -221,6 +228,10 @@ $(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_
 	mkdir -p $@.workdir/build
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) --html $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
+
+$(BUILD_DIR)/%.check-xrefs: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+	$(WORKDIR_SETUP)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) -v $(OPTIONS) $(REQUIRES) $< 2>&1 | grep 'possible invalid reference' && exit 1 || [ $$? -eq 0 ] $(DOCKER_QUOTE)
 
 # Update docker image to latest
 docker-pull-latest:

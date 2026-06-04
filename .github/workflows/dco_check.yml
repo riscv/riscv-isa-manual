@@ -1,0 +1,66 @@
+---
+name: DCO Check
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - converted_to_draft
+
+jobs:
+  dco_check:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: write
+    steps:
+      - name: Check for DCO
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              console.log('Could not get pull request from context, exiting');
+              return;
+            }
+
+            const { data: commits } = await github.rest.pulls.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const dcoFailedCommits = commits.filter(
+              (commit) => !/Signed-off-by:/.test(commit.commit.message)
+            );
+
+            if (dcoFailedCommits.length > 0) {
+              const comment = `
+                :warning: DCO CHECK FAILED :warning:
+
+                The Developer's Certificate of Origin (DCO) check has failed for this pull request.
+                To fix this, you need to sign off on your commits.
+
+                For instructions on how to set up signed commits, please see:
+                https://github.com/riscv/docs-spec-template/blob/main/CONTRIBUTING.md
+
+                Once you have signed your commits, you will need to force-push your changes.
+                `;
+
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: comment,
+                });
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                core.warning(`Could not post DCO comment: ${message}`);
+              }
+
+              core.setFailed('DCO check failed. One or more commits are not signed off.');
+            }

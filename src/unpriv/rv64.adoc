@@ -1,0 +1,255 @@
+[[rv64]]
+=== RV64I Base Integer Instruction Set
+
+This section describes the RV64I base integer instruction set, which
+builds upon the RV32I variant described in <<rv32>>.
+This chapter presents only the differences with RV32I, so should be read
+in conjunction with the earlier chapter.
+
+==== Register State
+
+[#norm:rv64i_xreg_sz]#RV64I widens the integer registers and supported user address space to
+64 bits, i.e., XLEN=64.#
+
+==== Integer Computational Instructions
+
+Most integer computational instructions operate on XLEN-bit values.
+Additional instruction variants are provided to manipulate 32-bit values
+in RV64I, indicated by a insn:*w[] suffix to the opcode. [#norm:rv64_w_sex]#These
+insn:*w[] instructions ignore the upper 32 bits of their inputs and always produce
+32-bit signed values, sign-extending them to 64 bits, i.e. bits XLEN-1
+through 31 are equal.#
+
+[NOTE]
+====
+The compiler and calling convention maintain an invariant that all
+32-bit values are held in a sign-extended format in 64-bit registers.
+Even 32-bit unsigned integers extend bit 31 into bits 63 through 32.
+Consequently, conversion between unsigned and signed 32-bit integers is
+a no-op, as is conversion from a signed 32-bit integer to a signed
+64-bit integer. Existing 64-bit wide SLTU and unsigned branch compares
+still operate correctly on unsigned 32-bit integers under this
+invariant. Similarly, existing 64-bit wide logical operations on 32-bit
+sign-extended integers preserve the sign-extension property.
+The insn:addw[], insn:addiw[], insn:subw[], insn:sllw[], insn:slliw[],
+insn:srlw[], insn:srliw[], insn:sraw[], and insn:sraiw[] instructions are
+required for addition and shifts to
+ensure reasonable performance for 32-bit values.
+====
+===== Integer Register-Immediate Instructions
+
+include::images/wavedrom/rv64i-base-int.edn[]
+[[rv64i-base-int]]
+//.RV64I register-immediate instructions
+
+[#norm:addiw_op]#insn:addiw[] is an RV64I instruction that adds the sign-extended 12-bit
+immediate to register _rs1_ and produces the proper sign extension of a
+32-bit result in _rd_.# [#norm:addiw_overflow]#Overflows are ignored and the result is the low
+32 bits of the result sign-extended to 64 bits.# Note, insn:addiw[rd,rs1,0]
+writes the sign extension of the lower 32 bits of register _rs1_ into
+register _rd_ (assembler pseudoinstruction insn:sext.w[]).
+
+include::images/wavedrom/rv64i-slli.edn[]
+[[rv64i-slli]]
+//.RV64I register-immediate (descr ADDIW) instructions
+
+(((RV64I, SLLI))) (((RV64I, SRLI))) (((RV64I, SRAI)))
+Shifts by a constant are encoded as a specialization of the I-type
+format using the same instruction opcode as RV32I. The operand to be
+shifted is in _rs1_, and the shift amount is encoded in the lower 6 bits
+of the I-immediate field for RV64I. The right-shift type is encoded in
+bit 30. insn:slli[] is a logical left shift (zeros are shifted into the lower
+bits); insn:srli[] is a logical right shift (zeros are shifted into the upper
+bits); and insn:srai[] is an arithmetic right shift (the original sign bit is
+copied into the vacated upper bits).
+
+include::images/wavedrom/rv64i-slliw.edn[]
+[[rv64i-slliw]]
+
+(((RV64I, SLLIW))) (((RV64I, SRLIW))) (((RV64I, SRAIW))) (((RV64I, RV64I-only)))
+[#norm:slliw_srliw_sraiw_op]#insn:slliw[], insn:srliw[], and insn:sraiw[] are RV64I-only instructions that are analogously
+defined but operate on 32-bit values and sign-extend their 32-bit
+results to 64 bits.# [#norm:slliw_srliw_sraiw_imm5_rsv]#insn:slliw[], insn:srliw[], and insn:sraiw[] encodings with
+_imm[5]_{ne}0 are reserved.#
+
+[NOTE]
+====
+Previously, insn:slliw[], insn:srliw[], and insn:sraiw[] with _imm[5]_{ne}0
+were defined to cause illegal-instruction exceptions, whereas now they
+are marked as reserved. This is a backwards-compatible change.
+====
+
+include::images/wavedrom/rv64-lui-auipc.edn[]
+[[rv64_lui-auipc]]
+//.RV64I register-immediate (descr) instructions
+
+(((RV64I, LUI)))
+insn:lui[] (load upper immediate) uses the same opcode as RV32I.
+[#norm:lui_op_rv64i]#insn:lui[] places the
+32-bit U-immediate into register _rd_, filling in the lowest 12 bits
+with zeros. The 32-bit result is sign-extended to 64 bits.#
+
+insn:auipc[] (add upper immediate to `pc`) uses the same opcode as RV32I. insn:auipc[]
+is used to build `pc`-relative addresses and uses the U-type format.
+[#norm:auipc_op_rv64i]#insn:auipc[] forms a 32-bit offset from the U-immediate, filling in the lowest
+12 bits with zeros, sign-extends the result to 64 bits, adds it to the
+address of the insn:auipc[] instruction, then places the result in register _rd_.#
+
+[NOTE]
+====
+Note that the set of address offsets that can be formed by pairing insn:lui[]
+with insn:ld[], insn:auipc[] with insn:jalr[], etc. in RV64I is
+[−2^31^−2^11^, 2^31^−2^11^−1].
+====
+
+===== Integer Register-Register Operations
+
+// this diagram doesn't match the tex specification
+include::images/wavedrom/rv64i-int-reg-reg.edn[]
+[[int_reg-reg]]
+//.RV64I integer register-register instructions
+
+(((RV64I-only, ADDW))) (((RV64I-only, SUBW)))
+[#norm:addw_subw_op]#insn:addw[] and insn:subw[] are RV64I-only instructions that are defined analogously
+to insn:add[] and insn:sub[] but operate on 32-bit values and produce signed 32-bit results.#
+[#norm:addw_subw_overflow]#Overflows are ignored, and the low 32-bits of the result is
+sign-extended to 64-bits and written to the destination register.#
+
+insn:sll[], insn:srl[], and insn:sra[] perform logical left, logical right, and arithmetic
+right shifts on the value in register _rs1_ by the shift amount held in
+register _rs2_. [#norm:sll_srl_sra_sh_amt_rv64i]#In RV64I, only the low 6 bits of _rs2_ are considered
+for the shift amount.#
+
+[[norm:sllw_srlw_sraw_op]]
+(((RV64I-only, SLLW))) (((RV64I-only, SRLW))) (((RV64I-only, SRAW)))
+insn:sllw[], insn:srlw[], and insn:sraw[] are RV64I-only instructions that are analogously
+defined but operate on 32-bit values and sign-extend their 32-bit
+results to 64 bits. The shift amount is given by _rs2[4:0]_.
+
+==== Load and Store Instructions
+
+RV64I extends the address space to 64 bits. The execution environment
+will define what portions of the address space are legal to access.
+
+include::images/wavedrom/load-store.edn[]
+[[load_store]]
+//.Load and store instructions
+
+(((RV64I, LD)))
+[#norm:ld_op_rv64i]#The insn:ld[] instruction loads a 64-bit value from memory into register _rd_
+for RV64I.#
+
+[#norm:lw_op_rv64i]#The insn:lw[] instruction loads a 32-bit value from memory and sign-extends
+this to 64 bits before storing it in register _rd_ for RV64I.#
+[#norm:lwu_op]#The insn:lwu[] instruction, on the other hand, zero-extends the 32-bit value from
+memory for RV64I.# [#norm:lh_lhu_lb_lbu_op_rv64i]#insn:lh[] and insn:lhu[] are defined analogously for 16-bit values,
+as are insn:lb[] and insn:lbu[] for 8-bit values.# [#norm:sd_sw_sh_sb_op_rv64i]#The insn:sd[], insn:sw[], insn:sh[], and insn:sb[] instructions
+store 64-bit, 32-bit, 16-bit, and 8-bit values from the low bits of
+register _rs2_ to memory respectively.#
+
+[[rv64i-hints]]
+==== HINT Instructions
+
+(((RV64I, HINT)))
+All instructions that are microarchitectural HINTs in RV32I (see
+<<rv32>>) are also HINTs in RV64I.
+The additional computational instructions in RV64I expand both the
+standard and custom HINT encoding spaces.
+
+<<rv64i-h>> lists all RV64I HINT code points. 91% of the
+HINT space is reserved for standard HINTs. The remainder of the HINT
+space is designated for custom HINTs; no standard HINTs will ever be
+defined in this subspace.
+
+[[rv64i-h]]
+.RV64I HINT instructions.
+[float="center",align="center",cols="<,<,^,<", options="header", grid="all"]
+|===
+|Instruction |Constraints |Code Points |Purpose
+|insn:lui[] |_rd_=`x0` |2^20^ .9+.^|_Designated for future standard use_
+
+|insn:auipc[] |_rd_=`x0` |2^20^
+
+|insn:addi[] |_rd_=`x0`, and either _rs1_{ne}``x0`` or _imm_{ne}0 |2^17^−1
+
+|insn:andi[] |_rd_=`x0` |2^17^
+
+|insn:ori[] |_rd_=`x0` |2^17^
+
+|insn:xori[] |_rd_=`x0` |2^17^
+
+|insn:addiw[] |_rd_=`x0` |2^17^
+
+|insn:add[] |_rd_=`x0`, _rs1_{ne}``x0`` |2^10^−32
+
+|insn:add[] |_rd_=`x0`, _rs1_=`x0`, _rs2_{ne}``x2``{endash}``x5`` | 28
+
+|insn:add[] |_rd_=`x0`, _rs1_=`x0`, _rs2_=`x2`{endash}``x5`` | 4 | (_rs2_=`x2`) NTL.P1 +
+ (_rs2_=`x3`) NTL.PALL +
+ (_rs2_=`x4`) NTL.S1 +
+ (_rs2_=`x5`) NTL.ALL
+
+|insn:slli[] |_rd_=`x0`, _rs1_=`x0`, _shamt_=31 |1|Semihosting entry marker
+
+|insn:srai[] |_rd_=`x0`, _rs1_=`x0`, _shamt_=7 |1|Semihosting exit marker
+
+|insn:sub[] |_rd_=`x0` |2^10^ .16+.^| _Designated for future standard use_
+
+|insn:and[] |_rd_=`x0` |2^10^
+
+|insn:or[] |_rd_=`x0` |2^10^
+
+|insn:xor[] |_rd_=`x0` |2^10^
+
+|insn:sll[] |_rd_=`x0` |2^10^
+
+|insn:srl[] |_rd_=`x0` |2^10^
+
+|insn:sra[] |_rd_=`x0` |2^10^
+
+|insn:addw[] |_rd_=`x0` |2^10^
+
+|insn:subw[] |_rd_=`x0` |2^10^
+
+|insn:sllw[] |_rd_=`x0` |2^10^
+
+|insn:srlw[] |_rd_=`x0` |2^10^
+
+|insn:sraw[] |_rd_=`x0` |2^10^
+
+|insn:fence[] |_rd_=`x0`, _rs1_{ne}``x0``, _fm_=0, and either _pred_=0 or _succ_=0| 2^10^−63
+
+|insn:fence[] |_rd_{ne}``x0``, _rs1_=`x0`, _fm_=0, and either _pred_=0 or _succ_=0| 2^10^−63
+
+|insn:fence[] |_rd_=_rs1_=`x0`, _fm_=0, _pred_=0, _succ_{ne}0 |15
+
+|insn:fence[] |_rd_=_rs1_=`x0`, _fm_=0, _pred_{ne}W, _succ_=0 |15
+
+|insn:fence[] |_rd_=_rs1_=`x0`, _fm_=0, _pred_=W, _succ_=0 |1 |PAUSE
+
+|insn:slti[] |_rd_=`x0` |2^17^ .10+.^|_Designated for custom use_
+
+|insn:sltiu[] |_rd_=`x0` |2^17^
+
+|insn:slli[] |_rd_=`x0`, and either _rs1_{ne}``x0`` or _shamt_{ne}31 |2^11^−1
+
+|insn:srli[] |_rd_=`x0` |2^11^
+
+|insn:srai[] |_rd_=`x0`, and either _rs1_{ne}``x0`` or _shamt_{ne}7 |2^11^−1
+
+|insn:slliw[] |_rd_=`x0` |2^10^
+
+|insn:srliw[] |_rd_=`x0` |2^10^
+
+|insn:sraiw[] |_rd_=`x0` |2^10^
+
+|insn:slt[] |_rd_=`x0` |2^10^
+
+|insn:sltu[] |_rd_=`x0` |2^10^
+|===
+
+NOTE: insn:slli[x0,x0,0x1f] and insn:srai[x0,x0,7] were previously designated as
+custom HINTs, but they have been appropriated for use in semihosting calls, as
+described in <<ecall-ebreak>>.
+To reflect their usage in practice, the base ISA spec has been changed to
+designate them as standard HINTs.

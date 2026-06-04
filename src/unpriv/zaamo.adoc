@@ -1,0 +1,81 @@
+[[ext:zaamo]]
+=== ext:zaamo[] Extension for Atomic Memory Operations
+
+include::images/wavedrom/atomic-mem.edn[]
+
+The atomic memory operation (AMO) instructions perform read-modify-write
+operations for multiprocessor synchronization and are encoded with an
+R-type instruction format. These AMO instructions atomically load a data
+value from the address in _rs1_, place the value into register _rd_,
+apply a binary operator to the loaded value and the original value in
+_rs2_, then store the result back to the original address in _rs1_. [#norm:amo_operand_size]#AMOs
+can either operate on _doublewords_ (RV64 only) or _words_ in memory. For
+RV64, 32-bit AMOs always sign-extend the value placed in _rd_, and
+ignore the upper 32 bits of the original value of _rs2_.#
+
+[#norm:amo_alignment]#For AMOs, the ext:zaamo[] extension requires that the address held in _rs1_ be
+naturally aligned to the size of the operand (i.e., eight-byte aligned
+for _doublewords_ and four-byte aligned for _words_).# If the address
+is not naturally aligned, an address-misaligned exception or an
+access-fault exception will be generated. The access-fault exception can
+be generated for a memory access that would otherwise be able to
+complete except for the misalignment, if the misaligned access should
+not be emulated.
+
+[#norm:misaligned_atomicity_granule_size]#The misaligned atomicity granule PMA, defined in <<sec:misaligned-atomicity-granule>>,
+optionally relaxes this alignment requirement.
+If present, the misaligned atomicity granule PMA specifies the size
+of a misaligned atomicity granule, a power-of-two number of bytes.
+The misaligned atomicity granule PMA applies only to AMOs, loads and stores
+defined in the base ISAs, and loads and stores of no more than XLEN bits
+defined in the ext:f[], ext:d[], and ext:q[] extensions, and compressed encodings thereof.
+For an instruction in that set, if all accessed bytes lie within the same
+misaligned atomicity granule, the instruction will not raise an exception for
+reasons of address alignment, and the instruction will give rise to only one
+memory operation for the purposes of RVWMO--i.e., it will execute atomically.#
+
+The operations supported are swap, integer add, bitwise AND, bitwise OR,
+bitwise XOR, and signed and unsigned integer maximum and minimum.
+Without ordering constraints, these AMOs can be used to implement
+parallel reduction operations, where typically the return value would be
+discarded by writing to `x0`.
+
+[NOTE]
+====
+We provided fetch-and-op style atomic primitives as they scale to highly
+parallel systems better than LR/SC or CAS. A simple microarchitecture
+can implement AMOs using the LR/SC primitives, provided the
+implementation can guarantee the AMO eventually completes. More complex
+implementations might also implement AMOs at memory controllers, and can
+optimize away fetching the original value when the destination is `x0`.
+
+The set of AMOs was chosen to support the C11/C++11 atomic memory
+operations efficiently, and also to support parallel reductions in
+memory. Another use of AMOs is to provide atomic updates to
+memory-mapped device registers (e.g., setting, clearing, or toggling
+bits) in the I/O space.
+
+The ext:zaamo[] extension enables microcontroller class implementations to utilize
+atomic primitives from the AMO subset of the ext:a[] extension. Typically such
+implementations do not have caches and thus may not be able to naturally support
+the LR/SC instructions provided by the ext:zalrsc[] extension.
+====
+
+[#norm:amo_release_consistency]#To help implement multiprocessor synchronization, the AMOs optionally
+provide release consistency semantics. If the _aq_ bit is set, then no
+later memory operations in this RISC-V hart can be observed to take
+place before the AMO. Conversely, if the _rl_ bit is set, then other
+RISC-V harts will not observe the AMO before memory accesses preceding
+the AMO in this RISC-V hart. Setting both the _aq_ and the _rl_ bit on
+an AMO makes the sequence sequentially consistent, meaning that it
+cannot be reordered with earlier or later memory operations from the
+same hart.#
+
+[NOTE]
+====
+The AMOs were designed to implement the C11 and C++11 memory models
+efficiently. Although the insn:fence[r,rw] instruction suffices to implement
+the _acquire_ operation and insn:fence[rw,w] suffices to implement _release_,
+both imply additional unnecessary ordering as compared to AMOs with the
+corresponding _aq_ or _rl_ bit set.
+====

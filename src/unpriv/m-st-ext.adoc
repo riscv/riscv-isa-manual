@@ -1,0 +1,131 @@
+[[ext:m]]
+=== ext:m[] Extension for Integer Multiplication and Division
+
+This chapter describes the standard integer multiplication and division
+instruction extension, which is named ext:m[] and contains instructions
+that multiply or divide values held in two integer registers.
+
+[NOTE]
+====
+We separate integer multiply and divide out from the base to simplify
+low-end implementations, or for applications where integer multiply and
+divide operations are either infrequent or better handled in attached
+accelerators.
+====
+
+[[m-mul]]
+==== Multiplication Operations
+
+include::images/wavedrom/m-st-ext-for-int-mult.edn[]
+[[m-st-ext-for-int-mult]]
+//.Multiplication operation instructions
+(((MUL, MULH))) (((MUL, MULHU))) (((MUL, MULHSU)))
+[#norm:mul_op]#insn:mul[] performs an XLEN-bit×XLEN-bit multiplication of
+`rs1` by `rs2` and places the lower XLEN bits in the destination
+register.# [#norm:mulh_mulhu_mulhsu_op]#insn:mulh[], insn:mulhu[], and insn:mulhsu[] perform the same multiplication but
+return the upper XLEN bits of the full 2×XLEN-bit
+product, for signed×signed,
+unsigned×unsigned, and `rs1`×unsigned `rs2` multiplication.#
+
+If both the high and low bits of the same product are required, the recommended
+code sequence is insn:mulh[rdh,rs1,rs2] followed by insn:mul[rdl,rs1,rs2].
+insn:mulhu[] or insn:mulhsu[] can be used instead of insn:mulh[] if appropriate.
+Note that the source register specifiers, `rs1` and `rs2`, must be in same order
+and `rdh` cannot be the same as `rs1` or `rs2`.
+Microarchitectures can then fuse these into a single multiply operation instead
+of performing two separate multiplies.
+
+[NOTE]
+====
+insn:mulhsu[] is used in multi-word signed multiplication to multiply the
+most-significant word of the multiplicand (which contains the sign bit)
+with the less-significant words of the multiplier (which are unsigned).
+====
+
+[#norm:mulw_op]#insn:mulw[] is an RV64 instruction that multiplies the lower 32 bits of the
+source registers, placing the sign extension of the lower 32 bits of the
+result into the destination register.#
+
+[NOTE]
+====
+In RV64, insn:mul[] can be used to obtain the upper 32 bits of the 64-bit
+product, but signed arguments must be proper 32-bit signed values,
+whereas unsigned arguments must have their upper 32 bits clear. If the
+arguments are not known to be sign- or zero-extended, an alternative is
+to shift both arguments left by 32 bits, then use insn:mulh[], mulhu[] or mulhsu[].
+====
+
+==== Division Operations
+
+include::images/wavedrom/division-op.edn[]
+[[division-op]]
+//.Division operation instructions
+(((MUL, DIV))) (((MUL, DIVU)))
+[#norm:div_divu_op]#insn:div[] and insn:divu[] perform an XLEN bits by XLEN bits signed and unsigned
+integer division of `rs1` by `rs2`, rounding towards zero.# [#norm:rem_remu_op]#insn:rem[] and insn:remu[]
+provide the remainder of the corresponding division operation.# [#norm:rem_result_sign]#For insn:rem[],
+the sign of a nonzero result equals the sign of the dividend.#
+
+[NOTE]
+====
+For both signed and unsigned division, except in the case of overflow, it holds
+that dividend = divisor {times} quotient + remainder.
+====
+
+If both the quotient and remainder are required from the same division, the
+recommended code sequence is insn:div[rdq,rs1,rs2] followed by rem[rdr,rs1,rs2].
+insn:divu[] and insn:remu[] can also be used if appropriate. Note that `rdq` can
+not be the same as `rs1` or `rs2`.
+Microarchitectures can then fuse these into a single divide operation instead of
+performing two separate divides.
+
+[#norm:divw_divuw_op]#insn:divw[] and insn:divuw[] are RV64 instructions that divide the lower 32 bits of
+`rs1` by the lower 32 bits of `rs2`, treating them as signed and
+unsigned integers, placing the 32-bit quotient in `rd`,
+sign-extended to 64 bits.# [#norm:remw_remuw_op]#insn:remw[] and insn:remuw[] are RV64 instructions that
+provide the corresponding signed and unsigned remainder
+operations.# [#norm:remw_remuw_result_sign]#Both insn:remw[] and insn:remuw[] always sign-extend the 32-bit result
+to 64 bits, including on a divide by zero.#
+(((MUL, div by zero)))
+The semantics for division by zero and division overflow are summarized
+in <<divby0>>. [#norm:div_by_zero]#The quotient of division by zero has all bits
+set#, and [#norm:rem_by_zero]#the remainder of division by zero equals the dividend.#
+[#norm:signed_div_overflow]#Signed division overflow occurs only when the most-negative integer is divided
+by −1. The quotient of a signed division with overflow is
+equal to the dividend, and the remainder is zero.# Unsigned division
+overflow cannot occur.
+
+[[divby0]]
+.Semantics for division by zero and division overflow. L is the width of the operation in bits: XLEN for insn:div[], insn:divu[], insn:rem[], and insn:remu[], or 32 for insn:divw[], insn:divuw[], insn:remw[], and insn:remuw[].
+[cols="<2,^,^,^,^,^,^",options="header",]
+|===
+|Condition |Dividend |Divisor |insn:divu[]/insn:divuw[] |insn:remu[]/insn:remuw[] |insn:div[]/insn:divw[] |insn:rem[]/insn:remw[]
+
+|Division by zero       |_x_     |0  |2^L^-1 |_x_ |−1      |_x_
+|Overflow (signed only) |-2^L-1^ |−1 |--     |--  |-2^L-1^ |0
+|===
+
+[NOTE]
+====
+We considered raising exceptions on integer divide by zero, with these
+exceptions causing a trap in most execution environments. However, this
+would be the only arithmetic trap in the standard ISA (floating-point
+exceptions set flags and write default values, but do not cause traps)
+and would require language implementers to interact with the execution
+environment's trap handlers for this case. Further, where language
+standards mandate that a divide-by-zero exception must cause an
+immediate control flow change, only a single branch instruction needs to
+be added to each divide operation, and this branch instruction can be
+inserted after the divide and should normally be very predictably not
+taken, adding little runtime overhead.
+
+The value of all bits set is returned for both unsigned and signed
+divide by zero to simplify the divider circuitry. The value of all 1s is
+both the natural value to return for unsigned divide, representing the
+largest unsigned number, and also the natural result for simple unsigned
+divider implementations. Signed division is often implemented using an
+unsigned division circuit and specifying the same overflow result
+simplifies the hardware.
+====
+
+//

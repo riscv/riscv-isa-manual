@@ -1,0 +1,64 @@
+---
+name: Commit Signing Check
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - converted_to_draft
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  signing_check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for unsigned commits
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              console.log('Could not get pull request from context, exiting');
+              return;
+            }
+            const { data: commits } = await github.rest.pulls.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const unsignedCommits = commits.filter(
+              (commit) => !commit.commit.verification.verified
+            );
+
+            if (unsignedCommits.length > 0) {
+              const comment = `
+                :warning: Unsigned Commits :warning:
+
+                One or more commits in this pull request are not signed.
+                All commits must be signed to be accepted.
+
+                For instructions on how to sign your commits, please see:
+                https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits
+
+                Once you have signed your commits, you will need to force-push your changes.
+              `;
+              try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: comment,
+                });
+              } catch (e) {
+                core.warning(`Unable to post PR comment: ${e instanceof Error ? e.message : String(e)}`);
+              }
+
+              core.setFailed('Commit signing check failed. One or more commits are not signed.');
+            }
