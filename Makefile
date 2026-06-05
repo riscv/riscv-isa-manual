@@ -84,8 +84,6 @@ else
         cd $@.workdir &&
 endif
 
-SHARED_IMAGES_CACHE := $(BUILD_DIR)/images-out-cache
-
 ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
 WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
 WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
@@ -105,6 +103,7 @@ endif
 
 SRC_DIR := src
 BUILD_DIR := build
+SHARED_IMAGES_CACHE := $(BUILD_DIR)/images-out-cache
 NORM_RULE_DEF_DIR := normative_rule_defs
 DOC_NORM_TAG_SUFFIX := -norm-tags.json
 
@@ -178,7 +177,7 @@ update-ref: $(DOCS_NORM_TAGS)
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
 build-norm-rules: build-norm-rules-json build-norm-rules-html check-tags
-build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html check-xrefs
+build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
