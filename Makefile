@@ -44,7 +44,7 @@ endif
 RELEASE_DESCRIPTION_HTML := $(RELEASE_DESCRIPTION).  © RISC-V International, $(YEAR).
 
 DOCKER_BIN ?= docker
-DOCKER_INTERACTIVE=$(shell [ -t 0 ] && echo "-it --init")
+DOCKER_INTERACTIVE=--init $(shell [ -t 0 ] && echo "-t")
 SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
 DOCKER_IMG := ghcr.io/riscv/riscv-docs-base-container-image:latest
 ifneq ($(SKIP_DOCKER),true)
