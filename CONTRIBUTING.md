@@ -37,8 +37,10 @@ https://github.com/riscv/docs-dev-guide
 From the repo root:
 
 ```bash
-make build
+make -j2 build
 ```
+
+NOTE:  If you have a powerful machine with lots of RAM you can use -j4 or higher parallelism settings, however, -j2 is optimal for most machines.
 
 Common targets:
 
@@ -47,6 +49,8 @@ make build-pdf
 make build-html
 make build-epub
 ```
+
+NOTE:  For local development, it's recommended to target build-html throughout your development process.  The HTML output is the priority format and generating the PDF consumes considerable resources increasing build time to over 8 minutes typically.
 
 Outputs land in the `build/` directory.
 
@@ -97,7 +101,7 @@ ssh-add ~/.ssh/id_ed25519
 ```bash
 cat ~/.ssh/id_ed25519.pub
 ```
-GitHub → Settings → **SSH and GPG keys** → **New SSH key**  
+GitHub → Settings → **SSH and GPG keys** → **New SSH key**
 Key type: **Signing key**
 
 ### 3. Configure Git to use SSH signing
