@@ -84,16 +84,21 @@ else
         cd $@.workdir &&
 endif
 
+SHARED_IMAGES_CACHE := $(BUILD_DIR)/images-out-cache
+
 ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
 WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
 WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
 else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
-    mkdir -p $@.workdir && \
+    mkdir -p $@.workdir/build/images-out && \
+    mkdir -p $(SHARED_IMAGES_CACHE) && \
+    cp -n $(SHARED_IMAGES_CACHE)/* $@.workdir/build/images-out/ 2>/dev/null; true && \
     ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
 
 WORKDIR_TEARDOWN = \
+    cp -n $@.workdir/build/images-out/* $(SHARED_IMAGES_CACHE)/ 2>/dev/null; true && \
     mv $@.workdir/$@ $@ && \
     rm -rf $@.workdir
 endif
@@ -239,5 +244,5 @@ docker-pull-latest:
 
 clean:
 	@echo "Cleaning up generated files..."
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(SHARED_IMAGES_CACHE)
 	@echo "Cleanup completed."
