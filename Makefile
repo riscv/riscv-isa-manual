@@ -154,6 +154,7 @@ REQUIRES := --require=asciidoctor-bibtex \
 WEB_PDF_CSS := $(abspath src/themes/riscv-web-pdf.css)
 WEB_PDF_OPTIONS := \
            -r ./src/lib/diagram-extensions.js \
+           -r ./src/lib/macros-extensions.js \
            -a revnumber='$(DATE)' \
            -a monthyear='$(MONTHYEAR)' \
            -a revcite='$(CITATION_DESCRIPTION)' \
@@ -167,6 +168,9 @@ WEB_PDF_OPTIONS := \
 # Puppeteer downloads Chrome to ~/.cache/puppeteer by default. In some environments
 # (read-only /usr, sandboxed home) that path isn't writable; point it at the repo instead.
 export PUPPETEER_CACHE_DIR := $(abspath .cache)
+# The full RISC-V spec is large; give Puppeteer enough time to render it.
+export PUPPETEER_NAVIGATION_TIMEOUT := 120000
+export PUPPETEER_RENDERING_TIMEOUT := 300000
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-web-pdf build-html build-epub build-tags docker-pull-latest submodule-check
 .PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref

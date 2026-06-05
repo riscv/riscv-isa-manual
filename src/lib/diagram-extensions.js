@@ -61,22 +61,41 @@ function renderBytefield (source) {
 // Both wavedrom and bytefield-svg emit hard-coded pixel widths (e.g.
 // width="800") on the root <svg> element.  In Chromium's renderer, explicit
 // SVG attributes override CSS, so max-width rules have no effect.  We replace
-// the fixed width with "100%" and drop the fixed height (letting viewBox
-// drive the aspect ratio) so paged.js can fit the diagram to the text area.
+// the fixed width with "100%" and remove the fixed height attribute entirely
+// (letting viewBox drive the aspect ratio) so paged.js can fit the diagram
+// to the text area.  Setting height="auto" is invalid SVG and Chromium rejects it.
 // ---------------------------------------------------------------------------
 function normaliseSvgDimensions (svg) {
   return svg
     .replace(/(<svg\b[^>]*)\bwidth="[^"]*"/,  '$1width="100%"')
-    .replace(/(<svg\b[^>]*)\bheight="[^"]*"/, '$1height="auto"')
+    .replace(/(<svg\b[^>]*)\s+height="[^"]*"/, '$1')
 }
 
 // ---------------------------------------------------------------------------
-// Wrap SVG in a figure-like div so CSS can target it the same way as images
+// Convert SVG to a data-URI <img> so paged.js treats it as atomic replaced
+// content rather than traversing its DOM subtree for page-break calculations.
+// With 400+ diagrams in the full spec, inline SVGs create a massive DOM that
+// causes paged.js to time out; opaque <img> elements are laid out trivially.
+// ---------------------------------------------------------------------------
+function svgToImgTag (svg) {
+  const normSvg    = normaliseSvgDimensions(svg)
+  // Extract viewBox to set an explicit aspect ratio via width/height attrs on
+  // the <img> so browsers can reserve the correct space before the image loads.
+  const vbMatch    = normSvg.match(/viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"/)
+  const sizeAttrs  = vbMatch
+    ? ` width="${vbMatch[1]}" height="${vbMatch[2]}"`
+    : ''
+  const dataUri    = 'data:image/svg+xml;base64,' +
+    Buffer.from(normSvg).toString('base64')
+  return `<img src="${dataUri}"${sizeAttrs} alt="diagram" style="max-width:100%;height:auto;">`
+}
+
+// ---------------------------------------------------------------------------
+// Wrap diagram in a figure-like div so CSS can target it the same way as images
 // ---------------------------------------------------------------------------
 function wrapSvg (svg, attrs) {
-  const normSvg = normaliseSvgDimensions(svg)
-  const title   = attrs.title ? `<div class="diagram-title">${attrs.title}</div>` : ''
-  return `<div class="imageblock diagram">\n<div class="content">${normSvg}</div>\n${title}\n</div>`
+  const title = attrs.title ? `<div class="diagram-title">${attrs.title}</div>` : ''
+  return `<div class="imageblock diagram">\n<div class="content">${svgToImgTag(svg)}</div>\n${title}\n</div>`
 }
 
 // ---------------------------------------------------------------------------
