@@ -114,6 +114,7 @@ ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
 
 ASCIIDOCTOR_PDF := $(ENV) asciidoctor-pdf
+ASCIIDOCTOR_WEB_PDF := $(ENV) node_modules/.bin/asciidoctor-web-pdf
 ASCIIDOCTOR_HTML := $(ENV) asciidoctor
 ASCIIDOCTOR_EPUB := $(ENV) asciidoctor-epub3
 ASCIIDOCTOR_TAGS := $(ENV) asciidoctor --backend tags --require=./docs-resources/converters/tags.rb
@@ -143,7 +144,31 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-mathematical \
             --require=asciidoctor-sail
 
-.PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
+# Options for asciidoctor-web-pdf (no Ruby extensions; CSS theme replaces YAML theme)
+# Note: asciidoctor-web-pdf uses Asciidoctor.js so Ruby --require extensions are not
+# supported. The stylesheet attribute uses "+" prefix to extend the default styles.
+# An absolute path is required because the stylesheet is resolved relative to the
+# input file's directory (src/), not the Makefile's working directory.
+# The theme lives in src/themes/ (not the docs-resources submodule) so this repo
+# is self-contained and requires no submodule changes.
+WEB_PDF_CSS := $(abspath src/themes/riscv-web-pdf.css)
+WEB_PDF_OPTIONS := \
+           -r ./src/lib/diagram-extensions.js \
+           -a revnumber='$(DATE)' \
+           -a monthyear='$(MONTHYEAR)' \
+           -a revcite='$(CITATION_DESCRIPTION)' \
+           -a revremark='$(RELEASE_DESCRIPTION)' \
+           -a docinfo=shared \
+           -a "stylesheet=+$(WEB_PDF_CSS)" \
+           $(WATERMARK_OPT) \
+           $(XTRA_ADOC_OPTS) \
+           --failure-level=FATAL
+
+# Puppeteer downloads Chrome to ~/.cache/puppeteer by default. In some environments
+# (read-only /usr, sandboxed home) that path isn't writable; point it at the repo instead.
+export PUPPETEER_CACHE_DIR := $(abspath .cache)
+
+.PHONY: all build clean build-container build-no-container build-docs build-pdf build-web-pdf build-html build-epub build-tags docker-pull-latest submodule-check
 .PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref
 
 all: build
@@ -155,7 +180,10 @@ ifeq ("$(wildcard docs-resources/global-config.adoc)","")
   $(shell git submodule update --init --recursive)
 endif
 
+DOCS_WEB_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix -web.pdf, $(DOCS)))
+
 build-pdf: $(DOCS_PDF)
+build-web-pdf: $(DOCS_WEB_PDF)
 build-html: $(DOCS_HTML)
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
@@ -196,6 +224,13 @@ $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
+
+# asciidoctor-web-pdf target — runs locally (no Docker), no Ruby extensions
+# Output is build/<doc>-web.pdf to coexist with the standard build/<doc>.pdf
+$(BUILD_DIR)/%-web.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+	@mkdir -p $(BUILD_DIR)
+	$(ASCIIDOCTOR_WEB_PDF) $(WEB_PDF_OPTIONS) -o $@ $<
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
