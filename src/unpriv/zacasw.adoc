@@ -1,0 +1,79 @@
+[[ext:zacasw]]
+=== ext:zacasw[] Extension for Word CAS Instructions
+
+The ext:zacasw[] extension defines the insn:amocas.w[] instruction for
+compare-and-swap on 32-bit data values. The ext:zacasw[] extension depends upon
+the ext:zaamo[] extension.
+
+==== Word CAS (insn:amocas.w[]) Instruction
+
+[wavedrom, , svg]
+....
+{reg: [
+  {bits:  7, name: 'opcode', attr:'AMO'},
+  {bits:  5, name: 'rd', attr:'dest'},
+  {bits:  3, name: '010', attr:'AMOCAS.W'},
+  {bits:  5, name: 'rs1', attr:'addr'},
+  {bits:  5, name: 'rs2', attr:'src'},
+  {bits:  1, name: 'rl'},
+  {bits:  1, name: 'aq'},
+  {bits:  5, name: '00101', attr:'AMOCAS'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+[#norm:Zacasw_rv32_amocas-w_op]#For RV32, insn:amocas.w[] atomically loads a 32-bit data value from address in `rs1`,
+compares the loaded value to the 32-bit value held in `rd`, and if the comparison
+is bitwise equal, then stores the 32-bit value held in `rs2` to the original
+address in `rs1`. The value loaded from memory is placed into register `rd`.# The
+operation performed by insn:amocas.w[] for RV32 is as follows:
+
+[listing]
+----
+    temp = mem[X(rs1)]
+    if ( temp == X(rd) )
+        mem[X(rs1)] = X(rs2)
+    X(rd) = temp
+----
+
+[#norm:Zacasw_rv64_amocas-w_op]#For RV64, insn:amocas.w[] atomically loads a 32-bit data value from address in
+`rs1`, compares the loaded value to the lower 32 bits of the value held in `rd`,
+and if the comparison is bitwise equal, then stores the lower 32 bits of the
+value held in `rs2` to the original address in `rs1`. The 32-bit value loaded
+from memory is sign-extended and is placed into register `rd`.# The operation
+performed by insn:amocas.w[] for RV64 is as follows:
+
+[listing]
+    temp[31:0] = mem[X(rs1)]
+    if ( temp[31:0] == X(rd)[31:0] )
+        mem[X(rs1)] = X(rs2)[31:0]
+    X(rd) = SignExtend(temp[31:0])
+
+Just as for AMOs in the ext:zaamo[] extension,
+[#norm:Zacasw_amocas-w_rs1_addr_alignment]#insn:amocas.w[] requires that the address
+held in `rs1` be naturally aligned to the size of the operand (i.e., four-byte
+aligned for _words_).# And the same exception options apply if the address
+is not naturally aligned.
+
+Just as for AMOs in the ext:zaamo[] extension, insn:amocas.w[] optionally provides
+release consistency semantics, using the `aq` and `rl` bits, to help implement
+multiprocessor synchronization. [#norm:Zacasw_amocas-w_mem_op_success_aq_rl]#The memory operation performed by
+insn:amocas.w[], when successful, has acquire semantics if `aq` bit is 1 and has
+release semantics if `rl` bit is 1.# [#norm:Zacasw_amocas-w_mem_op_fail_aq_rl]#The memory operation performed by
+insn:amocas.w[], when not successful, has acquire semantics if `aq` bit is 1 but
+does not have release semantics, regardless of `rl`.#
+
+A insn:fence[] instruction may be used to order the memory read access and, if
+produced, the memory write access by an insn:amocas.w[] instruction.
+
+[NOTE]
+====
+An unsuccessful insn:amocas.w[] may either not perform a memory write or may
+write back the old value loaded from memory. The memory write, if produced, does
+not have release semantics, regardless of `rl`.
+Irrespective of whether a write is actually performed, the instruction is
+treated as an AMO for the purposes of the RVWMO PPO rules.
+====
+
+[#norm:Zacasw_amocas-w_permission]#An insn:amocas.w[] instruction always requires write permissions.#
+
+//

@@ -1,0 +1,94 @@
+[[ext:zacasq]]
+=== ext:zacasq[] Extension for Quadword CAS Instructions
+
+The ext:zacasq[] extension defines the insn:amocas.q[] instruction for
+compare-and-swap on 128-bit data values (RV64 only). [#norm:Zacasq_depends_on_zacasd]#The ext:zacasq[] extension
+depends upon the ext:zacasd[] extension.#
+
+==== Quadword CAS (insn:amocas.q[]) Instruction
+
+[wavedrom, , svg]
+....
+{reg: [
+  {bits:  7, name: 'opcode', attr:'AMO'},
+  {bits:  5, name: 'rd', attr:'dest'},
+  {bits:  3, name: '100', attr:'AMOCAS.Q'},
+  {bits:  5, name: 'rs1', attr:'addr'},
+  {bits:  5, name: 'rs2', attr:'src'},
+  {bits:  1, name: 'rl'},
+  {bits:  1, name: 'aq'},
+  {bits:  5, name: '00101', attr:'AMOCAS'},
+], config:{lanes: 1, hspace:1024}}
+....
+
+[#norm:Zacasq_rv64_amocas-q_op]#insn:amocas.q[] (RV64 only) atomically loads 128-bits of a data value from address in
+`rs1`, compares the loaded value to a 128-bit value held in a register pair
+consisting of `rd` and `rd+1`, and if the comparison is bitwise equal, then
+stores the 128-bit value held in the register pair `rs2` and `rs2+1` to the
+original address in `rs1`. The value loaded from memory is placed into the
+register pair `rd` and `rd+1`.# [#norm:Zacasq_rv64_amocas-q_frst_pair_entry_reg_even]#The instruction requires the first register in
+the pair to be even numbered; encodings with odd numbered registers specified in
+`rs2` and `rd` are reserved.# [#norm:Zacasq_rv64_amocas-q_rs2_frst_reg_x0]#When the first register of a source register pair
+is `x0`, then both halves of the pair read as zero.# [#norm:Zacasq_rv64_amocas-q_rd_frst_reg_x0]#When the first register of a
+destination register pair is `x0`, then the entire register result is discarded
+and neither destination register is written.# The operation performed by
+insn:amocas.q[] is as follows:
+
+<<<
+
+[listing]
+    temp0 = mem[X(rs1)+0]
+    temp1 = mem[X(rs1)+8]
+    comp0 = (rd == x0)  ? 0 : X(rd)
+    comp1 = (rd == x0)  ? 0 : X(rd+1)
+    swap0 = (rs2 == x0) ? 0 : X(rs2)
+    swap1 = (rs2 == x0) ? 0 : X(rs2+1)
+    if ( temp0 == comp0 ) && ( temp1 == comp1 )
+        mem[X(rs1)+0] = swap0
+        mem[X(rs1)+8] = swap1
+    endif
+    if ( rd != x0 )
+        X(rd)   = temp0
+        X(rd+1) = temp1
+    endif
+
+[NOTE]
+====
+Some algorithms may load the previous data value of a memory location into the
+register used as the compare data value source by a ext:zacasq[] instruction. When
+using insn:amocas.q[], which uses a register pair to source the compare value,
+the two registers may be loaded using two individual loads. The two individual
+loads may read an inconsistent pair of values but that is not an issue since the
+insn:amocas.q[] operation itself uses an atomic load-pair from memory to obtain
+the data value for its comparison.
+====
+
+Just as for AMOs in the ext:zaamo[] extension,
+[#norm:Zacasq_amocas-q_rs1_addr_alignment]#insn:amocas.q[] requires that the address
+held in `rs1` be naturally aligned to the size of the operand (i.e., 16-byte
+aligned for _quadwords_).# And the same exception options apply if the address
+is not naturally aligned.
+
+Just as for AMOs in the ext:zaamo[] extension, insn:amocas.q[] optionally provides
+release consistency semantics, using the `aq` and `rl` bits, to help implement
+multiprocessor synchronization. [#norm:Zacasq_amocas-q_mem_op_success_aq_rl]#The memory operation performed by
+insn:amocas.q[], when successful, has acquire semantics if `aq` bit is 1 and has
+release semantics if `rl` bit is 1.# [#norm:Zacasq_amocas-q_mem_op_fail_aq_rl]#The memory operation performed by
+insn:amocas.q[], when not successful, has acquire semantics if `aq` bit is 1 but
+does not have release semantics, regardless of `rl`.#
+
+A insn:fence[] instruction may be used to order the memory read access and, if
+produced, the memory write access by an insn:amocas.q[] instruction.
+
+[NOTE]
+====
+An unsuccessful insn:amocas.q[] may either not perform a memory write or may
+write back the old value loaded from memory. The memory write, if produced, does
+not have release semantics, regardless of `rl`.
+Irrespective of whether a write is actually performed, the instruction is
+treated as an AMO for the purposes of the RVWMO PPO rules.
+====
+
+[#norm:Zacasq_amocas-q_permission]#An insn:amocas.q[] instruction always requires write permissions.#
+
+//
