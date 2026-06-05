@@ -41,10 +41,45 @@ jobs:
       - name: Get current date
         run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
+    # Cache generated diagram SVGs across runs. Key on all source files so any
+    # content change that could affect diagrams invalidates the cache. The
+    # restore-key fallback gives a partial hit when only some files changed,
+    # which still skips generation for unchanged diagrams.
+      - name: Cache diagram images
+        uses: actions/cache@v4
+        with:
+          path: build/images-out-cache
+          key: diagrams-${{ hashFiles('src/**') }}
+          restore-keys: |
+            diagrams-
+
+    # Cache the Docker image to avoid a full pull on every run.
+      - name: Cache Docker image
+        id: docker-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/riscv-docs-image.tar
+          key: docker-${{ hashFiles('.github/workflows/isa-build.yml') }}
+
+      - name: Load or pull Docker image
+        run: |
+          if [ -f /tmp/riscv-docs-image.tar ]; then
+            docker load < /tmp/riscv-docs-image.tar
+          else
+            docker pull ghcr.io/riscv/riscv-docs-base-container-image:latest
+            docker save ghcr.io/riscv/riscv-docs-base-container-image:latest > /tmp/riscv-docs-image.tar
+          fi
+
     # Build PDF and HTML ISA manual versions and normative rule files using the container
       - name: Build Files
         id: build_files
         run: make -j$(nproc)
+
+    # Check cross-references (removed from default build target to avoid a
+    # redundant full HTML pass locally, but kept here for CI validation).
+      - name: Check cross-references
+        if: steps.build_files.outcome == 'success'
+        run: make check-xrefs
 
     # Upload the riscv-spec PDF file
       - name: Upload riscv-spec.pdf
