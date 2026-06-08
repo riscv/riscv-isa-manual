@@ -90,20 +90,16 @@ WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
 else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
-    mkdir -p $@.workdir/build/images-out && \
-    mkdir -p $(SHARED_IMAGES_CACHE) && \
-    cp -n $(SHARED_IMAGES_CACHE)/* $@.workdir/build/images-out/ 2>/dev/null; true && \
+    mkdir -p $@.workdir && \
     ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
 
 WORKDIR_TEARDOWN = \
-    cp -n $@.workdir/build/images-out/* $(SHARED_IMAGES_CACHE)/ 2>/dev/null; true && \
     mv $@.workdir/$@ $@ && \
     rm -rf $@.workdir
 endif
 
 SRC_DIR := src
 BUILD_DIR := build
-SHARED_IMAGES_CACHE := $(BUILD_DIR)/images-out-cache
 NORM_RULE_DEF_DIR := normative_rule_defs
 DOC_NORM_TAG_SUFFIX := -norm-tags.json
 
@@ -243,5 +239,5 @@ docker-pull-latest:
 
 clean:
 	@echo "Cleaning up generated files..."
-	rm -rf $(BUILD_DIR) $(SHARED_IMAGES_CACHE)
+	rm -rf $(BUILD_DIR)
 	@echo "Cleanup completed."
