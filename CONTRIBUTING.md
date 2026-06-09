@@ -52,6 +52,14 @@ make build-epub
 
 NOTE:  For local development, it's recommended to target build-html throughout your development process.  The HTML output is the priority format and generating the PDF consumes considerable resources increasing build time to over 8 minutes typically.
 
+When iterating on spec changes locally, you can significantly speed up incremental rebuilds by using:
+
+```bash
+make build-html UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS=1
+```
+
+This skips the clean-workdir step between builds, so unchanged files are not reprocessed.  As the name implies, this is not guaranteed to catch all changes in every scenario — use a clean build (`make build-html`) before opening a PR.
+
 Outputs land in the `build/` directory.
 
 ## Contributing changes
