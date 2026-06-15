@@ -191,6 +191,54 @@ The Zvvm family of Integrated Matrix extensions defines the following additional
 * `altfmt_A` at `vtype[XLEN-6]` is the Alternate Format for input A
 * `altfmt_B` at `vtype[XLEN-7]` is the Alternate Format for input B
 
+[#integrated-matrix-vtype-config]
+==== Interaction with vector configuration instructions
+
+The IME fields `lambda[2:0]`, `bs`, `altfmt_A`, and `altfmt_B`
+are outside the `vtypei` immediate field of `vsetvli` and
+`vsetivli`.
+
+The `vsetvli` and `vsetivli` instructions write the standard
+Vector fields encoded in `vtypei`, including `vsew`, `vlmul`,
+`vta`, and `vma`, and set `vl` according to the rules of the
+base Vector extension. They do not directly write the IME fields
+`lambda[2:0]`, `bs`, `altfmt_A`, or `altfmt_B`.
+
+On execution of `vsetvli` or `vsetivli`, the `bs`, `altfmt_A`,
+and `altfmt_B` fields retain their previous values.
+
+On execution of `vsetvli` or `vsetivli`, the `lambda[2:0]` field
+retains its previous value if that value is supported for the
+resulting `VLEN`, `SEW`, and `LMUL` configuration. If the previous
+nonzero `lambda` value is not supported for the resulting
+configuration, `lambda[2:0]` is WARL-canonicalized according to
+the rule in <<integrated-matrix-lambda>>. If no nonzero `lambda`
+value is supported for the resulting configuration, `lambda[2:0]`
+is set to `000`.
+
+The `vsetvl` instruction writes a complete `vtype` value from
+`rs2`, including the IME fields `lambda[2:0]`, `bs`, `altfmt_A`,
+and `altfmt_B`. Therefore, `vsetvl` is the architectural mechanism
+for setting or restoring IME `vtype` fields that are outside the
+`vsetvli` and `vsetivli` immediate field.
+
+A `vsetvl` write of `lambda[2:0]` is subject to the same
+WARL-canonicalization rule as any other write of `lambda[2:0]`.
+The `bs`, `altfmt_A`, and `altfmt_B` fields are written as supplied
+by `rs2`. The legality of particular `bs`, `altfmt_A`, and
+`altfmt_B` combinations is checked by the IME instruction that
+uses those fields.
+
+[NOTE]
+====
+The base Vector specification describes `vsetvl` as the
+configuration instruction used for context restore because it
+takes a complete `vtype` value from `rs2`. In IME, `vsetvl` is
+also the standard configuration instruction used to write IME
+`vtype` fields that are above the `vtypei` immediate field of
+`vsetvli` and `vsetivli`.
+====
+
 ==== Selected lambda (`lambda[2:0]`) field
 
 The `lambda[2:0]` field is a 3-bit WARL read/write field in the `vtype` CSR that holds the dynamic _selected lambda_ — the tile-layout parameter that determines the geometry of the accumulator tile C and, together with W and LMUL, the effective K dimension K_eff = λ × W × LMUL.
@@ -214,6 +262,20 @@ One discovery mechanism is to attempt to program different values and read back 
 | 1 | 1 | 0 |   32
 | 1 | 1 | 1 |   64
 |===
+
+[#integrated-matrix-lambda]
+A nonzero write to `lambda[2:0]` requests the corresponding
+lambda value. If the requested value is supported for the current
+`VLEN`, `SEW`, and `LMUL` configuration, that value is retained.
+If the requested value is not supported, the implementation shall
+set `lambda[2:0]` to the largest supported nonzero lambda value
+that is less than or equal to the requested value. If no such value exists,
+`lambda[2:0]` shall be set to `000`.
+
+The `000` encoding denotes that no nonzero lambda value is
+currently selected. Base Vector instructions may execute with this
+encoding, but any IME instruction that requires a selected lambda
+raises an illegal-instruction exception when `lambda[2:0] = 000`.
 
 ==== Alternate floating-point format for the output (`altfmt`)
 
@@ -243,12 +305,13 @@ The `altfmt_A` and `altfmt_B` fields are 1-bit read/write fields added to the `v
 They select the interpretation of elements in input matrices A and B, respectively.
 Their meaning depends on whether the instruction is a floating-point or integer multiply-accumulate.
 
-The `altfmt_A` and `altfmt_B` bits are located at `vtype[XLEN-6]` and
-`vtype[XLEN-7]`, immediately below the `bs` field.
-These positions are outside the `vsetvli` or `vsetivli` immediate field and must be
-configured via `vsetvl` (with the full `vtype` value in a register).
-The currently unused bits adjacent to `altfmt_B` can be used to extend the data type
-selection in future.
+The `altfmt_A` and `altfmt_B` bits are located at
+`vtype[XLEN-6]` and `vtype[XLEN-7]`, immediately below the
+`bs` field. These positions are outside the `vtypei` immediate
+field of `vsetvli` and `vsetivli`; they cannot be written directly
+by those instructions. They are written by `vsetvl`, which supplies
+a full `vtype` value in `rs2`, and are preserved by `vsetvli` and
+`vsetivli` as described in <<integrated-matrix-vtype-config>>.
 
 ===== Floating-point instructions
 
@@ -1527,8 +1590,11 @@ The set of supported lambda values is a function of
 (`VLEN`, `SEW`, `LMUL`); when `SEW` or `LMUL` changes — including through
 a `vsetvli` or `vsetivli` that does not write the lambda bits — the
 hardware may re-clamp lambda under WARL.
-Portable code re-establishes (or re-reads) lambda after any `vsetvl`-family
-call by calling `__riscv_vsetlambda` and checking the return value.
+
+Portable code that depends on a specific lambda value shall
+re-establish or re-read lambda, by calling `__riscv_vsetlambda`, after any `vsetvli` or `vsetivli`
+that may change `SEW` or `LMUL`, and after any `vsetvl` whose
+`rs2` value is not known to contain the desired lambda.
 
 [NOTE]
 ====
@@ -1558,13 +1624,14 @@ A toolchain whose `vsetvl` pass tracks `vtype` as a tuple of
 | The compiler cannot prove `requested_lambda != 0` in general; conservative may-DEF has the same dataflow effect as DEF for ordering and prevents hoisting of `lambda`-using operations.
 |===
 
-`vsetvli` and `vsetivli` should be modelled as may-DEFs of `lambda`
-even though they do not write the `lambda` field directly: a change to
-`SEW` or `LMUL` can cause the hardware to re-clamp lambda under WARL,
-so software (and the compiler) cannot rely on lambda surviving across
-those instructions.
-`vsetvl` (register form) is a full vtype write and is therefore a hard
-DEF of `lambda`.
+A compiler may conservatively model `vsetvli` and `vsetivli` as
+may-DEFs of `lambda`, because a change to `SEW` or `LMUL` can
+cause lambda to be WARL-canonicalized. These instructions preserve
+`bs`, `altfmt_A`, and `altfmt_B`.
+
+The `vsetvl` instruction is a full `vtype` write and should be
+modeled as a hard DEF of all `vtype` fields, including `lambda`,
+`bs`, `altfmt_A`, and `altfmt_B`.
 
 The corollary is that the standard `vsetvl`-elimination optimisation
 generalises to lambda without special-casing: a `__riscv_vsetlambda`
