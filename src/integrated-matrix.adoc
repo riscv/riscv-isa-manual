@@ -67,6 +67,14 @@ However, `EMUL_C` is derived from the tile geometry (`VLEN`, `SEW`, `λ`) rather
 In particular, `EMUL_C = 16` lies outside the value set permitted for the per-operand `EMUL` of base V instructions; the C operand is therefore aligned and indexed analogously to a V `EMUL`-grouped operand but with an extended value range.
 ====
 
+[NOTE]
+====
+For the C-language intrinsic interface, `EMUL_C = 16` is represented
+by IME-only `m16` accumulator types. These types do not imply that
+`LMUL=16` is a legal `vtype` setting, and they are not ordinary RVV
+vector intrinsic types. See <<integrated-matrix-ime-m16-types>>.
+====
+
 * The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
   equal to SEW for non-widening variants (`W=1`), and equal to SEW/2, SEW/4, or SEW/8 for widening variants (`W=2`, `W=4`, or `W=8`), with the narrower input elements packed within each `SEW`-wide storage position.
   The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-widening instructions, 2 for 2× widening instructions, 4 for 4× widening instructions, and 8 for 8× widening instructions.
@@ -1447,24 +1455,47 @@ The naming convention and type system extend the RISC-V V Intrinsics API
 (RISC-V International, _RISC-V V Intrinsics API Specification_):
 
 * Function names take the form `__riscv_{mnemonic}_{type-suffix}`.
-* The _type-suffix_ encodes the *accumulator C* (for multiply-accumulate),
-  *destination* (for loads), or *source-vector* (for stores) element type
-  and register-group multiplier, using the same codes as the RISC-V V
-  intrinsics: `i8m1` → `vint8m1_t`, `f32m2` → `vfloat32m2_t`,
-  `u16m4` → `vuint16m4_t`, etc.
-  For multiply-accumulate intrinsics the register-group multiplier encoded in
-  the type-suffix is EMUL_C (= VLEN ÷ (SEW × λ²)), which is determined by the
-  implementation's VLEN and is _independent of LMUL_.
-* When EMUL_C ≠ LMUL for a multiply-accumulate intrinsic, a `_lm{N}` qualifier
-  (N ∈ {1, 2, 4, 8}) is appended to the intrinsic name to specify LMUL.
-  The `_lm1` qualifier may be omitted; LMUL=1 is the default when no qualifier
-  is present.
-  The vs1 and vs2 argument types directly reflect LMUL: `vX{EEW}m{LMUL}_t`.
+
+* The _type-suffix_ encodes the *accumulator C* type for
+  multiply-accumulate intrinsics, and the destination/source register
+  group type for tile load/store intrinsics.
+
+For register-group multipliers `m1`, `m2`, `m4`, and `m8`, the
+type suffixes use the same spelling as the RISC-V V intrinsics:
+`i8m1` → `vint8m1_t`, `f32m2` → `vfloat32m2_t`,
+`u16m4` → `vuint16m4_t`, etc.
+
+IME additionally defines `m16` type suffixes for accumulator register
+groups with `EMUL_C = 16`. An `m16` suffix in an IME
+multiply-accumulate intrinsic denotes an IME accumulator register
+group occupying sixteen consecutive vector registers. It does not
+denote `vtype.LMUL = 16`.
+
+* For multiply-accumulate intrinsics, the register-group multiplier
+encoded in the accumulator type suffix is `EMUL_C` =  `VLEN` ÷ (`SEW` × λ²), which is determined by `VLEN`, `SEW`,
+and the selected `lambda`, and is _independent_ of `LMUL`.
+
+* A `_lm{N}` qualifier (`N` ∈ {1, 2, 4, 8}) is appended to the
+intrinsic name to specify the `LMUL` used by the A and B input
+operands. The `_lm1` qualifier may be omitted; `LMUL=1` is the
+default when no qualifier is present. The `vs1` and `vs2` argument
+types directly reflect `LMUL`: `vX{EEW}m{LMUL}_t`.
+
+* For tile load/store intrinsics, the register-group multiplier in
+the type suffix denotes the `vtype.LMUL` used by the load/store
+instruction. Since `LMUL=16` is not a legal `vtype` setting, no
+single-instruction `m16` tile load/store intrinsic is defined.
+Software may use the IME pair/unpair intrinsics described in
+<<integrated-matrix-ime-m16-pairing>> when it needs to compose or
+decompose an `m16` accumulator value from `m8` halves.
+
 * Every intrinsic accepts a final `size_t vl` argument equal to the value
   returned by the immediately preceding `vsetvl` call.
+
 * All intrinsics are implicitly barrier-like with respect to the vector
   register file: the compiler must not reorder them across other vector
   operations that touch the same register state.
+
 * When the input element type is non-ISO (BFloat16, OFP8, OFP4, or Int4),
   the input-type name and register-group multiplier are appended as a suffix
   (`_{type}m{LMUL}`) to the intrinsic name, even for the default `altfmt=0`
@@ -1472,16 +1503,136 @@ The naming convention and type system extend the RISC-V V Intrinsics API
   When the input type is a standard IEEE floating-point format (FP16, FP32,
   FP64) or a standard-width integer (Int8–Int64), no input-type suffix is
   needed for the default encoding.
+
 * When `altfmt_A ≠ altfmt_B` (mixed input formats), both input-type suffixes
   appear separated by an underscore, with the A suffix first:
   `__riscv_{mnemonic}_vv_{accum}_{inputA}_{inputB}`.
   When `altfmt_A = altfmt_B`, a single input-type suffix suffices.
-* The canonical suffix ordering for the long-form name is:
-  `{type-suffix}[_{inputA}[_{inputB}]][_su|_us][_lm{N}][_L{N}][_m]`
-  where each bracketed component is omitted when not applicable.
-  The `_m` (masked) suffix is reserved for tile load/store intrinsics
-  and always appears last; `_L{N}` (immediate-lambda) and `_m` are
-  orthogonal and may be combined as `_L{N}_m`.
+
+* The canonical suffix ordering for multiply-accumulate long-form
+names is:
+
+----
+{type-suffix}[_{inputA}[_{inputB}]][_su|_us][_lm{N}]
+----
+
+where each bracketed component is omitted when not applicable.
+
+* The canonical suffix ordering for tile load/store long-form names is:
+
+----
+{type-suffix}[_as_e{S}][_L{N}][_m]
+----
+
+The optional `_as_e{S}` qualifier is defined in
+<<integrated-matrix-storage-width-load-store-intrinsics>>. The
+`_L{N}` immediate-lambda qualifier precedes `_m`, and `_m` always
+appears last.
+
+[#integrated-matrix-ime-m16-types]
+===== IME-only `m16` accumulator types
+
+IME defines additional `m16` accumulator types for use by IME
+multiply-accumulate intrinsics when `EMUL_C = 16`.
+
+An IME `m16` type denotes a sixteen-register accumulator group.
+It is not an ordinary RVV vector intrinsic type, and it does not
+imply that `LMUL=16` is a legal `vtype` setting. The `LMUL` used
+by the A and B input operands remains specified by the `_lm{N}`
+qualifier or, in overloaded forms, by the `vs1` and `vs2` argument
+types.
+
+For each accumulator element type supported by IME, the C API
+defines an `m16` type when the corresponding `m1`, `m2`, `m4`,
+and `m8` accumulator types are defined. Examples include:
+
+[source,c]
+----
+vint8m16_t
+vint16m16_t
+vint32m16_t
+vint64m16_t
+
+vfloat8e4m3m16_t
+vfloat8e5m2m16_t
+vfloat16m16_t
+vbfloat16m16_t
+vfloat32m16_t
+vfloat64m16_t
+----
+
+An IME `m16` type is valid as:
+
+* the accumulator operand and result type of an IME
+  multiply-accumulate intrinsic when `EMUL_C = 16`;
+* the operand or result type of the IME pair/unpair intrinsics
+  described in <<integrated-matrix-ime-m16-pairing>>;
+* a compiler-managed temporary, assignment, or copy object when
+  supported by the implementation.
+
+An IME `m16` type is not valid as the operand type of ordinary RVV
+arithmetic intrinsics. The IME C API does not define ordinary
+`vsetvl_e{SEW}m16`, `vsetvlmax_e{SEW}m16`, `vle{SEW}_v_*m16`,
+or `vse{SEW}_v_*m16` intrinsics.
+
+[#integrated-matrix-ime-m16-pairing]
+===== Pairing and unpairing `m16` accumulator values
+
+IME defines pair/unpair pseudo-intrinsics that allow software to
+compose an IME `m16` accumulator value from two `m8` values, and
+to decompose an IME `m16` accumulator value into two `m8` values.
+
+These intrinsics are compiler builtins or pseudo-intrinsics; they
+do not correspond to new ISA instructions. They do not read or
+write memory, do not change `vl`, `vtype`, `vstart`, or `fflags`,
+and do not perform numeric conversion.
+
+[source,c]
+----
+/* Representative long-form examples. */
+
+vint32m16_t
+__riscv_ime_vpair_i32m16(vint32m8_t lo, vint32m8_t hi);
+
+vint32m8_t
+__riscv_ime_vunpairlo_i32m16(vint32m16_t src);
+
+vint32m8_t
+__riscv_ime_vunpairhi_i32m16(vint32m16_t src);
+
+
+vfloat32m16_t
+__riscv_ime_vpair_f32m16(vfloat32m8_t lo, vfloat32m8_t hi);
+
+vfloat32m8_t
+__riscv_ime_vunpairlo_f32m16(vfloat32m16_t src);
+
+vfloat32m8_t
+__riscv_ime_vunpairhi_f32m16(vfloat32m16_t src);
+----
+
+The overloaded forms are:
+
+[source,c]
+----
+T_m16 __riscv_ime_vpair(T_m8 lo, T_m8 hi);
+T_m8  __riscv_ime_vunpairlo(T_m16 src);
+T_m8  __riscv_ime_vunpairhi(T_m16 src);
+----
+
+`__riscv_ime_vpair_*m16(lo, hi)` constructs an `m16` accumulator
+value whose low half is the eight-register group `lo` and whose
+high half is the eight-register group `hi`.
+
+`__riscv_ime_vunpairlo_*m16(src)` returns the low eight-register
+half of `src`.
+
+`__riscv_ime_vunpairhi_*m16(src)` returns the high eight-register
+half of `src`.
+
+These operations are bit-preserving register-group operations.
+They do not perform element reordering, rounding, saturation,
+sign extension, zero extension, or floating-point format conversion.
 
 ===== Overloaded short forms (GCC and Clang)
 
@@ -1497,6 +1648,13 @@ no input-type suffix, and no `_su` / `_us` sign suffix is needed in user code.
 The types of the arguments fully determine every variant:
 
 * `vd` type → accumulator SEW and EMUL_C.
+
+An overloaded multiply-accumulate intrinsic may use an IME `m16`
+accumulator type for `vd` when the selected tile geometry gives
+`EMUL_C = 16`. The `vs1` and `vs2` argument types continue to
+determine the A and B input `LMUL`, and therefore use only
+`m1`, `m2`, `m4`, or `m8`.
+
 * `vs1` / `vs2` types → input EEW and LMUL; for integer operations, signed
   vs. unsigned; for floating-point operations, the FP format (e.g., FP16
   vs. BF16 for `altfmt`).
@@ -1518,6 +1676,9 @@ vfloat32m2_t __riscv_vfwmmacc_vv(vfloat32m2_t vd, vbfloat16m1_t vs1, vbfloat16m1
 /* Integer sign combination resolved by vs1/vs2 types — no _su/_us suffix: */
 vint32m2_t __riscv_vwmmacc_vv(vint32m2_t vd, vint16m1_t  vs1, vuint16m1_t vs2, size_t vl) __attribute__((overloadable));
 vint32m2_t __riscv_vwmmacc_vv(vint32m2_t vd, vuint16m1_t vs1, vint16m1_t  vs2, size_t vl) __attribute__((overloadable));
+
+/* EMUL_C=16 accumulator; A/B use LMUL=1. */
+vfloat32m16_t __riscv_vfmmacc_vv(vfloat32m16_t vd, vfloat32m1_t  vs1, vfloat32m1_t  vs2, size_t vl) __attribute__((overloadable));
 --
 
 NOTE: The mechanism used for overload resolution in C is compiler-specific
@@ -1744,6 +1905,64 @@ the same pattern; replace `vmtl` / `vmts` with `vmttl` / `vmtts`.
 All masking (`_m`) and immediate-lambda (`_L{N}`) qualifiers extend to
 these alternate-format intrinsics on the same orthogonal basis.
 
+[#integrated-matrix-storage-width-load-store-intrinsics]
+===== Storage-width-qualified tile load/store intrinsics
+
+For tile load/store intrinsics whose logical element type and storage
+element width are the same, the type suffix alone determines both the
+logical vector type and the `SEW` used by the instruction.
+
+For widening matrix multiply-accumulate instructions, however, the
+logical A and B input elements are narrower than the accumulator
+`SEW`. The tile load/store instruction still transfers memory in
+`SEW`-wide storage positions, and each storage position contains
+multiple packed logical input elements.
+
+To support this case without requiring a separate `vreinterpret`,
+IME defines storage-width-qualified tile load/store intrinsics using
+the suffix `_as_e{S}`, where `S` is the storage element width in bits.
+
+The logical type suffix describes the type of the value returned by
+the load or supplied to the store. The `_as_e{S}` suffix describes
+the `SEW` used by the tile load/store instruction and the width of
+one memory storage element.
+
+The `ld` and `vl` arguments of an `_as_e{S}` intrinsic are counted
+in storage elements of width `S`, not in logical narrow elements.
+No numeric conversion is performed. The operation is a bit-preserving
+load or store of packed storage elements.
+
+[source,c]
+----
+/* FP16 logical elements packed in 32-bit storage positions. */
+vfloat16m1_t __riscv_vmtl_v_f16m1_as_e32( const void *base, size_t ld, size_t vl);
+
+void __riscv_vmts_v_f16m1_as_e32( void *base, size_t ld, vfloat16m1_t vs3, size_t vl);
+
+/* OFP8 logical elements packed in 32-bit storage positions. */
+vfloat8e4m3m1_t __riscv_vmtl_v_f8e4m3m1_as_e32( const void *base, size_t ld, size_t vl);
+
+/* OFP4 logical elements packed in 32-bit storage positions. */
+vfloat4e2m1m1_t __riscv_vmtl_v_f4e2m1m1_as_e32( const void *base, size_t ld, size_t vl);
+
+/* Int8 logical elements packed in 32-bit storage positions. */
+vint8m1_t __riscv_vmtl_v_i8m1_as_e32( const void *base, size_t ld, size_t vl);
+
+/* Int4 logical elements packed in 32-bit storage positions. */
+vint4m1_t __riscv_vmtl_v_i4m1_as_e32( const void *base, size_t ld, size_t vl);
+----
+
+The storage width `S` shall be a supported `SEW` value for the
+implementation and shall be greater than or equal to the logical
+element width encoded by the type suffix. The number of logical
+elements packed into each storage element is `S / logical_EEW`.
+
+Storage-width-qualified intrinsics are defined for `vmtl.v` and
+`vmts.v`. Transposing storage-width-qualified forms are not defined
+by this section; transposition of packed narrow elements requires
+separate semantics because the transpose may apply either to storage
+elements or to logical narrow elements.
+
 When an immediate lambda override is required, a `_L{N}` variant encodes the
 lambda value (N ∈ {1, 2, 4, 8, 16, 32, 64}) directly in the intrinsic name.
 Because the lambda value maps to a 3-bit instruction-immediate field, the
@@ -1792,6 +2011,33 @@ vint8m1_t __riscv_vmtl_v_i8m1_L4_m (vbool8_t mask, const int8_t *base, size_t ld
 /* vmts.v with lambda=4 and a mask: */
 void      __riscv_vmts_v_i8m1_L4_m (vbool8_t mask, int8_t *base, size_t ld, vint8m1_t vs3, size_t vl);
 --
+
+For storage-width-qualified tile load/store intrinsics, the mask type
+is determined by the storage width `S` and `LMUL`, not by the logical
+narrow element type. For example:
+
+[source,c]
+----
+vfloat16m1_t __riscv_vmtl_v_f16m1_as_e32_m( vbool32_t mask, const void *base, size_t ld, size_t vl);
+
+vfloat16m1_t __riscv_vmtl_v_f16m1_as_e32_L4_m( vbool32_t mask, const void *base, size_t ld, size_t vl);
+----
+
+Example: loading FP16 input tiles for an FP16-by-FP16 to FP32
+widening multiply-accumulate can keep `SEW=32` for both the tile
+load and the multiply-accumulate instruction.
+
+[source,c]
+----
+/* vtype has SEW=32, LMUL=1, and the desired lambda. */
+/* Each 32-bit storage element contains two packed FP16 values. */
+
+vfloat16m1_t a = __riscv_vmtl_v_f16m1_as_e32(A_packed, lda_in_e32, vl_in_e32);
+
+vfloat16m1_t b = __riscv_vmtl_v_f16m1_as_e32(B_packed, ldb_in_e32, vl_in_e32);
+
+c = __riscv_vfwmmacc_vv_f32m16_f16m1(c, a, b, vl_in_e32);
+----
 
 ===== Integer matrix multiply-accumulate (Zvvmm)
 
@@ -1907,6 +2153,19 @@ vint32m2_t __riscv_vwmmacc_vv_i32m2_su_lm4(vint32m2_t vd, vint16m4_t  vs1,
 vint32m2_t __riscv_vqmmacc_vv_i32m2_us_lm8(vint32m2_t vd, vuint8m8_t vs1,
                                                vint8m8_t  vs2, size_t vl);
 --
+
+When `EMUL_C = 16`, the accumulator type suffix uses the IME-only
+`m16` accumulator type. The `_lm{N}` qualifier, when present, still
+specifies the `LMUL` of the A and B input operands.
+
+[source,c]
+----
+/* EMUL_C=16, LMUL=1. */
+vint32m16_t __riscv_vmmacc_vv_i32m16(vint32m16_t vd, vint32m1_t  vs1, vint32m1_t  vs2, size_t vl);
+
+/* EMUL_C=16, LMUL=2 for A and B. */
+vint32m16_t __riscv_vmmacc_vv_i32m16_lm2(vint32m16_t vd, vint32m2_t  vs1, vint32m2_t  vs2, size_t vl);
+----
 
 ===== Floating-point matrix multiply-accumulate (Zvvfmm)
 
@@ -2062,6 +2321,17 @@ vbfloat16m4_t __riscv_vfqimmacc_vv_bf16m4_u4m1(vbfloat16m4_t vd,
                                                   vuint4m1_t vs1, vuint4m1_t vs2, size_t vl);
 --
 
+The same rule for `EMUL_C` = 16 applies to floating-point accumulator types.
+
+[source,c]
+----
+/* Non-widening FP32, EMUL_C=16, LMUL=1. */
+vfloat32m16_t __riscv_vfmmacc_vv_f32m16(vfloat32m16_t vd, vfloat32m1_t  vs1, vfloat32m1_t  vs2, size_t vl);
+
+/* FP16 inputs, FP32 accumulator, EMUL_C=16, LMUL=1. */
+vfloat32m16_t __riscv_vfwmmacc_vv_f32m16_f16m1(vfloat32m16_t vd, vfloat16m1_t  vs1, vfloat16m1_t  vs2, size_t vl);
+----
+
 ===== Microscaled multiply-accumulate intrinsics
 
 Microscaled (MX) multiply-accumulate variants take an extra `vuint16m1_t v0`
@@ -2131,6 +2401,16 @@ Because EMUL_C = VLEN / (SEW × λ²), the accumulator register-group multiplier
 varies across implementations with different values of VLEN and λ, even for a fixed SEW tied to an output type.
 The type suffix in a long-form multiply-accumulate intrinsic name directly encodes EMUL_C, whereas in an overloaded name that EMUL_C is implicit.
 Either way, source code with IME intrinsics is tied to a specific combination of input/output types and value of EMUL_C.
+
+[NOTE]
+====
+IME `m16` types are intended primarily as compiler intrinsic operand
+types. Passing or returning IME `m16` values across externally visible
+function boundaries requires psABI support. Until such support is
+specified, portable software should avoid using IME `m16` types in
+externally visible function interfaces, except through
+implementation-defined compiler conventions.
+====
 
 Although it is possible to write more general assembly code, it is common industry practice to favor coding with compiler intrinsics.
 The recommended approach for writing portable code with IME intrinsics is to package multiple code paths in the same executable, each optimized for a specific value of EMUL_C.
