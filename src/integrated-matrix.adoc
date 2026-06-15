@@ -1868,100 +1868,185 @@ void __riscv_vmtts_v_f32m1 (float    *base, size_t ld, vfloat32m1_t vs3, size_t 
 void __riscv_vmtts_v_f64m1 (double   *base, size_t ld, vfloat64m1_t vs3, size_t vl);
 --
 
-The tile load/store intrinsics are also defined for the alternate-format
-input vector types (OFP4, OFP8, BF16, Int4) so that input tiles can be
-loaded and stored without a `vreinterpret`.  The element width follows
-the underlying storage width: 8 bits for OFP8 and 4 bits for OFP4 / Int4.
-The base-pointer type is `uint8_t *` for OFP8 (and for OFP4 / Int4 packed
-into bytes).
+[#integrated-matrix-storage-width-load-store-intrinsics]
+====== Alternate-format and storage-width-qualified tile load/store intrinsics
+
+Tile load/store instructions transfer memory in units of the current
+instruction `SEW`. The C intrinsic type describes the logical
+interpretation of the bits in the vector register group; it does not
+imply numeric conversion and, for packed narrow types, it does not by
+itself determine the storage element width used by the instruction.
+
+For logical element types whose natural storage width is the same as the
+instruction `SEW`, the unqualified tile load/store intrinsic name is used.
+Examples include Int8 at `SEW=8`, OFP8 at `SEW=8`, BF16 at `SEW=16`,
+FP16 at `SEW=16`, FP32 at `SEW=32`, and FP64 at `SEW=64`.
+
+For four-bit logical element types, including OFP4 and Int4, the natural
+tile-load storage width is 8 bits. Each 8-bit storage element contains two
+logical 4-bit elements in the packing order defined in
+<<_sub_byte_elements_eew_4>>. Therefore, the unqualified OFP4 and Int4
+tile load/store intrinsics are aliases for the corresponding `_as_e8`
+forms. They do not imply that `SEW=4` is a supported vector configuration.
+
+.Natural storage width for unqualified alternate-format tile load/store intrinsics
+[cols="2,1,1,3", options="header"]
+|===
+| Logical type family | Logical element width | Natural storage width | Notes
+
+| OFP8
+| 8
+| 8
+| One logical element per storage element.
+
+| BF16
+| 16
+| 16
+| One logical element per storage element.
+
+| OFP4
+| 4
+| 8
+| Two logical elements packed per 8-bit storage element.
+
+| Int4 / UInt4
+| 4
+| 8
+| Two logical elements packed per 8-bit storage element.
+|===
+
+The unqualified natural-storage alternate-format intrinsics are defined
+for order-preserving tile loads and stores. Representative examples are:
 
 [source,c]
---
-/* OFP8 — order-preserving load/store: */
-vfloat8e4m3m1_t __riscv_vmtl_v_f8e4m3m1 (const uint8_t *base, size_t ld, size_t vl);
-vfloat8e5m2m1_t __riscv_vmtl_v_f8e5m2m1 (const uint8_t *base, size_t ld, size_t vl);
-void __riscv_vmts_v_f8e4m3m1 (uint8_t *base, size_t ld, vfloat8e4m3m1_t vs3, size_t vl);
-void __riscv_vmts_v_f8e5m2m1 (uint8_t *base, size_t ld, vfloat8e5m2m1_t vs3, size_t vl);
+----
+/* OFP8 natural-storage order-preserving load/store: SEW=8. */
+vfloat8e4m3m1_t __riscv_vmtl_v_f8e4m3m1(const uint8_t *base, size_t ld, size_t vl);
 
-/* OFP8 — transposing load/store: */
-vfloat8e4m3m1_t __riscv_vmttl_v_f8e4m3m1 (const uint8_t *base, size_t ld, size_t vl);
-void __riscv_vmtts_v_f8e5m2m1 (uint8_t *base, size_t ld, vfloat8e5m2m1_t vs3, size_t vl);
+vfloat8e5m2m1_t __riscv_vmtl_v_f8e5m2m1(const uint8_t *base, size_t ld, size_t vl);
 
-/* OFP4 / Int4 — order-preserving load/store: */
-vfloat4e2m1m1_t __riscv_vmtl_v_f4e2m1m1 (const uint8_t *base, size_t ld, size_t vl);
-vint4m1_t       __riscv_vmtl_v_i4m1     (const uint8_t *base, size_t ld, size_t vl);
-vuint4m1_t      __riscv_vmtl_v_u4m1     (const uint8_t *base, size_t ld, size_t vl);
-void __riscv_vmts_v_f4e2m1m1 (uint8_t *base, size_t ld, vfloat4e2m1m1_t vs3, size_t vl);
-void __riscv_vmts_v_i4m1     (uint8_t *base, size_t ld, vint4m1_t       vs3, size_t vl);
-void __riscv_vmts_v_u4m1     (uint8_t *base, size_t ld, vuint4m1_t      vs3, size_t vl);
+void __riscv_vmts_v_f8e4m3m1(uint8_t *base, size_t ld, vfloat8e4m3m1_t vs3, size_t vl);
 
-/* BFloat16 — order-preserving load/store: */
-vbfloat16m1_t __riscv_vmtl_v_bf16m1 (const __bf16 *base, size_t ld, size_t vl);
-void __riscv_vmts_v_bf16m1 (__bf16 *base, size_t ld, vbfloat16m1_t vs3, size_t vl);
---
+void __riscv_vmts_v_f8e5m2m1(uint8_t *base, size_t ld, vfloat8e5m2m1_t vs3, size_t vl);
 
-The transposing tile load/store intrinsics (`vmttl.v` / `vmtts.v`) follow
-the same pattern; replace `vmtl` / `vmts` with `vmttl` / `vmtts`.
-All masking (`_m`) and immediate-lambda (`_L{N}`) qualifiers extend to
-these alternate-format intrinsics on the same orthogonal basis.
 
-[#integrated-matrix-storage-width-load-store-intrinsics]
-===== Storage-width-qualified tile load/store intrinsics
+/* BF16 natural-storage order-preserving load/store: SEW=16. */
+vbfloat16m1_t __riscv_vmtl_v_bf16m1(const __bf16 *base, size_t ld, size_t vl);
 
-For tile load/store intrinsics whose logical element type and storage
-element width are the same, the type suffix alone determines both the
-logical vector type and the `SEW` used by the instruction.
+void __riscv_vmts_v_bf16m1(__bf16 *base, size_t ld, vbfloat16m1_t vs3, size_t vl);
 
-For widening matrix multiply-accumulate instructions, however, the
-logical A and B input elements are narrower than the accumulator
-`SEW`. The tile load/store instruction still transfers memory in
-`SEW`-wide storage positions, and each storage position contains
-multiple packed logical input elements.
 
-To support this case without requiring a separate `vreinterpret`,
-IME defines storage-width-qualified tile load/store intrinsics using
-the suffix `_as_e{S}`, where `S` is the storage element width in bits.
+/* OFP4 and Int4 natural-storage order-preserving forms use SEW=8 storage. */
+vfloat4e2m1m1_t __riscv_vmtl_v_f4e2m1m1( const uint8_t *base, size_t ld, size_t vl);
 
-The logical type suffix describes the type of the value returned by
-the load or supplied to the store. The `_as_e{S}` suffix describes
-the `SEW` used by the tile load/store instruction and the width of
-one memory storage element.
+vint4m1_t __riscv_vmtl_v_i4m1(const uint8_t *base, size_t ld, size_t vl);
 
-The `ld` and `vl` arguments of an `_as_e{S}` intrinsic are counted
-in storage elements of width `S`, not in logical narrow elements.
-No numeric conversion is performed. The operation is a bit-preserving
-load or store of packed storage elements.
+vuint4m1_t __riscv_vmtl_v_u4m1(const uint8_t *base, size_t ld, size_t vl);
+
+void __riscv_vmts_v_f4e2m1m1(uint8_t *base, size_t ld, vfloat4e2m1m1_t vs3, size_t vl);
+
+void __riscv_vmts_v_i4m1(uint8_t *base, size_t ld, vint4m1_t vs3, size_t vl);
+
+void __riscv_vmts_v_u4m1(uint8_t *base, size_t ld, vuint4m1_t vs3, size_t vl);
+----
+
+In addition to the unqualified natural-storage forms, IME defines
+storage-width-qualified tile load/store intrinsics using the suffix
+`_as_e{S}`, where `S` is the storage element width in bits.
+
+The logical type suffix describes the logical element type of the value
+returned by the load or supplied to the store. The `_as_e{S}` suffix
+describes the `SEW` used by the tile load/store instruction and the width
+of one memory storage element.
+
+The storage width `S` shall be a supported `SEW` value for the
+implementation and shall be greater than or equal to the logical element
+width encoded by the type suffix. For 4-bit logical element types, `S`
+shall be at least 8. The number of logical elements packed into each
+storage element is `S / logical_EEW`.
+
+The `ld` and `vl` arguments of an `_as_e{S}` intrinsic are counted in
+storage elements of width `S`, not in logical narrow elements. No numeric
+conversion is performed. The operation is a bit-preserving load or store
+of packed storage elements.
+
+When `S` is the natural storage width of the logical type, the `_as_e{S}`
+form and the unqualified form are equivalent. For example,
+`__riscv_vmtl_v_f8e4m3m1_as_e8` is equivalent to
+`__riscv_vmtl_v_f8e4m3m1`, and `__riscv_vmtl_v_i4m1_as_e8` is equivalent
+to `__riscv_vmtl_v_i4m1`.
+
+Representative storage-width-qualified examples are:
 
 [source,c]
 ----
 /* FP16 logical elements packed in 32-bit storage positions. */
-vfloat16m1_t __riscv_vmtl_v_f16m1_as_e32( const void *base, size_t ld, size_t vl);
+vfloat16m1_t __riscv_vmtl_v_f16m1_as_e32(const void *base, size_t ld, size_t vl);
 
-void __riscv_vmts_v_f16m1_as_e32( void *base, size_t ld, vfloat16m1_t vs3, size_t vl);
+void __riscv_vmts_v_f16m1_as_e32(void *base, size_t ld, vfloat16m1_t vs3, size_t vl);
+
 
 /* OFP8 logical elements packed in 32-bit storage positions. */
-vfloat8e4m3m1_t __riscv_vmtl_v_f8e4m3m1_as_e32( const void *base, size_t ld, size_t vl);
+vfloat8e4m3m1_t __riscv_vmtl_v_f8e4m3m1_as_e32(const void *base, size_t ld, size_t vl);
+
+void __riscv_vmts_v_f8e4m3m1_as_e32(void *base, size_t ld, vfloat8e4m3m1_t vs3, size_t vl);
+
 
 /* OFP4 logical elements packed in 32-bit storage positions. */
-vfloat4e2m1m1_t __riscv_vmtl_v_f4e2m1m1_as_e32( const void *base, size_t ld, size_t vl);
+vfloat4e2m1m1_t __riscv_vmtl_v_f4e2m1m1_as_e32(const void *base, size_t ld, size_t vl);
+
+void __riscv_vmts_v_f4e2m1m1_as_e32(void *base, size_t ld, vfloat4e2m1m1_t vs3, size_t vl);
+
 
 /* Int8 logical elements packed in 32-bit storage positions. */
 vint8m1_t __riscv_vmtl_v_i8m1_as_e32( const void *base, size_t ld, size_t vl);
 
+void __riscv_vmts_v_i8m1_as_e32(void *base, size_t ld, vint8m1_t vs3, size_t vl);
+
+
 /* Int4 logical elements packed in 32-bit storage positions. */
-vint4m1_t __riscv_vmtl_v_i4m1_as_e32( const void *base, size_t ld, size_t vl);
+vint4m1_t __riscv_vmtl_v_i4m1_as_e32(const void *base, size_t ld, size_t vl);
+
+void __riscv_vmts_v_i4m1_as_e32(void *base, size_t ld, vint4m1_t vs3, size_t vl);
 ----
 
-The storage width `S` shall be a supported `SEW` value for the
-implementation and shall be greater than or equal to the logical
-element width encoded by the type suffix. The number of logical
-elements packed into each storage element is `S / logical_EEW`.
+Storage-width-qualified intrinsics are defined for `vmtl.v` and `vmts.v`.
+They are the C intrinsic mechanism for loading or storing packed narrow
+logical input tiles using the storage `SEW` required by a widening
+multiply-accumulate instruction.
 
-Storage-width-qualified intrinsics are defined for `vmtl.v` and
-`vmts.v`. Transposing storage-width-qualified forms are not defined
-by this section; transposition of packed narrow elements requires
-separate semantics because the transpose may apply either to storage
-elements or to logical narrow elements.
+Transposing tile load/store intrinsics are defined for natural-storage
+forms whose logical element width equals the storage element width and is
+at least 8 bits. In these cases, the transpose of storage elements is also
+the transpose of logical elements.
+
+Representative alternate-format transposing examples are:
+
+[source,c]
+----
+/* OFP8 natural-storage transposing load/store: SEW=8. */
+vfloat8e4m3m1_t __riscv_vmttl_v_f8e4m3m1(const uint8_t *base, size_t ld, size_t vl);
+
+void __riscv_vmtts_v_f8e4m3m1(uint8_t *base, size_t ld, vfloat8e4m3m1_t vs3, size_t vl);
+
+
+/* BF16 natural-storage transposing load/store: SEW=16. */
+vbfloat16m1_t __riscv_vmttl_v_bf16m1(const __bf16 *base, size_t ld, size_t vl);
+
+void __riscv_vmtts_v_bf16m1(__bf16 *base, size_t ld, vbfloat16m1_t vs3, size_t vl);
+----
+
+Transposing forms for packed-narrow logical elements are not defined by
+this section. For example, no OFP4 or Int4 transposing intrinsic is
+defined here. Such forms would require separate semantics because the
+transpose could apply either to `SEW`-wide storage elements or to logical
+4-bit elements within those storage elements.
+
+A future extension may define storage-transposing `_as_e{S}` forms whose
+transpose applies to `S`-bit storage elements rather than to logical narrow
+elements.
+
+====== Immediate-lambda and mask qualifiers
 
 When an immediate lambda override is required, a `_L{N}` variant encodes the
 lambda value (N ∈ {1, 2, 4, 8, 16, 32, 64}) directly in the intrinsic name.
