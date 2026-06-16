@@ -144,7 +144,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref check-xref-fallbacks
 
 all: build
 
@@ -156,10 +156,12 @@ ifeq ("$(wildcard docs-resources/global-config.adoc)","")
 endif
 
 build-pdf: $(DOCS_PDF)
-build-html: $(DOCS_HTML)
+build-html: $(DOCS_HTML) check-xref-fallbacks
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
 check-xrefs: $(addprefix $(BUILD_DIR)/, $(addsuffix .check-xrefs, $(DOCS)))
+check-xref-fallbacks: $(DOCS_HTML)
+	@python3 ./scripts/check_xref_fallbacks.py $(DOCS_HTML)
 check-tags:
 	@bash ./scripts/check-tag-changes.sh
 
@@ -232,6 +234,7 @@ $(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_
 $(BUILD_DIR)/%.check-xrefs: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) -v $(OPTIONS) $(REQUIRES) $< 2>&1 | grep 'possible invalid reference' && exit 1 || [ $$? -eq 0 ] $(DOCKER_QUOTE)
+	@[ ! -f $@.workdir/$(BUILD_DIR)/$(notdir $*).html ] && exit 0 || python3 scripts/check_xref_fallbacks.py $@.workdir/$(BUILD_DIR)/$(notdir $*).html
 
 # Update docker image to latest
 docker-pull-latest:
