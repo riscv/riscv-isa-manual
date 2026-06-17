@@ -854,18 +854,29 @@ _OCP Microscaling Formats (MX) v1.0 Specification_) is an 8-bit
 exponent-only format with a bias of 127, representing power-of-two values
 from 2^−127^ to 2^127^.  The bit pattern 0xFF encodes NaN.
 
-Because E8M0 values are exact powers of two, scale application is
-equivalent to exponent addition and introduces no rounding error.
+Non-NaN E8M0 scale values denote exact powers of two. Applying such a
+scale to an unbounded or internal floating-point value can be modeled as
+an exact exponent adjustment before the next required rounding point.
 
-When a non-NaN E8M0 value represents a power-of-two that overflows the
-accumulator FP format (e.g., 2^128^ cannot be represented in FP16 which
-has a maximum finite exponent of 2^15^), the converted scale value is
-+∞.  The subsequent block-scale multiply follows IEEE 754 rules: +∞
-multiplied by a non-zero finite value yields ±∞ (propagating into the
-accumulator via `fp_add`); +∞ multiplied by zero yields the default NaN,
-which sets the output element to NaN via the NaN propagation rule above.
-Implementations shall handle this case as specified — not as an
-implementation-defined result.
+However, the conversion of a scale value to the C accumulator format,
+formation of the paired block scale, and scaling of a partial sum follow
+the floating-point operations specified by this section and by the
+SAIL-like pseudocode. These operations may overflow, underflow, produce
+NaN, be inexact, or set floating-point exception flags as specified.
+Therefore, the exactness of the E8M0 scale encoding does not imply that
+every scaled intermediate or final result is exactly representable in the
+C accumulator format.
+
+When conversion of a non-NaN E8M0 scale value to the accumulator FP format
+overflows, the converted scale value is +∞. For example, the E8M0 scale
+value 2^127^ cannot be represented as a finite IEEE binary16 value.
+
+The subsequent block-scale operations follow IEEE 754 rules: +∞ multiplied
+by a non-zero finite value yields ±∞, propagating into the accumulator via
+`fp_add`; +∞ multiplied by zero yields the default NaN, which sets the
+output element to NaN via the NaN propagation rule above. Implementations
+shall handle this case as specified, not as an implementation-defined
+result.
 
 ====== Arithmetic considerations
 
@@ -873,9 +884,24 @@ The computation of stem:[C_{i,j}] follows similar arithmetic rules as described 
 Each block dot product stem:[\sum_{k \in \text{block}(s)} A_{i,k} \times B_{k,j}] is partitioned into consecutive groups of `min`(`G`, `bs` ÷ `W`) sub-dot-products.
 That is, a group never crosses a block boundary.
 The group dot-product is reduced into a partial sum `S` according to the implementation-defined parameter `psm`.
+The partial sum `S` is scaled by
+stem:[\text{scale_A}_{i,s} \times \text{scale_B}_{j,s}]. For non-NaN
+E8M0 scales, the mathematical scale factor is an exact power of two.
 The partial sum `S` is treated according to the implementation-defined parameter `rnd`.
-The partial sum `S` is scaled by stem:[\text{scale_A}_{i,s} \times \text{scale_B}_{j,s}]. As noted above, this scaling does not introduce additional rounding.
-Finally, the rounded and scaled partial sum `S` is accumulated into the running value of stem:[C_{i,j}] by computing
+
+If `rnd=frm` or `rnd=rto`, `S` has first been rounded to the C accumulator
+format, and scaling is performed by the accumulator-format floating-point
+multiply specified by the operation pseudocode. This multiplication may
+overflow, underflow, be inexact, produce NaN, or set floating-point
+exception flags.
+
+If `rnd=xct`, scaling is applied to the internal partial sum before final
+accumulation. The scale factor itself is exact, but the final accumulation
+into C is rounded according to `frm` and may raise floating-point exception
+flags.
+
+Finally, the scaled partial sum `S` is accumulated into the running value
+of stem:[C_{i,j}] by computing
 
 stem:[C_{i,j} \leftarrow \text{round}_{\text{frm}}(C_{i,j} + S)].
 
@@ -2715,6 +2741,11 @@ helper functions that are shared across all instructions in this chapter:
 --
 val is_pow2 : int -> bool
 
+// Scale an internal partial sum by a block-scale value represented in the
+// C accumulator format. For non-NaN E8M0 scales this can be implemented as
+// exponent adjustment of the internal value. The final conversion or
+// accumulation into the C accumulator format remains responsible for
+// rounding and exception flags.
 val fp_internal_scale : (bits, fp_fmt, fp_internal) -> fp_internal
 
 // Decode a 3-bit lambda encoding to the actual lambda value.
@@ -2967,8 +2998,10 @@ function round_group_sum(S : fp_internal,
 // and passed as scale_fmt.  The per-scale width (sw) and pair width
 // (pw = 2 × sw) are derived from the scale format.
 // When vm=1 (no microscaling), returns (1.0, false).
-// When vm=0, reads a pw-bit scale-pair element from v0 and returns
-// (scale_A × scale_B, is_nan).
+// When vm=0, reads a pw-bit scale-pair element from v0, decodes both
+// scale values into the C accumulator format, forms their product with
+// fp_mul, and returns (scale_A × scale_B, is_nan). This operation follows
+// the accumulator-format floating-point rules and may raise exception flags.
 function read_block_scales(vm : bit, i : int, j : int, s : int,
                            R : int, EEW_C : int, fmt_C : fp_fmt,
                            scale_fmt : scale_format,
