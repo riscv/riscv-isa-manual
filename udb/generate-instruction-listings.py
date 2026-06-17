@@ -15,39 +15,89 @@ def build_database(files):
 
     return db
 
-def traverse_extensions(x, name):
-    key = next(iter(x))
-    value = x[key]
-    match key:
-        case 'name':
-            return [value]
-        case 'extension':
-            return helper(value)
-        case 'anyOf' | 'oneOf':
-            return [item for sublist in map(helper, value) for item in sublist]
-        case 'allOf':
-            value = {k: v for d in x[key] for k, v in d.items()}
-            if len(value) == 2 and 'xlen' in value and 'extension' in value:
-                res = helper(value['extension'])
-                return list(map(lambda x: f"{x} (RV{value['xlen']})", res))
-            if len(value) == 2 and 'not' in value and 'name' in value:
-                return helper(value)
-            if len(value) == 1 and 'name' in value:
-                return helper(value)
-            raise Exception(f"{name} has unrecognized 'allOf' pattern {value}")
-        case _:
-            raise Exception(f"{name} has unknown key {key}")
-
 def extensions_implied_by(ext):
     if 'requirements' not in ext:
         return []
-    return traverse_extensions(ext['requirements'], f"{ext['name']}.requirements")
 
-def extensions_defined_in(inst, xlen):
-    return traverse_extensions(inst['definedBy'], f"{inst['name']}.definedBy")
+    def traverse_extensions(x):
+        key = next(iter(x))
+        value = x[key]
+        match key:
+            case 'param':
+                return []
+
+            case 'idl()':
+                return []
+
+            case 'name':
+                return [value]
+
+            case 'not':
+                return []
+
+            case 'xlen':
+                return []
+
+            case 'extension':
+                return traverse_extensions(value)
+
+            case 'anyOf' | 'oneOf':
+                return [item for sublist in map(traverse_extensions, value) for item in sublist]
+
+            case 'allOf':
+                if any('xlen' in d for d in value):
+                    index = next((i for i, d in enumerate(value) if 'xlen' in d))
+                    xlen = value[index]['xlen']
+                    res = traverse_extensions({key: [d for d in value if 'xlen' not in d]})
+                    #return list(map(lambda x: f"{x} (RV{xlen})", res))
+                    return res
+
+                return [item for sublist in map(traverse_extensions, value) for item in sublist]
+
+            case _:
+                raise Exception(f"unknown key {key}")
+
+    return traverse_extensions(ext['requirements'])
 
 def extensions_defined_in(inst):
-    return traverse_extensions(inst['definedBy'], f"{inst['name']}.definedBy")
+    def traverse_extensions(x):
+        key = next(iter(x))
+        value = x[key]
+        match key:
+            case 'name':
+                return [value]
+
+            case 'not':
+                return []
+
+            case 'extension':
+                return traverse_extensions(value)
+
+            case 'anyOf' | 'oneOf':
+                return [item for sublist in map(traverse_extensions, value) for item in sublist]
+
+            case 'allOf':
+                if any('xlen' in d for d in value):
+                    index = next((i for i, d in enumerate(value) if 'xlen' in d))
+                    xlen = value[index]['xlen']
+                    res = traverse_extensions({key: [d for d in value if 'xlen' not in d]})
+                    return list(map(lambda x: f"{x} (RV{xlen})", res))
+
+                res = [item for sublist in map(traverse_extensions, value) for item in sublist]
+                return ['_'.join(res)]
+
+            case _:
+                raise Exception(f"unknown key {key}")
+
+    return traverse_extensions(inst['definedBy'])
+
+def compute_extension_dependencies(exts):
+    deps = {e['name']: [] for e in exts}
+    for e in exts:
+        implications = extensions_implied_by(e)
+        for e2 in implications:
+            deps[e2].append(e['name'])
+    return deps
 
 def main():
     parser = argparse.ArgumentParser()
@@ -61,12 +111,19 @@ def main():
     args = parser.parse_args()
 
     db = build_database(args.yamls)
-    print(extensions_implied_by(db['extension']['Zca']))
-    print(extensions_implied_by(db['extension']['C']))
-    #print(extensions_dependent_on('Zca', db['extension']))
 
-    #for inst in db['instruction'].values():
-    #    print(inst['name'] + " " + str(extensions_defined_in(inst)))
+    for inst in db['instruction'].values():
+        print(inst['name'] + " " + str(extensions_defined_in(inst)))
+
+    for ext in db['extension'].values():
+        print(ext['name'] + " " + str(extensions_implied_by(ext)))
+
+    ext_deps = compute_extension_dependencies(db['extension'].values())
+    print(ext_deps)
+
+    #print(extensions_implied_by(db['extension']['Zca']))
+    #print(extensions_implied_by(db['extension']['C']))
+    #print(extensions_dependent_on('Zca', db['extension']))
 
 if __name__ == "__main__":
     main()
