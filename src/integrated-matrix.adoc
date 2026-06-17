@@ -544,8 +544,12 @@ least that many significand bits.
 | IEEE binary64 | 53
 |===
 
-When p~A~ + p~B~ ≤ p~C~, the exact product is representable in `fmt_C`, so any later rounding of that value to the C accumulator format is exact.
-This holds for all mixed-format widening combinations. For example, E4M3 × E5M2 → FP16 (4 + 3 = 7 ≤ 11) and FP16 × BF16 → FP32 (11 + 8 = 19 ≤ 24).
+When p~A~ + p~B~ ? p~C~, the exact product is representable in `fmt_C`.
+Therefore, if the accumulation model later requires a value containing that
+product to be rounded to the C accumulator format, the product itself does
+not introduce additional rounding error.  This holds for all mixed-format
+widening combinations. For example, E4M3 × E5M2 → FP16
+(4 + 3 = 7 ≤ 11) and FP16 × BF16 → FP32 (11 + 8 = 19 ≤ 24).
 
 An implementation need not use a standard IEEE 754 type for the internal
 product; any representation that captures the exact product (e.g., an
@@ -571,9 +575,10 @@ Likewise, for 8-bit inputs, `altfmt_A` and `altfmt_B` independently select
 E4M3 or E5M2.  All four combinations — including mixed E4M3 × E5M2 — are
 covered by the same OFP8 extension for the given output format and are
 permitted on all four instructions (`vfmmacc.vv`, `vfwmmacc.vv`,
-`vfqmmacc.vv`, `vf8wmmacc.vv`).  Each A × B product is computed at sufficient internal
-precision and rounded once to the C accumulator format; see
-<<mixed-format-inputs>>.
+`vfqmmacc.vv`, `vf8wmmacc.vv`).  Each A × B product is defined by the exact
+mathematical product of the corresponding input values.  Grouping,
+partial-sum formation, optional rounding of partial sums, and final
+accumulation into C follow <<arithmetic-considerations>>.
 
 ===== 16-bit inputs (IEEE binary16, BFloat16)
 
@@ -587,9 +592,10 @@ When `altfmt_A ≠ altfmt_B` (one input is IEEE binary16 and the other is
 BFloat16), the mixed combination is permitted on all three instructions
 (`vfmmacc.vv`, `vfwmmacc.vv`, `vfqmmacc.vv`) — the two input formats share
 the same element width, so no additional encoding space or hardware
-extension is required.  Each A × B product is computed at sufficient
-internal precision and rounded once to the C accumulator format;
-see <<mixed-format-inputs>>.
+extension is required.  Each A × B product is defined by the exact
+mathematical product of the corresponding input values.  Grouping,
+partial-sum formation, optional rounding of partial sums, and final
+accumulation into C follow <<arithmetic-considerations>>.
 
 For the mixed cases, _both_ the IEEE binary16 and BFloat16 extensions
 for the same instruction and output format are required.  The instruction
@@ -2736,16 +2742,6 @@ function mat_C_idx(i : int, j : int, N_max : int,
 //   Decode (element width in bits, altfmt flag) to the concrete FP format as specified
 //   by the altfmt encoding tables in the vtype section (e.g., EEW=8, alt=0 → E4M3 (OFP8)).
 
-// fp_mul_to(a     : bits(EEW_A), fmt_A : fp_fmt,
-//           b     : bits(EEW_A), fmt_B : fp_fmt,
-//           EEW_C : int,         fmt_C : fp_fmt,
-//           rm    : rounding_mode) -> bits(EEW_C)
-//   Multiply a (in format fmt_A) by b (in format fmt_B), round the product
-//   into format fmt_C, and return the EEW_C-wide bit pattern.  Updates fflags.
-//   Per IEEE 754, the exact (infinite-precision) product a × b is formed
-//   regardless of whether fmt_A equals fmt_B, then rounded once to fmt_C
-//   using rounding mode rm.
-
 // fp_add(acc  : bits(EEW), prod : bits(EEW),
 //        EEW  : int,       fmt  : fp_fmt,
 //        rm   : rounding_mode) -> bits(EEW)
@@ -2987,28 +2983,6 @@ function read_block_scales(vm : bit, i : int, j : int, s : int,
 
   let blk_scale : bits(EEW_C) = fp_mul(sA, sB, EEW_C, fmt_C, rm);
   (blk_scale, fp_is_NaN(blk_scale, EEW_C, fmt_C))
-}
-
-// NOTE: Obsolete helper retained temporarily during the transition to the
-// group-based floating-point semantics. Not used by fp_gemm or fp_scaled_gemm.
-// Floating-point inner product over elements [k_lo, k_hi] with widening.
-// Returns the block accumulator in format fmt_C at width EEW_C.
-function fp_block_dot(i : int, j : int, k_lo : int, k_hi : int,
-                      g : gemm_geom,
-                      fmt_A : fp_fmt, fmt_B : fp_fmt, fmt_C : fp_fmt,
-                      rm : rounding_mode,
-                      vs1 : regidx, vs2 : regidx) -> bits(g.EEW_C) = {
-  var blk_acc : bits(g.EEW_C) = fp_zero(g.EEW_C, fmt_C);
-  foreach (k from k_lo to k_hi) {
-    let a_flat : int = mat_A_idx(i, k, g.K_eff, g.LMUL, g.lambda, g.epr_A);
-    let b_flat : int = mat_B_idx(k, j, g.K_eff, g.LMUL, g.lambda, g.epr_A);
-    let a_bits : bits(g.EEW_A) = read_single_element(g.EEW_A, a_flat, vs1);
-    let b_bits : bits(g.EEW_A) = read_single_element(g.EEW_A, b_flat, vs2);
-    let prod   : bits(g.EEW_C) = fp_mul_to(a_bits, fmt_A, b_bits, fmt_B,
-                                            g.EEW_C, fmt_C, rm);
-    blk_acc = fp_add(blk_acc, prod, g.EEW_C, fmt_C, rm)
-  };
-  blk_acc
 }
 
 // Exact signed integer inner product over elements [k_lo, k_hi].
@@ -3421,8 +3395,7 @@ Synopsis::
 Floating-Point Matrix Multiply-Accumulate
 
 Mnemonic::
-vfmmacc.vv _vd_, _vs1_, _vs2_ +
-vfmmacc.vv _vd_, _vs1_, _vs2_, v0.scale
+vfmmacc.vv _vd_, _vs1_, _vs2_
 
 Encoding::
 [wavedrom, , svg]
