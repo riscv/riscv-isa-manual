@@ -122,7 +122,6 @@ CREATE_NORM_RULE_PYTHON := python3 $(CREATE_NORM_RULE_TOOL)
 
 OPTIONS_TAGS := --trace \
            -a compress \
-           -a mathematical-format=svg \
            -a pdf-fontsdir=docs-resources/fonts \
            -a pdf-theme=docs-resources/themes/riscv-pdf.yml \
            $(WATERMARK_OPT) \
@@ -140,7 +139,6 @@ OPTIONS := $(OPTIONS_TAGS) \
 REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
-            --require=asciidoctor-mathematical \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
