@@ -93,7 +93,7 @@ NOTE: New RISC-V specifications may only be developed by RISC-V International me
 
 ## Sign your commits
 
-All contributions must be signed with a `Signed-ff-by: Name <email>` amd a cryptographic key using either SSH (recommended) or GPG.
+All contributions must be signed with a `Signed-off-by: Name <email>` and a cryptographic key using either SSH (recommended) or GPG.
 
 # Signing GitHub Commits — Step by Step
 
