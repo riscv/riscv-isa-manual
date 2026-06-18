@@ -105,9 +105,9 @@ Note that the Developer's Certificate of Origin bot that RISC-V employs across a
 
 # Signing Git Commits with your Signing Key
 
-## Option A: Sign commits with SSH (recommended)
-
 In addition to adding the DCO Signed-off-by line to your commits, your commits must be signed with your private key, and your public key must be uploaded to GitHub as a signing key.
+
+## Option A: Sign commits with SSH (recommended)
 
 ### 1. Generate an SSH key (skip if you already have one)
 ```bash
