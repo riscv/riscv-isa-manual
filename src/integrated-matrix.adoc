@@ -674,7 +674,14 @@ For microscaled instructions, additional microscaling block boundaries apply; se
 * `G` is a power of two;
 * 1 ≤ `G` ≤ λ.  Since both `λ` and `G` are powers of two and `1 ≤ G ≤ λ`, `G` divides `λ`. 
 
-* Within each group, the `G` sub-dot-products jointly define a dot product of two vectors with `G × W` elements. This group dot product is reduced into a partial sum `S` according to an implementation-defined parameter `psm` ∈ {`0`, `1`}.
+* For unscaled instructions, each group contains exactly `G`
+  sub-dot-products and therefore defines a dot product of two vectors with
+  `G × W` elements. For microscaled instructions, a group contains the
+  actual group length `g_len` defined in
+  <<integrated-matrix-mx-shortened-groups>> and therefore defines a dot
+  product of two vectors with `g_len × W` elements. In either case, the
+  group dot product is reduced into a partial sum `S` according to an
+  implementation-defined parameter `psm` ∈ {`0`, `1`}.
 
 ** If `psm=0`, the partial sum `S` is formed using exact computation: the contributing products and sums are computed in sufficiently precise internal form, without rounding to the C accumulator format, until the next rounding step defined by this specification.
 
@@ -707,7 +714,7 @@ companion functions referenced by it for that entry.
 The disclosed reduction shall define behavior for every actual group length
 that can occur for that entry. For unscaled instructions, the actual group
 length is always `G`. For microscaled instructions, the actual group length
-may be any value `g_len` such that `1 ? g_len ? G`, because groups are
+may be any value `g_len` such that `1 ≤ g_len ≤ G`, because groups are
 shortened at microscaling block boundaries as described in
 <<integrated-matrix-mx-shortened-groups>>.
 
@@ -764,11 +771,27 @@ the implementation's supported mapping from (`SEW`, `W`, `lambda`) to
 implementation's complete architectural disclosure for the reduction
 algorithm is available.
 
-The number of rounding operations per output element of C is (λ × `LMUL`) ÷ `G` if no rounding is applied to the reduced partial sum before accumulation, and 2 × (λ × `LMUL`) ÷ `G` if the reduced partial sum is rounded before accumulation into the running value of C.
+For unscaled instructions, the number of group updates per output element
+of C is (λ × `LMUL`) ÷ `G`. Each group update includes one final
+accumulation rounded according to `frm`. If `rnd=frm` or `rnd=rto`, one
+additional rounding of the partial sum `S` occurs before that final
+accumulation.
+
+For microscaled instructions, the number of group updates is the number of
+actual groups produced by the microscaling-block and `LMUL=1`-step
+intersections described in <<integrated-matrix-mx-shortened-groups>>. It
+need not equal (λ × `LMUL`) ÷ `G`. In addition, when `rnd=frm` or
+`rnd=rto`, scaling the rounded partial sum with the accumulator-format
+floating-point multiply is a separate rounding point.
 
 [NOTE]
 ====
-A common choice of `psm=1` reduction is the _RISC-V Bulk Normalization Algorithm_ (RVBNA), defined as part of the Zvdota extension.  An implementation adopting RVBNA discloses it as the `psm=1` algorithm and publishes the standard RVBNA parameters (per-factor significand and biased-exponent widths `p` / `e`, result significand and biased-exponent widths `q` / `f`, and the per-group accumulation count `n`).  For Zvvfmm instructions the natural binding is `n = G × W`, with `q`/`f` determined by the output format and `p`/`e` by the input format(s).
+A common choice of `psm=1` reduction is the _RISC-V Bulk Normalization Algorithm_ (RVBNA), defined as part of the Zvdota extension.  An implementation adopting RVBNA discloses it as the `psm=1` algorithm and publishes the standard RVBNA parameters (per-factor significand and biased-exponent widths `p` / `e`, result significand and biased-exponent widths `q` / `f`, and the per-group accumulation count `n`).  
+For Zvvfmm instructions, the natural binding for a group of actual length
+`g_len` is `n = g_len × W`, with `q`/`f` determined by the output format
+and `p`/`e` by the input format(s). Thus, unscaled and other full-length
+groups use `n = G × W`, while a shortened microscaled group uses the
+corresponding smaller value `n = g_len × W`.
 
 The standard RVBNA description includes a terminal round-to-odd step that produces a value in the result format.  When an implementation discloses RVBNA as its `psm=1` algorithm, that terminal round-to-odd is taken only if it also discloses `rnd=rto` for the same (`SEW`, `W`, `lambda`); otherwise the rounding implied by the disclosed `rnd` value applies in its place.  Most implementations that adopt RVBNA are therefore expected to also disclose `rnd=rto`.
 
