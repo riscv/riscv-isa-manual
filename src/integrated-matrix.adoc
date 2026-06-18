@@ -700,7 +700,7 @@ For each entry with `psm=1`, the disclosure must additionally identify the reduc
 
 For each (`SEW`, `W`, `lambda`) entry with `psm=1`, the implementation-specific
 architectural disclosure is complete only when it includes a SAIL fragment
-that provides a concrete definition of `fp_bna_add` and of any companion
+that provides a concrete definition of `fp_disclosed_reduce_step` and of any companion
 functions referenced by it for that entry.
 
 When composed with the shared SAIL pseudocode of this specification, the
@@ -737,14 +737,15 @@ with the shared SAIL of this specification.
 The SAIL fragment serves three purposes that natural-language disclosure cannot:
 
 . *Unambiguous semantics.* A SAIL definition fixes operand widths, alignment, rounding, ordering, and parameter values without the interpretation overhead of prose.
-. *Direct integration with conformance testing.* The architectural model in this specification is itself SAIL-based; a published implementation fragment plugs into the same model with no glue code, so an architectural test suite can exercise the implementor's own definition of `fp_bna_add` to verify match against hardware.
+. *Direct integration with conformance testing.* The architectural model in this specification is itself SAIL-based; a published implementation fragment plugs into the same model with no glue code, so an architectural test suite can exercise the implementor's own definition of `fp_disclosed_reduce_step` to verify match against hardware.
 . *Reproducible cross-implementation comparison.* Two implementors disclosing nominally the same algorithm can settle disputes by diffing their SAIL fragments rather than re-deriving equivalence from prose.
 
 An implementation that discloses RVBNA at the standard parameters may
 satisfy the SAIL-fragment portion of its complete architectural disclosure
 by referencing the SAIL fragment published alongside the RVBNA specification
 itself, provided that fragment composes with the shared SAIL of this
-specification and reproduces the implementation's results bit-exactly.
+specification and reproduces the implementation's result bits and accrued
+`fflags` bit-exactly.
 
 ====
 
@@ -2974,7 +2975,7 @@ function decode_gemm_geometry(W : int) -> gemm_geom = {
 }
 
 // Partial-sum formation mode for floating-point group reduction.
-enum psm_mode = { PSM_EXACT, PSM_BNA }
+enum psm_mode = { PSM_EXACT, PSM_DISCLOSED }
 
 // Abstract internal floating-point representation used for the group
 // partial sum S before any rounding to the C accumulator format.
@@ -3008,7 +3009,7 @@ val fp_internal_add : (fp_internal, fp_internal) -> fp_internal
 // producing different numerical results or different accrued fflags may
 // both be conforming, provided each discloses its algorithm, parameters,
 // and exception-flag behavior.
-val fp_bna_add : (fp_internal, fp_internal) -> fp_internal
+val fp_disclosed_reduce_step : (fp_internal, fp_internal) -> fp_internal
 
 // Group partial sum S for one output element.
 // The group lies within one LMUL=1 step, identified by step, and begins
@@ -3044,7 +3045,7 @@ function fp_group_sum(i : int, j : int,
       S
     },
 
-    PSM_BNA => {
+    PSM_DISCLOSED => {
       var S : fp_internal = fp_internal_zero();
       foreach (k from k_lo to k_hi) {
         let a_flat : int = mat_A_idx(i, k, g.K_eff, g.LMUL, g.lambda, g.epr_A);
@@ -3054,7 +3055,7 @@ function fp_group_sum(i : int, j : int,
         let b_bits : bits(g.EEW_A) = read_single_element(g.EEW_A, b_flat, vs2);
 
         let prod : fp_internal = fp_mul_exact(a_bits, fmt_A, b_bits, fmt_B);
-        S = fp_bna_add(S, prod)
+        S = fp_disclosed_reduce_step(S, prod)
       };
       S
     }
