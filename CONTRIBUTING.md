@@ -67,6 +67,7 @@ Outputs land in the `build/` directory.
 - Create a branch for your change.
 - Keep commits focused and include clear messages.
 - Run the relevant build target(s) before opening a PR.
+- Sign off your commit with `git commit -s` or add `git config --global format.signOff true` to your global git config.
 - Open a pull request with a short summary of what changed and why.
 
 ## PR checklist (as applicable)
@@ -96,7 +97,13 @@ All contributions must be signed. Use either SSH (recommended) or GPG.
 
 # Signing GitHub Commits — Step by Step
 
-## Option A: Sign commits with SSH (recommended)
+## Option A (REQUIRED): Sign off your commits with a `Signed-off-by: Name <email>` in the commit message.
+
+This can be achieved with `git commit -s` or by automating it be adding `git config --global format.signOff true` to your global git config file.
+
+Note that the Developer's Certificate of Origin bot that RISC-V employs across all of it's repositories requires the `Signed-off-by:` trailer exists.  If it's missing, Pull Requests will fail the DCO Check and will not be accepted.
+
+## Option B: Sign commits with SSH (recommended)
 
 ### 1. Generate an SSH key (skip if you already have one)
 ```bash
@@ -131,7 +138,7 @@ git log --show-signature -1
 
 ---
 
-## Option B: Sign commits with GPG
+## Option C: Sign commits with GPG
 
 For a comprehensive guide, see [GitHub's documentation on telling Git about your signing key](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key).
 
