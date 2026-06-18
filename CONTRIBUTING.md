@@ -93,17 +93,21 @@ NOTE: New RISC-V specifications may only be developed by RISC-V International me
 
 ## Sign your commits
 
-All contributions must be signed. Use either SSH (recommended) or GPG.
+All contributions must be signed with a `Signed-ff-by: Name <email>` amd a cryptographic key using either SSH (recommended) or GPG.
 
 # Signing GitHub Commits — Step by Step
 
-## Option A (REQUIRED): Sign off your commits with a `Signed-off-by: Name <email>` in the commit message.
+## REQUIRED: Sign off your commits with a `Signed-off-by: Name <email>` in the commit message.
 
 This can be achieved with `git commit -s` or automating it by adding `git config --global format.signOff true` to your global git config file.
 
 Note that the Developer's Certificate of Origin bot that RISC-V employs across all of it's repositories requires the `Signed-off-by:` trailer exists.  If it's missing, Pull Requests will fail the DCO Check and will not be accepted.
 
-## Option B: Sign commits with SSH (recommended)
+# Signing Git Commits with your Signing Key
+
+## Option A: Sign commits with SSH (recommended)
+
+In addition to adding the DCO Signed-off-by line to your commits, your commits must be signed with your private key, and your public key must be uploaded to GitHub as a signing key.
 
 ### 1. Generate an SSH key (skip if you already have one)
 ```bash
@@ -138,7 +142,7 @@ git log --show-signature -1
 
 ---
 
-## Option C: Sign commits with GPG
+## Option B: Sign commits with GPG
 
 For a comprehensive guide, see [GitHub's documentation on telling Git about your signing key](https://docs.github.com/en/authentication/managing-commit-signature-verification/telling-git-about-your-signing-key).
 
