@@ -99,7 +99,7 @@ All contributions must be signed. Use either SSH (recommended) or GPG.
 
 ## Option A (REQUIRED): Sign off your commits with a `Signed-off-by: Name <email>` in the commit message.
 
-This can be achieved with `git commit -s` or by automating it be adding `git config --global format.signOff true` to your global git config file.
+This can be achieved with `git commit -s` or automating it by adding `git config --global format.signOff true` to your global git config file.
 
 Note that the Developer's Certificate of Origin bot that RISC-V employs across all of it's repositories requires the `Signed-off-by:` trailer exists.  If it's missing, Pull Requests will fail the DCO Check and will not be accepted.
 
