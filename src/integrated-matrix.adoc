@@ -666,12 +666,13 @@ stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{\lambda W - 1} A_{i,k} \times B_{
 
 An implementation partitions the `λ` sub-dot-products for each output element into consecutive groups of `G` sub-dot-products.
 The implementation-defined grouping factor `G` is applied separately within each `LMUL=1` step, so that a group shall not cross the boundary between two consecutive `LMUL=1` steps.
-The number of groups in the computation of stem:[C_{i,j}] above is `λ` ÷ `G`.
+For unscaled floating-point multiply-accumulate instructions, every group within an `LMUL=1` step has exactly `G` sub-dot-products, and the number of groups in the computation of stem:[C_{i,j}] above is `λ` ÷ `G`.
+For microscaled instructions, additional microscaling block boundaries apply; see <<integrated-matrix-mx-shortened-groups>>.
 
 `G` must satisfy:
 
 * `G` is a power of two;
-* 1 ≤ `G` ≤ λ.
+* 1 ≤ `G` ≤ λ.  Since both `λ` and `G` are powers of two and `1 ≤ G ≤ λ`, `G` divides `λ`. 
 
 * Within each group, the `G` sub-dot-products jointly define a dot product of two vectors with `G × W` elements. This group dot product is reduced into a partial sum `S` according to an implementation-defined parameter `psm` ∈ {`0`, `1`}.
 
@@ -700,8 +701,15 @@ For each entry with `psm=1`, the disclosure must additionally identify the reduc
 
 For each (`SEW`, `W`, `lambda`) entry with `psm=1`, the implementation-specific
 architectural disclosure is complete only when it includes a SAIL fragment
-that provides a concrete definition of `fp_disclosed_reduce_step` and of any companion
-functions referenced by it for that entry.
+that provides a concrete definition of `fp_disclosed_reduce_step` and of any
+companion functions referenced by it for that entry.
+
+The disclosed reduction shall define behavior for every actual group length
+that can occur for that entry. For unscaled instructions, the actual group
+length is always `G`. For microscaled instructions, the actual group length
+may be any value `g_len` such that `1 ? g_len ? G`, because groups are
+shortened at microscaling block boundaries as described in
+<<integrated-matrix-mx-shortened-groups>>.
 
 When composed with the shared SAIL pseudocode of this specification, the
 published fragment shall reproduce, bit-exactly, both the result that the
@@ -969,17 +977,72 @@ output element to NaN via the NaN propagation rule above. Implementations
 shall handle this case as specified, not as an implementation-defined
 result.
 
-====== Arithmetic considerations
+[#integrated-matrix-mx-shortened-groups]
+====== Arithmetic considerations and shortened groups
 
-The computation of stem:[C_{i,j}] follows similar arithmetic rules as described in <<accumulation-and-rounding-model>>.
-Each block dot product stem:[\sum_{k \in \text{block}(s)} A_{i,k} \times B_{k,j}] is partitioned into consecutive groups of `min`(`G`, `bs` ÷ `W`) sub-dot-products.
-That is, a group never crosses a block boundary.
-The group dot-product is reduced into a partial sum `S` according to the implementation-defined parameter `psm`.
-The partial sum `S` is treated according to the implementation-defined parameter `rnd`.
+The computation of stem:[C_{i,j}] follows the grouping, partial-sum,
+rounding, scaling, and final-accumulation rules of
+<<accumulation-and-rounding-model>>, with the additional constraint that
+a group shall not cross a microscaling block boundary.
 
-The partial sum `S` is scaled by
-stem:[\text{scale_A}_{i,s} \times \text{scale_B}_{j,s}]. For non-NaN
-E8M0 scales, the mathematical scale factor is an exact power of two.
+Microscaling block boundaries are defined over scalar elements along the K axis. For block
+index `s`, the scalar K interval covered by the block is:
+
+    blk_k_lo = s × block_size
+    blk_k_hi = min(blk_k_lo + block_size, K_eff) - 1
+
+The computation is also defined as repeated `LMUL=1` steps, in increasing
+register-index order. For `LMUL=1` step `step`, the scalar K interval is:
+
+    step_k_lo = step × λ × W
+    step_k_hi = step_k_lo + λ × W - 1
+
+For each output element, the instruction processes the intersection of the
+current microscaling block and the current `LMUL=1` step:
+
+    int_k_lo = max(step_k_lo, blk_k_lo)
+    int_k_hi = min(step_k_hi, blk_k_hi)
+
+If `int_k_lo > int_k_hi`, that block/step pair contributes no products.
+
+Otherwise, the intersected scalar K interval is converted to sub-dot-product
+indices relative to the `LMUL=1` step:
+
+    subdot_lo = (int_k_lo - step_k_lo) ÷ W
+    subdot_hi = (int_k_hi - step_k_lo) ÷ W
+
+The sub-dot-products in this interval are partitioned into consecutive
+groups of up to `G` sub-dot-products. For a group beginning at sub-dot-product
+index `g0`, the actual group length is:
+
+    g_len = min(G, subdot_hi - g0 + 1)
+
+Thus:
+
+* `1 ≤ g_len ≤ G`;
+* groups do not cross `LMUL=1` step boundaries;
+* groups do not cross microscaling block boundaries; and
+* the final group in an intersected block/step interval may contain fewer
+  than `G` sub-dot-products.
+
+A group of actual length `g_len` contains `g_len × W` scalar products. The
+group dot-product is reduced into a partial sum `S` according to `psm`.
+The partial sum `S` is treated according to `rnd`.
+
+For `psm=0`, the exact-reduction rule applies to the actual group length
+`g_len`.
+
+For `psm=1`, the implementation-specific architectural disclosure shall
+define the reduction result and exception-flag behavior for every actual
+group length `g_len` that can occur for the disclosed
+(`SEW`, `W`, `lambda`) entry. In particular, the disclosed SAIL fragment
+shall not assume that every microscaled group has length exactly `G`.
+
+The partial sum `S` is then scaled by
+stem:[\text{scale_A}_{i,s} \times \text{scale_B}_{j,s}], using the scale
+value associated with microscaling block `s`. Scaling, rounding, final
+accumulation into C, and accrued exception flags follow
+<<integrated-matrix-fp-special-values-fflags>> and the operation pseudocode.
 
 If `rnd=frm` or `rnd=rto`, `S` has first been rounded to the C accumulator
 format, and scaling is performed by the accumulator-format floating-point
@@ -996,6 +1059,18 @@ Finally, the scaled partial sum `S` is accumulated into the running value
 of stem:[C_{i,j}] by computing
 
 stem:[C_{i,j} \leftarrow \text{round}_{\text{frm}}(C_{i,j} + S)].
+
+[NOTE]
+====
+For unscaled floating-point multiply-accumulate instructions, the only
+group boundary inside an `LMUL=1` step is the grouping factor `G`, and
+groups always have length `G`.
+
+For microscaled instructions, scale-block boundaries are additional group
+boundaries. These boundaries may cut across the `LMUL=1` step structure,
+so the final group in an intersected block/step interval may be shorter
+than `G`.
+====
 
 ===== Scale layout in `v0`
 
@@ -3011,11 +3086,16 @@ val fp_internal_add : (fp_internal, fp_internal) -> fp_internal
 // and exception-flag behavior.
 val fp_disclosed_reduce_step : (fp_internal, fp_internal) -> fp_internal
 
+
 // Group partial sum S for one output element.
 // The group lies within one LMUL=1 step, identified by step, and begins
 // at sub-dot-product index g0 within that step. Each sub-dot-product
-// contributes W scalar products, so the full group corresponds to a dot
+// contributes W scalar products, so the actual group corresponds to a dot
 // product of two vectors with g_len × W elements.
+//
+// For unscaled FP GEMM, callers pass g_len = G. For microscaled FP GEMM,
+// callers may pass any g_len with 1 <= g_len <= G, because groups are not
+// permitted to cross microscaling block boundaries.
 //
 // The returned value S has not yet been rounded to the C accumulator format;
 // any such rounding is handled separately according to rnd.
@@ -3289,6 +3369,8 @@ function fp_scaled_gemm(g : gemm_geom,
               // Groups are not permitted to cross either an LMUL=1 step boundary
               // or a microscaling block boundary. Therefore the final group in this
               // intersected range may contain fewer than G sub-dot-products.
+	      // The actual group length g_len is part of the architectural input to
+	      // fp_group_sum and to any disclosed psm=1 reduction.
               let g_len : int = min(G, subdot_hi - g0 + 1);
 
               let S : fp_internal =
@@ -3344,6 +3426,7 @@ function int_scaled_gemm(g : gemm_geom,
                                                      g.EEW_C, fmt_C, scale_fmt, rm);
         if is_nan then { nan_out = true; break };
 
+	// The final microscaling block may contain fewer than block_size scalar elements along the K axis.
         let k_lo : int = s * block_size;
         let k_hi : int = min(k_lo + block_size, g.K_eff) - 1;
         let dot  : int = int_block_dot(i, j, k_lo, k_hi, g, true, true, vs1, vs2);
