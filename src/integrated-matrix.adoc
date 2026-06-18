@@ -704,8 +704,9 @@ that provides a concrete definition of `fp_bna_add` and of any companion
 functions referenced by it for that entry.
 
 When composed with the shared SAIL pseudocode of this specification, the
-published fragment shall reproduce, bit-exactly, the result that the
-implementation computes for every legal input. The published fragment shall
+published fragment shall reproduce, bit-exactly, both the result that the
+implementation computes and the floating-point exception flags that the
+implementation accrues for every legal input. The published fragment shall
 identify the version of this specification against which it was authored.
 
 A SAIL fragment in this form constitutes the machine-executable disclosure
@@ -747,11 +748,12 @@ specification and reproduces the implementation's results bit-exactly.
 
 ====
 
-The floating-point result of a matrix multiply-accumulate instruction is
-fully architecturally determined once the implementation's supported mapping
-from (`SEW`, `W`, `lambda`) to (`G`, `psm`, `rnd`) is known and, for every
-entry with `psm=1`, the implementation's complete architectural disclosure
-for the reduction algorithm is available.
+The floating-point result and accrued exception flags of a matrix
+multiply-accumulate instruction are fully architecturally determined once
+the implementation's supported mapping from (`SEW`, `W`, `lambda`) to
+(`G`, `psm`, `rnd`) is known and, for every entry with `psm=1`, the
+implementation's complete architectural disclosure for the reduction
+algorithm is available.
 
 The number of rounding operations per output element of C is (λ × `LMUL`) ÷ `G` if no rounding is applied to the reduced partial sum before accumulation, and 2 × (λ × `LMUL`) ÷ `G` if the reduced partial sum is rounded before accumulation into the running value of C.
 
@@ -781,9 +783,97 @@ The rounding of partial sum `S` is optional in order to match established practi
 ====
 
 Two conforming implementations may produce floating-point results that differ for identical inputs.
-Bit-exact reproducibility of floating-point matrix multiply-accumulate results across different implementations is therefore guaranteed only when both implementations support the same (`SEW`, `W`, `lambda`) → (`G`, `psm`, `rnd`) mapping and, at any `psm=1` entry, also disclose the same reduction algorithm with the same parameters.
+Bit-exact reproducibility of floating-point matrix multiply-accumulate
+results and accrued exception flags across different implementations is
+therefore guaranteed only when both implementations support the same
+(`SEW`, `W`, `lambda`) to (`G`, `psm`, `rnd`) mapping and, at any `psm=1`
+entry, also disclose the same reduction algorithm with the same parameters
+and the same exception-flag behavior.
 
-Floating-point exception flags (inexact, overflow, underflow, invalid, etc.) are accumulated into `fflags`; the order in which individual exceptions are raised within a single instruction execution is implementation-defined.
+[#integrated-matrix-fp-special-values-fflags]
+===== Floating-point special values and exception flags
+
+For floating-point matrix multiply-accumulate instructions, the architectural
+result of an instruction consists of both:
+
+* the bit pattern written to each active C accumulator element; and
+* the accrued floating-point exception flags written to `fflags`.
+
+For a given implementation disclosure, including the disclosed
+(`SEW`, `W`, `lambda`) to (`G`, `psm`, `rnd`) mapping and any complete
+`psm=1` architectural disclosure, the final destination register contents
+and the final accrued `fflags` value are architecturally determined.
+
+The temporal order in which individual floating-point exception conditions
+arise during one matrix multiply-accumulate instruction is implementation-defined.
+However, the final accrued `fflags` value shall be the bitwise OR of all
+floating-point exception flags raised by the helper operations in the
+specified or disclosed evaluation of all active output elements.
+
+C tile tail elements, inactive columns, and any element positions not
+processed by the instruction do not contribute floating-point exception
+flags.
+
+The helper operations in the SAIL-like pseudocode define where floating-point
+exception flags may be raised:
+
+* `fp_mul_exact` forms the exact internal product of two FP operands. For
+  finite operands, including subnormal operands and signed zeros, no rounding
+  to the C accumulator format is performed at this point. Special values are
+  handled according to the rules of the operand formats. For example,
+  signaling NaN operands and invalid operations such as zero multiplied by
+  infinity raise the invalid-operation flag and produce an internal NaN value.
+
+* `fp_internal_add` forms the exact internal sum of two internal FP values.
+  For finite operands, no rounding to the C accumulator format is performed
+  at this point. Special values are handled according to the rules of the
+  participating FP values. For example, adding infinities of opposite signs
+  raises the invalid-operation flag and produces an internal NaN value.
+
+* `fp_round_to_frm` rounds an internal FP value to the C accumulator format
+  using the dynamic rounding mode `frm`. This operation may raise inexact,
+  overflow, underflow, or other exception flags defined for conversion to
+  the C accumulator format.
+
+* `fp_round_to_rto` rounds an internal FP value to the C accumulator format
+  using round-to-odd. This operation may raise the same exception flags that
+  would be raised by converting the internal value to the C accumulator
+  format under the specified round-to-odd rule.
+
+* `fp_add_internal` adds an internal FP value directly to a C accumulator
+  element and rounds the final result according to `frm`. This operation may
+  raise the floating-point exception flags associated with the final addition
+  and rounding.
+
+* `fp_add` and `fp_mul` operate on values already represented in the C
+  accumulator format and follow the floating-point rules for that format,
+  including special-value handling and exception-flag behavior.
+
+* `decode_scale` decodes a scale-format value into the C accumulator format.
+  If that decoding requires conversion to the C accumulator format, the
+  conversion may raise the floating-point exception flags defined by the
+  scale format and the C accumulator format.
+
+For `psm=0`, the shared SAIL-like pseudocode and the helper operations above
+define both the result bits and the accrued exception flags.
+
+For `psm=1`, the implementation-specific SAIL fragment that completes the
+architectural disclosure shall define both the result value produced by the
+non-exact reduction and any floating-point exception flags raised by that
+reduction. When composed with the shared SAIL-like pseudocode of this
+specification, the implementation-specific fragment shall reproduce both
+the hardware result bits and the hardware accrued `fflags` value for every
+legal input.
+
+[NOTE]
+====
+This rule follows the same architectural principle as ordinary vector
+floating-point instructions: floating-point exceptions from active
+computations are accrued into `fflags`, while inactive element positions do
+not contribute exception flags. IME matrix multiply-accumulate instructions
+define their active computations in terms of active C tile elements rather
+than ordinary one-dimensional vector element positions.
+====
 
 [#integrated-matrix-microscaling]
 ==== Microscaling support (`v0.scale`)
@@ -2817,15 +2907,17 @@ function scale_width_of(sfmt : scale_format) -> int =
     E8M0 => 8
   }
 
-// decode_scale(scale : bits(sw), scale_fmt : scale_format,
-//              EEW : int, fmt : fp_fmt) -> bits(EEW)
+decode_scale(scale : bits(sw), scale_fmt : scale_format,
+             EEW : int, fmt : fp_fmt) -> bits(EEW)
 //   Decode a block-scale value of width sw = scale_width_of(scale_fmt)
 //   in the given scale format to the corresponding value in the target
-//   FP format.  The scale format is determined by the input data type.
+//   FP format. The scale format is determined by the input data type.
+//   This helper updates fflags for exceptions raised by conversion to
+//   the target FP format.
 //   For E8M0: converts an 8-bit exponent-only value (bias 127) to a
 //   power-of-two; the bit pattern 0xFF maps to NaN.
 
-// int_to_fp(x : int, EEW : int, fmt : fp_fmt, rm : rounding_mode) -> bits(EEW)
+int_to_fp(x : int, EEW : int, fmt : fp_fmt, rm : rounding_mode) -> bits(EEW)
 //   Convert a mathematical integer x to the nearest representable value in
 //   format fmt at width EEW, rounded per rm.  Updates fflags.
 
@@ -2890,6 +2982,10 @@ type fp_internal
 
 // Exact internal product of two FP operands.
 // No rounding to the C accumulator format is performed here.
+// Finite products are represented exactly in fp_internal.
+// Special values are handled according to the operand formats.
+// This helper updates fflags for exceptional special-value cases,
+// such as signaling NaN operands or zero multiplied by infinity.
 val fp_mul_exact : forall ('n, 'm).
   (bits('n), fp_fmt, bits('m), fp_fmt) -> fp_internal
 
@@ -2897,14 +2993,21 @@ val fp_mul_exact : forall ('n, 'm).
 val fp_internal_zero : unit -> fp_internal
 
 // Exact internal addition of two abstract internal FP values.
+// Finite sums are represented exactly in fp_internal.
+// Special values are handled according to the participating FP values.
+// This helper updates fflags for exceptional special-value cases,
+// such as adding infinities of opposite signs.
 val fp_internal_add : (fp_internal, fp_internal) -> fp_internal
 
-// Non-exact reduction step (psm=1).  The implementation chooses the
+// Non-exact reduction step (psm=1). The implementation chooses the
 // reduction algorithm and discloses it; common choices include RVBNA,
 // other bulk-normalised fixed-point schemes, and Kulisch-style
-// accumulators.  The SAIL leaves the operation abstract here: two
-// implementations producing different numerical results may both be
-// conforming, provided each discloses its algorithm and parameters.
+// accumulators.
+//
+// The SAIL leaves the operation abstract here: two implementations
+// producing different numerical results or different accrued fflags may
+// both be conforming, provided each discloses its algorithm, parameters,
+// and exception-flag behavior.
 val fp_bna_add : (fp_internal, fp_internal) -> fp_internal
 
 // Group partial sum S for one output element.
@@ -2969,13 +3072,17 @@ val get_fp_psm      : (int, int, int) -> psm_mode
 val get_fp_rnd      : (int, int, int) -> rnd_mode
 
 // Round an internal FP value to the C accumulator format using frm.
+// Updates fflags according to the conversion to the C accumulator format.
 val fp_round_to_frm : (fp_internal, int, fp_fmt, rounding_mode) -> bits
 
 // Round an internal FP value to the C accumulator format using round-to-odd.
+// Updates fflags according to the conversion to the C accumulator format
+// under the specified round-to-odd rule.
 val fp_round_to_rto : (fp_internal, int, fp_fmt) -> bits
 
 // Add an internal FP value directly to an accumulator-format operand,
 // with the only rounding step being the final rounding according to frm.
+// Updates fflags according to the final addition and rounding.
 val fp_add_internal : (bits, fp_internal, int, fp_fmt, rounding_mode) -> bits
 
 // Apply the implementation-selected treatment of the group partial sum S
