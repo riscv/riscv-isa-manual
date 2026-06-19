@@ -81,6 +81,7 @@ vector intrinsic types. See <<integrated-matrix-ime-m16-types>>.
   LMUL scales the A and B register groups along the K dimension only and does not affect C.
   Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
   Fractional LMUL settings (LMUL < 1) are reserved.
+  Executing any Zvvm instruction when `vtype.vlmul` does not encode an integer LMUL value in {1, 2, 4, 8} raises an illegal-instruction exception.
 
 [#ime-geometry-fig]
 .Geometry of matrix tiles and element ordering for `VLEN`/`SEW` (vector length in C element width) = 32 and λ=4. Vector register groups are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case (W=1) with A, B, and C having the same SEW. (b) Double-widening case (W=2) with A and B at half the SEW of C, with two narrow input elements packed into each SEW-wide storage position.
@@ -1497,6 +1498,42 @@ Tile load and store instructions follow the standard vector element-status seman
   Stores do not write to memory and do not raise exceptions.
 * _Prestart_ elements (index < `vstart`): neither the destination register nor memory is updated; no exceptions are raised.
 
+[#integrated-matrix-tile-ls-legality]
+===== Common legality and restart rules
+
+The following rules apply to all tile load/store instructions:
+
+* `vtype.vlmul` shall encode an integer LMUL value in {1, 2, 4, 8}.
+  Fractional and reserved LMUL encodings raise an illegal-instruction
+  exception.
+
+* The effective lambda is taken from the nonzero instruction lambda field,
+  when present. Otherwise, it is taken from `vtype.lambda[2:0]`.
+
+* If both the instruction lambda field and `vtype.lambda[2:0]` are zero,
+  no effective lambda is selected and the instruction raises an
+  illegal-instruction exception.
+
+* A nonzero instruction lambda field requests its exact encoded lambda.
+  The immediate value is not WARL-clamped and does not modify
+  `vtype.lambda[2:0]`. If that exact lambda is not supported for the
+  current (`VLEN`, `SEW`, `LMUL`) configuration, the instruction raises
+  an illegal-instruction exception.
+
+* `VL` shall be a multiple of `effective_lambda * LMUL`.
+
+* The tile vector operand shall be aligned to its LMUL-sized register
+  group, and the group shall not extend beyond `v31`.
+
+* For a masked tile load, the destination register group shall not
+  overlap the mask register `v0`.
+
+A nonzero `vstart` value is legal for tile load/store instructions.
+Execution resumes at element `vstart`. Prestart elements do not access
+memory or vector-register state. On successful completion, `vstart` is
+set to zero. If an active element raises a memory exception, `vstart`
+identifies the faulting element so that the instruction can be restarted.
+
 [cols="2,4", options="header"]
 |===
 | Mnemonic | Description
@@ -1572,6 +1609,8 @@ Tile load and store instructions follow the standard vector element-status seman
 * _Tail_ elements (index ≥ VL): loads never raise exceptions and do not update the destination register unless `vtype.vta`=1 (tail-agnostic), in which case those elements may be overwritten with 1s.
   Stores do not write to memory and do not raise exceptions.
 * _Prestart_ elements (index < `vstart`): neither the destination register nor memory is updated; no exceptions are raised.
+
+The common legality and restart rules in <<integrated-matrix-tile-ls-legality>> also apply to `vmttl.v` and `vmtts.v`.
 
 [cols="2,4", options="header"]
 |===
@@ -2988,6 +3027,95 @@ function decode_vlambda(lam_enc : bits(3)) -> option(int) =
   if lam_enc == 0b000 then None()
   else Some(2 ^ (unsigned(lam_enc) - 1))
 
+// Return true only when the exact lambda value is supported for the
+// current VLEN and the supplied SEW and LMUL configuration.
+//
+// This is the same implementation support predicate used by the WARL
+// behavior of vtype.lambda. An instruction immediate is checked exactly;
+// it is not WARL-clamped.
+val is_ime_lambda_supported : (int, int, int) -> bool
+
+
+// Decode vtype.vlmul for an IME instruction.
+// IME permits only integer LMUL values 1, 2, 4, and 8.
+function decode_ime_lmul() -> int = {
+  let LMUL_pow : int = get_lmul_pow();
+
+  if LMUL_pow not in {0, 1, 2, 3} then
+    return Illegal_Instruction();
+
+  2 ^ LMUL_pow
+}
+
+
+// Select the effective lambda for a tile load/store instruction.
+//
+// A nonzero instruction lambda field overrides vtype.lambda.
+// A zero instruction lambda field selects vtype.lambda.
+// If neither field supplies a nonzero value, the instruction is illegal.
+//
+// A nonzero instruction immediate requests its exact value. It is not
+// WARL-clamped and it does not modify vtype.lambda.
+function decode_tile_lambda(lam_enc : bits(3),
+                            SEW : int, LMUL : int) -> int = {
+  let eff_lambda : int =
+    match decode_vlambda(lam_enc) {
+      Some(lam) => lam,
+      None()    => match decode_vlambda(vtype[lambda]) {
+        Some(lam) => lam,
+        None()    => return Illegal_Instruction()
+      }
+    };
+
+  if not (is_ime_lambda_supported(SEW, LMUL, eff_lambda)) then
+    return Illegal_Instruction();
+
+  eff_lambda
+}
+
+
+// Check alignment and architectural-register-file bounds for an
+// LMUL-sized vector register group.
+function check_ime_reg_group(base : regidx, LMUL : int) -> unit = {
+  let base_idx : int = unsigned(base);
+
+  if base_idx % LMUL != 0 then
+    return Illegal_Instruction();
+
+  if base_idx + LMUL > 32 then
+    return Illegal_Instruction()
+}
+
+
+// Common decoded geometry for tile load/store instructions.
+struct tile_ls_geom = {
+  SEW_pow       : int,
+  EEW           : int,
+  LMUL          : int,
+  lambda        : int,
+  linesize      : int,
+  elems_per_reg : int,
+  num_elem      : int
+}
+
+
+function decode_tile_ls_geometry(lam_enc : bits(3)) -> tile_ls_geom = {
+  let SEW_pow       : int = get_sew_pow();
+  let EEW           : int = 2 ^ SEW_pow;
+  let LMUL          : int = decode_ime_lmul();
+  let lambda        : int = decode_tile_lambda(lam_enc, EEW, LMUL);
+  let linesize      : int = lambda * LMUL;
+  let elems_per_reg : int = vlen / EEW;
+  let num_elem      : int = unsigned(vl);
+
+  if num_elem % linesize != 0 then
+    return Illegal_Instruction();
+
+  struct {
+    SEW_pow, EEW, LMUL, lambda, linesize, elems_per_reg, num_elem
+  }
+}
+
 // Map sequential tile element index i to the flat register-group element index.
 // linesize = lambda * LMUL; elements within one tile row span LMUL registers.
 function tile_reg_idx(i : int, LMUL : int, lambda : int, elems_per_reg : int) -> int = {
@@ -3087,8 +3215,7 @@ function decode_gemm_geometry(W : int) -> gemm_geom = {
   let SEW_pow  : int = get_sew_pow();
   let EEW_C    : int = 2 ^ SEW_pow;
   let EEW_A    : int = EEW_C / W;
-  let LMUL_pow : int = get_lmul_pow();
-  let LMUL     : int = 2 ^ max(0, LMUL_pow);
+  let LMUL     : int = decode_ime_lmul();
   let epr_A    : int = vlen / EEW_A;
   let epr_C    : int = vlen / EEW_C;
 
@@ -3097,6 +3224,8 @@ function decode_gemm_geometry(W : int) -> gemm_geom = {
       Some(lam) => lam,
       None()    => return Illegal_Instruction()
     };
+  if not (is_ime_lambda_supported(EEW_C, LMUL, lambda)) then
+    return Illegal_Instruction();
 
   let K_eff : int = lambda * W * LMUL;
 
@@ -4498,47 +4627,88 @@ column-major order: in both cases the memory layout consists of _linesize_-eleme
 contiguous segments with a stride of `LD` elements between them.
 For LMUL=1 this simplifies to λ-element segments.
 
+Exceptions::
+The instruction raises the standard vector memory exceptions for active
+elements.
++
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
+* No effective lambda is selected.
+* The effective lambda is not supported for the current
+  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  field is checked exactly and is not WARL-clamped.
+* `VL` is not a multiple of `effective_lambda * LMUL`.
+* _vd_ is not aligned for LMUL, or its register group extends past `v31`.
+* `vm=0` and the destination register group overlaps `v0`.
+
+A nonzero `vstart` value is legal and is not an illegal-instruction
+condition.
+
 Operation::
 [source,sail]
 --
-let SEW_pow       : int        = get_sew_pow();
-let EEW           : int        = 2 ^ SEW_pow;
+let t : tile_ls_geom =
+  decode_tile_ls_geometry(instr.lambda);
+
+let SEW_pow       : int        = t.SEW_pow;
+let EEW           : int        = t.EEW;
 let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
-let LMUL_pow      : int        = get_lmul_pow();
-let LMUL          : int        = 2 ^ max(0, LMUL_pow);
-let elems_per_reg : int        = vlen / EEW;
-let num_elem      : int        = unsigned(vl);
+let LMUL          : int        = t.LMUL;
+let eff_lambda    : int        = t.lambda;
+let linesize      : int        = t.linesize;
+let elems_per_reg : int        = t.elems_per_reg;
+let num_elem      : int        = t.num_elem;
 
-let eff_lambda : int =
-  match decode_vlambda(instr.lambda) {
-    Some(lam) => lam,
-    None()    => match decode_vlambda(vtype[lambda]) {
-      Some(lam) => lam,
-      None()    => return Illegal_Instruction()
-    }
-  };
+check_ime_reg_group(vd, LMUL);
 
-var LD     : int      = unsigned(X(rs2));
-let vm_val            = read_vmask(num_elem, vm, zvreg);
-let linesize : int    = eff_lambda * LMUL;
+// A masked load destination may not overlap mask register v0.
+// Because the destination group is LMUL-aligned, overlap with v0
+// occurs exactly when the destination base register is v0.
+if vm == 0b0 then {
+  if unsigned(vd) == 0 then
+    return Illegal_Instruction()
+};
+
+var LD  : int = unsigned(X(rs2));
+let vm_val = read_vmask(num_elem, vm, zvreg);
 
 if LD == 0 then {
-  LD = eff_lambda * LMUL;
-}
+  LD = linesize;
+};
 
-foreach (i from 0 to (num_elem - 1)) {
-  if vm_val[i] == 0b1 then {
-    set_vstart(to_bits_unsafe(16, i));
-    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
-    let mem_off  : int = (i / linesize) * LD + (i % linesize);
-    match vmem_read(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
-                    EEW_bytes, Load(Data), false, false, false) {
-      Ok(elem) => write_single_element(EEW, flat_idx, vd, elem),
-      Err(e)   => return e,
+let start : int = unsigned(vstart);
+
+if start < num_elem then {
+  foreach (i from start to (num_elem - 1)) {
+    if vm_val[i] == 0b1 then {
+      set_vstart(to_bits_unsafe(16, i));
+
+      let flat_idx : int =
+        tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+
+      let mem_off : int =
+        (i / linesize) * LD + (i % linesize);
+
+      match vmem_read(
+        rs1,
+        to_bits_unsafe(xlen, mem_off * EEW_bytes),
+        EEW_bytes,
+        Load(Data),
+        false,
+        false,
+        false
+      ) {
+        Ok(elem) =>
+          write_single_element(EEW, flat_idx, vd, elem),
+        Err(e) =>
+          return e,
+      }
     }
+    // Inactive body elements perform no memory access.
+    // Prestart elements are excluded by the loop lower bound.
+    // Tail elements are excluded by the loop upper bound.
   }
-  // inactive (body, mask=0): undisturbed unless vma=1 (may overwrite with 1s)
-  // tail (i >= VL): not reached by this loop; undisturbed unless vta=1 (may overwrite with 1s)
 };
 
 set_vstart(zeros());
@@ -4596,46 +4766,88 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 +
     M[rs1 + (i / linesize) × LD + (i % linesize)] = VS[i]
 
+Exceptions::
+The instruction raises the standard vector memory exceptions for active
+elements.
++
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
+* No effective lambda is selected.
+* The effective lambda is not supported for the current
+  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  field is checked exactly and is not WARL-clamped.
+* `VL` is not a multiple of `effective_lambda * LMUL`.
+* _vs3_ is not aligned for LMUL, or its register group extends past `v31`.
+
+A nonzero `vstart` value is legal and is not an illegal-instruction
+condition.
+
 Operation::
 [source,sail]
 --
-let SEW_pow       : int        = get_sew_pow();
-let EEW           : int        = 2 ^ SEW_pow;
+let t : tile_ls_geom =
+  decode_tile_ls_geometry(instr.lambda);
+
+let SEW_pow       : int        = t.SEW_pow;
+let EEW           : int        = t.EEW;
 let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
-let LMUL_pow      : int        = get_lmul_pow();
-let LMUL          : int        = 2 ^ max(0, LMUL_pow);
-let elems_per_reg : int        = vlen / EEW;
-let num_elem      : int        = unsigned(vl);
+let LMUL          : int        = t.LMUL;
+let eff_lambda    : int        = t.lambda;
+let linesize      : int        = t.linesize;
+let elems_per_reg : int        = t.elems_per_reg;
+let num_elem      : int        = t.num_elem;
 
-let eff_lambda : int =
-  match decode_vlambda(instr.lambda) {
-    Some(lam) => lam,
-    None()    => match decode_vlambda(vtype[lambda]) {
-      Some(lam) => lam,
-      None()    => return Illegal_Instruction()
-    }
-  };
+check_ime_reg_group(vs3, LMUL);
 
-var LD     : int   = unsigned(X(rs2));
-let vm_val         = read_vmask(num_elem, vm, zvreg);
-let linesize : int = eff_lambda * LMUL;
+var LD  : int = unsigned(X(rs2));
+let vm_val = read_vmask(num_elem, vm, zvreg);
 
 if LD == 0 then {
-  LD = eff_lambda * LMUL;
-}
+  LD = linesize;
+};
 
-foreach (i from 0 to (num_elem - 1)) {
-  if vm_val[i] == 0b1 then {
-    set_vstart(to_bits_unsafe(16, i));
-    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
-    let mem_off  : int = (i / linesize) * LD + (i % linesize);
-    let data               = read_single_element(EEW, flat_idx, vs3);
-    match vmem_write(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
-                     EEW_bytes, data, Store(Data), false, false, false) {
-      Ok(true)  => (),
-      Ok(false) => internal_error(__FILE__, __LINE__, "store got false from vmem_write"),
-      Err(e)    => return e,
+let start : int = unsigned(vstart);
+
+if start < num_elem then {
+  foreach (i from start to (num_elem - 1)) {
+    if vm_val[i] == 0b1 then {
+      set_vstart(to_bits_unsafe(16, i));
+
+      let flat_idx : int =
+        tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+
+      let mem_off : int =
+        (i / linesize) * LD + (i % linesize);
+
+      let data =
+        read_single_element(EEW, flat_idx, vs3);
+
+      match vmem_write(
+        rs1,
+        to_bits_unsafe(xlen, mem_off * EEW_bytes),
+        EEW_bytes,
+        data,
+        Store(Data),
+        false,
+        false,
+        false
+      ) {
+        Ok(true) =>
+          (),
+        Ok(false) =>
+          internal_error(
+            __FILE__,
+            __LINE__,
+            "store got false from vmem_write"
+          ),
+        Err(e) =>
+          return e,
+      }
     }
+    // Inactive body elements perform no memory access.
+    // Prestart elements are excluded by the loop lower bound.
+    // Tail elements are excluded by the loop upper bound.
   }
 };
 
@@ -4700,48 +4912,88 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 +
     VD[i] = M[rs1 + (i % linesize) × LD + (i / linesize)]
 
+Exceptions::
+The instruction raises the standard vector memory exceptions for active
+elements.
++
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
+* No effective lambda is selected.
+* The effective lambda is not supported for the current
+  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  field is checked exactly and is not WARL-clamped.
+* `VL` is not a multiple of `effective_lambda * LMUL`.
+* _vd_ is not aligned for LMUL, or its register group extends past `v31`.
+* `vm=0` and the destination register group overlaps `v0`.
+
+A nonzero `vstart` value is legal and is not an illegal-instruction
+condition.
+
 Operation::
 [source,sail]
 --
-let SEW_pow       : int        = get_sew_pow();
-let EEW           : int        = 2 ^ SEW_pow;
+let t : tile_ls_geom =
+  decode_tile_ls_geometry(instr.lambda);
+
+let SEW_pow       : int        = t.SEW_pow;
+let EEW           : int        = t.EEW;
 let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
-let LMUL_pow      : int        = get_lmul_pow();
-let LMUL          : int        = 2 ^ max(0, LMUL_pow);
-let elems_per_reg : int        = vlen / EEW;
-let num_elem      : int        = unsigned(vl);
+let LMUL          : int        = t.LMUL;
+let eff_lambda    : int        = t.lambda;
+let linesize      : int        = t.linesize;
+let elems_per_reg : int        = t.elems_per_reg;
+let num_elem      : int        = t.num_elem;
 
-let eff_lambda : int =
-  match decode_vlambda(instr.lambda) {
-    Some(lam) => lam,
-    None()    => match decode_vlambda(vtype[lambda]) {
-      Some(lam) => lam,
-      None()    => return Illegal_Instruction()
-    }
-  };
+check_ime_reg_group(vd, LMUL);
 
-var LD     : int   = unsigned(X(rs2));
-let vm_val         = read_vmask(num_elem, vm, zvreg);
-let linesize : int = eff_lambda * LMUL;
+// A masked load destination may not overlap mask register v0.
+// Because the destination group is LMUL-aligned, overlap with v0
+// occurs exactly when the destination base register is v0.
+if vm == 0b0 then {
+  if unsigned(vd) == 0 then
+    return Illegal_Instruction()
+};
+
+var LD  : int = unsigned(X(rs2));
+let vm_val = read_vmask(num_elem, vm, zvreg);
 
 if LD == 0 then {
   LD = elems_per_reg / eff_lambda;
-}
+};
 
-foreach (i from 0 to (num_elem - 1)) {
-  if vm_val[i] == 0b1 then {
-    set_vstart(to_bits_unsafe(16, i));
-    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
-    // Transposing: swap line and elem_in_line for the memory address
-    let mem_off  : int = (i % linesize) * LD + (i / linesize);
-    match vmem_read(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
-                    EEW_bytes, Load(Data), false, false, false) {
-      Ok(elem) => write_single_element(EEW, flat_idx, vd, elem),
-      Err(e)   => return e,
+let start : int = unsigned(vstart);
+
+if start < num_elem then {
+  foreach (i from start to (num_elem - 1)) {
+    if vm_val[i] == 0b1 then {
+      set_vstart(to_bits_unsafe(16, i));
+
+      let flat_idx : int =
+        tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+
+      let mem_off : int =
+        (i % linesize) * LD + (i / linesize);
+
+      match vmem_read(
+        rs1,
+        to_bits_unsafe(xlen, mem_off * EEW_bytes),
+        EEW_bytes,
+        Load(Data),
+        false,
+        false,
+        false
+      ) {
+        Ok(elem) =>
+          write_single_element(EEW, flat_idx, vd, elem),
+        Err(e) =>
+          return e,
+      }
     }
+    // Inactive body elements perform no memory access.
+    // Prestart elements are excluded by the loop lower bound.
+    // Tail elements are excluded by the loop upper bound.
   }
-  // inactive (body, mask=0): undisturbed unless vma=1 (may overwrite with 1s)
-  // tail (i >= VL): not reached by this loop; undisturbed unless vta=1 (may overwrite with 1s)
 };
 
 set_vstart(zeros());
@@ -4801,47 +5053,88 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 +
     M[rs1 + (i % linesize) × LD + (i / linesize)] = VS[i]
 
+Exceptions::
+The instruction raises the standard vector memory exceptions for active
+elements.
++
+_Illegal Instruction_ is raised if any of the following conditions holds:
++
+* `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
+* No effective lambda is selected.
+* The effective lambda is not supported for the current
+  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  field is checked exactly and is not WARL-clamped.
+* `VL` is not a multiple of `effective_lambda * LMUL`.
+* _vs3_ is not aligned for LMUL, or its register group extends past `v31`.
+
+A nonzero `vstart` value is legal and is not an illegal-instruction
+condition.
+
 Operation::
 [source,sail]
 --
-let SEW_pow       : int        = get_sew_pow();
-let EEW           : int        = 2 ^ SEW_pow;
+let t : tile_ls_geom =
+  decode_tile_ls_geometry(instr.lambda);
+
+let SEW_pow       : int        = t.SEW_pow;
+let EEW           : int        = t.EEW;
 let EEW_bytes     : word_width = 2 ^ (SEW_pow - 3);
-let LMUL_pow      : int        = get_lmul_pow();
-let LMUL          : int        = 2 ^ max(0, LMUL_pow);
-let elems_per_reg : int        = vlen / EEW;
-let num_elem      : int        = unsigned(vl);
+let LMUL          : int        = t.LMUL;
+let eff_lambda    : int        = t.lambda;
+let linesize      : int        = t.linesize;
+let elems_per_reg : int        = t.elems_per_reg;
+let num_elem      : int        = t.num_elem;
 
-let eff_lambda : int =
-  match decode_vlambda(instr.lambda) {
-    Some(lam) => lam,
-    None()    => match decode_vlambda(vtype[lambda]) {
-      Some(lam) => lam,
-      None()    => return Illegal_Instruction()
-    }
-  };
+check_ime_reg_group(vs3, LMUL);
 
-var LD     : int   = unsigned(X(rs2));
-let vm_val         = read_vmask(num_elem, vm, zvreg);
-let linesize : int = eff_lambda * LMUL;
+var LD  : int = unsigned(X(rs2));
+let vm_val = read_vmask(num_elem, vm, zvreg);
 
 if LD == 0 then {
   LD = elems_per_reg / eff_lambda;
-}
+};
 
-foreach (i from 0 to (num_elem - 1)) {
-  if vm_val[i] == 0b1 then {
-    set_vstart(to_bits_unsafe(16, i));
-    let flat_idx : int = tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
-    // Transposing: swap line and elem_in_line for the memory address
-    let mem_off  : int = (i % linesize) * LD + (i / linesize);
-    let data               = read_single_element(EEW, flat_idx, vs3);
-    match vmem_write(rs1, to_bits_unsafe(xlen, mem_off * EEW_bytes),
-                     EEW_bytes, data, Store(Data), false, false, false) {
-      Ok(true)  => (),
-      Ok(false) => internal_error(__FILE__, __LINE__, "store got false from vmem_write"),
-      Err(e)    => return e,
+let start : int = unsigned(vstart);
+
+if start < num_elem then {
+  foreach (i from start to (num_elem - 1)) {
+    if vm_val[i] == 0b1 then {
+      set_vstart(to_bits_unsafe(16, i));
+
+      let flat_idx : int =
+        tile_reg_idx(i, LMUL, eff_lambda, elems_per_reg);
+
+      let mem_off : int =
+        (i % linesize) * LD + (i / linesize);
+
+      let data =
+        read_single_element(EEW, flat_idx, vs3);
+
+      match vmem_write(
+        rs1,
+        to_bits_unsafe(xlen, mem_off * EEW_bytes),
+        EEW_bytes,
+        data,
+        Store(Data),
+        false,
+        false,
+        false
+      ) {
+        Ok(true) =>
+          (),
+        Ok(false) =>
+          internal_error(
+            __FILE__,
+            __LINE__,
+            "store got false from vmem_write"
+          ),
+        Err(e) =>
+          return e,
+      }
     }
+    // Inactive body elements perform no memory access.
+    // Prestart elements are excluded by the loop lower bound.
+    // Tail elements are excluded by the loop upper bound.
   }
 };
 
