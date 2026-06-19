@@ -449,8 +449,14 @@ For `vwmmacc.vv`, `vqmmacc.vv`, and `v8wmmacc.vv`, `vm=0` encodes
 `vfwimmacc.vv`, `vfqimmacc.vv`, and `vf8wimmacc.vv` respectively —
 integer-input, floating-point-accumulate, microscaled
 instructions (see <<integrated-matrix-microscaling>> and <<tbl-intmx-encoding-map>>).
+
 For floating-point multiply-accumulate instructions, `vm=0` enables
 microscaling (see <<integrated-matrix-microscaling>>).
+
+A `vm=0` integer-input encoding is legal only when the corresponding row
+and selected MX block-size cell in <<tbl-intmx-encoding-map>> name the
+required microscaling extension and that extension is implemented.
+Otherwise, an illegal-instruction exception is raised.
 
 Matrix multiply-accumulate instructions cannot be interrupted and resumed:
 they require `vstart` = 0 at the start of execution, and if `vstart` is
@@ -490,9 +496,20 @@ The following table lists the floating-point matrix tile multiplication instruct
 | `vf8wimmacc.vv vd, vs1, vs2, v0.scale`  | 8 | SEW/8   | SEW | only MX-scaled integer A/B tiles
 |===
 
-Vector masking is not supported on matrix multiply-accumulate instructions:
-the vm bit in the encoding selects between normal, unscaled arguments (`vm=1`)
-and microscaled MX* matrix tile arguments. For details see <<integrated-matrix-microscaling>>.
+Vector masking is not supported on matrix multiply-accumulate instructions.
+
+For `vfmmacc.vv`, `vm=0` is reserved.
+
+For `vfwmmacc.vv`, `vfqmmacc.vv`, and `vf8wmmacc.vv`, `vm=1`
+selects normal unscaled operands and `vm=0` requests microscaled MX
+operands using `v0.scale`.
+
+A `vm=0` encoding is legal only when the corresponding row and selected
+MX block-size cell in <<tbl-fp-encoding-map>> name the required
+microscaling extension or extensions and all such extensions are
+implemented. Otherwise, an illegal-instruction exception is raised.
+See <<integrated-matrix-microscaling>> for the arithmetic and scale-layout
+semantics.
 
 Matrix multiply-accumulate instructions cannot be interrupted and resumed:
 they require `vstart` = 0 at the start of execution, and if `vstart` is
@@ -3303,6 +3320,30 @@ function check_microscaling_legality(W : int, LMUL : int,
   if vtype[bs] == 0b1 & (W * LMUL > EEW_C) then return Illegal_Instruction()
 }
 
+// Enforce the vm=0 columns of tbl-fp-encoding-map for a
+// floating-point-input microscaled instruction.
+//
+// The argument order is:
+//   W, SEW, altfmt_A, altfmt_B, altfmt, bs
+//
+// Raises Illegal_Instruction when the selected MX cell is reserved,
+// contains no extension, or names one or more required extensions that
+// are not implemented.
+val check_fp_mx_encoding_legality :
+  (int, int, bit, bit, bit, bit) -> unit
+
+
+// Enforce tbl-intmx-encoding-map for an integer-input microscaled
+// floating-point-accumulate instruction.
+//
+// The argument order is:
+//   W, SEW, altfmt_A, altfmt_B, altfmt, bs
+//
+// Raises Illegal_Instruction when the selected MX cell is reserved
+// or names an extension that is not implemented.
+val check_int_mx_encoding_legality :
+  (int, int, bit, bit, bit, bit) -> unit
+
 // ─── Top-level GEMM operations ─────────────────────────────────────────
 //
 // Each instruction decodes its parameters and dispatches to one of the
@@ -3636,6 +3677,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* When `vm=0`: the selected MX cell in <<tbl-fp-encoding-map>> is `-` or `_reserved_`, or any required extension named by that cell is not implemented.
 * When `vm=0`: SEW × λ < 16.
 * When `vm=0` and `bs=1`: W × LMUL > SEW (i.e., 8 × LMUL > SEW).
 * When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
@@ -3649,7 +3691,14 @@ if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(8);
 
-if vm == 0 then check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda, E8M0);
+if vm == 0 then {
+  check_microscaling_legality(
+    8, g.LMUL, g.EEW_C, g.lambda, E8M0);
+  check_fp_mx_encoding_legality(
+    8, g.EEW_C,
+    vtype[altfmt_A], vtype[altfmt_B],
+    vtype[altfmt], vtype[bs])
+};
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
@@ -3671,6 +3720,14 @@ Included in::
 |Lifecycle state
 
 |Zvvfmm (<<#zvvfmm>>)
+|0.1
+|Draft
+
+|Zvvxofp4fp32mm, Zvvxofp8fp64mm (<<#integrated-matrix-microscaling>>)
+|0.1
+|Draft
+
+|Zvvxnofp4fp32mm, Zvvxnofp8fp64mm (<<#integrated-matrix-microscaling>>)
 |0.1
 |Draft
 |===
@@ -3820,6 +3877,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* When `vm=0`: the selected MX cell in <<tbl-fp-encoding-map>> is `-` or `_reserved_`, or any required extension named by that cell is not implemented.
 * When `vm=0`: SEW × λ < 16.
 * When `vm=0` and `bs=1`: W × LMUL > SEW.
 * When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
@@ -3834,7 +3892,14 @@ if SEW_check == 8 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(4);
 
-if vm == 0 then check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda, E8M0);
+if vm == 0 then {
+  check_microscaling_legality(
+    4, g.LMUL, g.EEW_C, g.lambda, E8M0);
+  check_fp_mx_encoding_legality(
+    4, g.EEW_C,
+    vtype[altfmt_A], vtype[altfmt_B],
+    vtype[altfmt], vtype[bs])
+};
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
@@ -3925,6 +3990,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* When `vm=0`: the selected MX cell in <<tbl-fp-encoding-map>> is `-` or `_reserved_`, or any required extension named by that cell is not implemented.
 * When `vm=0`: SEW × λ < 16.
 * When `vm=0` and `bs=1`: W × LMUL > SEW.
 * When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
@@ -3936,7 +4002,14 @@ if vstart != 0 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(2);
 
-if vm == 0 then check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda, E8M0);
+if vm == 0 then {
+  check_microscaling_legality(
+    2, g.LMUL, g.EEW_C, g.lambda, E8M0);
+  check_fp_mx_encoding_legality(
+    2, g.EEW_C,
+    vtype[altfmt_A], vtype[altfmt_B],
+    vtype[altfmt], vtype[bs])
+};
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
 let fmt_B : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_B]);
@@ -4029,6 +4102,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * SEW = 64 (reserved encoding).
 * `altfmt_A` = 1 (reserved; MXINT inputs are signed).
 * `altfmt_B` = 1 (reserved; MXINT inputs are signed).
+* The selected MX cell in <<tbl-intmx-encoding-map>> is `_reserved_`, or the extension named by that cell is not implemented.
 * VL is not a multiple of λ × LMUL.
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
@@ -4053,6 +4127,11 @@ check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
+
+check_int_mx_encoding_legality(
+  2, g.EEW_C,
+  vtype[altfmt_A], vtype[altfmt_B],
+  vtype[altfmt], vtype[bs]);
 
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
@@ -4134,6 +4213,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * SEW < 32 (reserved encoding).
 * `altfmt_A` = 1 (reserved; MXINT inputs are signed).
 * `altfmt_B` = 1 (reserved; MXINT inputs are signed).
+* The selected MX cell in <<tbl-intmx-encoding-map>> is `_reserved_`, or the extension named by that cell is not implemented.
 * VL is not a multiple of λ × LMUL.
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
@@ -4155,6 +4235,11 @@ check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
+
+check_int_mx_encoding_legality(
+  8, g.EEW_C,
+  vtype[altfmt_A], vtype[altfmt_B],
+  vtype[altfmt], vtype[bs]);
 
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
@@ -4238,6 +4323,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * SEW = 64 (reserved encoding).
 * `altfmt_A` = 1 (reserved; MXINT inputs are signed).
 * `altfmt_B` = 1 (reserved; MXINT inputs are signed).
+* The selected MX cell in <<tbl-intmx-encoding-map>> is `_reserved_`, or the extension named by that cell is not implemented.
 * VL is not a multiple of λ × LMUL.
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
@@ -4262,6 +4348,11 @@ check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda, E8M0);
 
 if vtype[altfmt_A] == 0b1 then return Illegal_Instruction();
 if vtype[altfmt_B] == 0b1 then return Illegal_Instruction();
+
+check_int_mx_encoding_legality(
+  4, g.EEW_C,
+  vtype[altfmt_A], vtype[altfmt_B],
+  vtype[altfmt], vtype[bs]);
 
 let fmt_C : fp_fmt        = fp_format_of(g.EEW_C, vtype[altfmt]);
 let rm    : rounding_mode = get_fp_rounding_mode();
@@ -5002,6 +5093,25 @@ Mixed-format inputs (`altfmt_A` ≠ `altfmt_B`) are permitted wherever both
 input formats are defined for a given (SEW, W) combination; those
 combinations are listed explicitly in the table below.
 
+For `vm=1`, the `Extension` column identifies the extension or extensions
+required by the selected row.
+
+For `vfwmmacc.vv`, `vfqmmacc.vv`, and `vf8wmmacc.vv` with `vm=0`,
+the row is selected by the instruction, `SEW`, `altfmt_A`, `altfmt_B`,
+and `altfmt`. The governing MX cell is:
+
+* `MX BS=32 (vm=0)` when `bs=0`; or
+* `MX BS=16 (vm=0)` when `bs=1`.
+
+The `vm=0` encoding is legal only if the selected MX cell names one or
+more extensions and every extension named by that cell is implemented.
+A selected MX cell containing `?` or `_reserved_` raises an
+illegal-instruction exception.
+
+Implementation of the extension or extensions named in the unscaled
+`Extension` column does not by itself authorize the corresponding
+`vm=0` encoding.
+
 [#tbl-fp-encoding-map]
 .Floating-point multiply-accumulate encoding map
 [cols="2,1,1,1,2,1,2,1,2,2,2,2", options="header"]
@@ -5179,6 +5289,17 @@ MXINT inputs are always signed;
 `altfmt_A` and `altfmt_B` must be 0 (unsigned is _reserved_).
 `altfmt` selects the FP accumulator format.
 `vmmacc.vv` with `vm=0` remains _reserved_.
+
+For `vfwimmacc.vv`, `vfqimmacc.vv`, and `vf8wimmacc.vv`, the row is
+selected by the instruction, `SEW`, `altfmt_A`, `altfmt_B`, and
+`altfmt`. The governing MX cell is:
+
+* `MX BS=32` when `bs=0`; or
+* `MX BS=16` when `bs=1`.
+
+The encoding is legal only if the selected MX cell names an extension and
+that extension is implemented. A selected cell containing `_reserved_`
+raises an illegal-instruction exception.
 
 .Integer MX multiply-accumulate encoding map (`vm=0`)
 [cols="2,1,1,1,2,1,2,1,2,2,2", options="header"]
