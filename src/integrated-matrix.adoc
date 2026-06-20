@@ -134,8 +134,31 @@ Equivalently, the matrix operation is:
 [stem]
 ++++
 C \leftarrow C
-  + A_{\mathrm{tile}} B_{\mathrm{tile}}^{T}
+  + A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}
 ++++
+
+The contents of the _vs2_ register group have two equivalent matrix
+interpretations:
+
+* stem:[B_{\mathrm{tile}}] has shape
+  stem:[N \times K_{\mathrm{eff}}] and is stored in row-major register
+  layout.
+
+* stem:[B_{\mathrm{tile}}^{T}] has shape
+  stem:[K_{\mathrm{eff}} \times N] and is stored in column-major register
+  layout.
+
+The two views refer to the same register contents:
+
+[stem]
+++++
+B_{\mathrm{tile}}^{T}[k,j]
+  = B_{\mathrm{tile}}[j,k]
+++++
+
+Descriptions involving output-column selection and dot products generally
+use the stem:[B_{\mathrm{tile}}^{T}] view, because column `j` of
+stem:[B_{\mathrm{tile}}^{T}] contributes directly to column `j` of C.
 
 Consequently, if stem:[A_{\mathrm{tile}} = B_{\mathrm{tile}}], the
 instruction computes:
@@ -495,7 +518,7 @@ in row-major register layout. The instructions compute:
 [stem]
 ++++
 C \leftarrow C +
-A_{\mathrm{tile}} B_{\mathrm{tile}}^{T}
+A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}
 ++++
 
 The following table lists the integer matrix tile multiplication instructions. The arguments are:
@@ -555,7 +578,7 @@ in row-major register layout. The instructions compute:
 [stem]
 ++++
 C \leftarrow C +
-A_{\mathrm{tile}} B_{\mathrm{tile}}^{T}
+A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}
 ++++
 
 The following table lists the floating-point matrix tile multiplication instructions. The arguments are:
@@ -741,7 +764,7 @@ Whenever mixed formats are used in the computational instructions, one must foll
 
 Each multiply-accumulate instruction computes, for every output element stem:[C_{i,j}]:
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{K_{\text{eff}}-1} A_{\mathrm{tile}}[i,k] \times B_{\mathrm{tile}}[j,k]]
+stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{K_{\text{eff}}-1} A_{\mathrm{tile}}[i,k] \times B^{T}_{\mathrm{tile}}[k,j]]
 
 where K~eff~ = `λ` × `W` × `LMUL`.
 This section specifies how the K~eff~ product terms may be grouped and when intermediate rounding is permitted.
@@ -761,7 +784,7 @@ When `W` = `1`, each product of two `SEW`-bit values is exact at `2` × `SEW` bi
 The resulting value of element stem:[C_{i,j}] for any given `LMUL` must match the value computed by applying a series of multiply-accumulate instructions with `LMUL=1`, in increasing order of vector-register indices.
 Therefore, it is enough to specify the result of the computation
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{\lambda W - 1} A_{\mathrm{tile}}[i,k] \times B_{\mathrm{tile}}[j,k]]
+stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{\lambda W - 1} A_{\mathrm{tile}}[i,k] \times B^{T}_{\mathrm{tile}}[k,j]]
 
 An implementation partitions the `λ` sub-dot-products for each output element into consecutive groups of `G` sub-dot-products.
 The implementation-defined grouping factor `G` is applied separately within each `LMUL=1` step, so that a group shall not cross the boundary between two consecutive `LMUL=1` steps.
@@ -1075,7 +1098,7 @@ applied, `v0` is not read, and the `bs` field is ignored.
 
 When microscaling is active (`vm=0`), each output element is computed as:
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{s=0}^{L-1} \left( \text{scale_A}_{i,s} \times \text{scale_B}_{j,s} \times \left( \sum_{k \in \text{block}(s)} A_{\mathrm{tile}}[i,k] \times B_{\mathrm{tile}}[j,k] \right) \right)]
+stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{s=0}^{L-1} \left( \text{scale_A}_{i,s} \times \text{scale_B}_{j,s} \times \left( \sum_{k \in \text{block}(s)} A_{\mathrm{tile}}[i,k] \times B^{T}_{\mathrm{tile}}[k,j] \right) \right)]
 
 where L = ⌈K_eff / block_size⌉ is the number of scale blocks per
 row/column, and block(_s_) covers elements
@@ -3913,11 +3936,17 @@ Encoding::
 ....
 
 Description::
-Computes the matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_:
+C ← C + T,
 with a widening factor of 8 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
@@ -3998,11 +4027,16 @@ Encoding::
 ....
 
 Description::
-Computes the floating-point matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times  B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_: C ← C + T,
 with a widening factor of 8 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
@@ -4111,10 +4145,15 @@ Encoding::
 ....
 
 Description::
-Computes the floating-point matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T.
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times  B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_: C ← C + T.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
@@ -4198,11 +4237,16 @@ Encoding::
 ....
 
 Description::
-Computes the floating-point matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times  B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_: C ← C + T,
 with a widening factor of 4 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
@@ -4314,11 +4358,16 @@ Encoding::
 ....
 
 Description::
-Computes the floating-point matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times  B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_: C ← C + T,
 with a widening factor of 2 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
@@ -4425,13 +4474,18 @@ NOTE: This instruction shares its opcode with `vwmmacc.vv`; `vm=0` selects
 the integer-input FP-accumulate MX form.  `vwmmacc.vv` requires `vm=1`.
 
 Description::
-Computes the exact integer matrix-matrix product T = vs1 × vs2 block by block,
-scales each block by the paired scale factors in `v0`, and accumulates the
-scaled result into the floating-point accumulator _vd_: C ← C + scale_A × scale_B × T.
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes the exact integer
+tile product
+
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
+
+block by block, scales each block by the paired scale factors in `v0`,
+and accumulates the scaled result into _vd_: C ← C + scale_A × scale_B × T.
 The widening factor is 2 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical FP accumulator tile (row-major
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical FP accumulator tile (row-major
 register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷2; _vd_ has FP elements of width SEW.
 +
@@ -4538,13 +4592,18 @@ NOTE: This instruction shares its opcode with `v8wmmacc.vv`; `vm=0` selects
 the integer-input FP-accumulate MX form.  `v8wmmacc.vv` requires `vm=1`.
 
 Description::
-Computes the exact integer matrix-matrix product T = vs1 × vs2 block by block,
-scales each block by the paired scale factors in `v0`, and accumulates the
-scaled result into the floating-point accumulator _vd_: C ← C + scale_A × scale_B × T.
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes the exact integer
+tile product
+
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
+
+block by block, scales each block by the paired scale factors in `v0`,
+and accumulates the scaled result into _vd_: C ← C + scale_A × scale_B × T.
 The widening factor is 8 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical FP accumulator tile (row-major
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical FP accumulator tile (row-major
 register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷8; _vd_ has FP elements of width SEW.
 +
@@ -4646,13 +4705,18 @@ NOTE: This instruction shares its opcode with `vqmmacc.vv`; `vm=0` selects
 the integer-input FP-accumulate MX form.  `vqmmacc.vv` requires `vm=1`.
 
 Description::
-Computes the exact integer matrix-matrix product T = vs1 × vs2 block by block,
-scales each block by the paired scale factors in `v0`, and accumulates the
-scaled result into the floating-point accumulator _vd_: C ← C + scale_A × scale_B × T.
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes the exact integer
+tile product
+
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
+
+block by block, scales each block by the paired scale factors in `v0`,
+and accumulates the scaled result into _vd_: C ← C + scale_A × scale_B × T.
 The widening factor is 4 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical FP accumulator tile (row-major
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical FP accumulator tile (row-major
 register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷4; _vd_ has FP elements of width SEW.
 +
@@ -4756,10 +4820,15 @@ Encoding::
 ....
 
 Description::
-Computes the matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T.
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_: C ← C + T.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
@@ -5421,11 +5490,16 @@ Encoding::
 ....
 
 Description::
-Computes the matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_: C ← C + T,
 with a widening factor of 4 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
@@ -5507,11 +5581,16 @@ Encoding::
 ....
 
 Description::
-Computes the matrix-matrix product T = vs1 × vs2 and accumulates it into _vd_: C ← C + T,
+Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
+stem:[B_{\mathrm{tile}}^{T}], the instruction computes
+
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
+
+and accumulates T into _vd_: C ← C + T,
 with a widening factor of 2 applied to the K dimension.
 +
-_vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×N tile
-(column-major register layout), and _vd_ as an M×M physical accumulator tile (row-major register
+_vs1_ is interpreted as the stem:[M \times K_{\mathrm{eff}}] tile stem:[A_{\mathrm{tile}}] in row-major register layout, and _vs2_ is interpreted as the stem:[K_{\mathrm{eff}} \times N] tile stem:[B_{\mathrm{tile}}^{T}] in column-major register layout,
+and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
