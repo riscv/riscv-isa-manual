@@ -488,11 +488,21 @@ accordingly.
 
 The `Zvvmm` family of extensions provides instructions that perform matrix multiply-accumulate on integer data, computing C ← C + A × B^T^, where A, B, and C are matrix tiles held in the vector register file.
 
+The architectural A and B input tiles are denoted
+stem:[A_{\mathrm{tile}}] and stem:[B_{\mathrm{tile}}]. Both are stored
+in row-major register layout. The instructions compute:
+
+[stem]
+++++
+C \leftarrow C +
+A_{\mathrm{tile}} B_{\mathrm{tile}}^{T}
+++++
+
 The following table lists the integer matrix tile multiplication instructions. The arguments are:
 
-* `vd`: Destination vector register group containing the C matrix tile.
-* `vs1`: Source vector register group containing the A matrix tile.
-* `vs2`: Source vector register group containing the B^T^ matrix tile.
+* `vd`: Destination vector register group containing the row-major architectural C matrix tile.
+* `vs1`: Source vector register group containing the row-major architecture  A matrix tile.
+* `vs2`: Source vector register group containing the row-major architectural B matrix tile.
 
 [cols="3,1,1,1", options="header", width="70%"]
 |===
@@ -537,6 +547,16 @@ Because modular addition is both associative and commutative, the final result i
 
 The `Zvvfmm` family of extensions provides floating-point matrix multiply-accumulate instructions, computing C ← C + A × B^T^.
 A, B, and C are matrix tiles held in the vector register file.
+
+The architectural A and B input tiles are denoted
+stem:[A_{\mathrm{tile}}] and stem:[B_{\mathrm{tile}}]. Both are stored
+in row-major register layout. The instructions compute:
+
+[stem]
+++++
+C \leftarrow C +
+A_{\mathrm{tile}} B_{\mathrm{tile}}^{T}
+++++
 
 The following table lists the floating-point matrix tile multiplication instructions. The arguments are:
 
@@ -721,7 +741,7 @@ Whenever mixed formats are used in the computational instructions, one must foll
 
 Each multiply-accumulate instruction computes, for every output element stem:[C_{i,j}]:
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{K_{\text{eff}}-1} A_{i,k} \times B_{k,j}]
+stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{K_{\text{eff}}-1} A_{\mathrm{tile}}[i,k] \times B_{\mathrm{tile}}[j,k]]
 
 where K~eff~ = `λ` × `W` × `LMUL`.
 This section specifies how the K~eff~ product terms may be grouped and when intermediate rounding is permitted.
@@ -741,7 +761,7 @@ When `W` = `1`, each product of two `SEW`-bit values is exact at `2` × `SEW` bi
 The resulting value of element stem:[C_{i,j}] for any given `LMUL` must match the value computed by applying a series of multiply-accumulate instructions with `LMUL=1`, in increasing order of vector-register indices.
 Therefore, it is enough to specify the result of the computation
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{\lambda W - 1} A_{i,k} \times B_{k,j}]
+stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{\lambda W - 1} A_{\mathrm{tile}}[i,k] \times B_{\mathrm{tile}}[j,k]]
 
 An implementation partitions the `λ` sub-dot-products for each output element into consecutive groups of `G` sub-dot-products.
 The implementation-defined grouping factor `G` is applied separately within each `LMUL=1` step, so that a group shall not cross the boundary between two consecutive `LMUL=1` steps.
@@ -1055,7 +1075,7 @@ applied, `v0` is not read, and the `bs` field is ignored.
 
 When microscaling is active (`vm=0`), each output element is computed as:
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{s=0}^{L-1} \left( \text{scale_A}_{i,s} \times \text{scale_B}_{j,s} \times \left( \sum_{k \in \text{block}(s)} A_{i,k} \times B_{k,j} \right) \right)]
+stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{s=0}^{L-1} \left( \text{scale_A}_{i,s} \times \text{scale_B}_{j,s} \times \left( \sum_{k \in \text{block}(s)} A_{\mathrm{tile}}[i,k] \times B_{\mathrm{tile}}[j,k] \right) \right)]
 
 where L = ⌈K_eff / block_size⌉ is the number of scale blocks per
 row/column, and block(_s_) covers elements
@@ -1533,11 +1553,6 @@ For a widening input tile, where the logical element width is less than
 `SEW`, transposition of storage elements is not generally equivalent to
 transposition of the logical input matrix.
 
-<<#ime-load-store-geometry>> illustrates order-preserving and transposing
-transfers at the storage-element level for a tile with `LMUL=1`.
-Both forms transfer `SEW`-bit storage elements and use `LD` measured in
-those storage elements.
-
 <<#ime-load-store-geometry>> illustrates order-preserving and
 transposing transfers at the storage-element level for `LMUL=1`.
 Both forms transfer the same number of `SEW`-bit storage elements and
@@ -1567,7 +1582,12 @@ It is expected that implementations will optimize the case of `rs2 = x0` to load
 Efficient implementation of tile loads with `rs2 = x0` are essential to high-performance linear algebra kernels.
 ====
 
-When using a vector length lower than the maximum for the data width, the data is loaded such that it fills full rows in an A tile or columns in a B^T^ tile. The impact is sketched in <<ime-load-store-vl>>.
+When using a vector length lower than the maximum for the data width,
+the data is loaded so that it fills complete rows of an A tile or
+complete rows of the architectural B tile. Each active B-tile row
+corresponds to one active column of the conventional B matrix panel and
+one active column of C. The impact is sketched in
+<<ime-load-store-vl>>.
 
 [#ime-load-store-vl]
 .Examples of element distribution for full (left) and reduced vector length matrix tile load / store operations.
@@ -1677,9 +1697,19 @@ image::png/ime-vmtls-lmul.png[align="center", width="90%"]
 [#zvvmttls,reftext=Transposing load/store instructions for matrix tiles]
 === Zvvmttls: Extension for loading and storing vector register groups interpreted as transposed 2D matrix tiles
 
-The `Zvvmttls` extension provides instructions that transfer transposed 2D matrix tiles between memory and the vector register file without requiring a separate repacking step.
-Memory layout and tile geometry for `Zvvmttls` follows those established for the `Zvvmtls` extension
-with the difference that the transpose operation requires SEW to be set to the actual element width.
+The `Zvvmttls` extension provides instructions that transpose
+two-dimensional arrays of `SEW`-bit storage elements between memory and
+the vector register file.
+
+The instructions use the memory-layout, tile-geometry, masking, restart,
+and legality rules established for `Zvvmtls`. They transpose storage
+elements; they do not unpack, transpose, or repack logical elements
+contained within a storage element.
+
+When each logical matrix element occupies one `SEW`-bit storage element,
+the storage-element transpose is also a logical-element transpose. When
+multiple logical elements are packed within each storage element, it is
+not a transpose of the individual logical elements.
 
 [#ime-vmttl-fig]
 .Transposing load examples with LMUL = 1 (left) and LMUL = 2 (right). Indices number elements of width SEW from the row-major order matrix in memory. Light-blue arrows indicate the memory / vector register access order.
@@ -1720,9 +1750,17 @@ The common legality and restart rules in <<integrated-matrix-tile-ls-legality>> 
 
     vmttl.v vd, (rs1), rs2 [, Lλ] [, vm]
 
-Loads a 2D matrix tile from memory and transposes it into the vector register layout required by the matrix multiplier.
-This instruction is used when a B tile is stored in row-major order, or when an A or C tile is stored in column-major order in memory.
-`rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
+Loads a two-dimensional array of `SEW`-bit storage elements from memory
+and transposes those storage elements into the vector register-group
+layout.
+
+When each logical matrix element occupies one `SEW`-bit storage element,
+this operation is also a logical matrix transpose. When multiple logical
+elements are packed within a storage element, the instruction does not
+transpose the packed logical elements within it.
+
+`rs1` holds the matrix base address; `rs2` holds the leading dimension
+`LD`, measured in `SEW`-bit storage elements.
 
 Let _linesize_ = λ × LMUL.
 For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
@@ -1733,9 +1771,15 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
     vmtts.v vs3, (rs1), rs2 [, Lλ] [, vm]
 
-Stores a 2D matrix tile from vector register groups to memory, applying the inverse transposition of `vmttl.v`.
-`rs1` holds the matrix base address; `rs2` holds the leading dimension `LD` in elements.
+Stores a two-dimensional array of `SEW`-bit storage elements from a
+vector register group to memory, applying the inverse storage-element
+transposition of `vmttl.v`.
 
+The instruction does not unpack, transpose, or repack logical elements
+contained within an `SEW`-bit storage element.
+
+`rs1` holds the matrix base address; `rs2` holds the leading dimension
+`LD`, measured in `SEW`-bit storage elements.
 
 Let _linesize_ = λ × LMUL.
 For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
@@ -1791,7 +1835,7 @@ The tile dimensions are fully determined by the current vector configuration:
 
     M_tile     = VLEN / (SEW × λ)       (rows of A and C per computation)
     K_eff      = λ × W × LMUL           (shared K-dimension step)
-    N_tile     = VL / (λ × LMUL)        (active columns of B and C; set via vsetvl)
+    N_tile     = VL / (λ × LMUL)        (active rows of B_tile and active columns of C; set via vsetvl)
     N_tile_max = M_tile                 (maximum columns when VL = VL_max)
     EMUL_C      = VLEN / (SEW × λ²)      (C accumulator register group size)
 
@@ -1827,11 +1871,14 @@ rows of A independent of `VL`, loading an A tile requires:
 
 which is the natural maximum `VL` for the chosen `LMUL`.
 
-The B load and computation use the narrower active-column `VL`:
+The B load and computation use the narrower active-output-column `VL`:
 
     VL = λ × LMUL × N_tile
 
-The compute `VL` selects the number of active B/C columns. It does not
+The compute `VL` selects the number of active rows of
+stem:[B_{\mathrm{tile}}] (active columns of stem:[B_{\mathrm{tile}}^T]) and, equivalently, the number of active columns
+of C.
+It does not
 change the physical row stride of the C accumulator tile, which remains
 `N_tile_max`.
 
@@ -3380,7 +3427,7 @@ function decode_gemm_geometry(W : int) -> gemm_geom = {
   let K_eff : int = lambda * W * LMUL;
 
   // VL divisibility: VL must be a multiple of lambda × LMUL.
-  // N_tile is the number of active columns of B and C.
+  // N_tile is the number of active columns of tranpose(B) and C.
   // Assumes VL is set via vsetvli at vtype.SEW = C element width.
   let vl_div : int = lambda * LMUL;
   let N      : int = unsigned(vl) / vl_div;
@@ -3875,7 +3922,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
@@ -3960,7 +4007,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷8; the C
@@ -4071,7 +4118,7 @@ _vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×
 layout), of which only the first N columns are active.  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B` in `vtype` (see <<mixed-format-inputs>>);
@@ -4160,7 +4207,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷4; the C
@@ -4276,7 +4323,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷2; the C
@@ -4389,7 +4436,7 @@ register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷2; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
@@ -4502,7 +4549,7 @@ register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷8; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
@@ -4610,7 +4657,7 @@ register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷4; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
@@ -4716,7 +4763,7 @@ _vs1_ is interpreted as an M×K tile (row-major register layout), _vs2_ as a K×
 layout), of which only the first N columns are active.  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
@@ -5383,7 +5430,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
@@ -5469,7 +5516,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B (and C) are updated; VL must be a multiple of λ × LMUL.
+VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
