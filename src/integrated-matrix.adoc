@@ -15,8 +15,11 @@ By interpreting vector register groups as two-dimensional matrix tiles, the Zvvm
 We focus, in particular, on the computation of C ← A × B^T^ + C, where A (σ × λ), B (σ × λ) and C (σ × σ) are row-major matrix panels.
 
 The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
-A key architectural goal is that the same binary executes correctly—and achieves near-peak arithmetic throughput—across this entire range without recompilation.
-
+A key architectural goal is that the same executable can run correctly
+across this entire range without recompilation. Achieving near-peak
+arithmetic throughput may require the executable to contain multiple code
+paths specialized for different supported tile geometries or `EMUL_C`
+values, with the appropriate path selected at run time.
 
 === Overview
 
@@ -1510,10 +1513,45 @@ The tile load and store instructions make use of the following parameters from t
 * LMUL — vector length multiplier
 * λ — selected lambda, read from `lambda[2:0]` in `vtype`
 
-When loading A or B input tiles, `vmtl.v` and `vmttl.v` shall be used with SEW equal to the element width of the C accumulator tile.
-<<#ime-load-store-geometry>> illustrates the memory-to-vector-register-group load for both row-major and column-major order for a tile with LMUL=1.
-Physically both transfers are identical: they move contiguous segments of length _linesize_ = λ × LMUL with a stride of LD between them.
-The tile load/store instructions interpret the memory layout according to the specified leading dimension, but the resulting data layout in the vector register group is the same regardless of whether the source/destination matrix is stored in row-major or column-major order.
+Tile load/store instructions operate on `SEW`-bit _storage elements_.
+They do not interpret the logical element types packed within a storage
+element, and they do not use the widening factor `W`.
+
+When an order-preserving tile load or store is used to prepare an A or B
+input tile for direct use by a widening multiply-accumulate instruction,
+`SEW` shall equal the C accumulator element width. Each `SEW`-bit storage
+element then contains `W` packed logical input elements of width
+`SEW / W`, in the packing order defined by this specification.
+
+The transposing instructions `vmttl.v` and `vmtts.v` transpose
+`SEW`-bit storage elements. They do not unpack, transpose, or repack
+logical elements contained within an `SEW`-bit storage element.
+
+Consequently, a transposing tile instruction performs a direct logical
+matrix transpose only when the logical element width equals `SEW`.
+For a widening input tile, where the logical element width is less than
+`SEW`, transposition of storage elements is not generally equivalent to
+transposition of the logical input matrix.
+
+<<#ime-load-store-geometry>> illustrates order-preserving and transposing
+transfers at the storage-element level for a tile with `LMUL=1`.
+Both forms transfer `SEW`-bit storage elements and use `LD` measured in
+those storage elements.
+
+<<#ime-load-store-geometry>> illustrates order-preserving and
+transposing transfers at the storage-element level for `LMUL=1`.
+Both forms transfer the same number of `SEW`-bit storage elements and
+produce the required register-group ordering when the memory layout
+matches the selected instruction. However, their memory-address traversal
+differs: `vmtl.v` accesses consecutive storage elements within each
+segment, whereas `vmttl.v` accesses storage elements in transposed order
+using `LD`.
+
+When the logical element width equals `SEW`, these transfers may be
+interpreted directly as row-major and column-major logical-element loads.
+When logical elements are packed within `SEW`-bit storage elements, that
+interpretation applies only to the storage elements, not to the individual
+packed logical elements.
 
 [#ime-load-store-geometry]
 .Loading a matrix tile from memory for LMUL=1. The matrix is laid out linearly in memory, the leading dimension LD specifies its row size (a) or column size (b). Element indices represent the offset of the elements in memory. Blue arrows indicate the data ordering in memory and in the vector register group.
@@ -1706,7 +1744,43 @@ For each element index `i` in the body `[vstart, VL)` where the mask is enabled:
 
 [NOTE]
 ====
-Transposing loads and stores should be performed with SEW set to the width of the actual data that is being loaded and transposed. Sub-byte elements (e.g., OFP4) cannot be transposed directly.
+`vmttl.v` and `vmtts.v` transpose `SEW`-bit storage elements. They do
+not transpose logical elements packed within those storage elements.
+
+A direct logical-element transpose is therefore obtained only when the
+logical element width equals `SEW` and is at least 8 bits.
+
+For widening input tiles, where `W > 1` and the logical input width is
+`SEW / W`, these instructions do not directly transform an ordinary
+matrix of narrow logical elements into the packed register layout
+required by the multiply-accumulate instruction.
+
+Sub-byte logical elements, including OFP4 and Int4, cannot be transposed
+individually by these instructions. Software shall pretranspose and pack
+such data into the required `SEW`-bit storage-element layout, or use
+separate vector rearrangement operations.
+====
+
+[NOTE]
+====
+For example, consider FP16 inputs accumulated into FP32, with `SEW=32`
+and `W=2`. A conventional row-major B matrix has shape
+`K_eff` by `N`, while the architectural B tile has shape
+`N` by `K_eff` and satisfies:
+
+    B_tile[j,k] = B_matrix[k,j]
+
+To prepare the B tile, software may transpose the matrix panel and pack
+the values `B_tile[j,2q]` and `B_tile[j,2q+1]` into one 32-bit storage
+element. The resulting packed tile can then be loaded with `vmtl.v`
+using `SEW=32`.
+
+Using `vmttl.v` with `SEW=32` on the original row-major FP16 matrix would
+transpose pairs of packed FP16 values as 32-bit storage elements; it would
+not perform the required element-by-element FP16 transpose.
+
+The same rule applies for `W=4` and `W=8`, including OFP4 and Int4 input
+tiles.
 ====
 
 <<<
@@ -1811,6 +1885,20 @@ columns of the C tile without referencing the inactive C tile columns.
 | C, row-major      | `vmtl.v` (if loaded from memory) | `vmts.v`
 | C, column-major   | `vmttl.v` (transposing)      | `vmtts.v`
 |===
+
+[NOTE]
+====
+The `vmttl.v` and `vmtts.v` entries in this table denote a direct
+logical-element transpose only when each logical matrix element occupies
+one `SEW`-bit storage element.
+
+For widening A or B inputs, `vmttl.v` and `vmtts.v` transpose packed
+`SEW`-bit storage elements, not the individual logical elements within
+them. Software preparing a widening input tile from an ordinary
+row-major or column-major matrix of narrow logical elements must first
+arrange the data into the required packed tile order, either in memory
+or with separate vector rearrangement operations.
+====
 
 ==== Loading and storing C accumulator tiles
 
@@ -2614,11 +2702,15 @@ vbfloat16m1_t __riscv_vmttl_v_bf16m1(const __bf16 *base, size_t ld, size_t vl);
 void __riscv_vmtts_v_bf16m1(__bf16 *base, size_t ld, vbfloat16m1_t vs3, size_t vl);
 ----
 
-Transposing forms for packed-narrow logical elements are not defined by
-this section. For example, no OFP4 or Int4 transposing intrinsic is
-defined here. Such forms would require separate semantics because the
-transpose could apply either to `SEW`-wide storage elements or to logical
-4-bit elements within those storage elements.
+The C intrinsic API does not define transposing forms for packed-narrow
+logical elements. For example, no OFP4 or Int4 transposing intrinsic is
+defined.
+
+The underlying ISA instructions remain defined as transposes of
+`SEW`-bit storage elements. A logical-narrow transposing intrinsic is not
+provided because such a name could incorrectly imply that the instruction
+transposes the individual logical elements packed within each storage
+element.
 
 A future extension may define storage-transposing `_as_e{S}` forms whose
 transpose applies to `S`-bit storage elements rather than to logical narrow
@@ -4982,10 +5074,20 @@ Encoding::
 ....
 
 Description::
-Loads a 2D matrix tile from memory and transposes it into the vector register layout
-required by the matrix multiplier.
-This instruction is used when a B tile is stored in row-major order, or when an A or C tile
-is stored in column-major order in memory.
+
+Loads a two-dimensional array of `SEW`-bit storage elements from memory
+and transposes those storage elements into the vector register-group
+layout.
+
+When each logical matrix element occupies one `SEW`-bit storage element,
+this operation is also a logical matrix transpose. In that case it can be
+used when a conventional B matrix is stored in row-major order, or when
+an A or C matrix is stored in column-major order.
+
+When multiple logical elements are packed within each `SEW`-bit storage
+element, the instruction transposes the storage elements but does not
+transpose the packed logical elements within them.
+
 _rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements of width SEW.
 If _rs2_ holds zero (0), the leading dimension `LD` is set to VLEN / (SEW × λ),
 which is the natural maximum width of a B tile and height of an A or C tile.
@@ -5127,8 +5229,13 @@ Encoding::
 ....
 
 Description::
-Stores a 2D matrix tile from vector register groups to memory, applying the inverse transposition
-of `vmttl.v`.
+Stores a two-dimensional array of `SEW`-bit storage elements from a
+vector register group to memory, applying the inverse storage-element
+transposition of `vmttl.v`.
+
+The instruction does not unpack, transpose, or repack logical elements
+contained within an `SEW`-bit storage element.
+
 _rs1_ holds the matrix base address; _rs2_ holds the leading dimension `LD` in elements of width SEW.
 If _rs2_ holds zero (0), the leading dimension `LD` is set to VLEN / (SEW × λ).
 The parameter _λ_ refers to the source matrix tile of the transposing store operation.
