@@ -110,10 +110,68 @@ NOTE: `EMUL_C` is independent of both `W` and `LMUL`; the C register group alway
 
 The elements in each vector register are contiguous in the inner (`K`) direction, as depicted in
 <<ime-geometry-fig>>. Tiles A, B, and C elements are stored in row-major order.
-Since the computation performed by the instructions is C ← A × B^T^ + C, it may be desirable to store matrix B in memory in column-major order so that the effective computation becomes C ← A × B + C
-This choice allows the implementation of the
-matrix tile multiplication as inner product or outer product and
-simplifies the implementation of high-rank updates based on outer products.
+
+The architectural input tiles stem:[A_{\mathrm{tile}}] and
+stem:[B_{\mathrm{tile}}] are both stored in row-major register layout.
+The tile stem:[A_{\mathrm{tile}}] has shape
+stem:[M \times K_{\mathrm{eff}}], and stem:[B_{\mathrm{tile}}] has shape
+stem:[N \times K_{\mathrm{eff}}]. For every active accumulator element,
+the instruction computes:
+
+[stem]
+++++
+C_{i,j} \leftarrow C_{i,j}
+  + \sum_{k=0}^{K_{\mathrm{eff}}-1}
+      A_{\mathrm{tile}}[i,k] \,
+      B_{\mathrm{tile}}[j,k]
+++++
+
+Equivalently, the matrix operation is:
+
+[stem]
+++++
+C \leftarrow C
+  + A_{\mathrm{tile}} B_{\mathrm{tile}}^{T}
+++++
+
+Consequently, if stem:[A_{\mathrm{tile}} = B_{\mathrm{tile}}], the
+instruction computes:
+
+[stem]
+++++
+C \leftarrow C
+  + A_{\mathrm{tile}} A_{\mathrm{tile}}^{T}
+++++
+
+To compute a conventional matrix product
+stem:[C \leftarrow C + A_{\mathrm{matrix}} B_{\mathrm{matrix}}],
+where stem:[B_{\mathrm{matrix}}] has shape
+stem:[K_{\mathrm{eff}} \times N], software populates the architectural
+B tile such that:
+
+[stem]
+++++
+B_{\mathrm{tile}}[j,k] = B_{\mathrm{matrix}}[k,j]
+++++
+
+Thus, stem:[B_{\mathrm{tile}}] contains the transpose of the corresponding
+stem:[B_{\mathrm{matrix}}] panel:
+
+[stem]
+++++
+B_{\mathrm{tile}} = B_{\mathrm{matrix}}^{T}
+++++
+
+If stem:[B_{\mathrm{matrix}}] is stored in column-major order in memory,
+its columns are contiguous and may be loaded directly into the rows of
+stem:[B_{\mathrm{tile}}] using an order-preserving tile load. If
+stem:[B_{\mathrm{matrix}}] is stored in row-major order, a transposing
+tile load may be used to construct stem:[B_{\mathrm{tile}}].
+
+This register-tile interpretation permits matrix multiplication to be
+implemented using either inner-product or outer-product microarchitectures
+and naturally supports higher-rank updates expressed as sums of outer
+products.
 
 [#ime-tile-lmul-fig]
 .LMUL scaling of matrix tiles for LMUL=2 (left) and LMUL=4 (right).
