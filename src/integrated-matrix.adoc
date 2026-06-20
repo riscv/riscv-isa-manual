@@ -126,7 +126,7 @@ the instruction computes:
 C_{i,j} \leftarrow C_{i,j}
   + \sum_{k=0}^{K_{\mathrm{eff}}-1}
       A_{\mathrm{tile}}[i,k] \,
-      B_{\mathrm{tile}}[j,k]
+      B_{\mathrm{tile}}^{T}[k,j]
 ++++
 
 Equivalently, the matrix operation is:
@@ -764,7 +764,14 @@ Whenever mixed formats are used in the computational instructions, one must foll
 
 Each multiply-accumulate instruction computes, for every output element stem:[C_{i,j}]:
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{K_{\text{eff}}-1} A_{\mathrm{tile}}[i,k] \times B^{T}_{\mathrm{tile}}[k,j]]
+[stem]
+++++
+C_{i,j} \leftarrow C_{i,j}
+  + \sum_{k=0}^{K_{\text{eff}}-1}
+      A_{\mathrm{tile}}[i,k]
+      \times
+      B_{\mathrm{tile}}^{T}[k,j]
+++++
 
 where K~eff~ = `λ` × `W` × `LMUL`.
 This section specifies how the K~eff~ product terms may be grouped and when intermediate rounding is permitted.
@@ -784,7 +791,14 @@ When `W` = `1`, each product of two `SEW`-bit values is exact at `2` × `SEW` bi
 The resulting value of element stem:[C_{i,j}] for any given `LMUL` must match the value computed by applying a series of multiply-accumulate instructions with `LMUL=1`, in increasing order of vector-register indices.
 Therefore, it is enough to specify the result of the computation
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{k=0}^{\lambda W - 1} A_{\mathrm{tile}}[i,k] \times B^{T}_{\mathrm{tile}}[k,j]]
+[stem]
+++++
+C_{i,j} \leftarrow C_{i,j}
+  + \sum_{k=0}^{\lambda W - 1}
+      A_{\mathrm{tile}}[i,k]
+      \times
+      B_{\mathrm{tile}}^{T}[k,j]
+++++
 
 An implementation partitions the `λ` sub-dot-products for each output element into consecutive groups of `G` sub-dot-products.
 The implementation-defined grouping factor `G` is applied separately within each `LMUL=1` step, so that a group shall not cross the boundary between two consecutive `LMUL=1` steps.
@@ -1072,7 +1086,7 @@ demonstrates that a block size of 16 significantly improves accuracy for
 activation tensors with outliers.
 
 [#ime-block-scaling-mul]
-.Block scaling multiplication example with SEW=16, λ=4, W=4, LMUL=1. Block scales are applied along A rows and B columns.
+.Block scaling multiplication example with SEW=16, λ=4, W=4, LMUL=1. Block scales are applied along rows of stem:[A_{\mathrm{tile}}] and columns of stem:[B_{\mathrm{tile}}^{T}].
 image::png/ime-block-scaling.png[align="center", width="50%"]
 
 The Integrated Matrix extensions support microscaling on widening
@@ -1098,7 +1112,23 @@ applied, `v0` is not read, and the `bs` field is ignored.
 
 When microscaling is active (`vm=0`), each output element is computed as:
 
-stem:[C_{i,j} \leftarrow C_{i,j} + \sum_{s=0}^{L-1} \left( \text{scale_A}_{i,s} \times \text{scale_B}_{j,s} \times \left( \sum_{k \in \text{block}(s)} A_{\mathrm{tile}}[i,k] \times B^{T}_{\mathrm{tile}}[k,j] \right) \right)]
+[stem]
+++++
+C_{i,j} \leftarrow C_{i,j}
+  + \sum_{s=0}^{L-1}
+    \left(
+      \text{scale_A}_{i,s}
+      \times
+      \text{scale_B}_{j,s}
+      \times
+      \left(
+        \sum_{k \in \text{block}(s)}
+          A_{\mathrm{tile}}[i,k]
+          \times
+          B_{\mathrm{tile}}^{T}[k,j]
+      \right)
+    \right)
+++++
 
 where L = ⌈K_eff / block_size⌉ is the number of scale blocks per
 row/column, and block(_s_) covers elements
@@ -1250,22 +1280,29 @@ The register `v0` holds paired scale values at an effective element
 width of 16 bits.  Each 16-bit element contains one (scale_A, scale_B)
 pair, regardless of the scale format:
 
-* Lower byte [7:0]: `scale_A` — the block scale for a row of A.
-* Upper byte [15:8]: `scale_B` — the block scale for a column of B^T^.
+* Lower byte [7:0]: `scale_A` — the block scale for a row of stem:[A_{\mathrm{tile}}].
+* Upper byte [15:8]: `scale_B` — the block scale for a column of stem:[B_{\mathrm{tile}}^{T}].
 
 The interpretation of each 8-bit field is determined by the scale format
 associated with the input data type (see <<integrated-matrix-scale-formats>>).
 
 [#ime-block-scale-v0]
-.Block scales are folded into `v0` in pairs, separated by the row stride R = λ × SEW / _pw_. Each block-scale pair is used for `bs` consecutive tile elements in the corresponding A row / B^T^ column. In matrix-tile representation `v0` has the paired scales arranged in the correct tile rows. In a multi-lane setup the scales are distributed across the lanes appropriately.
+.Block scales are folded into `v0` in pairs, separated by the row stride R = λ × SEW / _pw_. Each block-scale pair is used for `bs` consecutive tile elements in the corresponding row of stem:[A_{\mathrm{tile}}] and column of stem:[B_{\mathrm{tile}}^{T}]. In matrix-tile representation, `v0` has the paired scales arranged in the correct scale rows. In a multi-lane setup, the scales are distributed across the lanes appropriately.
 image::png/ime-mx-v0-format.png[width="80%", align="center"]
 
 Let _sw_ = scale_width_of(scale_fmt) be the width in bits of a single scale
 value and _pw_ = 2 × _sw_ the width of a (scale_A, scale_B) pair.
 For E8M0: _sw_ = 8, _pw_ = 16.
 
-The row stride in `v0` is R = λ × SEW ÷ _pw_ in units of _pw_-bit elements
-(see <<ime-block-scale-v0>>).
+The row stride in `v0` is R = λ × SEW ÷ _pw_ in units of _pw_-bit elements (see <<ime-block-scale-v0>>).
+
+For each tile index _m_, S = ⒎K_eff / block_size⌉ scale-pair elements
+are active. Element index _p_ = _m_ × R + _s_ addresses the scale pair
+for block _s_.
+
+For `scale_A`, index _m_ identifies row _m_ of
+stem:[A_{\mathrm{tile}}]. For `scale_B`, index _m_ identifies column
+_m_ of stem:[B_{\mathrm{tile}}^{T}]. Specifically:
 Within each row, S = ⌈K_eff / block_size⌉ elements are active.  Element
 index _p_ = _m_ × R + _s_ addresses the scale pair for row (or column) _m_
 at block _s_.  Specifically:
@@ -1279,7 +1316,7 @@ where M = N = VLEN ÷ (SEW × λ).  Because M × R = (VLEN ÷ (SEW × λ)) ×
 regardless of configuration.
 
 [#ime-mx-v0-lanes]
-.Example for the use of microscales in a 4-lane setup for two blocks per row / column. The red lines symbolize the split of the vector register group across the lanes. The R-strided scales distribution in `v0` leads to the correct lane-wise block scales layout.
+.Example for the use of microscales in a 4-lane setup for two blocks per row of stem:[A_{\mathrm{tile}}] and per column of stem:[B_{\mathrm{tile}}^{T}]. The red lines symbolize the split of the vector register group across the lanes. The R-strided scales distribution in `v0` leads to the correct lane-wise block scales layout.
 image::png/ime-mx-v0-lanes.png[width="69%", align="center"]
 
 **Capacity proof:**
@@ -1607,10 +1644,9 @@ Efficient implementation of tile loads with `rs2 = x0` are essential to high-per
 
 When using a vector length lower than the maximum for the data width,
 the data is loaded so that it fills complete rows of an A tile or
-complete rows of the architectural B tile. Each active B-tile row
-corresponds to one active column of the conventional B matrix panel and
-one active column of C. The impact is sketched in
-<<ime-load-store-vl>>.
+complete columns of stem:[B_{\mathrm{tile}}^{T}]. Each active column
+of stem:[B_{\mathrm{tile}}^{T}] contributes to the corresponding active
+column of C. The impact is sketched in <<ime-load-store-vl>>.
 
 [#ime-load-store-vl]
 .Examples of element distribution for full (left) and reduced vector length matrix tile load / store operations.
@@ -1858,7 +1894,7 @@ The tile dimensions are fully determined by the current vector configuration:
 
     M_tile     = VLEN / (SEW × λ)       (rows of A and C per computation)
     K_eff      = λ × W × LMUL           (shared K-dimension step)
-    N_tile     = VL / (λ × LMUL)        (active rows of B_tile and active columns of C; set via vsetvl)
+    N_tile     = VL / (λ × LMUL)        (active columns of B_tile^T and C; set via vsetvl)
     N_tile_max = M_tile                 (maximum columns when VL = VL_max)
     EMUL_C      = VLEN / (SEW × λ²)      (C accumulator register group size)
 
@@ -1894,16 +1930,15 @@ rows of A independent of `VL`, loading an A tile requires:
 
 which is the natural maximum `VL` for the chosen `LMUL`.
 
-The B load and computation use the narrower active-output-column `VL`:
+The stem:[B_{\mathrm{tile}}] load and computation use the narrower
+active-column `VL`:
 
     VL = λ × LMUL × N_tile
 
-The compute `VL` selects the number of active rows of
-stem:[B_{\mathrm{tile}}] (active columns of stem:[B_{\mathrm{tile}}^T]) and, equivalently, the number of active columns
-of C.
-It does not
-change the physical row stride of the C accumulator tile, which remains
-`N_tile_max`.
+The compute `VL` selects the number of active columns of
+stem:[B_{\mathrm{tile}}^{T}] and, equivalently, the number of active
+columns of C. It does not change the physical row stride of the C
+accumulator tile, which remains `N_tile_max`.
 
 ==== C tile tail policy
 
@@ -2064,12 +2099,14 @@ The following pseudocode implements C ← C + A × B for single-precision
 floating-point data, tiled over all three matrix dimensions.
 The configuration uses SEW=32, LMUL=1, and λ=4, giving K_eff = 4 and
 M_tile = VLEN/128.
-A and C are stored row-major; B is stored column-major.
+Matrices A and C are stored row-major; Matrix B is stored column-major, allowing its columns
+to be loaded directly into the column-major register layout of
+stem:[B_{\mathrm{tile}}^{T}].
 
 [source,c]
 --
-// C (M×N, row-major, stride ldc) += A (M×K, row-major, stride lda)
-//                                 × B (K×N, col-major, stride ldb)
+// C (M×N, row-major, stride ldc) += A_matrix (M×K, row-major, stride lda)
+//                                 × B_matrix (K×N, column-major, stride ldb)
 //
 // Pre-condition: vtype can be configured for SEW=32, LMUL=1, lambda=4.
 // Pre-condition: K is a multiple of K_eff (= lambda × LMUL = 4).
@@ -2108,7 +2145,7 @@ for (j = 0; j < N; j += N_tile) {
         vsetvl(VL_C_full);
         vmtl.v v8, &C[i*ldc + j], ldc, v0.t;
 
-        // Inner K loop: accumulate A sub-columns × B sub-rows into C tile.
+        // Inner K loop: accumulate A_tile × B_tile^T into the C tile.
         for (k = 0; k < K; k += K_eff) {
 
             // Load A[i:i+M_tile][k:k+K_eff]: M_tile rows, K_eff cols, row-major.
@@ -2117,12 +2154,19 @@ for (j = 0; j < N; j += N_tile) {
             vsetvl(VL_A);
             vmtl.v v0, &A[i*lda + k], lda;     // LD = lda (A row stride)
 
-            // Load B[k:k+K_eff][j:j+N_tile]: K_eff rows, N_tile cols, col-major.
-            // Then accumulate into the active C columns.
+            // Load a K_eff × N_tile panel of the conventional B_matrix.
+            //
+            // B_matrix is column-major, so the order-preserving tile load copies
+            // its columns directly into the column-major register layout of B_tile^T:
+            //
+            //     B_tile^T[k_local,j_local]
+            //         = B_matrix[k + k_local,j + j_local]
+            //
+            // The compute VL selects the active columns of B_tile^T and C.
             configure_vtype(SEW=32, LMUL=1, lambda=4);
             vsetvl(vl_compute);
-            vmtl.v     v4, &B[j*ldb + k], ldb; // LD = ldb (B col stride = K_total)
-            vfmmacc.vv v8, v0, v4;             // C += A_tile × B_tile
+            vmtl.v     v4, &B_matrix[j*ldb + k], ldb;
+            vfmmacc.vv v8, v0, v4;   // C += A_tile × B_tile^T
         }
 
         // Store the C accumulator tile back to memory.
@@ -2142,9 +2186,11 @@ Key observations:
   A separate vector-configuration step is therefore required before each
   `vmtl.v` for A.
 
-* The B load and the multiply-accumulate instruction share
-  `VL = λ × LMUL × N_tile`, which restricts computation to the current
-  column block.
+* The order-preserving `B_matrix` load constructs
+  stem:[B_{\mathrm{tile}}^{T}] directly. The load and the
+  multiply-accumulate instruction share
+  `VL = λ × LMUL × N_tile`, which selects the active columns of
+  stem:[B_{\mathrm{tile}}^{T}] and C.
 
 * The C accumulator tile has fixed physical shape
   `M_tile × N_tile_max`, where `N_tile_max = M_tile`. Loading or storing
@@ -3352,11 +3398,14 @@ function mat_A_idx(i : int, k : int, K_eff : int,
                    LMUL : int, lambda : int, epr : int) -> int =
   tile_reg_idx(i * K_eff + k, LMUL, lambda, epr)
 
-// B[k, j] in vs2: B is stored column-major (columns are the outer dimension).
+// B_tile^T[k, j] in vs2: B_tile^T has shape K_eff x N and is
+// stored column-major. Column j contributes to output column j.
+// Equivalently, this element is B_tile[j, k] in the row-major
+// N x K_eff view of the same register contents.
 function mat_B_idx(k : int, j : int, K_eff : int,
                    LMUL : int, lambda : int, epr : int) -> int =
   tile_reg_idx(j * K_eff + k, LMUL, lambda, epr)
- 
+
 // C[i, j] in vd: C is stored in a fixed physical row-major tile.
 // The physical row stride is N_max (= M), not the active column count N.
 // EMUL_C = VLEN / (SEW * lambda^2) is the number of registers in the C group.
@@ -3424,7 +3473,7 @@ struct gemm_geom = {
   lambda  : int,   // tile-layout parameter from vtype
   K_eff   : int,   // effective K dimension (= lambda * W * LMUL)
   M       : int,   // rows of A / C tile
-  N       : int,   // columns of B / C tile (set via VL)
+  N       : int,   // active columns of B_tile^T and C (set via VL)
   N_max   : int,   // physical columns of the C tile (= M)
   EMUL_C  : int,   // number of registers in C group
   epr_A   : int,   // elements per register at EEW_A
@@ -3450,7 +3499,7 @@ function decode_gemm_geometry(W : int) -> gemm_geom = {
   let K_eff : int = lambda * W * LMUL;
 
   // VL divisibility: VL must be a multiple of lambda × LMUL.
-  // N_tile is the number of active columns of tranpose(B) and C.
+  // N_tile is the number of active columns of B_tile^T and C.
   // Assumes VL is set via vsetvli at vtype.SEW = C element width.
   let vl_div : int = lambda * LMUL;
   let N      : int = unsigned(vl) / vl_div;
@@ -3951,7 +4000,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
@@ -4030,7 +4079,7 @@ Description::
 Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
 stem:[B_{\mathrm{tile}}^{T}], the instruction computes
 
-stem:[T = A_{\mathrm{tile}} \times  B_{\mathrm{tile}}^{T}]
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
 
 and accumulates T into _vd_: C ← C + T,
 with a widening factor of 8 applied to the K dimension.
@@ -4041,7 +4090,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷8; _vd_ has elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷8; the C
@@ -4148,7 +4197,7 @@ Description::
 Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
 stem:[B_{\mathrm{tile}}^{T}], the instruction computes
 
-stem:[T = A_{\mathrm{tile}} \times  B_{\mathrm{tile}}^{T}]
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
 
 and accumulates T into _vd_: C ← C + T.
 +
@@ -4157,7 +4206,7 @@ and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B` in `vtype` (see <<mixed-format-inputs>>);
@@ -4240,7 +4289,7 @@ Description::
 Interpreting _vs1_ as stem:[A_{\mathrm{tile}}] and _vs2_ as
 stem:[B_{\mathrm{tile}}^{T}], the instruction computes
 
-stem:[T = A_{\mathrm{tile}} \times  B_{\mathrm{tile}}^{T}]
+stem:[T = A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}]
 
 and accumulates T into _vd_: C ← C + T,
 with a widening factor of 4 applied to the K dimension.
@@ -4251,7 +4300,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷4; the C
@@ -4372,7 +4421,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The floating-point format for A and B elements is selected independently by
 `altfmt_A` and `altfmt_B`, interpreted for input element width SEW÷2; the C
@@ -4490,7 +4539,7 @@ register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷2; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
@@ -4608,7 +4657,7 @@ register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷8; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 8 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
@@ -4721,7 +4770,7 @@ register layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have integer elements of width SEW÷4; _vd_ has FP elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 MXINT inputs are always signed; `altfmt_A` and `altfmt_B` must be 0.
 `altfmt` selects the FP format of the accumulator C.
@@ -4832,7 +4881,7 @@ and _vd_ as an M×M physical accumulator tile (row-major register
 layout), of which only the first N columns are active.  All three tiles have elements of width SEW.
 +
 K_effective = λ × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
@@ -5504,7 +5553,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷4; _vd_ has elements of width SEW.
 +
 K_effective = λ × 4 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
@@ -5595,7 +5644,7 @@ layout), of which only the first N columns are active.
 _vs1_ and _vs2_ have elements of width SEW÷2; _vd_ has elements of width SEW.
 +
 K_effective = λ × 2 × LMUL.
-VL selects how many columns of B^T (and C) are updated; VL must be a multiple of λ × LMUL.
+`VL` selects how many columns of stem:[B_{\mathrm{tile}}^{T}], and therefore how many columns of C, are active; VL must be a multiple of λ × LMUL.
 The remaining columns of the physical C tile are C tile tail elements.
 The signedness of each input operand is selected by `altfmt_A` and `altfmt_B` in `vtype`:
 0 = signed, 1 = unsigned.
