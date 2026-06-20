@@ -3449,6 +3449,33 @@ function check_microscaling_legality(W : int, LMUL : int,
   if vtype[bs] == 0b1 & (W * LMUL > EEW_C) then return Illegal_Instruction()
 }
 
+// Enforce the Extension column of tbl-int-encoding-map for an
+// ordinary integer matrix multiply-accumulate instruction.
+//
+// The argument order is:
+//   W, SEW, altfmt_A, altfmt_B
+//
+// Raises Illegal_Instruction when the selected row is reserved or
+// the extension named by that row is not implemented.
+val check_int_encoding_legality :
+  (int, int, bit, bit) -> unit
+
+
+// Enforce the Extension column of tbl-fp-encoding-map for an
+// ordinary floating-point-input matrix multiply-accumulate instruction.
+//
+// The argument order is:
+//   W, SEW, altfmt_A, altfmt_B, altfmt
+//
+// Raises Illegal_Instruction when the selected row is reserved or
+// any extension named by that row is not implemented. A row that
+// names more than one extension requires all named extensions.
+//
+// Fields identified as ignored by the table do not participate in
+// row selection.
+val check_fp_encoding_legality :
+  (int, int, bit, bit, bit) -> unit
+
 // Enforce the vm=0 columns of tbl-fp-encoding-map for a
 // floating-point-input microscaled instruction.
 //
@@ -3716,6 +3743,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* When `vm=1`: the selected row in <<tbl-int-encoding-map>> is marked `_reserved_`, or the extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -3726,6 +3754,7 @@ if vm == 0 then return Illegal_Instruction();
 if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(8);
+check_int_encoding_legality(8, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B]);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
@@ -3821,12 +3850,10 @@ if (2 ^ get_sew_pow()) < 32 then return Illegal_Instruction();
 let g : gemm_geom = decode_gemm_geometry(8);
 
 if vm == 0 then {
-  check_microscaling_legality(
-    8, g.LMUL, g.EEW_C, g.lambda, E8M0);
-  check_fp_mx_encoding_legality(
-    8, g.EEW_C,
-    vtype[altfmt_A], vtype[altfmt_B],
-    vtype[altfmt], vtype[bs])
+  check_microscaling_legality(8, g.LMUL, g.EEW_C, g.lambda, E8M0);
+  check_fp_mx_encoding_legality(8, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B], vtype[altfmt], vtype[bs])
+} else {
+  check_fp_encoding_legality(8, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B], vtype[altfmt])
 };
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
@@ -3914,6 +3941,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* The selected row in <<tbl-fp-encoding-map>> is marked `_reserved_`, or any extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -3923,6 +3951,7 @@ if vstart != 0 then return Illegal_Instruction();
 if vm == 0 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(1);
+check_fp_encoding_legality(1, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B], vtype[altfmt]);
 
 let fmt_A : fp_fmt       = fp_format_of(g.EEW_C, vtype[altfmt_A]);
 let fmt_B : fp_fmt       = fp_format_of(g.EEW_C, vtype[altfmt_B]);
@@ -4010,6 +4039,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * When `vm=0`: SEW × λ < 16.
 * When `vm=0` and `bs=1`: W × LMUL > SEW.
 * When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
+* When `vm=1`: the selected row in <<tbl-fp-encoding-map>> is marked `_reserved_`, or any extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -4022,12 +4052,10 @@ if SEW_check == 8 then return Illegal_Instruction();
 let g : gemm_geom = decode_gemm_geometry(4);
 
 if vm == 0 then {
-  check_microscaling_legality(
-    4, g.LMUL, g.EEW_C, g.lambda, E8M0);
-  check_fp_mx_encoding_legality(
-    4, g.EEW_C,
-    vtype[altfmt_A], vtype[altfmt_B],
-    vtype[altfmt], vtype[bs])
+  check_microscaling_legality(4, g.LMUL, g.EEW_C, g.lambda, E8M0);
+  check_fp_mx_encoding_legality(4, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B], vtype[altfmt], vtype[bs])
+} else {
+  check_fp_encoding_legality(4, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B], vtype[altfmt])
 };
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
@@ -4123,6 +4151,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * When `vm=0`: SEW × λ < 16.
 * When `vm=0` and `bs=1`: W × LMUL > SEW.
 * When `vm=0`: _vd_, _vs1_, or _vs2_ overlaps `v0`.
+* When `vm=1`: the selected row in <<tbl-fp-encoding-map>> is marked `_reserved_`, or any extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -4132,12 +4161,10 @@ if vstart != 0 then return Illegal_Instruction();
 let g : gemm_geom = decode_gemm_geometry(2);
 
 if vm == 0 then {
-  check_microscaling_legality(
-    2, g.LMUL, g.EEW_C, g.lambda, E8M0);
-  check_fp_mx_encoding_legality(
-    2, g.EEW_C,
-    vtype[altfmt_A], vtype[altfmt_B],
-    vtype[altfmt], vtype[bs])
+  check_microscaling_legality(2, g.LMUL, g.EEW_C, g.lambda, E8M0);
+  check_fp_mx_encoding_legality(2, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B], vtype[altfmt], vtype[bs])
+} else {
+  check_fp_encoding_legality(2, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B], vtype[altfmt])
 };
 
 let fmt_A : fp_fmt        = fp_format_of(g.EEW_A, vtype[altfmt_A]);
@@ -4350,6 +4377,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * SEW × λ < 16.
 * When `bs=1`: W × LMUL > SEW (i.e., 8 × LMUL > SEW).
 * _vd_, _vs1_, or _vs2_ overlaps `v0`.
+* When `vm=1`: the selected row in <<tbl-fp-encoding-map>> is marked `_reserved_`, or any extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -4553,6 +4581,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* The selected row in <<tbl-int-encoding-map>> is marked `_reserved_`, or the extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -4562,6 +4591,7 @@ if vstart != 0 then return Illegal_Instruction();
 if vm == 0 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(1);
+check_int_encoding_legality(1, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B]);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
@@ -5206,6 +5236,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* When `vm=1`: the selected row in <<tbl-int-encoding-map>> is marked `_reserved_`, or the extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -5218,6 +5249,7 @@ let SEW_check : int = 2 ^ get_sew_pow();
 if SEW_check == 8 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(4);
+check_int_encoding_legality(4, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B]);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
@@ -5286,6 +5318,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * EMUL_C (= VLEN ÷ (SEW × λ²)) is not in \{1, 2, 4, 8, 16}.
 * _vs1_ or _vs2_ is not aligned for LMUL.
 * _vd_ is not aligned for EMUL_C.
+* When `vm=1`: the selected row in <<tbl-int-encoding-map>> is marked `_reserved_`, or the extension named by that row is not implemented.
 
 Operation::
 [source,sail]
@@ -5295,6 +5328,7 @@ if vstart != 0 then return Illegal_Instruction();
 if vm == 0 then return Illegal_Instruction();
 
 let g : gemm_geom = decode_gemm_geometry(2);
+check_int_encoding_legality(2, g.EEW_C, vtype[altfmt_A], vtype[altfmt_B]);
 
 let signed_A : bool = vtype[altfmt_A] == 0b0;
 let signed_B : bool = vtype[altfmt_B] == 0b0;
@@ -5375,16 +5409,42 @@ NOTE: See <<Block size selection>> for LMUL restrictions when `bs=1`.
 
 === Encoding map
 
-The following tables enumerate every (instruction, SEW, altfmt) encoding
-point and map it to its input and output data types and the governing
-extension.  Entries marked _reserved_ raise an illegal-instruction
-exception.
+The following tables are normative. They enumerate each computational
+instruction encoding point and map it to its input and output data types
+and governing individual extension or extensions.
+
+A selected table row marked `_reserved_` raises an illegal-instruction
+exception. For a non-reserved row, every extension named by the applicable
+extension cell shall be implemented. Otherwise, the instruction raises an
+illegal-instruction exception.
+
+The applicable extension cell is identified separately for ordinary
+unscaled, floating-point-input MX, and integer-input MX instructions in
+the subsections below.
+
+For these checks, an extension implied by another implemented extension
+is considered implemented according to the extension dependency and
+implication rules.
 
 ==== Floating-point encoding map
 
 Mixed-format inputs (`altfmt_A` ≠ `altfmt_B`) are permitted wherever both
 input formats are defined for a given (SEW, W) combination; those
 combinations are listed explicitly in the table below.
+
+For an ordinary floating-point-input instruction with `vm=1`, the selected
+row is determined by the instruction, `SEW`, `altfmt_A`, `altfmt_B`, and
+`altfmt`. The `Extension` column is the applicable extension cell.
+
+The encoding is legal only if the selected row is not marked `_reserved_`
+and every extension named in the `Extension` cell is implemented. A cell
+that names more than one extension requires all named extensions. For
+example, a mixed FP16 and BF16 row that names both `Zvvfp16fp32mm` and
+`Zvvbf16fp32mm` requires both extensions.
+
+Where the table indicates that an `altfmt_A` or `altfmt_B` field is ignored,
+either value of that field selects the same row. The `bs` field is ignored
+when `vm=1`.
 
 For `vm=1`, the `Extension` column identifies the extension or extensions
 required by the selected row.
@@ -5497,6 +5557,16 @@ Implementation of the extension or extensions named in the unscaled
 For `vwmmacc.vv`, `vqmmacc.vv`, and `v8wmmacc.vv`, `vm=0` is separately defined as
 `vfwimmacc.vv`, `vfqimmacc.vv`, and `vf8wimmacc.vv`
 (integer inputs, FP accumulator, microscaling); see <<tbl-intmx-encoding-map>>.
+
+For an ordinary integer instruction with `vm=1`, the selected row is
+determined by the instruction, `SEW`, `altfmt_A`, and `altfmt_B`.
+The `Extension` column is the applicable extension cell.
+
+The encoding is legal only if the selected row is not marked `_reserved_`
+and the extension named in the `Extension` cell is implemented.
+
+The `altfmt` and `bs` fields do not participate in the selection of an
+ordinary integer row and are ignored when `vm=1`.
 
 [#tbl-int-encoding-map]
 .Integer multiply-accumulate encoding map
