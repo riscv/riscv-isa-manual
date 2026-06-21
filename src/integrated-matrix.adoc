@@ -300,14 +300,19 @@ base Vector extension. They do not directly write the IME fields
 On execution of `vsetvli` or `vsetivli`, the `bs`, `altfmt_A`,
 and `altfmt_B` fields retain their previous values.
 
-On execution of `vsetvli` or `vsetivli`, the `lambda[2:0]` field
-retains its previous value if that value is supported for the
-resulting `VLEN`, `SEW`, and `LMUL` configuration. If the previous
-nonzero `lambda` value is not supported for the resulting
-configuration, `lambda[2:0]` is WARL-canonicalized according to
-the rule in <<integrated-matrix-lambda>>. If no nonzero `lambda`
-value is supported for the resulting configuration, `lambda[2:0]`
-is set to `000`.
+On execution of `vsetvli` or `vsetivli`, the current value of
+`lambda[2:0]` is evaluated against the resulting `VLEN` and `SEW`
+configuration.
+If the current nonzero lambda value is supported for the resulting
+configuration, it is retained.
+If the current value is zero or is not supported for the resulting
+configuration, and one or more supported nonzero lambda values exist,
+the implementation shall select a supported nonzero lambda value.
+If no supported nonzero lambda value exists for the resulting
+configuration, `lambda[2:0]` is set to `000`.
+
+`LMUL` does not affect whether a lambda value is supported. Therefore,
+a change to `LMUL` alone shall not change `lambda[2:0]`.
 
 The `vsetvl` instruction writes a complete `vtype` value from
 `rs2`, including the IME fields `lambda[2:0]`, `bs`, `altfmt_A`,
@@ -315,8 +320,15 @@ and `altfmt_B`. Therefore, `vsetvl` is the architectural mechanism
 for setting or restoring IME `vtype` fields that are outside the
 `vsetvli` and `vsetivli` immediate field.
 
-A `vsetvl` write of `lambda[2:0]` is subject to the same
-WARL-canonicalization rule as any other write of `lambda[2:0]`.
+The `lambda[2:0]` bits supplied to `vsetvl` in `rs2` are interpreted
+as a lambda write request for the resulting `VLEN` and `SEW`
+configuration.
+
+A nonzero request is processed according to the nonzero-write rule in
+<<integrated-matrix-lambda>>. A zero request is processed according to
+the preserve-or-initialize rule in that section; it is not necessarily
+written as a literal zero.
+
 The `bs`, `altfmt_A`, and `altfmt_B` fields are written as supplied
 by `rs2`. The legality of particular `bs`, `altfmt_A`, and
 `altfmt_B` combinations is checked by the IME instruction that
@@ -334,41 +346,82 @@ also the standard configuration instruction used to write IME
 
 ==== Selected lambda (`lambda[2:0]`) field
 
-The `lambda[2:0]` field is a 3-bit WARL read/write field in the `vtype` CSR that holds the dynamic _selected lambda_ — the tile-layout parameter that determines the geometry of the accumulator tile C and, together with W and LMUL, the effective K dimension K_eff = λ × W × LMUL.
-It governs both multiply-accumulate and 2D load/store instructions.
+The `lambda[2:0]` field is a 3-bit WARL read/write field in the
+`vtype` CSR that holds the dynamic selected lambda. Lambda determines
+the geometry of the accumulator tile C and, together with `W` and
+`LMUL`, determines:
 
-`lambda[2:0]` is a WARL field, so it can only be programmed to values supported by the implementation.
-One discovery mechanism is to attempt to program different values and read back which are retained.
+    K_eff = lambda * W * LMUL
+
+The set of supported nonzero lambda values is an implementation-defined
+function of `VLEN` and `SEW`. `LMUL` does not affect whether a lambda
+value is supported.
+
+For any legal vector configuration, `lambda[2:0]` shall contain a
+supported nonzero lambda value whenever at least one supported nonzero
+lambda value exists for the current (`VLEN`, `SEW`) configuration.
+The field shall contain `000` only when no supported nonzero lambda
+value exists for that configuration.
+
+One discovery mechanism is to attempt to program each nonzero lambda
+encoding and read back the value that is retained.
 
 .lambda[2:0] (selected lambda) encoding
 [cols="1,1,1,1"]
 [%autowidth,float="center",align="center",options="header"]
 |===
-3+| lambda[2:0] | K
+3+| lambda[2:0] | Selected lambda
 
-| 0 | 0 | 0 |   _invalid_/_dynamic_
-| 0 | 0 | 1 |   1
-| 0 | 1 | 0 |   2
-| 0 | 1 | 1 |   4
-| 1 | 0 | 0 |   8
-| 1 | 0 | 1 |   16
-| 1 | 1 | 0 |   32
-| 1 | 1 | 1 |   64
+| 0 | 0 | 0 | _no supported lambda_
+| 0 | 0 | 1 | 1
+| 0 | 1 | 0 | 2
+| 0 | 1 | 1 | 4
+| 1 | 0 | 0 | 8
+| 1 | 0 | 1 | 16
+| 1 | 1 | 0 | 32
+| 1 | 1 | 1 | 64
 |===
 
 [#integrated-matrix-lambda]
-A nonzero write to `lambda[2:0]` requests the corresponding
-lambda value. If the requested value is supported for the current
-`VLEN`, `SEW`, and `LMUL` configuration, that value is retained.
-If the requested value is not supported, the implementation shall
-set `lambda[2:0]` to the largest supported nonzero lambda value
-that is less than or equal to the requested value. If no such value exists,
-`lambda[2:0]` shall be set to `000`.
+A write of `000` is a preserve-or-initialize request:
 
-The `000` encoding denotes that no nonzero lambda value is
-currently selected. Base Vector instructions may execute with this
-encoding, but any IME instruction that requires a selected lambda
-raises an illegal-instruction exception when `lambda[2:0] = 000`.
+* If the current nonzero lambda value is supported for the resulting
+  (`VLEN`, `SEW`) configuration, that value is retained.
+
+* Otherwise, if one or more supported nonzero lambda values exist for
+  the resulting configuration, the implementation shall select a
+  supported nonzero lambda value.
+
+* If no supported nonzero lambda value exists, the field is set to
+  `000`.
+
+A nonzero write requests the corresponding lambda value.
+
+If the requested value is supported for the resulting (`VLEN`, `SEW`)
+configuration, that value is retained.
+
+If the requested value is not supported, the implementation shall select
+the largest supported nonzero lambda value that is less than or equal to
+the requested value.
+
+If no supported value is less than or equal to the requested value, but
+one or more supported nonzero lambda values exist, the implementation
+shall select the smallest supported nonzero lambda value.
+
+The field is set to `000` only when no supported nonzero lambda value
+exists for the resulting (`VLEN`, `SEW`) configuration.
+
+Base Vector instructions may execute when `lambda[2:0] = 000`. An IME
+instruction that requires a dynamic lambda raises an illegal-instruction
+exception when `lambda[2:0] = 000`.
+
+[NOTE]
+====
+The `000` encoding in the instruction lambda field of a tile load/store
+instruction means "use `vtype.lambda`." It does not write
+`vtype.lambda`, and it is distinct from writing zero to the
+`vtype.lambda` field itself.
+====
 
 ==== Alternate floating-point format for the output (`altfmt`)
 
@@ -2476,7 +2529,7 @@ software:
 [source,c]
 --
 size_t __riscv_ime_vlen   (void);   /* VLEN in bits */
-size_t __riscv_ime_lambda (void);   /* implementation lambda value */
+size_t __riscv_ime_lambda (void);   /* current selected lambda */
 --
 
 `__riscv_ime_vlen()` returns the architectural VLEN (in bits).  When VLEN is
@@ -2484,22 +2537,34 @@ known to the compiler — for example via `-mrvv-vector-bits=zvl` on GCC or
 Clang — the call folds to a load-immediate; otherwise the compiler emits
 `csrr vlenb` followed by a left-shift by 3.
 
+`__riscv_ime_lambda()` is a pure query of the currently selected
+lambda value. It reads `vtype.lambda[2:0]`, decodes the field, and
+returns the resulting lambda value without modifying `vtype`, `vl`, or
+any vector register.
+
+A return value of zero means that no supported nonzero lambda value
+exists for the current (`VLEN`, `SEW`) configuration. If at least one
+supported nonzero lambda value exists, the returned value is nonzero
+and is valid for the current configuration.
+
+Because an implementation may support multiple lambda values for the
+same `VLEN` and `SEW`, the result cannot in general be derived from
+`VLEN` alone. A compiler may fold the query to a constant only when it
+can prove the current value of `vtype.lambda`.
+
+Otherwise, the compiler shall emit a read of `vtype` or an equivalent
+implementation-defined sequence that returns the current selected
+lambda.
+
+Software that needs to enumerate all supported lambda values may use
+`__riscv_vsetlambda` to request each nonzero candidate and inspect the
+returned value. Because those requests may change the selected lambda,
+software should restore its desired value after enumeration.
+
 `__riscv_ime_lambda()` returns the implementation's lambda value as observed
 by the matrix unit.  When VLEN is statically known the call folds to a
 constant; otherwise the compiler emits a runtime sequence (typically
 `csrr vlenb` followed by `ctz` and a shift) that derives lambda from VLEN.
-
-These intrinsics are the supported way for software to discover the
-implementation's tile geometry without parsing CSR fields directly, and are
-intended for use in the runtime-dispatch pattern described in
-<<_vlen_portable_code>>: software queries lambda (and VLEN, if needed),
-then selects an appropriate code path among several specialised by EMUL_C.
-
-NOTE: `__riscv_ime_lambda()` returns a single representative lambda value
-for the implementation.  Implementations may support multiple lambda values
-in `vtype.lambda[2:0]` (the field is WARL).  Software that needs to enumerate
-all supported lambda values must do so through `vsetvl` write-readback at
-the relevant SEW; see <<_vlen_portable_code>>.
 
 ===== Establishing lambda from C: `__riscv_vsetlambda`
 
@@ -2508,93 +2573,120 @@ the relevant SEW; see <<_vlen_portable_code>>.
 size_t __riscv_vsetlambda(size_t requested_lambda);
 ----
 
-`__riscv_vsetlambda` is the C-level primitive for writing the `lambda` field
-of `vtype` and for reading the lambda value the matrix engine will use for
-subsequent tile and multiply-accumulate operations.
+`__riscv_vsetlambda` is the C-level primitive for submitting a lambda
+write request and returning the lambda value established by that request.
+It preserves all other `vtype` fields and preserves `vl`.
 
-If `requested_lambda` is a positive power of two in {1, 2, 4, 8, 16, 32, 64},
-the intrinsic writes the corresponding 3-bit encoding into `vtype.lambda`,
-preserves all other `vtype` fields and `vl`, and returns the lambda value
-actually established.
-Because `lambda` is WARL, the returned value may be smaller than the
-request: if the implementation does not support `requested_lambda` for
-the current (`VLEN`, `SEW`, `LMUL`), the hardware clamps to the largest
-supported value below `requested_lambda` and that clamped value is
-returned.
+If `requested_lambda` is a positive power of two in
+{1, 2, 4, 8, 16, 32, 64}, the intrinsic requests the corresponding
+nonzero lambda value.
 
-If `requested_lambda` is 0, `__riscv_vsetlambda` is a read-only query: it
-does not write `vtype` and returns the currently active lambda value;
-a return value of 0 indicates that lambda is in its not-configured
-encoding (`lambda[2:0]` = `0b000`).
+If the requested value is supported for the current (`VLEN`, `SEW`)
+configuration, that value is established.
 
-Software shall not assume that lambda set by a prior `__riscv_vsetlambda`
-persists across any operation that may modify `SEW` or `LMUL`.
-The set of supported lambda values is a function of
-(`VLEN`, `SEW`, `LMUL`); when `SEW` or `LMUL` changes — including through
-a `vsetvli` or `vsetivli` that does not write the lambda bits — the
-hardware may re-clamp lambda under WARL.
+If it is not supported, the implementation establishes the largest
+supported nonzero lambda value that is less than or equal to the request.
 
-Portable code that depends on a specific lambda value shall
-re-establish or re-read lambda, by calling `__riscv_vsetlambda`, after any `vsetvli` or `vsetivli`
-that may change `SEW` or `LMUL`, and after any `vsetvl` whose
-`rs2` value is not known to contain the desired lambda.
+If no supported value is less than or equal to the request, but one or
+more supported nonzero lambda values exist, the implementation establishes
+the smallest supported nonzero lambda value.
+
+If no supported nonzero lambda value exists for the current
+(`VLEN`, `SEW`) configuration, the established value is zero.
+
+If `requested_lambda` is zero, the intrinsic performs the architectural
+preserve-or-initialize write:
+
+* If the currently selected nonzero lambda value is valid for the current
+  (`VLEN`, `SEW`) configuration, it is retained.
+
+* Otherwise, if one or more supported nonzero lambda values exist, the
+  implementation selects a supported nonzero lambda value.
+
+* If no supported nonzero lambda value exists, the selected value remains
+  zero.
+
+The intrinsic returns the selected value after processing the request.
+
+`__riscv_vsetlambda(0)` is therefore not a pure read operation. Software
+that only needs to inspect the selected lambda without modifying
+architectural state should use `__riscv_ime_lambda()`.
+
+The set of supported lambda values is a function of (`VLEN`, `SEW`).
+A change to `SEW` may cause lambda to be retained, replaced by another
+supported value, or set to zero when no supported value exists. A change
+to `LMUL` alone shall not change lambda.
+
+Portable code that depends on a specific lambda value should re-establish
+or re-read lambda after any `vsetvli` or `vsetivli` that may change `SEW`,
+and after any `vsetvl` whose `rs2` value is not known to request the
+desired lambda.
 
 [NOTE]
 ====
 *Compiler-modelling guidance (non-normative).*
 
-A toolchain whose `vsetvl` pass tracks `vtype` as a tuple of
-(`SEW`, `LMUL`, `vma`, `vta`, `lambda`, `VL`) should model
-`__riscv_vsetlambda` as follows:
+A compiler should model the lambda query and write intrinsics as follows:
 
-[cols="2,2,2,3", options="header"]
+[cols="3,2,2,4", options="header"]
 |===
-| Argument | DEFs | USEs | Notes
+| Operation | DEFs | USEs | Notes
 
-| compile-time `0`
-| (none)
+| `__riscv_ime_lambda()`
+| none
 | `vtype.lambda`
-| Pure read; the compiler may emit a single `csrr`-style read of `vtype`, extract the lambda field, and return.  Subject to standard read-only motion optimisations.
+| Pure read of the currently selected lambda. The compiler may move or
+  combine such reads subject to ordinary read-dependence rules.
 
-| compile-time non-zero
-| `lambda`
-| `SEW`, `LMUL`
-| Standard re-establish-and-probe.  Tile and multiply-accumulate operations using `lambda` cannot be hoisted across this call.
-
-| runtime value
+| `__riscv_vsetlambda(0)`
 | `lambda` (may-DEF)
-| `SEW`, `LMUL`
-| The compiler cannot prove `requested_lambda != 0` in general; conservative may-DEF has the same dataflow effect as DEF for ordering and prevents hoisting of `lambda`-using operations.
+| `lambda`, `SEW`
+| Preserve-or-initialize write. The current value may be retained or may
+  be replaced if it is not valid for the current configuration.
+
+| `__riscv_vsetlambda` with a compile-time nonzero argument
+| `lambda`
+| `SEW`
+| Nonzero lambda request followed by WARL canonicalization.
+
+| `__riscv_vsetlambda` with a runtime argument
+| `lambda` (may-DEF)
+| `lambda`, `SEW`
+| The compiler cannot in general determine whether the argument is zero.
+  Conservative ordering should treat the operation as a lambda definition.
 |===
 
-A compiler may conservatively model `vsetvli` and `vsetivli` as
-may-DEFs of `lambda`, because a change to `SEW` or `LMUL` can
-cause lambda to be WARL-canonicalized. These instructions preserve
-`bs`, `altfmt_A`, and `altfmt_B`.
+A `vsetvli` or `vsetivli` that may change `SEW` should be modeled as a
+may-DEF of `lambda`, because the selected value may need to be
+canonicalized for the new `SEW`.
 
-The `vsetvl` instruction is a full `vtype` write and should be
-modeled as a hard DEF of all `vtype` fields, including `lambda`,
-`bs`, `altfmt_A`, and `altfmt_B`.
+A vector-configuration operation that changes only `LMUL` does not define
+or modify `lambda`.
 
-The corollary is that the standard `vsetvl`-elimination optimisation
-generalises to lambda without special-casing: a `__riscv_vsetlambda`
-that is immediately preceded by another `__riscv_vsetlambda` with the
-same argument, with no intervening vtype-affecting operation, is dead.
+The `vsetvl` instruction is a full `vtype` write and should be modeled as
+a hard DEF of all `vtype` fields. If the lambda bits supplied in `rs2`
+may be zero, the operation also uses the old lambda value because a zero
+request can preserve the old value.
 
-Two read-only inspection patterns are idiomatic:
+Repeated lambda operations may be eliminated when their dataflow permits.
+For example, a second `__riscv_vsetlambda(0)` is redundant when it
+immediately follows another `__riscv_vsetlambda(0)` and no intervening
+operation can affect `SEW` or lambda.
+
+Typical usage is:
 
 [source,c]
 ----
-/* (1) Confirm lambda survived a configuration change. */
-__riscv_vsetvli(new_avl, /* new SEW */, /* new LMUL */);
-size_t now = __riscv_vsetlambda(0);
-if (now != target_lambda) {
-    now = __riscv_vsetlambda(target_lambda);
-}
+/* Purely inspect the selected lambda. */
+size_t current = __riscv_ime_lambda();
 
-/* (2) Save / restore around a foreign call that may perturb vtype. */
-size_t saved = __riscv_vsetlambda(0);
+/* Preserve a valid lambda, or initialize one if repair is needed. */
+size_t selected = __riscv_vsetlambda(0);
+
+/* Save and restore after restoring the surrounding vector configuration. */
+size_t saved = __riscv_ime_lambda();
 external_function();
+restore_vector_configuration();
 __riscv_vsetlambda(saved);
 ----
 ====
@@ -3287,20 +3379,18 @@ val is_pow2 : int -> bool
 // rounding and exception flags.
 val fp_internal_scale : (bits, fp_fmt, fp_internal) -> fp_internal
 
-// Decode a 3-bit lambda encoding to the actual lambda value.
-// Returns None() if the encoding is 0b000 (meaning "use vtype.lambda").
+// Decode a 3-bit lambda encoding.
+// Returns None() for 0b000. The caller interprets None() according
+// to the context in which the encoding appears.
 function decode_vlambda(lam_enc : bits(3)) -> option(int) =
   if lam_enc == 0b000 then None()
   else Some(2 ^ (unsigned(lam_enc) - 1))
 
 // Return true only when the exact lambda value is supported for the
-// current VLEN and the supplied SEW and LMUL configuration.
+// current VLEN and the supplied SEW.
 //
-// This is the same implementation support predicate used by the WARL
-// behavior of vtype.lambda. An instruction immediate is checked exactly;
-// it is not WARL-clamped.
-val is_ime_lambda_supported : (int, int, int) -> bool
-
+// Lambda support does not depend on LMUL.
+val is_ime_lambda_supported : (int, int) -> bool
 
 // Decode vtype.vlmul for an IME instruction.
 // IME permits only integer LMUL values 1, 2, 4, and 8.
@@ -3322,8 +3412,7 @@ function decode_ime_lmul() -> int = {
 //
 // A nonzero instruction immediate requests its exact value. It is not
 // WARL-clamped and it does not modify vtype.lambda.
-function decode_tile_lambda(lam_enc : bits(3),
-                            SEW : int, LMUL : int) -> int = {
+function decode_tile_lambda(lam_enc : bits(3), SEW : int) -> int = {
   let eff_lambda : int =
     match decode_vlambda(lam_enc) {
       Some(lam) => lam,
@@ -3333,7 +3422,7 @@ function decode_tile_lambda(lam_enc : bits(3),
       }
     };
 
-  if not (is_ime_lambda_supported(SEW, LMUL, eff_lambda)) then
+  if not (is_ime_lambda_supported(SEW, eff_lambda)) then
     return Illegal_Instruction();
 
   eff_lambda
@@ -3493,7 +3582,7 @@ function decode_gemm_geometry(W : int) -> gemm_geom = {
       Some(lam) => lam,
       None()    => return Illegal_Instruction()
     };
-  if not (is_ime_lambda_supported(EEW_C, LMUL, lambda)) then
+  if not (is_ime_lambda_supported(EEW_C, lambda)) then
     return Illegal_Instruction();
 
   let K_eff : int = lambda * W * LMUL;
@@ -4981,7 +5070,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
 * No effective lambda is selected.
 * The effective lambda is not supported for the current
-  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  (`VLEN`, `SEW`) configuration. A nonzero instruction lambda
   field is checked exactly and is not WARL-clamped.
 * `VL` is not a multiple of `effective_lambda * LMUL`.
 * _vd_ is not aligned for LMUL, or its register group extends past `v31`.
@@ -5120,7 +5209,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
 * No effective lambda is selected.
 * The effective lambda is not supported for the current
-  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  (`VLEN`, `SEW`) configuration. A nonzero instruction lambda
   field is checked exactly and is not WARL-clamped.
 * `VL` is not a multiple of `effective_lambda * LMUL`.
 * _vs3_ is not aligned for LMUL, or its register group extends past `v31`.
@@ -5276,7 +5365,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
 * No effective lambda is selected.
 * The effective lambda is not supported for the current
-  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  (`VLEN`, `SEW`) configuration. A nonzero instruction lambda
   field is checked exactly and is not WARL-clamped.
 * `VL` is not a multiple of `effective_lambda * LMUL`.
 * _vd_ is not aligned for LMUL, or its register group extends past `v31`.
@@ -5422,7 +5511,7 @@ _Illegal Instruction_ is raised if any of the following conditions holds:
 * `vtype.vlmul` does not encode LMUL in {1, 2, 4, 8}.
 * No effective lambda is selected.
 * The effective lambda is not supported for the current
-  (`VLEN`, `SEW`, `LMUL`) configuration. A nonzero instruction lambda
+  (`VLEN`, `SEW`) configuration. A nonzero instruction lambda
   field is checked exactly and is not WARL-clamped.
 * `VL` is not a multiple of `effective_lambda * LMUL`.
 * _vs3_ is not aligned for LMUL, or its register group extends past `v31`.
