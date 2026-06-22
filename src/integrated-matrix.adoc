@@ -1007,7 +1007,7 @@ reduction algorithm and the values of any parameters it takes.
 
 For each (`SEW`, `W`, `lambda`) entry with `psm=1`, the implementation-specific
 architectural disclosure is complete only when it includes a SAIL fragment
-that provides a concrete definition of `fp_disclosed_reduce_step` and of any
+that provides a concrete definition of `fp_disclosed_reduce_group` and of any
 companion functions referenced by it for that entry.
 
 The SAIL fragment shall cover every legal combination of `fmt_A`, `fmt_B`,
@@ -1056,7 +1056,7 @@ with the shared SAIL of this specification.
 The SAIL fragment serves three purposes that natural-language disclosure cannot:
 
 . *Unambiguous semantics.* A SAIL definition fixes operand widths, alignment, rounding, ordering, and parameter values without the interpretation overhead of prose.
-. *Direct integration with conformance testing.* The architectural model in this specification is itself SAIL-based; a published implementation fragment plugs into the same model with no glue code, so an architectural test suite can exercise the implementor's own definition of `fp_disclosed_reduce_step` to verify match against hardware.
+. *Direct integration with conformance testing.* The architectural model in this specification is itself SAIL-based; a published implementation fragment plugs into the same model with no glue code, so an architectural test suite can exercise the implementor's own definition of `fp_disclosed_reduce_group` to verify match against hardware.
 . *Reproducible cross-implementation comparison.* Two implementors disclosing nominally the same algorithm can settle disputes by diffing their SAIL fragments rather than re-deriving equivalence from prose.
 
 An implementation that discloses RVBNA at the standard parameters may
@@ -3842,16 +3842,28 @@ val fp_internal_zero : unit -> fp_internal
 // such as adding infinities of opposite signs.
 val fp_internal_add : (fp_internal, fp_internal) -> fp_internal
 
-// Non-exact reduction step (psm=1). The implementation chooses the
+// Non-exact bulk reduction (psm=1). The implementation chooses the
 // reduction algorithm and discloses it; common choices include RVBNA,
 // other bulk-normalised fixed-point schemes, and Kulisch-style
 // accumulators.
+//
+// The entire group of exact products is presented at once, as a list,
+// rather than folded pairwise. A pairwise fold cannot express a bulk
+// normalisation -- such as RVBNA, the flagship psm=1 algorithm -- which
+// aligns and sums all g_len x W terms together with a single terminal
+// normalisation. fmt_A and fmt_B give the input formats (and hence the
+// per-factor significand and exponent widths the algorithm may need);
+// g_len and W give the term count (g_len x W). The reduction is defined
+// to be independent of the order in which the products appear in the
+// list. The returned value has not yet been rounded to the C accumulator
+// format; any terminal rounding (e.g. RVBNA's round-to-odd) is applied by
+// the separate rnd step.
 //
 // The SAIL leaves the operation abstract here: two implementations
 // producing different numerical results or different accrued fflags may
 // both be conforming, provided each discloses its algorithm, parameters,
 // and exception-flag behavior.
-val fp_disclosed_reduce_step : (fp_internal, fp_internal) -> fp_internal
+val fp_disclosed_reduce_group : (list(fp_internal), fp_fmt, fp_fmt, int, int) -> fp_internal
 
 
 // Group partial sum S for one output element.
@@ -3893,7 +3905,11 @@ function fp_group_sum(i : int, j : int,
     },
 
     PSM_DISCLOSED => {
-      var S : fp_internal = fp_internal_zero();
+      // Gather the group's exact products, then reduce them in a single
+      // bulk operation so that a disclosed bulk-normalisation algorithm
+      // (e.g. RVBNA) can normalise all terms together. The reduction is
+      // order-independent, so the list order is unspecified.
+      var prods : list(fp_internal) = [||];
       foreach (k from k_lo to k_hi) {
         let a_flat : int = mat_A_idx(i, k, g.K_eff, g.LMUL, g.lambda, g.epr_A);
         let b_flat : int = mat_B_idx(k, j, g.K_eff, g.LMUL, g.lambda, g.epr_A);
@@ -3902,9 +3918,9 @@ function fp_group_sum(i : int, j : int,
         let b_bits : bits(g.EEW_A) = read_single_element(g.EEW_A, b_flat, vs2);
 
         let prod : fp_internal = fp_mul_exact(a_bits, fmt_A, b_bits, fmt_B);
-        S = fp_disclosed_reduce_step(S, prod)
+        prods = prod :: prods
       };
-      S
+      fp_disclosed_reduce_group(prods, fmt_A, fmt_B, g_len, g.W)
     }
   }
 }
