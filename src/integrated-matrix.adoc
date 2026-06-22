@@ -3628,6 +3628,17 @@ function check_ime_reg_group(base : regidx, LMUL : int) -> unit = {
     return Illegal_Instruction()
 }
 
+// Check register-group alignment and bounds for a multiply-accumulate.
+// The A and B input operands (vs1, vs2) form LMUL-register groups; the C
+// accumulator (vd) forms an EMUL_C-register group. Raises
+// illegal-instruction if any group is misaligned or extends past v31.
+function check_gemm_reg_groups(g : gemm_geom,
+                               vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  check_ime_reg_group(vs1, g.LMUL);
+  check_ime_reg_group(vs2, g.LMUL);
+  check_ime_reg_group(vd,  g.EMUL_C)
+}
+
 
 // Common decoded geometry for tile load/store instructions.
 struct tile_ls_geom = {
@@ -4068,6 +4079,7 @@ val check_int_mx_encoding_legality :
 // Integer GEMM: C (integer) += A (integer) × B (integer), no scaling.
 function int_gemm(g : gemm_geom, signed_A : bool, signed_B : bool,
                   vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  check_gemm_reg_groups(g, vs1, vs2, vd);
   foreach (j from 0 to (g.N - 1)) {
     foreach (i from 0 to (g.M - 1)) {
       let c_flat : int = mat_C_idx(i, j, g.N_max, g.EMUL_C, g.lambda, g.epr_C);
@@ -4085,6 +4097,7 @@ function fp_gemm(g : gemm_geom,
                  fmt_A : fp_fmt, fmt_B : fp_fmt, fmt_C : fp_fmt,
                  rm : rounding_mode,
                  vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  check_gemm_reg_groups(g, vs1, vs2, vd);
   let G   : int      = get_fp_grouping(g.EEW_C, g.W, g.lambda);
   let psm : psm_mode = get_fp_psm(g.EEW_C, g.W, g.lambda);
   let rnd : rnd_mode = get_fp_rnd(g.EEW_C, g.W, g.lambda);
@@ -4130,6 +4143,7 @@ function fp_scaled_gemm(g : gemm_geom,
                         scale_fmt : scale_format,
                         rm : rounding_mode,
                         vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  check_gemm_reg_groups(g, vs1, vs2, vd);
   let pw : int = 2 * scale_width_of(scale_fmt);
   let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
   let S_blocks : int = (g.K_eff + block_size - 1) / block_size;
@@ -4217,6 +4231,7 @@ function int_scaled_gemm(g : gemm_geom,
                          fmt_C : fp_fmt, scale_fmt : scale_format,
                          rm : rounding_mode,
                          vs1 : regidx, vs2 : regidx, vd : regidx) -> unit = {
+  check_gemm_reg_groups(g, vs1, vs2, vd);
   let pw : int = 2 * scale_width_of(scale_fmt);
   let block_size : int = if vtype[bs] == 0b1 then 16 else 32;
   let S : int = (g.K_eff + block_size - 1) / block_size;
