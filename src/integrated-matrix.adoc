@@ -305,11 +305,11 @@ On execution of `vsetvli` or `vsetivli`, the current value of
 configuration.
 If the current nonzero lambda value is supported for the resulting
 configuration, it is retained.
-If the current value is zero or is not supported for the resulting
-configuration, and one or more supported nonzero lambda values exist,
-the implementation shall select a supported nonzero lambda value.
-If no supported nonzero lambda value exists for the resulting
-configuration, `lambda[2:0]` is set to `000`.
+Otherwise, the implementation shall select the largest supported nonzero
+lambda value for the resulting configuration.
+The set of supported nonzero lambda values is never empty for a legal
+configuration (see <<integrated-matrix-lambda>>), so this selection
+always yields a nonzero value.
 
 `LMUL` does not affect whether a lambda value is supported. Therefore,
 a change to `LMUL` alone shall not change `lambda[2:0]`.
@@ -357,11 +357,13 @@ The set of supported nonzero lambda values is an implementation-defined
 function of `VLEN` and `SEW`. `LMUL` does not affect whether a lambda
 value is supported.
 
-For any legal vector configuration, `lambda[2:0]` shall contain a
-supported nonzero lambda value whenever at least one supported nonzero
-lambda value exists for the current (`VLEN`, `SEW`) configuration.
-The field shall contain `000` only when no supported nonzero lambda
-value exists for that configuration.
+For any legal (`VLEN`, `SEW`) configuration the set of supported nonzero
+lambda values is non-empty. The minimum supported lambda is `1` when
+`VLEN ≤ 16 × SEW`, and a larger power of two otherwise, because
+`EMUL_C` = `VLEN` ÷ (`SEW` × λ²) shall not exceed `16`. Consequently
+`lambda[2:0]` always holds a supported nonzero value in a legal
+configuration, and `000` is never produced as a selected value by a
+configuration instruction.
 
 One discovery mechanism is to attempt to program each nonzero lambda
 encoding and read back the value that is retained.
@@ -372,7 +374,7 @@ encoding and read back the value that is retained.
 |===
 3+| lambda[2:0] | Selected lambda
 
-| 0 | 0 | 0 | _no supported lambda_
+| 0 | 0 | 0 | _reserved — never a selected value_
 | 0 | 0 | 1 | 1
 | 0 | 1 | 0 | 2
 | 0 | 1 | 1 | 4
@@ -388,12 +390,11 @@ A write of `000` is a preserve-or-initialize request:
 * If the current nonzero lambda value is supported for the resulting
   (`VLEN`, `SEW`) configuration, that value is retained.
 
-* Otherwise, if one or more supported nonzero lambda values exist for
-  the resulting configuration, the implementation shall select a
-  supported nonzero lambda value.
+* Otherwise, the implementation shall select the largest supported
+  nonzero lambda value for the resulting configuration.
 
-* If no supported nonzero lambda value exists, the field is set to
-  `000`.
+Because the supported set is non-empty, a `000` write always results in
+a supported nonzero selected value.
 
 A nonzero write requests the corresponding lambda value.
 
@@ -404,16 +405,17 @@ If the requested value is not supported, the implementation shall select
 the largest supported nonzero lambda value that is less than or equal to
 the requested value.
 
-If no supported value is less than or equal to the requested value, but
-one or more supported nonzero lambda values exist, the implementation
-shall select the smallest supported nonzero lambda value.
+If no supported value is less than or equal to the requested value, the
+implementation shall select the smallest supported nonzero lambda value.
 
-The field is set to `000` only when no supported nonzero lambda value
-exists for the resulting (`VLEN`, `SEW`) configuration.
+Because the supported set is non-empty, a nonzero write always results
+in a supported nonzero selected value.
 
-Base Vector instructions may execute when `lambda[2:0] = 000`. An IME
-instruction that requires a dynamic lambda raises an illegal-instruction
-exception when `lambda[2:0] = 000`.
+A configuration instruction on a legal (`VLEN`, `SEW`) configuration
+never selects `lambda[2:0] = 000`; the encoding can be observed only in
+an as-yet-unconfigured `vtype`. Base Vector instructions may execute
+when `lambda[2:0] = 000`; an IME instruction that requires a dynamic
+lambda raises an illegal-instruction exception when `lambda[2:0] = 000`.
 
 [NOTE]
 ====
@@ -2558,10 +2560,11 @@ lambda value. It reads `vtype.lambda[2:0]`, decodes the field, and
 returns the resulting lambda value without modifying `vtype`, `vl`, or
 any vector register.
 
-A return value of zero means that no supported nonzero lambda value
-exists for the current (`VLEN`, `SEW`) configuration. If at least one
-supported nonzero lambda value exists, the returned value is nonzero
-and is valid for the current configuration.
+In a legal, configured `vtype` the returned value is always a nonzero
+lambda that is valid for the current (`VLEN`, `SEW`) configuration,
+because the supported set is non-empty. A return value of zero indicates
+only an as-yet-unconfigured `vtype` (no configuration instruction has yet
+selected a lambda).
 
 Because an implementation may support multiple lambda values for the
 same `VLEN` and `SEW`, the result cannot in general be derived from
@@ -2598,12 +2601,11 @@ configuration, that value is established.
 If it is not supported, the implementation establishes the largest
 supported nonzero lambda value that is less than or equal to the request.
 
-If no supported value is less than or equal to the request, but one or
-more supported nonzero lambda values exist, the implementation establishes
-the smallest supported nonzero lambda value.
+If no supported value is less than or equal to the request, the
+implementation establishes the smallest supported nonzero lambda value.
 
-If no supported nonzero lambda value exists for the current
-(`VLEN`, `SEW`) configuration, the established value is zero.
+Because the supported set is non-empty for any legal (`VLEN`, `SEW`)
+configuration, the established value is always a supported nonzero value.
 
 If `requested_lambda` is zero, the intrinsic performs the architectural
 preserve-or-initialize write:
@@ -2611,11 +2613,8 @@ preserve-or-initialize write:
 * If the currently selected nonzero lambda value is valid for the current
   (`VLEN`, `SEW`) configuration, it is retained.
 
-* Otherwise, if one or more supported nonzero lambda values exist, the
-  implementation selects a supported nonzero lambda value.
-
-* If no supported nonzero lambda value exists, the selected value remains
-  zero.
+* Otherwise, the implementation selects the largest supported nonzero
+  lambda value.
 
 The intrinsic returns the selected value after processing the request.
 
@@ -2623,10 +2622,10 @@ The intrinsic returns the selected value after processing the request.
 that only needs to inspect the selected lambda without modifying
 architectural state should use `__riscv_ime_lambda()`.
 
-The set of supported lambda values is a function of (`VLEN`, `SEW`).
-A change to `SEW` may cause lambda to be retained, replaced by another
-supported value, or set to zero when no supported value exists. A change
-to `LMUL` alone shall not change lambda.
+The set of supported lambda values is a function of (`VLEN`, `SEW`) and
+is never empty for a legal configuration. A change to `SEW` may cause
+lambda to be retained or replaced by another supported nonzero value. A
+change to `LMUL` alone shall not change lambda.
 
 Portable code that depends on a specific lambda value should re-establish
 or re-read lambda after any `vsetvli` or `vsetivli` that may change `SEW`,
