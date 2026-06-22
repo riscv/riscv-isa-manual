@@ -324,11 +324,13 @@ On execution of `vsetvli` or `vsetivli`, the current value of
 configuration.
 If the current nonzero lambda value is supported for the resulting
 configuration, it is retained.
-Otherwise, the implementation shall select the largest supported nonzero
-lambda value for the resulting configuration.
-The set of supported nonzero lambda values is never empty for a legal
-configuration (see <<integrated-matrix-lambda>>), so this selection
-always yields a nonzero value.
+Otherwise, if the resulting configuration is in the IME-legal domain
+(see <<integrated-matrix-lambda>>), the implementation shall select the
+largest supported nonzero lambda value for that configuration; the
+supported set is non-empty there, so the selection yields a nonzero
+value.
+If the resulting configuration is outside the IME-legal domain (no
+nonzero lambda is permissible), `lambda[2:0]` is set to `000`.
 
 `LMUL` does not affect whether a lambda value is supported. Therefore,
 a change to `LMUL` alone shall not change `lambda[2:0]`.
@@ -399,13 +401,27 @@ The set of supported nonzero lambda values is an implementation-defined
 function of `VLEN` and `SEW`. `LMUL` does not affect whether a lambda
 value is supported.
 
-For any legal (`VLEN`, `SEW`) configuration the set of supported nonzero
-lambda values is non-empty. The minimum supported lambda is `1` when
-`VLEN ≤ 16 × SEW`, and a larger power of two otherwise, because
-`EMUL_C` = `VLEN` ÷ (`SEW` × λ²) shall not exceed `16`. Consequently
-`lambda[2:0]` always holds a supported nonzero value in a legal
-configuration, and `000` is never produced as a selected value by a
-configuration instruction.
+A nonzero lambda is _architecturally permissible_ for a given (`VLEN`,
+`SEW`) only when it yields a valid C register group, i.e. when
+`EMUL_C` = `VLEN` ÷ (`SEW` × λ²) is an integer in {`1`, `2`, `4`, `8`,
+`16`} (equivalently, when the resulting tile has `M = N = VLEN ÷ (SEW ×
+λ) ≥ 1`). The _IME-legal configuration domain_ is the set of (`VLEN`,
+`SEW`) for which at least one architecturally permissible nonzero lambda
+exists. Note that lambda = `1` is permissible only when `SEW ≤ VLEN ≤
+16 × SEW`; for `VLEN > 16 × SEW` the minimum permissible lambda is larger
+than `1`, and for `VLEN < SEW` no lambda is permissible (the configuration
+lies outside the IME-legal domain).
+
+*Implementation requirement.* For every (`VLEN`, `SEW`) in the IME-legal
+configuration domain, an implementation shall support at least one
+architecturally permissible nonzero lambda value. Consequently, within
+that domain the set of supported nonzero lambda values is non-empty,
+`lambda[2:0]` always holds a supported nonzero value after a configuration
+instruction, and `000` is never produced as a selected value.
+
+For a (`VLEN`, `SEW`) outside the IME-legal domain, no nonzero lambda is
+permissible; `lambda[2:0]` remains `000` and any IME instruction that
+requires a dynamic lambda raises an illegal-instruction exception.
 
 One discovery mechanism is to attempt to program each nonzero lambda
 encoding and read back the value that is retained.
@@ -443,30 +459,32 @@ A write of `000` is a preserve-or-initialize request:
 * If the current nonzero lambda value is supported for the resulting
   (`VLEN`, `SEW`) configuration, that value is retained.
 
-* Otherwise, the implementation shall select the largest supported
-  nonzero lambda value for the resulting configuration.
+* Otherwise, if the configuration is in the IME-legal domain, the
+  implementation shall select the largest supported nonzero lambda value
+  for the resulting configuration; if the configuration is outside the
+  IME-legal domain, `lambda[2:0]` is set to `000`.
 
-Because the supported set is non-empty, a `000` write always results in
-a supported nonzero selected value.
+Within the IME-legal domain the supported set is non-empty, so a `000`
+write results in a supported nonzero selected value.
 
 A nonzero write requests the corresponding lambda value.
 
 If the requested value is supported for the resulting (`VLEN`, `SEW`)
 configuration, that value is retained.
 
-If the requested value is not supported, the implementation shall select
-the largest supported nonzero lambda value that is less than or equal to
-the requested value.
+If the requested value is not supported but the configuration is in the
+IME-legal domain, the implementation shall select the largest supported
+nonzero lambda value that is less than or equal to the requested value;
+if no supported value is less than or equal to the request, it shall
+select the smallest supported nonzero lambda value.
 
-If no supported value is less than or equal to the requested value, the
-implementation shall select the smallest supported nonzero lambda value.
+If the configuration is outside the IME-legal domain, no nonzero lambda
+is permissible and `lambda[2:0]` is set to `000`.
 
-Because the supported set is non-empty, a nonzero write always results
-in a supported nonzero selected value.
-
-A configuration instruction on a legal (`VLEN`, `SEW`) configuration
-never selects `lambda[2:0] = 000`; the encoding can be observed only in
-an as-yet-unconfigured `vtype`. Base Vector instructions may execute
+A configuration instruction on a configuration in the IME-legal domain
+never selects `lambda[2:0] = 000`; the encoding is selected only outside
+that domain, and is otherwise observable only in an as-yet-unconfigured
+`vtype`. Base Vector instructions may execute
 when `lambda[2:0] = 000`; an IME instruction that requires a dynamic
 lambda raises an illegal-instruction exception when `lambda[2:0] = 000`.
 
@@ -2757,8 +2775,10 @@ supported nonzero lambda value that is less than or equal to the request.
 If no supported value is less than or equal to the request, the
 implementation establishes the smallest supported nonzero lambda value.
 
-Because the supported set is non-empty for any legal (`VLEN`, `SEW`)
-configuration, the established value is always a supported nonzero value.
+For a configuration in the IME-legal domain the supported set is
+non-empty, so the established value is a supported nonzero value. For a
+configuration outside that domain no nonzero lambda is permissible and
+the established (and returned) value is zero.
 
 If `requested_lambda` is zero, the intrinsic performs the architectural
 preserve-or-initialize write:
