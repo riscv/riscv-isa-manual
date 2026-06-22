@@ -1184,6 +1184,18 @@ C tile tail elements, inactive columns, and any element positions not
 processed by the instruction do not contribute floating-point exception
 flags.
 
+When microscaling forces an output element to the default NaN because a
+combined block scale (the product stem:[\text{scale_A} \times \text{scale_B}])
+is NaN, that element's evaluation terminates at the block that produced
+the NaN scale. The flags raised while decoding and multiplying the scales
+of that block, and all flags raised by earlier blocks of the same element
+(their scales, products, and accumulations), are accrued as usual. The
+products and accumulation of the NaN-producing block and every later block
+of that element are not evaluated and contribute no flags. The bitwise-OR
+rule above therefore applies to the evaluation actually performed for each
+active output element, which for a forced-NaN element ends at the
+NaN-producing block.
+
 The helper operations in the SAIL-like pseudocode define where floating-point
 exception flags may be raised:
 
@@ -1328,9 +1340,17 @@ row/column, and block(_s_) covers elements
 stem:[\text{scale_A}_{i,s}] and stem:[\text{scale_B}_{j,s}] are decoded from the
 per-block scale fields in `v0` according to the scale format associated
 with the input data type.
-If any decoded scale is NaN, the corresponding output element
+If the combined block scale -- the product
+stem:[\text{scale_A}_{i,s} \times \text{scale_B}_{j,s}] formed in the C
+accumulator format -- is NaN, the corresponding output element
 stem:[C_{i,j}] is set to the default NaN regardless of the input element
-values.
+values, and the evaluation of that output element terminates: the scale
+blocks after the one that produced the NaN scale are not evaluated.
+For the E8M0 scale format this combined-scale NaN occurs exactly when
+either decoded scale is NaN (the encoding 0xFF); for scale formats that
+admit zero and infinity it can also arise from stem:[0 \times \infty].
+The exception-flag consequences of this early termination are specified
+in <<integrated-matrix-fp-special-values-fflags>>.
 
 [#integrated-matrix-scale-formats]
 ===== Scale formats
@@ -4216,6 +4236,13 @@ function fp_scaled_gemm(g : gemm_geom,
       foreach (s from 0 to (S_blocks - 1)) {
         let (blk_scale, is_nan) =
           read_block_scales(0b0, i, j, s, R, g.EEW_C, fmt_C, scale_fmt, rm);
+        // is_nan is keyed on the combined block scale (scale_A x scale_B),
+        // not on either decoded scale alone. A NaN combined scale forces
+        // this output element to the default NaN and terminates its
+        // evaluation: the scale decode/multiply above has already accrued
+        // its flags, but this block's products and accumulation, and all
+        // later blocks of this element, are not evaluated and raise no
+        // further flags. See the fflags rules for forced-NaN elements.
         if is_nan then { nan_out = true; break };
 
         // Scalar k-range covered by this scale block.
