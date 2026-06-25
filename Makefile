@@ -163,12 +163,9 @@ check-xref-fallbacks: $(DOCS_HTML)
 check-tags:
 	@bash ./scripts/check-tag-changes.sh
 
-# Copy built normative tags JSON files to ref directory and use sed to ensure they end with a newline.
-# Required by GitHub pre-commit checks for this repo.
+# Copy built normative tags JSON files to ref directory.
 update-ref: $(DOCS_NORM_TAGS)
-	cp -f $(DOCS_NORM_TAGS) ref
-	sed -i .bak -e '$$a\' ref/*.json
-	rm ref/*.bak
+	cp -f $(DOCS_NORM_TAGS) ref/
 
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
