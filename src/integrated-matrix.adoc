@@ -1510,10 +1510,6 @@ For E8M0: _sw_ = 8, _pw_ = 16.
 
 The row stride in `v0` is R = λ × SEW ÷ _pw_ in units of _pw_-bit elements (see <<ime-block-scale-v0>>).
 
-For each tile index _m_, S = ⒎K_eff / block_size⌉ scale-pair elements
-are active. Element index _p_ = _m_ × R + _s_ addresses the scale pair
-for block _s_.
-
 For `scale_A`, index _m_ identifies row _m_ of
 stem:[A_{\mathrm{tile}}]. For `scale_B`, index _m_ identifies column
 _m_ of stem:[B_{\mathrm{tile}}^{T}]. Specifically:
@@ -3915,9 +3911,12 @@ val fp_internal_add : (fp_internal, fp_internal) -> fp_internal
 // rather than folded pairwise. A pairwise fold cannot express a bulk
 // normalisation -- such as RVBNA, the flagship psm=1 algorithm -- which
 // aligns and sums all g_len x W terms together with a single terminal
-// normalisation. fmt_A and fmt_B give the input formats (and hence the
-// per-factor significand and exponent widths the algorithm may need);
-// g_len and W give the term count (g_len x W). The reduction is defined
+// normalisation. fmt_A and fmt_B give the input formats, and fmt_C gives the C
+// accumulator format. These formats provide the significand and exponent
+// widths, and any other format-dependent parameters, that the disclosed
+// algorithm may need. g_len and W give the term count (g_len x W).
+//
+// The reduction is defined
 // to be independent of the order in which the products appear in the
 // list. The returned value has not yet been rounded to the C accumulator
 // format; any terminal rounding (e.g. RVBNA's round-to-odd) is applied by
@@ -3927,7 +3926,7 @@ val fp_internal_add : (fp_internal, fp_internal) -> fp_internal
 // producing different numerical results or different accrued fflags may
 // both be conforming, provided each discloses its algorithm, parameters,
 // and exception-flag behavior.
-val fp_disclosed_reduce_group : (list(fp_internal), fp_fmt, fp_fmt, int, int) -> fp_internal
+val fp_disclosed_reduce_group : (list(fp_internal), fp_fmt, fp_fmt, fp_fmt, int, int) -> fp_internal
 
 
 // Group partial sum S for one output element.
@@ -3945,7 +3944,7 @@ val fp_disclosed_reduce_group : (list(fp_internal), fp_fmt, fp_fmt, int, int) ->
 function fp_group_sum(i : int, j : int,
                       step : int, g0 : int, g_len : int,
                       g : gemm_geom,
-                      fmt_A : fp_fmt, fmt_B : fp_fmt,
+                      fmt_A : fp_fmt, fmt_B : fp_fmt, fmt_C : fp_fmt,
                       psm : psm_mode,
                       vs1 : regidx, vs2 : regidx) -> fp_internal = {
   let k_base : int = step * g.lambda * g.W;
@@ -3984,7 +3983,7 @@ function fp_group_sum(i : int, j : int,
         let prod : fp_internal = fp_mul_exact(a_bits, fmt_A, b_bits, fmt_B);
         prods = prod :: prods
       };
-      fp_disclosed_reduce_group(prods, fmt_A, fmt_B, g_len, g.W)
+      fp_disclosed_reduce_group(prods, fmt_A, fmt_B, fmt_C, g_len, g.W)
     }
   }
 }
@@ -4198,7 +4197,7 @@ function fp_gemm(g : gemm_geom,
         foreach (g0 from 0 to (g.lambda - 1) by G) {
           let S : fp_internal =
             fp_group_sum(i, j, step, g0, G,
-                         g, fmt_A, fmt_B, psm,
+                         g, fmt_A, fmt_B,fmt_C, psm,
                          vs1, vs2);
 
           match round_group_sum(S, rnd, g.EEW_C, fmt_C, rm) {
@@ -4283,7 +4282,7 @@ function fp_scaled_gemm(g : gemm_geom,
 
               let S : fp_internal =
                 fp_group_sum(i, j, step, g0, g_len,
-                             g, fmt_A, fmt_B, psm,
+                             g, fmt_A, fmt_B, fmt_C, psm,
                              vs1, vs2);
 
               match round_group_sum(S, rnd, g.EEW_C, fmt_C, rm) {
