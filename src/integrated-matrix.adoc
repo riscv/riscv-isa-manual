@@ -12,8 +12,20 @@ Dedicated matrix-multiply accelerators often require new register state—separa
 
 The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls, Zvvmttls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
 By interpreting vector register groups as two-dimensional matrix tiles, the Zvvm family of Integrated Matrix extensions delivers high arithmetic density without introducing any new architected state.
-We focus, in particular, on the computation of C ← A × B^T^ + C, where A (σ × K_eff) and B (σ × K_eff) are the input panels and C (σ × σ) is the accumulator panel, with σ = VLEN ÷ (SEW × λ) and K_eff = λ × W × LMUL.
+
+For orientation, `VLEN` is the vector-register width in bits, `SEW` is
+the accumulator element width, `LMUL` is the vector register-group
+multiplier for the A and B input operands, `W` is the per-instruction
+widening factor, and λ is the IME tile-layout parameter introduced
+below.
+
+We focus, in particular, on matrix multiply-accumulate operations of the
+form C ← A × B^T^ + C, using matrix tiles held in vector register groups.
+A (σ × K_eff) and B (σ × K_eff) are the input panels and C (σ × σ) is the accumulator panel, with σ = VLEN ÷ (SEW × λ) and K_eff = λ × W × LMUL.
 A, B, and C are row-major matrix panels.
+The detailed tile geometry, including the roles of `VLEN`, `SEW`,
+`lambda`, `W`, `LMUL`, `K_eff`, and `EMUL_C`, is defined in
+<<_matrix_tile_multiplication_geometry>>.
 
 The extensions are designed to support implementations spanning a wide range of microarchitectures and performance points: from small, embedded in-order cores targeting low-power and area-constrained applications, to large, high-performance out-of-order implementations targeting HPC and AI workloads.
 A key architectural goal is that the same executable can run correctly
@@ -30,6 +42,17 @@ The Zvvm family of Integrated Matrix extensions consists of the following extens
 * Zvvfmm   - <<#zvvfmm>>: multiply-accumulate instructions for floating-point matrix tiles
 * Zvvmtls  - <<#zvvmtls>>: two-dimensional load/store instructions for moving data between memory and vector register groups interpreted as matrix tiles
 * Zvvmttls - <<#zvvmttls>>: two-dimensional transposing load/store instructions for moving data between memory and vector register groups interpreted as matrix tiles
+
+[NOTE]
+====
+Reader orientation: this chapter first defines the common tile geometry
+and new `vtype` fields, then the integer and floating-point
+multiply-accumulate semantics, then microscaling, tile load/store
+instructions, C intrinsics, instruction details, and finally the encoding
+maps. The encoding maps are normative for instruction legality; instruction
+descriptions that refer to an encoding-map row rely on the tables in
+<<_encoding_map>>.
+====
 
 ==== Matrix tile multiplication geometry
 
@@ -227,6 +250,38 @@ The type tokens are:
 * Floating-point: `ofp4`, `ofp8`, `fp16`, `bf16`, `fp32`, `fp64`
 * Microscaling (E8M0-scaled, block size 32): prefix `x` — e.g., `xofp8`, `xi8`
 * Microscaling (E8M0-scaled, block size 16): prefix `xn` — e.g., `xnofp8`, `xni8`
+
+For first-read clarity, the type tokens used in extension names have the
+following meanings:
+
+[cols="1,4", options="header"]
+|===
+| Token | Meaning
+
+| `ofp4`
+| 4-bit floating-point input format OFP4, currently E2M1.
+
+| `ofp8`
+| 8-bit floating-point input format OFP8, either E4M3 or E5M2.
+
+| `bf16`
+| BFloat16.
+
+| `fp16`, `fp32`, `fp64`
+| IEEE binary16, binary32, and binary64.
+
+| `x...`
+| E8M0-microscaled form with block size 32.
+
+| `xn...`
+| E8M0-microscaled form with block size 16.
+
+| `MXFP4`, `MXFP8`
+| E8M0-scaled OFP4 or OFP8 data.
+
+| `MXINT4`, `MXINT8`
+| E8M0-scaled signed 4-bit or 8-bit integer data.
+|===
 
 Examples: `Zvvi8i32mm` (Int8 inputs, Int32 accumulator), `Zvvfp16fp32mm` (FP16 inputs,
 FP32 accumulator), `Zvvxofp8fp16mm` (MXFP8 inputs with BS=32, FP16 accumulator).
@@ -724,9 +779,10 @@ into the floating-point C accumulator using `frm`.
 This floating-point conversion, scaling, and accumulation may raise
 floating-point exception flags. The result may depend on `frm`, `fmt_C`,
 the scale values, the selected block size, and the specified NaN/exception
-behavior. It is not governed by the floating-point-input grouping parameters
-`G`, `psm`, or `rnd`; those parameters apply to the floating-point-input
-accumulation model of <<#zvvfmm>>.
+behavior. 
+It is not governed by the floating-point-input grouping and partial-sum
+rounding parameters (`G`, `psm`, and `rnd`, defined in
+<<accumulation-and-rounding-model>>).
 
 [#zvvfmm,reftext=Matrix-multiplication instructions (floating-point)]
 === Zvvfmm: Extension for matrix multiplication on vector register groups interpreted as 2D floating-point matrix tiles
@@ -750,6 +806,11 @@ The following table lists the floating-point matrix tile multiplication instruct
 * `vs1`: Source vector register group containing the A matrix tile.
 * `vs2`: Source vector register group containing the B matrix tile.
 * `v0.scale`: Block scales for A and B operands in MX-scaling mode.
+
+The operand spelling `v0.scale` denotes the use of vector register `v0`
+as the source of paired microscaling block-scale values. The layout and
+semantics of these scale values are defined in
+<<integrated-matrix-microscaling>>.
 
 [cols="4,1,1,1,4", options="header"]
 |===
@@ -1117,8 +1178,9 @@ The SAIL fragment serves three purposes that natural-language disclosure cannot:
 . *Direct integration with conformance testing.* The architectural model in this specification is itself SAIL-based; a published implementation fragment plugs into the same model with no glue code, so an architectural test suite can exercise the implementor's own definition of `fp_disclosed_reduce_group` to verify match against hardware.
 . *Reproducible cross-implementation comparison.* Two implementors disclosing nominally the same algorithm can settle disputes by diffing their SAIL fragments rather than re-deriving equivalence from prose.
 
-An implementation that discloses RVBNA at the standard parameters may
-satisfy the SAIL-fragment portion of its complete architectural disclosure
+An implementation that discloses the RISC-V Bulk Normalization Algorithm
+(RVBNA), introduced below, at the standard parameters may satisfy
+the SAIL-fragment portion of its complete architectural disclosure
 by referencing the SAIL fragment published alongside the RVBNA specification
 itself, provided that fragment composes with the shared SAIL of this
 specification and reproduces the implementation's result bits and accrued
@@ -3655,6 +3717,30 @@ implementation-defined compiler conventions.
 Although it is possible to write more general assembly code, it is common industry practice to favor coding with compiler intrinsics.
 The recommended approach for writing portable code with IME intrinsics is to package multiple code paths in the same executable, each optimized for a specific value of EMUL_C.
 Runtime selection of the appropriate code path is then performed based on the result of `vsetvl` and computations of EMUL_C = VLEN / (SEW × λ²).
+
+==== Encoding-map legality overview
+
+The detailed encoding maps appear in <<_encoding_map>>. They are
+normative and determine whether a particular instruction, `SEW`, `W`,
+`altfmt`, `altfmt_A`, `altfmt_B`, `vm`, and `bs` combination is legal.
+
+In the instruction descriptions below:
+
+* ordinary integer `vm=1` encodings are governed by
+  <<tbl-int-encoding-map>>;
+
+* ordinary floating-point-input `vm=1` encodings are governed by
+  <<tbl-fp-encoding-map>>;
+
+* floating-point-input microscaled `vm=0` encodings are governed by the
+  MX block-size columns of <<tbl-fp-encoding-map>>; and
+
+* integer-input microscaled encodings are governed by
+  <<tbl-intmx-encoding-map>>.
+
+An encoding-map cell marked `_reserved_`, a cell naming no extension, or
+a cell naming an extension that is not implemented causes an
+illegal-instruction exception.
 
 [#integrated-matrix-insns,reftext="Instructions (in alphabetical order)"]
 === Instructions (in alphabetical order)
