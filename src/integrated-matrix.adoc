@@ -709,17 +709,23 @@ is raised.
 For the unscaled integer multiply-accumulate instructions, all intermediate results are reduced modulo 2^SEW^.
 Because modular addition is both associative and commutative, the final result is uniquely defined regardless of the accumulation order or grouping factor.
 
-This order-independence and exactness applies only to the unscaled
-integer path. The microscaled integer-input forms (`vfwimmacc.vv`,
-`vfqimmacc.vv`, `vf8wimmacc.vv`) accumulate in floating point: the integer
-products within one microscaling block are summed exactly, but that block
-sum is converted to floating point, scaled by the block scale, and
-accumulated into a floating-point C accumulator. That floating-point
-accumulation is neither associative nor exact -- it depends on `frm` and
-on the disclosed (`G`, `psm`, `rnd`) tuple, and a narrow accumulator (for
-example FP16 or BF16) cannot represent every block sum exactly -- so the
-order-independence and uniqueness statements above do not extend to the
-microscaled integer path. Its numerics follow the floating-point
+The microscaled integer-input forms (`vfwimmacc.vv`, `vfqimmacc.vv`,
+`vf8wimmacc.vv`) use the separately specified exact integer block-dot-product
+path. For each microscaling block, the integer products in that block are
+summed exactly. The exact integer block sum is then converted to the C
+accumulator format `fmt_C` using the dynamic rounding mode `frm`.
+
+The paired block scales are decoded into `fmt_C`, and their product is
+formed using the accumulator-format floating-point multiplication specified
+by the operation pseudocode. The converted block sum is multiplied by that
+combined block scale, again in `fmt_C`, and the scaled value is accumulated
+into the floating-point C accumulator using `frm`.
+
+This floating-point conversion, scaling, and accumulation may raise
+floating-point exception flags. The result may depend on `frm`, `fmt_C`,
+the scale values, the selected block size, and the specified NaN/exception
+behavior. It is not governed by the floating-point-input grouping parameters
+`G`, `psm`, or `rnd`; those parameters apply to the floating-point-input
 accumulation model of <<#zvvfmm>>.
 
 [#zvvfmm,reftext=Matrix-multiplication instructions (floating-point)]
@@ -4198,7 +4204,7 @@ function fp_gemm(g : gemm_geom,
         foreach (g0 from 0 to (g.lambda - 1) by G) {
           let S : fp_internal =
             fp_group_sum(i, j, step, g0, G,
-                         g, fmt_A, fmt_B,fmt_C, psm,
+                         g, fmt_A, fmt_B, fmt_C, psm,
                          vs1, vs2);
 
           match round_group_sum(S, rnd, g.EEW_C, fmt_C, rm) {
