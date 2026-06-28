@@ -298,9 +298,11 @@ IME-defined `altfmt_A` / `altfmt_B` (input formats, high bits).
 On reset, and whenever `vtype.vill = 1`, the IME `vtype` fields read as
 `lambda[2:0] = 000`, `bs = 0`, `altfmt_A = 0`, and `altfmt_B = 0`. This
 is the unconfigured state in which `lambda[2:0] = 000` is observable;
-see <<integrated-matrix-lambda>>. A configuration instruction on a legal
-(`VLEN`, `SEW`) configuration always leaves `lambda[2:0]` holding a
-supported nonzero value.
+see <<integrated-matrix-lambda>>.
+A configuration instruction on an IME-legal (`VLEN`, `SEW`) configuration
+always leaves `lambda[2:0]` holding a supported nonzero value. Outside
+the IME-legal domain, no nonzero lambda is permissible and the field
+remains `000`.
 ====
 
 [#integrated-matrix-vtype-config]
@@ -362,9 +364,11 @@ behave differently across a `vsetvli`/`vsetivli`:
 
 * `lambda[2:0]` is _geometry-constrained_: its set of supported values
   is a function of (`VLEN`, `SEW`), so a change to `SEW` can invalidate
-  the current value. It therefore follows a preserve-or-initialize rule,
-  and a configuration instruction always leaves it holding a supported
-  nonzero value.
+  the current value.
+  It therefore follows a preserve-or-initialize rule. Within the IME-legal
+  domain, a configuration instruction always leaves it holding a supported
+  nonzero value. Outside the IME-legal domain, no nonzero lambda is
+  permissible and the field remains `000`.
 
 * `bs`, `altfmt_A`, and `altfmt_B` are _not_ geometry-constrained by
   `VLEN`/`SEW`; any encoding is representable. They are therefore
@@ -443,7 +447,7 @@ path reads back a clamped value.
 |===
 3+| lambda[2:0] | Selected lambda
 
-| 0 | 0 | 0 | _reserved — never a selected value_
+| 0 | 0 | 0 | _no selected lambda_
 | 0 | 0 | 1 | 1
 | 0 | 1 | 0 | 2
 | 0 | 1 | 1 | 4
@@ -491,23 +495,22 @@ lambda raises an illegal-instruction exception when `lambda[2:0] = 000`.
 [NOTE]
 ====
 The `000` lambda encoding carries two distinct meanings, depending on
-where it appears, and is never a _selected_ value in a configured
-`vtype`:
+where it appears:
 
 * *As a `vtype` write request* (the `lambda` bits supplied to `vsetvl`,
   or the value written by `__riscv_vsetlambda(0)`): it is a
-  preserve-or-initialize request — keep the current lambda if it is
-  valid for the resulting (`VLEN`, `SEW`) configuration, otherwise
-  select the largest supported nonzero lambda. It never writes a literal
-  `000` into the field, because the supported set is non-empty.
+  preserve-or-initialize request. Within the IME-legal domain, this
+  request preserves a valid current lambda or selects the largest
+  supported nonzero lambda. Outside the IME-legal domain, no nonzero
+  lambda is permissible and the field remains `000`.
 
 * *As a tile load/store instruction immediate*: it means "use
-  `vtype.lambda`" for that instruction. It does not write `vtype.lambda`
-  and is distinct from a `vtype` write of zero.
+  `vtype.lambda`" for that instruction. It does not write
+  `vtype.lambda` and is distinct from a `vtype` write of zero.
 
-The only way to observe `lambda[2:0] = 000` on read-back is an
-as-yet-unconfigured `vtype`; no configuration instruction produces it as
-a selected value on a legal (`VLEN`, `SEW`) configuration.
+Thus, `000` is not a selected nonzero lambda value. It denotes that no
+selected lambda is available, which can occur in an unconfigured `vtype`,
+when `vtype.vill = 1`, or outside the IME-legal (`VLEN`, `SEW`) domain.
 ====
 
 [#integrated-matrix-altfmt]
@@ -2841,8 +2844,12 @@ preserve-or-initialize write:
 * If the currently selected nonzero lambda value is valid for the current
   (`VLEN`, `SEW`) configuration, it is retained.
 
-* Otherwise, the implementation selects the largest supported nonzero
-  lambda value.
+* Otherwise, if the current (`VLEN`, `SEW`) configuration is in the
+  IME-legal domain, the implementation selects the largest supported
+  nonzero lambda value for that configuration.
+
+* Otherwise, the current configuration is outside the IME-legal domain;
+  no nonzero lambda is selected and the returned value is zero.
 
 The intrinsic returns the selected value after processing the request.
 
@@ -2851,7 +2858,8 @@ that only needs to inspect the selected lambda without modifying
 architectural state should use `__riscv_ime_lambda()`.
 
 The set of supported lambda values is a function of (`VLEN`, `SEW`) and
-is never empty for a legal configuration. A change to `SEW` may cause
+is non-empty within the IME-legal domain.
+A change to `SEW` may cause
 lambda to be retained or replaced by another supported nonzero value. A
 change to `LMUL` alone shall not change lambda.
 
@@ -2879,8 +2887,9 @@ A compiler should model the lambda query and write intrinsics as follows:
 | `__riscv_vsetlambda(0)`
 | `lambda` (may-DEF)
 | `lambda`, `SEW`
-| Preserve-or-initialize write. The current value may be retained or may
-  be replaced if it is not valid for the current configuration.
+| Preserve-or-initialize write. The current value may be retained, may be
+  replaced by a supported nonzero value in the IME-legal domain, or may
+  remain zero outside that domain.
 
 | `__riscv_vsetlambda` with a compile-time nonzero argument
 | `lambda`
