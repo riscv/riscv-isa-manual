@@ -95,6 +95,8 @@ WORKDIR_SETUP = \
 
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
+    mkdir -p $(BUILD_DIR)/unpriv/images && \
+    find $@.workdir -name '*.svg' -exec cp {} $(BUILD_DIR)/unpriv/images/ \; && \
     rm -rf $@.workdir
 endif
 
