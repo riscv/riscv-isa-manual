@@ -54,6 +54,18 @@ descriptions that refer to an encoding-map row rely on the tables in
 <<_encoding_map>>.
 ====
 
+[NOTE]
+====
+Unless explicitly stated otherwise, instruction descriptions, encoding
+tables, exception lists, `vtype` field definitions, operation pseudocode,
+and required disclosure rules are normative.
+
+Notes, examples, rationale paragraphs, and software-usage discussions are
+informative. They explain intent, expected usage, implementation strategies,
+or performance considerations, but do not add architectural requirements
+beyond the normative text they reference.
+====
+
 ==== Matrix tile multiplication geometry
 
 The geometry of the multiplier and the tiles is defined by the new `lambda` (λ) field, which is encoded in 3 bits in the `vtype` CSR, in combination with the per-instruction widening factor `W` and the standard vector-configuration values `LMUL`, `SEW`, and `VLEN`.
@@ -229,6 +241,17 @@ image::png/ime-tile-lmul_2_4.png[width=100%, align=center, alt="Diagram showing 
 
 LMUL scales the tile along the K dimension only, increasing the effective K dimension of the tile by a factor of LMUL. The blue arrows indicate the contiguous elements in the vector register groups that form the tiles in the ordering of element-wise 1D vector operations.
 
+[NOTE]
+====
+Implementation note: Because `LMUL` extends only the K dimension of the
+A and B input tiles, it does not change the physical C accumulator tile
+shape or `EMUL_C`. This allows an implementation to reuse the same C
+accumulator datapath across different A/B register-group sizes.
+
+For example, an implementation can process an `LMUL > 1` operation as an
+ordered sequence of `LMUL=1` steps, while preserving the architectural
+result defined by this specification.
+====
 
 === Extensions in Zvvm
 
@@ -492,8 +515,8 @@ request to a supported value (see the write rules below). The
 instruction-immediate lambda field of a tile load/store behaves
 _oppositely_: an unsupported nonzero immediate is not clamped and raises
 an illegal-instruction exception (see <<integrated-matrix-tile-ls-legality>>).
-The two paths must not be conflated for discovery — only the `vtype`-write
-path reads back a clamped value.
+For discovery, the useful path is the `vtype`-write path, because only
+that path reads back a clamped value.
 ====
 
 .lambda[2:0] (selected lambda) encoding
@@ -1750,7 +1773,7 @@ With EEW = 16 and LMUL = 1, linesize = λ = R (when SEW = 16).  Each
 non-contiguous in the outer scale matrix.  When LD = R, this reduces to a
 unit-stride load.
 
-NOTE: This form requires SEW = 16 (i.e., R = λ).  For SEW > 16, R > λ
+This form requires SEW = 16 (i.e., R = λ).  For SEW > 16, R > λ
 and a single `vmtl.v` cannot span a full scale row; use Option 2 instead.
 
 *Option 2 — Pre-paired flat load (`vle16.v`):*
@@ -2166,9 +2189,10 @@ matrix of narrow logical elements into the packed register layout
 required by the multiply-accumulate instruction.
 
 Sub-byte logical elements, including OFP4 and Int4, cannot be transposed
-individually by these instructions. Software shall pretranspose and pack
-such data into the required `SEW`-bit storage-element layout, or use
-separate vector rearrangement operations.
+individually by these instructions.
+Software can prepare such data by pretransposing and packing it into the
+required `SEW`-bit storage-element layout, or by using separate vector
+rearrangement operations.
 ====
 
 [NOTE]
@@ -2278,9 +2302,10 @@ tail-undisturbed is typically implemented via read-merge: the implementation
 reads the old destination register contents, updates active positions, and
 writes the merged result back.
 
-For IME multiply-accumulate instructions, undisturbed behaviour requires no
-read of C tile tail elements - the instruction leaves tail element positions
-untouched. This permits hardware implementations, including outer-product
+For IME multiply-accumulate instructions, undisturbed behaviour can be
+implemented without reading C tile tail elements: the instruction leaves
+tail element positions untouched.
+This permits hardware implementations, including outer-product
 engines and register-renaming machines, to process only the `N_tile` active
 columns of the C tile without referencing the inactive C tile columns.
 ====
@@ -2311,6 +2336,20 @@ them. Software preparing a widening input tile from an ordinary
 row-major or column-major matrix of narrow logical elements must first
 arrange the data into the required packed tile order, either in memory
 or with separate vector rearrangement operations.
+====
+
+[NOTE]
+====
+Performance note: The tile load/store instructions allow software to
+operate directly on matrices stored in common row-major or column-major
+layouts. This is useful for simple kernels, edge cases, and avoiding
+unnecessary data movement when peak throughput is not required.
+
+High-performance GEMM implementations are still expected to use dense
+packed panels when packing improves locality, alignment, prefetching,
+or reuse, as is common in BLAS- and BLIS-style libraries. The IME
+load/store instructions define architectural tile movement, but they do
+not preclude software from using packed matrix layouts for performance.
 ====
 
 ==== Loading and storing C accumulator tiles
