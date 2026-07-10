@@ -21,10 +21,10 @@ These registers define physical memory access privileges—read, write, and exec
 
 A memory access is successful only when permission checks for both S-mode execution environment and SPMP pass.
 SPMP checks can be performed by the hardware in parallel with PMA and PMP checks.
-SPMP exceptions take priority over PMP or PMA exceptions.
-Consequently, if a memory access violates both SPMP and PMP/PMA rules, only the SPMP exception is reported.
+[#norm:spmp_exception_priority]#SPMP exceptions take priority over PMP or PMA exceptions.
+Consequently, if a memory access violates both SPMP and PMP/PMA rules, only the SPMP exception is reported.#
 
-SPMP checks are enforced on all memory accesses with effective privilege modes less privileged than M-mode.
+[#norm:spmp_checks_lower_priv]#SPMP checks are enforced on all memory accesses with effective privilege modes less privileged than M-mode.#
 SPMP can be configured to grant permissions to U-mode, which has none by default, and to revoke permissions from S-mode.
 
 If the Shbare extension is implemented in conjunction with `Sspmp`, when V=1 and hgatp.MODE=Bare, SPMP enforces access checks on all memory accesses from VS and VU-modes, effectively applying SPMP protections to guest execution contexts.
@@ -53,7 +53,7 @@ Each SPMP entry is composed of an SXLEN-bit configuration register and an associ
 The SPMP registers are accessible only via the indirect access mechanism.
 For details on CSR numbers and how to access them, see <<access-method>>.
 In TOR mode, an entry also uses the address register of the preceding entry to define its range (see <<address-matching>>).
-Implementations support from 1 to 64 SPMP entries.
+[#norm:num_spmp_entries_param]#Implementations support from 1 to 64 SPMP entries.#
 
 
 [NOTE]
@@ -65,11 +65,11 @@ These registers collectively define a protected physical memory region and its a
 ====
 
 The SPMP address registers, named `spmpaddr0` through `spmpaddr63`, share the same layout as the M-mode PMP architecture.
-On RV32 systems, [#norm:spmpaddr_format_rv32]#each `spmpaddr` register encodes a 34-bit physical address from bit 33 down to bit 2, as illustrated in <<spmpaddr-rv32>>.#
-On RV64 systems, [#norm:spmpaddr_format_rv64]#each `spmpaddr` register encodes a 56-bit physical address from bit 55 down to bit 2, as shown in <<spmpaddr-rv64>>.#
+[#norm:spmpaddr_format_rv32]#On RV32 systems, each `spmpaddr` register encodes a 34-bit physical address from bit 33 down to bit 2, as illustrated in <<spmpaddr-rv32>>.#
+[#norm:spmpaddr_format_rv64]#On RV64 systems, each `spmpaddr` register encodes a 56-bit physical address from bit 55 down to bit 2, as shown in <<spmpaddr-rv64>>.#
 An implementation may support fewer address bits on systems with a smaller physical address space.
-All writable SPMP entries should implement the same number of address bits.
-Since not all physical address bits must be implemented, the SPMP address registers are considered WARL, with exceptions defined by granularity rules.
+[#norm:spmpaddr_impl_bits_same]#All writable SPMP entries must implement the same number of address bits.#
+[#norm:spmpaddr_warl]#Since not all physical address bits must be implemented, the SPMP address registers are considered WARL, with exceptions defined by granularity rules.#
 Refer to <<pmp-address-matching>>.
 
 [NOTE]
@@ -94,7 +94,7 @@ Permission rules and their encodings are detailed in <<encoding>>.
 
 . [#norm:spmpcfg_rwx_bits]#The R, W, and X bits govern permissions for read, write, and instruction execution, respectively.#
 . [#norm:spmpcfg_a_field]#The A field, which defines the address-matching mode, is detailed in <<address-matching>>.#
-. Bits 5 and 6 are reserved for future standard use.
+. [#norm:spmpcfg_bits_5_6_rsv]#Bits 5 and 6 of `spmpcfg[i]` are reserved for future standard use.#
 . [#norm:spmpcfg_lock_bit]#The L (lock) bit designates an entry as locked.
 Setting the L bit locks the SPMP entry, regardless of the A field's setting (even OFF).#
 [#norm:spmpcfg_lock_write_ignored]#Attempts to write to locked `spmpcfg[i]` and `spmpaddr[i]` registers using the `siselect` CSR are ignored.#
@@ -133,15 +133,16 @@ The following table details the A field's encoding.
 |3|NAPOT|[#norm:addr_match_napot]#Naturally aligned power-of-two region, ≥8 bytes#
 |===
 
+[#norm:spmpcfg-a_valid]#For a rule to be valid, its `spmpcfg[i].A` field must not be OFF.
+Furthermore, if `spmpcfg[i].A` is set to TOR, the condition `spmpaddr[i-1] < spmpaddr[i]` must hold.#
+
+[#norm:spmpcfg-a_tor_entry0]#If `spmpcfg[0].A` is set to TOR, zero is used for the lower bound.#
+
 
 [NOTE]
 ====
 This encoding is consistent with the PMP/ePMP.
 For comprehensive details, refer to <<pmp-address-matching>>.
-
-For a rule to be valid, its `spmpcfg[i].A` field must not be OFF.
-Furthermore, if `spmpcfg[i].A` is set to TOR, the condition `spmpaddr[i-1] < spmpaddr[i]` must hold.
-[#norm:addr_match_tor_entry0]#Particularly, if `spmpcfg[0].A` is set to TOR, zero is used for the lower bound.#
 
 Software can probe the minimum SPMP granularity.
 This is done by clearing `spmpcfg[i]`, writing all ones to `spmpaddr[i]`, and then reading back the resulting `spmpaddr[i]` value.
@@ -173,9 +174,9 @@ SPMP supports three distinct rule types: *S-mode-only*, *U-mode* and *Shared-Reg
 +
 . [#norm:shared_rule_enforce]#A *Shared-Region* rule is *enforced* for both Supervisor and User modes, but it imposes the constraint that read and write permissions for User mode are mutually exclusive.#
 +
-. The R, W, and X bits collectively form a WARL field.
+. [#norm:spmpcfg-rwx_warl]#The R, W, and X bits collectively form a WARL field.#
 +
-. The encodings [#norm:rwx_010_reserved]#`spmpcfg.RWX=010`#, [#norm:rwx_011_reserved]#`spmpcfg.RWX=011`#, as well as the combination `spmpcfg.SHARED == 1 and spmpcfg.U == 0` are all reserved for future standard use.
+. [#norm:spmpcfg_encodings_rsv]#The encodings `spmpcfg.RWX=010`, `spmpcfg.RWX=011`, and `spmpcfg.SHARED == 1 and spmpcfg.U == 0` are reserved for future standard use.#
 
 If the Shbare extension is implemented, when V=1 and hgatp.MODE=Bare, the permission encodings remain consistent with those when spmpcfg.U=1, but are applied to VS/VU rather than U-mode accesses.
 
@@ -205,7 +206,7 @@ The semantics of `sstatus.SUM` within SPMP are consistent with its definition in
 +
 . [#norm:match_priority]#The lowest-numbered SPMP entry that matches any byte of an access (indicated by an address and the accessed length) determines whether that access is allowed or denied.#
 +
-. This matching SPMP entry must match *all* bytes of the access, or the access fails and an instruction, load, or store page-fault exception is generated (see <<exceptions>>).
+. [#norm:spmp_match_all_bytes]#This matching SPMP entry must match *all* bytes of the access, or the access fails and an instruction, load, or store page-fault exception is generated (see <<exceptions>>).#
 +
 . [#norm:match_irrespective_perm_bits]#This matching is done irrespective of the SHARED, U, R, W, and X bits.#
 +
@@ -255,7 +256,7 @@ The registers `sireg3` through `sireg6` are reserved.
 SPMP entries are indexed starting from zero.
 In a system with N SPMP entries (`N {le} 64`),
 `SPMP[0..N-1]` is accessed by writing `0x100+i` to the `siselect` register, where `i` represents the entry index (`0 {le} i {le} N-1`).
-[#norm:siselect_oob_read_zero]#An access to an out-of-bounds index via `siselect` will return zero on read# and [#norm:siselect_oob_write_ignored]#be ignored on write.#
+[#norm:siselect_oob_access]#An access to an out-of-bounds index via `siselect` will return zero on read and be ignored on write.#
 
 
 <<<
@@ -283,8 +284,8 @@ with subsequent memory accesses.
 S or U, software must execute an `SFENCE.VMA` instruction with `rs1=x0` and
 `rs2=x0`, which synchronizes subsequent memory accesses with all preceding
 SPMP CSR writes.#
-To enforce ordering for subsequent accesses whose effective privilege mode is
-VS or VU, an `HFENCE.GVMA` instruction with `rs1=x0` and `rs2=x0` is required.
+[#norm:hfence-gvma_spmp_ordering]#To enforce ordering for subsequent accesses whose effective privilege mode is
+VS or VU, an `HFENCE.GVMA` instruction with `rs1=x0` and `rs2=x0` is required.#
 
 
 [NOTE]
@@ -296,16 +297,13 @@ While `SFENCE.VMA` and `HFENCE.GVMA` instructions normally order preceding store
 
 [[exceptions]]
 ==== Exceptions
-A failed SPMP check triggers an exception whose type corresponds to the memory operation (load, store/AMO, or instruction fetch).
-Each fault type is assigned a distinct exception code.
-
-The `Sspmp` extension reuses the existing page fault exception codes for SPMP violations.
+[#norm:spmp_page_fault]#When an SPMP check for an S-mode or U-mode access fails, an instruction fetch, load, or store/AMO raises an instruction page-fault exception (code 12), load page-fault exception (code 13), or store/AMO page-fault exception (code 15), respectively.#
 S-mode software (e.g., an OS) can differentiate between an SPMP fault and a standard page fault by querying the `satp.mode` field, given that SPMP and paging are mutually exclusive (see <<spmp-and-paging>>).
 
 It is important to note that a single instruction can result in multiple memory accesses that are not guaranteed to be atomic relative to each other.
 
 
-If the Shbare extension is implemented, when a VS/VU access is denied by SPMP, an exception is raised. The type of exception depends on the nature of the access attempt, i.e., whether it is a load, store/AMO, or instruction fetch. SPMP reuses the guest page fault exception codes (20, 21, and 23, for instruction, load, and store/AMO accesses, respectively).
+[#norm:spmp_guest_page_fault]#If the Shbare extension is implemented and V=1 with hgatp.MODE=Bare, when an SPMP check for a VS-mode or VU-mode access fails, an instruction fetch, load, or store/AMO raises an instruction guest-page-fault exception (code 20), load guest-page-fault exception (code 21), or store/AMO guest-page-fault exception (code 23), respectively.#
 
 
 Table of exception codes:
@@ -313,9 +311,9 @@ Table of exception codes:
 [cols="^1,^1,^1", stripes=even, options="header"]
 |===
 |Interrupt|Exception Code|Description
-|0|12|[#norm:spmp_instr_page_fault]#Instruction page fault#
-|0|13|[#norm:spmp_load_page_fault]#Load page fault#
-|0|15|[#norm:spmp_store_page_fault]#Store/AMO page fault#
+|0|12|Instruction page fault
+|0|13|Load page fault
+|0|15|Store/AMO page fault
 |0|20|Instruction guest-page fault
 |0|21|Load guest-page fault
 |0|23|Store/AMO guest-page fault
@@ -334,7 +332,7 @@ Since, when V=1, SPMP is only active when hgatp.MODE=Bare, SPMP protection and G
 In RV64, a context switch for the SPMP mechanism involves updating up to 64 address registers and 64 configuration registers.
 The `Sspmpen` extension, introduced in this chapter, is an optional feature designed to enhance the performance of SPMP context switches.
 
-* [#norm:spmpen_readwrite]#For RV64 architectures, it introduces a 64-bit WARL CSR, `spmpen`.#
+* [#norm:spmpen_warl]#For RV64 architectures, it introduces a 64-bit WARL CSR, `spmpen`.#
 * [#norm:spmpenh_alias]#For RV32 architectures, it introduces an additional 32-bit WARL CSR, `spmpenh`, which serves as an alias for the upper 32 bits of the `spmpen` register.#
 
 
@@ -344,8 +342,7 @@ The `spmpen[i]` bit controls only whether SPMP entry `i` participates in address
 
 [#norm:spmpen_locked_readonly]#When an entry `i` is locked, as indicated by `spmpcfg[i].L == 1`, its corresponding `spmpen[i]` bit becomes read-only.#
 
-In an implementation featuring 64 PMP entries with N (`N {le} 64`) delegated to the supervisor level, the bits `spmpen[0..N-1]` control their respective SPMP entries `[0..N-1]`.
-Any attempt to write to the upper bits of the register are ignored.
+[#norm:spmpen_upper_bits_write_ignored]#In an implementation featuring 64 PMP entries with N (`N {le} 64`) delegated to the supervisor level, the bits `spmpen[0..N-1]` control their respective SPMP entries `[0..N-1]`, and writes to the upper bits `spmpen[N..63]` are ignored.#
 
 Writes to the `spmpen` CSR are not ordered with respect to subsequent
 memory accesses.
@@ -379,7 +376,7 @@ This chapter introduces the `Smpmpdeleg` extension, a mechanism that allows hard
 
 *This extension is mandatory for implementations that support both `Sspmp` and `Sm1p13`.*
 The `Smcsrind` extension for indirect CSR access must be implemented.
-For the purposes of this specification, `Smpmpdeleg` assumes an architectural space of 64 PMP entries, although fewer entries may be writable; any non-writable entries behave as read-only zero.
+[#norm:smpmpdeleg_pmp_entries]#An implementation of `Smpmpdeleg` must provide an architectural space of 64 PMP entries. Fewer than 64 entries may be writable; each non-writable entry must read as zero, and writes to it must be ignored.#
 
 
 
@@ -387,11 +384,11 @@ For the purposes of this specification, `Smpmpdeleg` assumes an architectural sp
 ==== Resource Sharing between PMP and SPMP
 
 The `Smpmpdeleg` extension facilitates the delegation of PMP entries for use by S-mode, thereby creating SPMP entries.
-This delegation is managed by an MXLEN-bit M-mode CSR named `mpmpdeleg`, whose layout is detailed in <<mpmpdeleg-format-rv64>>.
+[#norm:mpmpdeleg]#This delegation is managed by an MXLEN-bit M-mode CSR named `mpmpdeleg`, whose layout is detailed in <<mpmpdeleg-format-rv64>>.#
 
 . [#norm:mpmpdeleg_pmpnum_field]#A key component of this CSR is the `pmpnum` WARL field, which defines the starting index for delegation.
 All PMP entries with an index equal to or greater than `pmpnum` are delegated as SPMP entries.#
-. If a write to `pmpnum` specifies a value exceeding the number of writable PMP entries, the field subsequently reads back the total count of writable entries. In such a case, no SPMP entries are delegated.
+. [#norm:mpmpdeleg-pmpnum_warl_limit]#If a write to `pmpnum` specifies a value exceeding the number of writable PMP entries, the field subsequently reads back the total count of writable entries. In such a case, no SPMP entries are delegated.#
 . [#norm:mpmpdeleg_pmpnum_zero_delegates_all]#Setting `pmpnum` to zero delegates all writable PMP entries to SPMP, while setting it to the total number of writable entries delegates none.#
 . By default, unless hardwired, `pmpnum` resets to the total number of writable PMP entries.
 . [#norm:mpmpdeleg_no_delegation_disables]#If no entries are delegated to SPMP, the `Sspmp` extension is effectively disabled, and any attempt to access SPMP-related registers results in reads returning zero, and writes being ignored.#
@@ -415,7 +412,7 @@ In an implementation with 64 total entries where `pmpnum` is configured to N (`N
 
 . PMP entries 0 through N-1 act as PMP (i.e., `PMP[0..N-1]`) and are accessible via standard PMP CSRs (e.g., `pmpcfg[0..3]` and `pmpaddr[0..15]` for RV32; `pmpcfg[0,2]` and `pmpaddr[0..15]` for RV64).
 . The remaining 64-N entries are delegated as SPMP (i.e., `SPMP[0..63-N]`) and are indirectly accessed via `xiselect` (see <<access-method>> and <<m-mode-indirect-access>>).
-. Accesses to out-of-range indices, such as reading `PMP[N]` or writing to `SPMP[64-N]` in this scenario, are handled as follows: reads return zero, and writes are ignored.
+. [#norm:mpmpdeleg_oob_access]#Accesses to out-of-range indices, such as reading `PMP[N]` or writing to `SPMP[64-N]` in this scenario, are handled as follows: reads return zero, and writes are ignored.#
 
 
 *Configuration registers:*
@@ -429,10 +426,10 @@ Its lower 8 bits are an alias for the 8-bit field in the corresponding M-mode PM
 . M-mode software can dynamically adjust the allocation between PMP and SPMP by writing to the `mpmpdeleg` CSR.
 . [#norm:mpmpdeleg_locked_pmp_constraint]#The `pmpnum` value cannot be set to an index that is less than or equal to that of any locked PMP entry.
 For example, if `PMP[7]` is locked, any attempt to write a value less than 8 to `pmpnum` is ignored, and the field retains its prior value.#
-. The `pmpnum` value can be set to override locked SPMP entries. For example, if `SPMP[0]` is locked, M-mode software can still increment `pmpnum`.
-. As `pmpnum` is reconfigured, SPMP entries with the largest indices change.
+. [#norm:mpmpdeleg-pmpnum_locked_spmp_override]#The `pmpnum` value can be set to override locked SPMP entries. For example, if `SPMP[0]` is locked, M-mode software can still increment `pmpnum`.#
+. [#norm:mpmpdeleg-pmpnum_reconfig_high_entries]#As `pmpnum` is reconfigured, SPMP entries with the largest indices change.
 Raising `pmpnum` from N to N+2 truncates SPMP and spmpen ranges from `SPMP[0..63-N]`, `spmpen[0..63-N]` to `SPMP[0..61-N]`, `spmpen[0..61-N]`.
-Conversely, reducing `pmpnum` from N+2 to N expands SPMP and spmpen ranges from `SPMP[0..61-N]`, `spmpen[0..61-N]` to `SPMP[0..63-N]`, `spmpen[0..63-N]`.
+Conversely, reducing `pmpnum` from N+2 to N expands SPMP and spmpen ranges from `SPMP[0..61-N]`, `spmpen[0..61-N]` to `SPMP[0..63-N]`, `spmpen[0..63-N]`.#
 
 [NOTE]
 ====
@@ -471,7 +468,7 @@ Any access attempt by either mode to an index outside this range (`i {ge} N`) re
 *Memory access in M-mode:*
 [#norm:mmode_mem_access_bypasses_spmp]#If the effective privilege mode of the memory access is M, the access is `allowed` regardless of the SPMP permissions.#
 
-If the Shbare extension is implemented in conjunction with `Sspmp`, then when V=1 and hgatp.MODE=Bare, the Hypervisor Virtual Machine Load and Store instructions (HLV, HLVX, HSV) executed from M-mode are subject to SPMP checks.
+[#norm:hlv_hlvx_hsv_spmp_mmode]#If the Shbare extension is implemented in conjunction with `Sspmp`, then when V=1 and hgatp.MODE=Bare, the Hypervisor Virtual Machine Load and Store instructions (HLV, HLVX, HSV) executed from M-mode are subject to SPMP checks.#
 
 
 [[guidelines]]
