@@ -201,11 +201,12 @@ check-ref: update-ref
 	@if git diff --quiet -- $(REF_NORM_TAGS); then \
 	  echo "Normative tag reference files are up to date."; \
 	else \
-	  echo "ERROR: normative tag reference files are out of date:"; \
+	  echo "ERROR: normative tag reference files were out of date:"; \
 	  echo; \
 	  git diff --stat -- $(REF_NORM_TAGS); \
 	  echo; \
-	  echo "Run 'make update-ref', review the diff, and commit the result."; \
+	  echo "They have been regenerated in your working tree."; \
+	  echo "Review the diff above and commit the result."; \
 	  exit 1; \
 	fi
 

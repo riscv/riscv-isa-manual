@@ -25,7 +25,7 @@ There is one file per document listed in `DOCS` in the [Makefile](../Makefile).
 ```json
 {
   "tags": {
-    "norm:tag-name": "The normative text content...",
+    "norm:tag-name": "The normative text content..."
   },
   "sections": {
     "title": "...",
