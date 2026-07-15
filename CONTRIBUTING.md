@@ -62,6 +62,28 @@ This skips the clean-workdir step between builds, so unchanged files are not rep
 
 Outputs land in the `build/` directory.
 
+### Changebar PDF (review aid)
+
+`make build-changebar-pdf` builds the normal manual with a red bar in the left
+margin next to everything the current branch changed. It is fully automatic —
+the bars are derived from `git diff`, so no source annotation is needed and it
+works for any branch with any mix of additions, edits, and deletions.
+
+```bash
+make build-changebar-pdf                       # vs origin/main (merge base)
+make build-changebar-pdf CHANGEBAR_BASE=v2.0   # vs any ref/tag/commit
+```
+
+The comparison uses the merge base with `CHANGEBAR_BASE` (default `origin/main`),
+i.e. everything the branch changed since it forked, and includes uncommitted
+working-tree edits so you can preview before committing. Output:
+`build/riscv-spec-changebar.pdf`.
+
+How it works: `scripts/gen-changebar-diff.sh` emits the changed `.adoc` line
+ranges as JSON (git runs on the host, not in the build container), and
+`src/lib/changebar.rb` uses Asciidoctor's `--sourcemap` to tag the affected
+blocks and draw the bars.
+
 ## Contributing changes
 
 - Create a branch for your change.

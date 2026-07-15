@@ -142,7 +142,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref check-xref-fallbacks
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-tags update-ref check-xref-fallbacks build-changebar-pdf
 
 all: build
 
@@ -153,7 +153,19 @@ ifeq ("$(wildcard docs-resources/global-config.adoc)","")
   $(shell git submodule update --init --recursive)
 endif
 
+# Changebar PDF: the normal manual with a red bar in the left margin next to
+# everything this branch changed relative to CHANGEBAR_BASE (default
+# origin/main). The diff is computed on the host by
+# scripts/gen-changebar-diff.sh (git isn't available in the build container) and
+# consumed by src/lib/changebar.rb via --sourcemap.
+# Override the base ref with e.g.: make build-changebar-pdf CHANGEBAR_BASE=v2.0
+CHANGEBAR_BASE ?= origin/main
+CHANGEBAR_PDF := $(BUILD_DIR)/$(DOCS)-changebar.pdf
+CHANGEBAR_DIFF_JSON := changebar-changes.json
+CHANGEBAR_OPTS := --sourcemap -r ./src/lib/changebar.rb -a changebar-diff=$(CHANGEBAR_DIFF_JSON)
+
 build-pdf: $(DOCS_PDF)
+build-changebar-pdf: $(CHANGEBAR_PDF)
 build-html: $(DOCS_HTML) check-xref-fallbacks
 build-epub: $(DOCS_EPUB)
 build-tags: $(DOCS_NORM_TAGS)
@@ -196,6 +208,13 @@ $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
+	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
+
+$(CHANGEBAR_PDF): $(SRC_DIR)/$(DOCS).adoc $(ALL_SRCS)
+	$(WORKDIR_SETUP)
+	bash ./scripts/gen-changebar-diff.sh "$(CHANGEBAR_BASE)" > "$@.workdir/$(CHANGEBAR_DIFF_JSON)"
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(CHANGEBAR_OPTS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	mv $@.workdir/$(BUILD_DIR)/$(DOCS).pdf $@ && rm -rf $@.workdir
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
