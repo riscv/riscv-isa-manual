@@ -68,17 +68,49 @@ jobs:
       - name: Build normative tags
         run: make build-tags
 
+      - name: Check if branch triggers issues
+        id: branch-check
+        if: github.event_name == 'push'
+        run: |
+          CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
+          echo "Current branch: $CURRENT_BRANCH"
+          if echo "$ISSUE_TRIGGER_BRANCHES" | grep -qE "(^|,)${CURRENT_BRANCH}(,|$)"; then
+            echo "is_trigger_branch=true" >> "$GITHUB_OUTPUT"
+            echo "Branch '$CURRENT_BRANCH' is configured to trigger issues"
+          else
+            echo "is_trigger_branch=false" >> "$GITHUB_OUTPUT"
+            echo "Branch '$CURRENT_BRANCH' is not configured to trigger issues"
+          fi
+
       - name: Resolve base revision
         id: base
         run: |
           case "${{ github.event_name }}" in
-            pull_request) BASE='${{ github.event.pull_request.base.sha }}' ;;
-            push)         BASE='${{ github.event.before }}' ;;
-            *)            BASE='' ;;
+            pull_request)
+              BASE='${{ github.event.pull_request.base.sha }}'
+              ;;
+            push)
+              # github.event.before is *this branch's* previous tip. That is only
+              # a meaningful comparison on the branches we track: on a feature
+              # branch it is wherever the branch last happened to point, which
+              # says nothing about what the work introduces. (A branch opened
+              # from an issue starts at main's tip at that moment, so the first
+              # push would otherwise diff against a long-stale ref/.) Pull
+              # request runs cover feature branches properly, against the real
+              # merge base.
+              if [ "${{ steps.branch-check.outputs.is_trigger_branch }}" = "true" ]; then
+                BASE='${{ github.event.before }}'
+              else
+                BASE=''
+              fi
+              ;;
+            *)
+              BASE=''
+              ;;
           esac
 
-          # github.event.before is all-zeros for a newly created branch, and the
-          # commit can be absent entirely after a force push.
+          # before is also all-zeros for a newly created branch, and the commit
+          # can be absent entirely after a force push.
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "No usable base revision; the change report will be skipped."
             echo "available=false" >> "$GITHUB_OUTPUT"
@@ -168,20 +200,6 @@ jobs:
             echo "has_bypass=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check if branch triggers issues
-        id: branch-check
-        if: github.event_name == 'push'
-        run: |
-          CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
-          echo "Current branch: $CURRENT_BRANCH"
-          if echo "$ISSUE_TRIGGER_BRANCHES" | grep -qE "(^|,)${CURRENT_BRANCH}(,|$)"; then
-            echo "is_trigger_branch=true" >> "$GITHUB_OUTPUT"
-            echo "Branch '$CURRENT_BRANCH' is configured to trigger issues"
-          else
-            echo "is_trigger_branch=false" >> "$GITHUB_OUTPUT"
-            echo "Branch '$CURRENT_BRANCH' is not configured to trigger issues"
-          fi
-
       - name: Create issue on merge to configured branches
         if: >-
           steps.report.outputs.has_any_changes == 'true' &&
@@ -203,8 +221,15 @@ jobs:
 
       # The governance gate. Additions alone are fine; changing or removing
       # normative text that already shipped needs an explicit sign-off.
+      #
+      # Pull requests only. That is where the label lives and where review
+      # happens, and the bypass step above does not even run on other events, so
+      # a push could never be approved out of this gate. On a push to main the
+      # change is already merged and failing the build achieves nothing -- the
+      # issue created above is the response there.
       - name: Fail on unapproved normative changes
         if: >-
+          github.event_name == 'pull_request' &&
           steps.report.outputs.has_breaking_changes == 'true' &&
           steps.bypass.outputs.has_bypass != 'true'
         run: |
