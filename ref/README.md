@@ -1,87 +1,100 @@
 # Normative Tag Reference Files
 
-This directory contains reference files used to track changes to normative (specification-defining) text in the RISC-V ISA manual.
+This directory holds a checked-in snapshot of the normative (specification-defining) text extracted from the manual's AsciiDoc sources.
 
 ## Purpose
 
-Normative tags mark text that defines official RISC-V specification behavior. Changes to this text can have significant implications for hardware and software implementations. These reference files serve as a baseline to detect when normative text is:
+Normative tags mark text that defines official RISC-V specification behaviour. Changes to this text can have significant implications for hardware and software implementations, so the extracted text is committed to the repository. That gives every pull request a reviewable diff of exactly which normative statements were:
 
-- **Added** - New normative requirements introduced
-- **Modified** - Existing normative text changed
-- **Deleted** - Normative requirements removed
+- **Added** - new normative requirements introduced
+- **Modified** - existing normative text changed
+- **Deleted** - normative requirements removed
+
+Downstream consumers (for example UDB) also read these files, so they must always match the sources.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `riscv-unprivileged-norm-tags.json` | Normative tags from the Unprivileged Specification |
-| `riscv-privileged-norm-tags.json` | Normative tags from the Privileged Specification |
+| `riscv-spec-norm-tags.json` | Normative tags and section structure for the RISC-V ISA Manual |
 
-## How It Works
-
-1. **Tag Extraction**: During the build process (`make build-tags`), normative tags are extracted from AsciiDoc source files using a custom Asciidoctor backend (`docs-resources/converters/tags.rb`).
-
-2. **Change Detection**: The `detect_tag_changes.py` script compares the newly extracted tags against these reference files to identify additions, modifications, and deletions.
-
-3. **CI Integration**: The GitHub Actions workflow (`.github/workflows/check-normative-tags.yml`) runs this check on every PR and push to detect normative changes.
-
-4. **Automatic Updates**: When PRs are merged to `main`, new tags (additions) are automatically added to these reference files. Modifications and deletions require manual review.
-
-## Change Types and Actions
-
-| Change Type | CI Behavior | Action Required |
-|-------------|-------------|-----------------|
-| Addition | Pass (auto-update on merge) | None - automatically tracked |
-| Modification | Fail | Manual review and update |
-| Deletion | Fail | Manual review and update |
-
-## Bypassing the Check
-
-For intentional normative changes that have been reviewed and approved:
-
-1. Add the `normative-change-approved` label to the PR
-2. The check will report changes but not fail the build
-3. Update the reference files manually after merge if needed
-
-## Updating Reference Files Manually
-
-If you need to update the reference files after an intentional normative change, you can use the provided script or Makefile target:
-
-```bash
-# Using the Makefile (recommended)
-make check-tags
-
-# Or using the script directly
-./scripts/check-tag-changes.sh
-```
-
-These commands will build the latest tags and update the reference files in the `ref/` directory with any changes. After running either command, you should review the changes and commit them:
-
-```bash
-# Review and commit the changes
-git add ref/*.json
-git commit -m "Update normative tag reference files"
-```
+There is one file per document listed in `DOCS` in the [Makefile](../Makefile).
 
 ## JSON Structure
-
-Each reference file contains a JSON object with:
 
 ```json
 {
   "tags": {
     "norm:tag-name": "The normative text content...",
-    ...
+  },
+  "sections": {
+    "title": "...",
+    "id": "...",
+    "children": [],
+    "tags": []
   }
 }
 ```
 
-The tag names correspond to AsciiDoc anchors prefixed with `norm:` in the source files.
+`tags` maps each AsciiDoc anchor prefixed with `norm:` to its extracted text. `sections` mirrors the document's section tree and records which tags live in each section. **Both** keys are part of the snapshot and both must be kept up to date.
+
+## Keeping These Files Up To Date
+
+The files are generated, never hand-edited. If you change tagged text in `src/`, regenerate them in the same pull request:
+
+```bash
+make update-ref        # Rebuild the tags and refresh ref/
+git diff -- ref/       # Review what your change did to the normative text
+git add ref/ && git commit
+```
+
+To check without committing:
+
+```bash
+make check-ref         # Fails if ref/ does not match a fresh build
+```
+
+`check-ref` is `update-ref` followed by `git diff --exit-code`, so if it fails, the corrected files are already sitting in your working tree ready to review and commit.
+
+## How It Works
+
+1. **Extraction** - `make build-tags` runs a custom Asciidoctor backend (`docs-resources/converters/tags.rb`) over the sources, writing `build/riscv-spec-norm-tags.json`.
+2. **Refresh** - `make update-ref` copies that output into `ref/`, appending the trailing newline that pre-commit's `end-of-file-fixer` requires.
+3. **CI** - the [check-normative-tags workflow](../.github/workflows/check-normative-tags.yml) runs on every pull request and enforces the two checks below.
+
+## CI Behaviour
+
+CI enforces two *separate* things. Keeping them separate matters: conflating them is what previously allowed these files to drift out of date ([#3186](https://github.com/riscv/riscv-isa-manual/issues/3186)).
+
+### 1. Freshness (mechanical, not bypassable)
+
+`make check-ref` requires `ref/` to be **byte-identical** to a fresh build. This is a pure yes/no question with no judgement involved, so it can never be bypassed or approved away. If it fails, run `make update-ref` and commit.
+
+### 2. Normative change review (human judgement)
+
+`docs-resources/tools/detect_tag_changes.py` compares `ref/` as of the pull request's **base commit** against the tags built from your branch, and publishes a report to the workflow's job summary.
+
+| Change type | CI behaviour | Action required |
+|-------------|--------------|-----------------|
+| Addition | Pass | None; the report notes it for reviewers |
+| Modification | Fail | Review, then approve via label (see below) |
+| Deletion | Fail | Review, then approve via label (see below) |
+
+This comparison deliberately **normalises whitespace and AsciiDoc formatting** before comparing, so that pure reformatting does not raise a false alarm about a normative change. That fuzziness is correct for a review signal but is *not* a substitute for the byte-exact freshness check above.
+
+## Bypassing the Review Check
+
+For intentional normative changes that have been reviewed and approved:
+
+1. Add the `normative-change-approved` label to the pull request.
+2. Modifications and deletions will then report without failing.
+
+The label affects **only** the review check. It does not and cannot bypass the freshness check: an approved normative change still has to ship the regenerated `ref/` files.
 
 ## Related Files
 
-- `docs-resources/tools/detect_tag_changes.py` - Change detection script
-- `docs-resources/converters/tags.rb` - Tag extraction backend
-- `.github/workflows/check-normative-tags.yml` - CI workflow
-- `.github/scripts/create-tag-change-issue.js` - Issue creation script
-- `scripts/check-tag-changes.sh` - Local pre-commit check script
+- `docs-resources/converters/tags.rb` - tag extraction backend
+- `docs-resources/tools/detect_tag_changes.py` - change reporting script
+- `../.github/workflows/check-normative-tags.yml` - CI workflow
+- `../.github/scripts/create-tag-change-issue.js` - issue creation on merge
+- `../Makefile` - `build-tags`, `update-ref` and `check-ref` targets
