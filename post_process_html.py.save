@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""
+post_process_html.py — Replace base64-encoded SVG <img> tags with accessible inline <svg>
+Usage: python post_process_html.py build/riscv-spec.html
+"""
+import re, base64, sys
+from pathlib import Path
+
+def inject_a11y(svg_text, alt):
+    title = alt if alt and alt != "Diagram" else "Instruction encoding diagram"
+    
+    # Add role and aria-label to outer svg tag
+    svg_text = svg_text.replace('<svg ', f'<svg role="img" aria-label="{title}" ', 1)
+    
+    # Build hidden text + title + wrap inner content
+    hidden_text = f'<text x="0" y="0" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;font-size:1px">{title}</text>'
+    
+    def wrap_contents(m):
+        opening_tag = m.group(1)
+        rest = m.group(2)
+        return f'{opening_tag}<title>{title}</title>{hidden_text}<g aria-hidden="true">{rest}'
+    
+    svg_text = re.sub(r'(<svg[^>]*>)(.*?)(</svg>)', wrap_contents, svg_text, count=1, flags=re.DOTALL)
+    svg_text = svg_text.replace('</svg>', '</g></svg>', 1)
+    
+    return svg_text
+
+def process_html(html_path):
+    content = Path(html_path).read_text(encoding='utf-8')
+
+    pattern = re.compile(
+        r'<img\s+src="data:image/svg\+xml;base64,([^"]+)"\s+alt="([^"]*)"([^>]*)>',
+        re.IGNORECASE
+    )
+
+    def replace_match(m):
+        b64_data, alt, extra_attrs = m.group(1), m.group(2), m.group(3)
+        try:
+            svg_text = base64.b64decode(b64_data).decode('utf-8')
+            svg_text = inject_a11y(svg_text, alt)
+            svg_text = re.sub(r'<\?xml[^?]*\?>', '', svg_text).strip()
+            return svg_text
+        except Exception as e:
+            print(f"  WARNING: Could not process diagram (alt='{alt}'): {e}")
+            return m.group(0)
+
+    new_content, count = pattern.subn(replace_match, content)
+    Path(html_path).write_text(new_content, encoding='utf-8')
+    print(f"Processed {count} diagrams in {html_path}")
+
+if __name__ == '__main__':
+    process_html(sys.argv[1])
+    
+exit
+^X
+
+
+
+

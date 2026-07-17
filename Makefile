@@ -95,6 +95,16 @@ WORKDIR_SETUP = \
 
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
+    mkdir -p $(BUILD_DIR)/unpriv/images && \
+    if [ "$(suffix $@)" = ".html" ]; then \
+        mkdir -p $(BUILD_DIR)/priv/images && \
+        grep -o 'src="priv/images/[^"]*\.svg"' $@ | sed 's/src="priv\/images\///;s/"//' | sort -u | \
+            while read f; do [ -f "$@.workdir/build/images-out/$$f" ] && cp "$@.workdir/build/images-out/$$f" $(BUILD_DIR)/priv/images/; done; \
+        grep -o 'src="unpriv/images/[^"]*\.svg"' $@ | sed 's/src="unpriv\/images\///;s/"//' | sort -u | \
+            while read f; do [ -f "$@.workdir/build/images-out/$$f" ] && cp "$@.workdir/build/images-out/$$f" $(BUILD_DIR)/unpriv/images/; done; \
+    else \
+        find $@.workdir -name '*.svg' -exec cp {} $(BUILD_DIR)/unpriv/images/ \; ; \
+    fi && \
     rm -rf $@.workdir
 endif
 
@@ -249,6 +259,7 @@ $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) -a revremark='$(RELEASE_DESCRIPTION_HTML)' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
+	python3 post_process_html.py $@
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
