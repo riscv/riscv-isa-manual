@@ -177,15 +177,10 @@ check-xref-fallbacks: $(DOCS_HTML)
 
 # Regenerate the checked-in normative tags JSON in $(REF_DIR) from the sources.
 #
-# The tags backend (docs-resources/converters/tags.rb) emits JSON with no
-# trailing newline, but pre-commit's end-of-file-fixer requires one, so append
-# it when it is missing. Inside a command substitution `tail -c 1` yields the
-# empty string exactly when the file already ends in a newline.
+# The tags backend (docs-resources/converters/tags.rb) emits a trailing newline
+# as of riscv/docs-resources#246, so no newline fix-up is needed here.
 update-ref: $(DOCS_NORM_TAGS)
 	cp -f $(DOCS_NORM_TAGS) $(REF_DIR)
-	@for f in $(REF_NORM_TAGS); do \
-	  if [ -n "$$(tail -c 1 "$$f")" ]; then printf '\n' >> "$$f"; fi; \
-	done
 
 # Fail if the checked-in normative tags are out of date with respect to the
 # sources.
