@@ -71,3 +71,4 @@ Raptor        | Yu Jin                          | [Yu Jin](mailto:lambda.jinyu@g
 Sargantana    | BSC-LOCA                        | [Narcís Rodas](mailto:narcis.rodaquiroga@bsc.es)            | 51               | https://github.com/bsc-loca/sargantana
 KianV Stealth | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 52               | https://github.com/splinedrive/kianRiscV
 RVController  | April Kolwey (cheapie)          | [April Kolwey](mailto:cheapiephp@gmail.com)                 | 53               | https://cheapiesystems.com/git/rvcontroller/
+aRVern        | Arvern Silicon                  | [Arvern Silicon](mailto:arvernsilicon@gmail.com)            | 54               | https://github.com/Arvern-Silicon
