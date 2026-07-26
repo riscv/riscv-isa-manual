@@ -16,8 +16,8 @@ By interpreting vector register groups as two-dimensional matrix tiles, the Zvvm
 For orientation, `VLEN` is the vector-register width in bits, `SEW` is
 the element width for output C, `LMUL` is the vector register-group
 multiplier for the A and B input operands, `W` is the per-instruction
-widening factor, and λ is the IM tile-layout parameter introduced
-below.
+widening factor, and `LAMBDA` (λ) is the IM tile-layout parameter introduced
+below. Below, λ is used as shorthand for `LAMBDA`.
 `EMUL_C` is the register-group multiplier for the output C and is computed as
 `EMUL_C` = (`VLEN` ÷ `SEW`) ÷ λ^2^.
 
@@ -122,6 +122,33 @@ Highly optimized versions of a matrix-multiply kernel are specialized for a part
 but are otherwise portable across specific choices of `VLEN` and `LAMBDA`.
 Therefore, a fully portable binary includes five (5) versions of a matrix-multiply kernel (one for each value of `EMUL_C`), with a run-time selector of which kernel to execute on a specific situation.
 
+===== Choosing the tile geometry (`LAMBDA` and `EMUL_C`)
+
+The legality rules above leave the implementer with a choice of `LAMBDA` (equivalently, of `M` and `EMUL_C`) for a given `VLEN` and `SEW`. This choice is not free: it fixes the shape of the C-panel and therefore trades off arithmetic throughput, silicon area and power, and memory-system efficiency. We summarize the forces at work using the three configurations of <<ime-emulc-examples>> (`VLEN` = 512, `SEW` = 32, so `L` = `VLEN` ÷ `SEW` = 16).
+
+Compute intensity versus memory bandwidth. Each rank-λ update of the accumulator loads the A and B operands — `M`·λ elements each — and performs `M`·`M`·λ multiply-accumulates. The compute intensity, in MACs per loaded element, is therefore
+
+    I = (M·M·λ) ÷ (2·M·λ) = M ÷ 2 = L ÷ (2λ).
+
+For the three cases this gives `I` = 8, 4, and 2 MACs/load for <<ime-emulc-examples>> (a), (b), and (c) respectively: the larger the C-panel (larger `M`, smaller `LAMBDA`), the more arithmetic is extracted per byte moved, and the less external bandwidth is needed to keep the array busy. In roofline terms the attainable throughput is
+
+    P = min(P_peak, I × B),
+
+where `B` is the delivered operand bandwidth and `P_peak` is the flat, compute-bound ceiling set by the number of instantiated MAC units. The product `I` × `B` is only the sloped, bandwidth-bound ceiling; a bandwidth-limited implementation raises its attainable `P` by choosing a geometry with higher `I` (smaller λ), which shifts the ridge point toward the arithmetic ceiling.
+
+Peak throughput versus area and power. The number of MAC units a configuration can usefully instantiate scales with the C-panel area and the rank:
+
+    N_MAC = M·M·LAMBDA = L^2^ ÷ LAMBDA.
+
+<<ime-emulc-examples>> (a) is a rank-1 outer-product engine of up to 16 × 16 = 256 MACs; <<ime-emulc-examples>> (c) is a rank-4 engine of 4 × 4 × 4 = 64 MACs. Both `N_MAC` and `I` increase as λ decreases, so a performance-only argument always favours the smallest legal λ — the largest `EMUL_C` in <<ime-emulc-table>>. Area and power push the other way: the 256-MAC array of (a) is four times the arithmetic hardware of (c). An implementation with a limited area or power budget therefore deliberately selects a larger λ, accepting lower compute intensity and lower peak throughput in exchange for a smaller multiplier. Subject to that budget, the highest-performance choice for a given `VLEN` and `SEW` is the one with the largest `EMUL_C` permitted by <<ime-emulc-table>>.
+
+Dependence on `L`, and hence on `SEW`. Because the accumulator `SEW` sets `L` = `VLEN` ÷ `SEW`, a single physical multiplier is used at different values of `L` for different C-element widths. If the multiplier is built as a fixed `M` × `M` panel, the operating LAMBDA is λ = `L` ÷ `M`, so the largest-`EMUL_C` (highest-intensity) point migrates with `SEW`. For example, on a machine with `VLEN` = 16384 wired to a 64 × 64 panel: at `SEW` = 32 (`L` = 512) the panel runs at λ = 8, `EMUL_C` = 8; at `SEW` = 16 (`L` = 1024) the same panel runs at λ = 16, `EMUL_C` = 4. Narrower C elements raise `L` and therefore require a larger λ on the same silicon.
+
+Cacheline utilization of the tile loads. The base λ can be extended along K by `LMUL`, giving an effective contraction depth `K_eff` = λ · `LMUL` (Section 36.2.1, <<ime-tile-lmul-fig>>). Each matrix row streamed by an order-preserving tile load `vmtl` is therefore `K_eff` · `SEW` = λ · `LMUL` · `SEW` bits of contiguous data, and this length determines how well each row maps onto a memory cacheline. For `SEW` = 32 and a 512-bit (64-byte) cacheline: configuration (a), with λ = 1, streams at most 8 · 32 = 256 bits per row even at the maximum `LMUL` = 8, filling only half a cacheline; configuration (b), with λ = 2, reaches a full 512-bit line at `LMUL` = 8; and configuration (c), with λ = 4, reaches a full line already at `LMUL` = 4. A λ that is too small can thus leave `vmtl` unable to issue full-cacheline row transfers within the available `LMUL`, wasting bandwidth on partial lines. This gives a lower bound on the useful λ that is independent of, and may exceed, the minimum required for legality.
+
+Summary of the trade-off. `LAMBDA` (and thus `EMUL_C`) is selected to balance three competing objectives: high compute intensity and peak throughput, which favour small `LAMBDA` (large C-panel, large `EMUL_C`); bounded multiplier area and power, which favour large `LAMBDA`; and full-cacheline tile loads, which impose a minimum useful `LAMBDA`. The resulting choice must in all cases satisfy the legality constraints of <<ime-emulc-table>>, in particular `EMUL_C` ∈ {1, 2, 4, 8, 16} and the reservation of register groups for the A and B operands.
+
+
 We have introduced the fundamental concepts realted to the geometry of a C ← A × B^T^ + C computation.
 We now proceed with a more detailed explanation of the ISA support for controlling and selecting that geometry.
 We also discuss more general configurations, with elements of A and B that are submultiples of `SEW` and with the A and B input tiles also supporting vector register groups of multiplicity > 1.
@@ -129,6 +156,10 @@ We also discuss more general configurations, with elements of A and B that are s
 ==== ISA control of matrix tile geometry
 
 The geometry of the multiplier and the tiles is defined by the new `lambda` (λ) field, which is encoded in 3 bits in the `vtype` CSR, in combination with the per-instruction widening factor `W` and the standard vector-configuration values `LMUL`, `SEW`, and `VLEN`.
+
+A and B tiles have elements of width `SEW`÷`W`; the accumulator C has elements of width `SEW` (see <<tbl-extensions>>).
+When operating on integer data types, the signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned; see <<integrated-matrix-altfmt-inputs>>); the accumulator C is always signed.
+Integer accumulation wraps modulo 2^`SEW`^.
 
 A and B tiles have elements of width `SEW`÷`W`; the accumulator C has elements of width `SEW` (see <<tbl-extensions>>).
 When operating on integer data types, the signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned; see <<integrated-matrix-altfmt-inputs>>); the accumulator C is always signed.
