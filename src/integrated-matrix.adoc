@@ -10,18 +10,20 @@
 High-performance computing and machine learning workloads depend critically on matrix multiply-accumulate over a wide range of data types and precisions.
 Dedicated matrix-multiply accelerators often require new register state—separate matrix register files—to achieve competitive throughput, introducing substantial architectural complexity and binary interface disruption.
 
-The Zvvm family of Integrated Matrix extensions (Zvvmm, Zvvfmm, Zvvmtls, Zvvmttls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
+The Zvvm family of Integrated Matrix (IM) extensions (Zvvmm, Zvvfmm, Zvvmtls, Zvvmttls) takes a different approach: it accelerates matrix multiplication using _only_ the 32 × VLEN architected vector registers already defined by the RISC-V "V" vector extension.
 By interpreting vector register groups as two-dimensional matrix tiles, the Zvvm family of Integrated Matrix extensions delivers high arithmetic density without introducing any new architected state.
 
 For orientation, `VLEN` is the vector-register width in bits, `SEW` is
-the accumulator element width, `LMUL` is the vector register-group
+the element width for output C, `LMUL` is the vector register-group
 multiplier for the A and B input operands, `W` is the per-instruction
-widening factor, and λ is the IME tile-layout parameter introduced
+widening factor, and λ is the IM tile-layout parameter introduced
 below.
+`EMUL_C` is the register-group multiplier for the output C and is computed as
+`EMUL_C` = (`VLEN` ÷ `SEW`) ÷ λ^2^.
 
 We focus, in particular, on matrix multiply-accumulate operations of the
 form C ← A × B^T^ + C, using matrix tiles held in vector register groups.
-A (σ × K_eff) and B (σ × K_eff) are the input panels and C (σ × σ) is the accumulator panel, with σ = VLEN ÷ (SEW × λ) and K_eff = λ × W × LMUL.
+A (σ × `K_eff`) and B (σ × `K_eff`) are the input panels and C (σ × σ) is the accumulator panel, with σ = `VLEN` ÷ (`SEW` × λ) and `K_eff` = λ × `W` × `LMUL`.
 A, B, and C are row-major matrix panels.
 The detailed tile geometry, including the roles of `VLEN`, `SEW`,
 λ, `W`, `LMUL`, `K_eff`, and `EMUL_C`, is defined in
@@ -68,7 +70,69 @@ beyond the normative text they reference.
 
 ==== Matrix tile multiplication geometry
 
+A _matrix tile_ is a two-dimensional rectangular section of a matrix.
+The goal of the IM-extension is to support the computation of C ← A × B^T^ + C, where A, B, and C are matrix tiles.
+In the computation above, A and B are _input tiles_ and C is called the _accumulator tile_.
+In the IM extension, input and accumulator tiles are stored in vector register groups.
+For any given C ← A × B^T^ + C computation, both A and B input tiles have a common rectangular shape `M` × `K`.
+(We explain below how the `M` and `K` parameters are defined.)
+From the rules of matrix multiplication, the shape of C must be `M` × `M`.
+This means that, in general, the sizes of the input and accumulator vector register groups can be different.
+
+The IM extension grants implementations a certain degree of flexibility in selecting the shape of tiles.
+Given a vector length `VLEN` (also an implementationn choice) and a selected element width `SEW`, the number of elements in a single vector registers is (`VLEN` ÷ `SEW`).
+To define the shape of a tile contained in a single vector registers, we introduce an additional implementation-choice parameter `LAMBDA` that is the width of such tile in elements of `SEW`.
+The height of the tile is then `M` = (`VLEN` ÷ `SEW`) ÷ `LAMBDA`.
+The IM extension imposes two more restrictions on `LAMBDA`. (An additional third restriction will be introduced later.)
+First, `LAMBDA`, and consequently `M`, must be a power of 2 ≥ 1.
+Second, we must have `M` ≥ `LAMBDA` or, equivalently, `LAMBDA` ≤ (`VLEN` ÷ `SEW`)^½^.
+
+As an example of the implication of the rules for `LAMBDA`, let us consider the case `VLEN` = 512 and `SEW` = 32.
+In this case, (`VLEN` ÷ `SEW`) = 16 and, therefore there are only three possible choices for `LAMBDA`: 1, 2, or 4.
+The corresponding values for `M` are 16, 8, and 4, respectively.
+The three possible configurations in this case are shown in <<ime-single-vec-reg-geometry>>.
+
+[#ime-single-vec-reg-geometry]
+.Geometry of matrix tiles fitting in a single vector register for `VLEN` = 512 and `SEW` = 32. (In general, for (`VLEN` ÷ `SEW`) = 16.) There are three legal choices for the implementation parameter `LAMBDA`, and corresponding `M`. (a) `LAMBDA` = 1, `M` = 16. (b) `LAMBDA` = 2, `M` = 8. (c) `LAMBDA` = 4, `M` = 4.
+image::png/ime-single-vec-reg-geometry.png[width=50%, align=center, alt="Diagram of tile geometry for a single vector register."]
+
+Since the `M` × `K` shape of the input tiles A and B that fit in a single vector register depends on the parameter `LAMBDA`, so does the shape `M` × `M` of the accumulator tile C.
+Correspondingly, the multiplicity of the vector register group holding tile C, `EMUL_C`, is also a function of `LAMBDA`, `EMUL_C` = `M` ÷ `LAMBDA` = (`VLEN` ÷ `SEW`) ÷ `LAMBDA`^2^.
+The three possible configurations for `VLEN` = 512 and `SEW` = 32 are shown in <<ime-emulc-examples>>.
+
+[#ime-emulc-examples]
+.Geometry of the computation of C ← A × B^T^ + C for `VLEN` = 512 and `SEW` = 32. (In general, for (`VLEN` ÷ `SEW`) = 16.) There are three legal choices for the implementation parameter `LAMBDA`, which impacts the shapes of the A, B, and C tiles, including the multiplicity `EMUL_C` of the vector register group holding the accumulator tile C. (a) `LAMBDA` = 1, `M` = 16, `EMUL_C` = 16. (b) `LAMBDA` = 2, `M` = 8, `EMUL_C` = 4. (c) `LAMBDA` = 4, `M` = 4, `EMUL_C` = 1.
+image::png/ime-emulc-examples.png[width=80%, align=center, alt="Diagram of C ← A × B^T^ + C computation for different choices of `LAMBDA`."]
+
+We now introduce the third restriction on `LAMBDA`.
+This (indirect) restriction comes from the 32 vector registers being used to stored tiles A, B, and C.
+To ensure enough space for the input tiles A and B, we force `EMUL_C` ∈ {1, 2, 4, 8, 16}.
+This requires a minimum values of `LAMBDA` when (`VLEN` ÷ `SEW`) is large. 
+For example, if (`VLEN` ÷ `SEW`) = 32, a choice of `LAMBDA` = 1 would results in `EMUL_C` = 32, leaving no spaces for the A and B tiles. 
+Therefore, in this case the legal values for `LAMBDA` are only 2 and 4, leading to corresponding values of `EMUL_C` of 8 and 2, respectively.
+The legal choices of `LAMBDA`, and corresponding values of `EMUL_C`, for all possible values of (`VLEN` ÷ `SEW`) are shown in <<ime-emulc-table>>.
+
+[#ime-emulc-table]
+.Table of legal implementation choices of `LAMBDA` for different values of `L` = (`VLEN` ÷ `SEW`). The entries in the table show the resulting multiplicity `EMUL_C` of the vector register group holding tile C.
+image::png/ime-emulc-table.png[width=80%, align=center, alt="Table of choices of `LAMBDA` as a function of (`VLEN` ÷ `SEW`)."]
+
+We see in <<ime-emulc-table>> that the majority of cases support either 2 or 3 choices for `LAMBDA`. 
+Furthermore, in those cases the corresponding values for `EMUL_C` are either `EMUL_C` ∈ {1, 4, 16} or `EMUL_C` ∈ {2, 8}.
+Highly optimized versions of a matrix-multiply kernel are specialized for a particular value of `EMUL_C`, as that dictates the multiplicity of a vector register group holding the C tile in a C ← A × B^T^ + C computation, 
+but are otherwise portable across specific choices of `VLEN` and `LAMBDA`.
+Therefore, a fully portable binary includes five (5) versions of a matrix-multiply kernel (one for each value of `EMUL_C`), with a run-time selector of which kernel to execute on a specific situation.
+
+We have introduced the fundamental concepts realted to the geometry of a C ← A × B^T^ + C computation.
+We now proceed with a more detailed explanation of the ISA support for controlling and selecting that geometry.
+We also discuss more general configurations, with elements of A and B that are submultiples of `SEW` and with the A and B input tiles also supporting vector register groups of multiplicity > 1.
+
+==== ISA control of matrix tile geometry
+
 The geometry of the multiplier and the tiles is defined by the new `lambda` (λ) field, which is encoded in 3 bits in the `vtype` CSR, in combination with the per-instruction widening factor `W` and the standard vector-configuration values `LMUL`, `SEW`, and `VLEN`.
+
+A and B tiles have elements of width `SEW`÷`W`; the accumulator C has elements of width `SEW` (see <<tbl-extensions>>).
+When operating on integer data types, the signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned; see <<integrated-matrix-altfmt-inputs>>); the accumulator C is always signed.
+Integer accumulation wraps modulo 2^`SEW`^.
 
 The Zvvm family uses the widening factor `W` to describe both the arithmetic widening ratio
 and the corresponding packing of input elements within each `SEW`-wide element group.
@@ -79,26 +143,22 @@ no packing occurs, and the element group sizes of inputs `A` and `B` are both 1.
 
 When `W > 1`, the instruction is _widening_: each input element has width `SEW/W`,
 and `W` such narrow input elements are packed into an `SEW`-wide vector element group.
-Correspondingly, element group sizes of both `A` and `B` are `W`.
+Correspondingly, element group sizes (`EGS`) of both `A` and `B` are `W`.
 
 Thus, "packing" refers to the storage layout of the inputs in the vector register groups,
 whereas "widening" refers to the arithmetic relationship between the input element width
 and the accumulator element width. In this specification, these two views are coupled by
 the same parameter `W`.
 
-The packed layout of `W` narrow input elements within one `SEW`-wide storage position
-is an _element group_ in the sense of the base RISC-V V vector specification, with an
-element-group size (`EGS`) of `W`.
-
 Matrix tiles are represented using the existing RISC-V V register file and its configuration state.
-The three matrices in the multiply-accumulate operation C ← A × B^T^ + C are stored as follows:
+The in-register tiles used by the multiply-accumulate operation C ← A × B^T^ + C are stored as follows:
 
 * The _accumulator_ C is stored in a vector register group with element width `SEW`.
   The register-group multiplier of the C register group is `EMUL_C`, computed from the tile geometry:
-  EMUL_C = (VLEN / SEW) / λ^2^, where λ is the tile-layout parameter decoded from the `lambda[2:0]` field in `vtype`.
-  λ^2^ must divide (VLEN / SEW), giving EMUL_C ∈ {1, 2, 4, 8, 16}.
+  `EMUL_C` = (`VLEN` ÷ `SEW`) ÷ λ^2^, where λ is the tile-layout parameter decoded from the `lambda[2:0]` field in `vtype`.
+  λ^2^ must divide (`VLEN` ÷ `SEW`), giving `EMUL_C` ∈ {1, 2, 4, 8, 16}.
   The C base register index must be a multiple of `EMUL_C`.
-+
+
 [NOTE]
 ====
 `EMUL_C` plays the same role for the C operand that the per-operand `EMUL` plays for ordinary V instructions: it is the operand's effective register-group multiplier and it dictates the operand's alignment.
@@ -109,137 +169,42 @@ In particular, `EMUL_C = 16` lies outside the value set permitted for the per-op
 [NOTE]
 ====
 For the C-language intrinsic interface, `EMUL_C = 16` is represented
-by IME-only `m16` accumulator types. These types do not imply that
+by IM-only `m16` accumulator types. These types do not imply that
 `LMUL=16` is a legal `vtype` setting, and they are not ordinary RVV
 vector intrinsic types. See <<integrated-matrix-ime-m16-types>>.
 ====
 
-* The _input matrices_ A and B are stored in vector register groups with element width determined by the instruction:
-  equal to SEW for non-widening variants (`W=1`), and equal to SEW/2, SEW/4, or SEW/8 for widening variants (`W=2`, `W=4`, or `W=8`), with the narrower input elements packed within each `SEW`-wide storage position.
-  The effective K dimension of the multiply (K_eff) equals λ × W × LMUL, where W is 1 for non-widening instructions, 2 for 2× widening instructions, 4 for 4× widening instructions, and 8 for 8× widening instructions.
-  LMUL scales the A and B register groups along the K dimension only and does not affect C.
-  Only integer values of LMUL are supported by the Zvvm family of Integrated Matrix extensions: LMUL ∈ {1, 2, 4, 8}.
-  Fractional LMUL settings (LMUL < 1) are reserved.
-  Executing any Zvvm instruction when `vtype.vlmul` does not encode an integer LMUL value in {1, 2, 4, 8} raises an illegal-instruction exception.
+[NOTE]
+====
+`EMUL_C` is independent of both `W` and `LMUL`; the C register group always occupies `EMUL_C` registers regardless of how A and B are configured.
+====
+
+* The _input tiles_ A and B are stored in vector register groups with element width determined by the instruction:
+  equal to `SEW` for non-widening variants (`W`=1), and equal to `SEW`/2, `SEW`/4, or `SEW`/8 for widening variants (`W`=2, `W`=4, or `W`=8), with the narrower input elements packed within each `SEW`-wide storage position.
+  The elements in each vector register are contiguous in the inner (`K`) direction, as depicted in
+  <<ime-geometry-fig>>. 
+  The elements of the A, B, and C tiles are stored in row-major register layout.
 
 [#ime-geometry-fig]
 .Geometry of matrix tiles and element ordering for `VLEN`/`SEW` (vector length in C element width) = 32 and λ=4. Vector register groups are interpreted as 2D tiles. Vector element indices show the tile element order. (a) Non-widening case (W=1) with A, B, and C having the same SEW. (b) Double-widening case (W=2) with A and B at half the SEW of C, with two narrow input elements packed into each SEW-wide storage position.
 image::png/ime-geometry.png[width=100%, align=center, alt="Diagram of matrix tile geometry and multiplier configuration parameters."]
 
-The K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor W and further multiplied by LMUL:
+The effective K-dimension of the multiplication (shared inner dimension of A and B^T^) is determined by λ from `vtype`, scaled by a per-instruction widening factor `W` and further multiplied by `LMUL`:
 
-    K_eff = λ × W × LMUL
+    K_eff = λ × W × LMUL.
 
-A and B tiles have elements of width `SEW`÷`W`; the accumulator C has elements of width `SEW` (see table below).
-When operating on integer data types, the signedness of each input is controlled independently by `altfmt_A` and `altfmt_B` (0 = signed, 1 = unsigned; see <<integrated-matrix-altfmt-inputs>>); the accumulator C is always signed.
-Integer accumulation wraps modulo 2^SEW^.
+Where `W` is 1 for non-widening instructions, 2 for 2× widening instructions, 4 for 4× widening instructions, and 8 for 8× widening instructions.
 
-<<tile-dimensions>> show how the tile dimensions follow from the widening, λ, and LMUL settings.
-
-[#tile-dimensions]
-.Tile dimensions K~eff~, M, and N derived from the settings.
-[cols="1,1,1", options="header"]
-|===
-|Parameter  | Value                | description
-|K~eff~     | λ × W × LMUL         | number of input elements along the inner (K) dimension
-|M = N      | (VLEN ÷ SEW) ÷ λ     | rows = columns of the square accumulator tile
-|===
-
-NOTE: `EMUL_C` is independent of both `W` and `LMUL`; the C register group always occupies `EMUL_C` registers regardless of how A and B are configured.
-
-The elements in each vector register are contiguous in the inner (`K`) direction, as depicted in
-<<ime-geometry-fig>>. Tiles A, B, and C elements are stored in row-major order.
-
-The architectural input tiles stem:[A_{\mathrm{tile}}] and
-stem:[B_{\mathrm{tile}}] are both stored in row-major register layout.
-The tile stem:[A_{\mathrm{tile}}] has shape
-stem:[M \times K_{\mathrm{eff}}], and stem:[B_{\mathrm{tile}}] has shape
-stem:[N \times K_{\mathrm{eff}}]. For every active accumulator element,
-the instruction computes:
-
-[stem]
-++++
-C_{i,j} \leftarrow C_{i,j}
-  + \sum_{k=0}^{K_{\mathrm{eff}}-1}
-      A_{\mathrm{tile}}[i,k] \,
-      B_{\mathrm{tile}}^{T}[k,j]
-++++
-
-Equivalently, the matrix operation is:
-
-[stem]
-++++
-C \leftarrow C
-  + A_{\mathrm{tile}} \times B_{\mathrm{tile}}^{T}
-++++
-
-The contents of the _vs2_ register group have two equivalent matrix
-interpretations:
-
-* stem:[B_{\mathrm{tile}}] has shape
-  stem:[N \times K_{\mathrm{eff}}] and is stored in row-major register
-  layout.
-
-* stem:[B_{\mathrm{tile}}^{T}] has shape
-  stem:[K_{\mathrm{eff}} \times N] and is stored in column-major register
-  layout.
-
-The two views refer to the same register contents:
-
-[stem]
-++++
-B_{\mathrm{tile}}^{T}[k,j]
-  = B_{\mathrm{tile}}[j,k]
-++++
-
-Descriptions involving output-column selection and dot products generally
-use the stem:[B_{\mathrm{tile}}^{T}] view, because column `j` of
-stem:[B_{\mathrm{tile}}^{T}] contributes directly to column `j` of C.
-
-Consequently, if stem:[A_{\mathrm{tile}} = B_{\mathrm{tile}}], the
-instruction computes:
-
-[stem]
-++++
-C \leftarrow C
-  + A_{\mathrm{tile}} A_{\mathrm{tile}}^{T}
-++++
-
-To compute a conventional matrix product
-stem:[C \leftarrow C + A_{\mathrm{matrix}} B_{\mathrm{matrix}}],
-where stem:[B_{\mathrm{matrix}}] has shape
-stem:[K_{\mathrm{eff}} \times N], software populates the architectural
-B tile such that:
-
-[stem]
-++++
-B_{\mathrm{tile}}[j,k] = B_{\mathrm{matrix}}[k,j]
-++++
-
-Thus, stem:[B_{\mathrm{tile}}] contains the transpose of the corresponding
-stem:[B_{\mathrm{matrix}}] panel:
-
-[stem]
-++++
-B_{\mathrm{tile}} = B_{\mathrm{matrix}}^{T}
-++++
-
-If stem:[B_{\mathrm{matrix}}] is stored in column-major order in memory,
-its columns are contiguous and may be loaded directly into the rows of
-stem:[B_{\mathrm{tile}}] using an order-preserving tile load. If
-stem:[B_{\mathrm{matrix}}] is stored in row-major order, a transposing
-tile load may be used to construct stem:[B_{\mathrm{tile}}].
-
-This register-tile interpretation permits matrix multiplication to be
-implemented using either inner-product or outer-product microarchitectures
-and naturally supports higher-rank updates expressed as sums of outer
-products.
+`LMUL` scales the A and B register groups along the K dimension only and does not affect C.
+This increases the effective K dimension of the tile by a factor of `LMUL`, as shown in  <<ime-tile-lmul-fig>>.
+The blue arrows indicate the contiguous elements in the vector register groups that form the tiles in the ordering of element-wise 1D vector operations.
+Only integer values of `LMUL` are supported by the Zvvm family of Integrated Matrix extensions: `LMUL` ∈ {1, 2, 4, 8}.
+Fractional LMUL settings (`LMUL` < 1) are reserved.
+Executing any Zvvm instruction when `vtype.vlmul` does not encode an integer LMUL value in {1, 2, 4, 8} raises an illegal-instruction exception.
 
 [#ime-tile-lmul-fig]
 .LMUL scaling of matrix tiles for LMUL=2 (left) and LMUL=4 (right).
 image::png/ime-tile-lmul_2_4.png[width=100%, align=center, alt="Diagram showing LMUL scaling of matrix tiles."]
-
-LMUL scales the tile along the K dimension only, increasing the effective K dimension of the tile by a factor of LMUL. The blue arrows indicate the contiguous elements in the vector register groups that form the tiles in the ordering of element-wise 1D vector operations.
 
 [NOTE]
 ====
@@ -252,6 +217,143 @@ For example, an implementation can process an `LMUL > 1` operation as an
 ordered sequence of `LMUL=1` steps, while preserving the architectural
 result defined by this specification.
 ====
+
+<<tile-dimensions>> shows how the tile dimensions follow from the widening, λ, and LMUL settings.
+
+[#tile-dimensions]
+.Tile dimensions K~eff~, M, and N derived from the settings.
+[cols="1,1,1", options="header"]
+|===
+|Parameter  | Value                | description
+|K~eff~     | λ × W × LMUL         | number of input elements along the inner (K) dimension
+|M = N      | (VLEN ÷ SEW) ÷ λ     | rows = columns of the square accumulator tile
+|===
+
+==== Matrix tile multiplication computation
+
+The terms _matrix_ and _tile_ are used deliberately in this section.
+A _matrix_ is the application-level object in memory, such as
+stem:[A_{\mathrm{matrix}}], stem:[B_{\mathrm{matrix}}], or
+stem:[C_{\mathrm{matrix}}]. A matrix may be stored in row-major,
+column-major, packed, or another software-defined layout.
+
+A _tile_ is the in-register object held in one or more vector registers
+and consumed or produced by an IM instruction. The order-preserving tile
+load/store instructions, introduced in <<#zvvmtls>>, and the transposing
+tile load/store instructions, introduced in <<#zvvmttls>>, define how
+memory matrix elements are moved into or out of these in-register tiles.
+
+For a multiply-accumulate operation, the in-register input tile
+stem:[A_{\mathrm{tile}}] has shape
+stem:[M \times K_{\mathrm{eff}}] and is stored in row-major register
+layout. The in-register input tile stem:[B_{\mathrm{tile}}] has shape
+stem:[N \times K_{\mathrm{eff}}] and is also stored in row-major register
+layout.
+
+The operation forms dot products between rows of stem:[A_{\mathrm{tile}}]
+and rows of stem:[B_{\mathrm{tile}}]; equivalently, it forms dot products
+between rows of stem:[A_{\mathrm{tile}}] and columns of
+stem:[B_{\mathrm{tile}}^{T}].
+Therefore,
+it is often clearer to view the same stem:[B_{\mathrm{tile}}] register
+contents as a transposed tile. This equivalent
+view is denoted stem:[B_{\mathrm{tile}}^{T}], has shape
+stem:[K_{\mathrm{eff}} \times N], and is stored in column-major register
+layout.
+
+The two views refer to the same register contents:
+
+[stem]
+++++
+B_{\mathrm{tile}}^{T}[k,j]
+  = B_{\mathrm{tile}}[j,k]
+++++
+
+For every active accumulator element, the operation computes:
+
+[stem]
+++++
+C_{\mathrm{tile}}[i,j] \leftarrow C_{\mathrm{tile}}[i,j]
+  + \sum_{k=0}^{K_{\mathrm{eff}}-1}
+      A_{\mathrm{tile}}[i,k] \,
+      B_{\mathrm{tile}}^{T}[k,j]
+++++
+
+Equivalently, the matrix operation on the in-register tiles is:
+
+[stem]
+++++
+C_{\mathrm{tile}} \leftarrow C_{\mathrm{tile}}
+  + A_{\mathrm{tile}} B_{\mathrm{tile}}^{T}
+++++
+
+Consequently, if stem:[A_{\mathrm{tile}} = B_{\mathrm{tile}}], the
+operation computes:
+
+[stem]
+++++
+C_{\mathrm{tile}} \leftarrow C_{\mathrm{tile}}
+  + A_{\mathrm{tile}} A_{\mathrm{tile}}^{T}
+++++
+
+To compute a matrix product using memory matrices,
+
+[stem]
+++++
+C_{\mathrm{matrix}} \leftarrow
+C_{\mathrm{matrix}} +
+A_{\mathrm{matrix}} B_{\mathrm{matrix}},
+++++
+
+software loads or constructs in-register tiles such that the tile elements
+represent the desired matrix panels. For an
+stem:[M \times K_{\mathrm{eff}}] panel of stem:[A_{\mathrm{matrix}}],
+the natural relationship is:
+
+[stem]
+++++
+A_{\mathrm{tile}}[i,k]
+  = A_{\mathrm{matrix}}[i,k]
+++++
+
+For a stem:[K_{\mathrm{eff}} \times N] panel of
+stem:[B_{\mathrm{matrix}}], the required relationship is:
+
+[stem]
+++++
+B_{\mathrm{tile}}^{T}[k,j]
+  = B_{\mathrm{matrix}}[k,j]
+++++
+
+or equivalently:
+
+[stem]
+++++
+B_{\mathrm{tile}}[j,k]
+  = B_{\mathrm{matrix}}[k,j].
+++++
+
+Thus, the in-register stem:[B_{\mathrm{tile}}] object is a row-major
+stem:[N \times K_{\mathrm{eff}}] tile, while the arithmetic naturally uses
+the equivalent column-major stem:[B_{\mathrm{tile}}^{T}] view.
+
+If stem:[B_{\mathrm{matrix}}] is stored in column-major order in memory,
+its columns are contiguous and may be loaded directly into the
+column-major stem:[B_{\mathrm{tile}}^{T}] view using an order-preserving
+tile load, as described in <<#zvvmtls>>. If
+stem:[B_{\mathrm{matrix}}] is stored in row-major order, a transposing
+tile load from <<#zvvmttls>> may be used when the logical element width
+equals the tile-load storage width.
+
+For packed widening inputs, software prepares the required packed tile
+layout in memory or with separate vector rearrangement operations; the
+storage-element transpose rule is described with the transposing
+load/store instructions in <<#zvvmttls>>.
+
+This definition of in-register tile multiplication permits
+matrix multiplication to be implemented using either inner-product or
+outer-product microarchitectures and naturally supports higher-rank
+updates expressed as sums of outer products.
 
 === Extensions in Zvvm
 
@@ -313,7 +415,7 @@ the output token is dropped.
 
 ==== Computational extensions
 
-Table <<tbl-extensions>> lists the computational extensions in the Zvvm family which are not related to microscaling.
+<<tbl-extensions>> lists the computational extensions in the Zvvm family which are not related to microscaling.
 The extensions specific to microscaling are listed separately in <<mx-extensions-section>>.
 
 [#tbl-extensions]
