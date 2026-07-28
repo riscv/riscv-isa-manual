@@ -27,10 +27,13 @@ jobs:
               return;
             }
 
-            const { data: commits } = await github.rest.pulls.listCommits({
+            // Paginate: listCommits returns only the first 30 commits by
+            // default, so a long PR could hide unsigned commits.
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: pr.number,
+              per_page: 100,
             });
 
             // Bots (e.g. autofix-ci[bot] pushing regenerated normative rules,
@@ -48,17 +51,17 @@ jobs:
             );
 
             if (dcoFailedCommits.length > 0) {
-              const comment = `
-                :warning: DCO CHECK FAILED :warning:
-
-                The Developer's Certificate of Origin (DCO) check has failed for this pull request.
-                To fix this, you need to sign off on your commits.
-
-                For instructions on how to set up signed commits, please see:
-                https://github.com/riscv/docs-spec-template/blob/main/CONTRIBUTING.md
-
-                Once you have signed your commits, you will need to force-push your changes.
-                `;
+              const comment = [
+                ':warning: DCO CHECK FAILED :warning:',
+                '',
+                "The Developer's Certificate of Origin (DCO) check has failed for this pull request.",
+                'To fix this, you need to sign off on your commits.',
+                '',
+                'For instructions on how to set up signed commits, please see:',
+                'https://github.com/riscv/docs-spec-template/blob/main/CONTRIBUTING.md',
+                '',
+                'Once you have signed your commits, you will need to force-push your changes.',
+              ].join('\n');
 
               try {
                 await github.rest.issues.createComment({
