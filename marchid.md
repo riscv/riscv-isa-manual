@@ -72,4 +72,4 @@ Sargantana    | BSC-LOCA                        | [Narcís Rodas](mailto:narcis.
 KianV Stealth | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 52               | https://github.com/splinedrive/kianRiscV
 RVController  | April Kolwey (cheapie)          | [April Kolwey](mailto:cheapiephp@gmail.com)                 | 53               | https://cheapiesystems.com/git/rvcontroller/
 aRVern        | Arvern Silicon                  | [Arvern Silicon](mailto:arvernsilicon@gmail.com)            | 54               | https://github.com/Arvern-Silicon
-SARV          | Amirreza Torabi                 | [Amirreza Torabi](mailto:sayyidtorabi@gmail.com)            |                  | https://github.com/Sarst04/SARV
+SARV          | Amirreza Torabi                 | [Amirreza Torabi](mailto:sayyidtorabi@gmail.com)            | 55               | https://github.com/Sarst04/SARV
