@@ -61,7 +61,7 @@ ApogeoRV      | Gabriele Tripi                  | [Gabriele Tripi](mailto:tripi.
 MicroRV32      | AGRA, Group of Computer Architecture, University of Bremen | [RISC-V @ AGRA](mailto:riscv@informatik.uni-bremen.de)       | 41               | https://github.com/agra-uni-bremen/microrv32
 QEMU          | qemu.org                        | [QEMU Mailing List](mailto:qemu-riscv@nongnu.org)           | 42               | https://qemu.org
 KianV         | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 43               | https://github.com/splinedrive/kianRiscV
-Coreblocks    | Kuźnia Rdzeni, University of Wrocław | [Coreblocks Team](mailto:coreblocks@cs.uni.wroc.pl)    | 44               | https://github.com/kuznia-rdzeni/coreblocks
+Coreblocks    | Coreforge Foundation            | [Coreforge Foundation contact](mailto:org@kuznia-rdzeni.org) | 44              | https://github.com/kuznia-rdzeni/coreblocks
 rrv32         | Solra Bizna                     | [Solra Bizna](mailto:solra@bizna.name)                      | 45               | https://github.com/SolraBizna/rrv32
 VexiiRiscv    | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 46               | https://github.com/SpinalHDL/VexiiRiscv
 Wildcat       | Technical University of Denmark | [Martin Schoeberl](mailto:masca@dtu.dk)                     | 47               | https://github.com/schoeberl/wildcat
