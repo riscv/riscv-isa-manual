@@ -1,0 +1,308 @@
+[[ext:zvbext]]
+=== ext:zvbext[] Vector Extension for Bit Compression and Expansion, Version 0.1
+
+[NOTE]
+====
+This extension is an unratified draft.
+====
+
+This extension provides bit-compression and bit-expansion instructions on
+vector registers.
+The instructions operate independently on each vector element.
+Unlike insn:vcompress.vm[], they do not move values between vector elements.
+
+[#norm:Zvbext_dependent_Zve32x]#The ext:zvbext[] extension depends upon
+ext:zve32x[].#
+
+[#norm:Zvbext_eew]#ext:zvbext[] provides support for EEW of 8, 16, and 32.#
+
+[#norm:Zvbext_eew_Zve64x]#If ext:zve64x[] is supported then ext:zvbext[] also
+adds support for EEW=64.#
+
+The term _selection mask_ in this section denotes the SEW-bit operand that
+selects bit positions within a data element.
+[#norm:Zvbext_selection_mask]#The selection mask is distinct from the vector
+mask in `v0` that controls predicated execution.
+When `vm=0`, `v0.mask[i]` controls whether destination element `i` is updated;
+it does not contribute any bits to the selection mask.#
+The vector-vector forms provide a separate selection mask for each element.
+The vector-scalar forms use one selection mask from an integer register for
+all elements.
+
+[#norm:Zvbext_eew_emul]#All explicit data vector operands have EEW=SEW and
+EMUL=LMUL.#
+
+[#norm:Zvbext_bitwise]#The instructions interpret their source operands as
+bit vectors; signedness does not affect the result.#
+
+[#norm:Zvbext_execution]#These instructions follow the standard vector
+instruction rules for csr:vstart[], csr:vl[], masked-off elements, and tail
+elements.#
+
+[#norm:Zvbext_overlap]#The destination vector register group may overlap either
+vector source register group.
+The standard vector mask overlap constraint applies when masked execution is
+enabled.#
+
+[#norm:Zvbext_fixed_point_state]#These instructions do not read or modify
+csr:vxrm[] or csr:vxsat[].#
+
+[NOTE]
+====
+When XLEN is less than SEW, a vector-scalar form can only express a
+selection mask that is the sign extension of an XLEN-bit integer-register value.
+Other selection masks must use the vector-vector form.
+====
+
+[NOTE]
+====
+There are no vector-immediate forms of these instructions because a 5-bit
+immediate cannot encode a general SEW-bit selection mask.
+====
+
+[NOTE]
+====
+For both operations, a zero selection mask produces a zero result, and an
+all-ones selection mask leaves the data element unchanged.
+====
+
+[NOTE]
+====
+The OP-V _funct6_ assignments shown in this version are provisional encodings
+for prototyping.
+They are not standard opcode assignments and must be coordinated with the
+RISC-V Vector SIG before ratification.
+====
+
+[[insns-vbcompress, Vector Bit Compress]]
+==== insn:vbcompress.vv[] and insn:vbcompress.vx[]
+
+Synopsis::
+Compress selected bits within each vector element
+
+Mnemonic::
+insn:vbcompress.vv[vd,vs2,vs1,vm] +
+insn:vbcompress.vx[vd,vs2,rs1,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110010'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110010'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vbcompress_sew_rsv]#SEW is any value other than 8, 16, 32, or 64#
+* [#norm:vbcompress_sew64_rsv]#SEW=64 when ext:zve64x[] is not supported#
+
+Vector-Vector Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_ | input  | Per-element selection masks
+| _vs2_ | input  | Data elements
+| _vd_  | output | Compressed results
+|===
+
+Vector-Scalar Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _rs1_ | input  | Shared selection mask
+| _vs2_ | input  | Data elements
+| _vd_  | output | Compressed results
+|===
+
+Description::
+An element-wise bit-compression operation is performed.
+
+[#norm:vbcompress_mask]#In the vector-vector form, the selection mask is the
+corresponding element of _vs1_.
+In the vector-scalar form, the selection mask is the sign-extended or truncated
+value in integer register _rs1_.#
+
+[#norm:vbcompress_op]#For each active element, the bits of the corresponding
+_vs2_ element selected by the selection mask are copied, in increasing bit
+position order, to contiguous least-significant bit positions in the result.
+If the set bit positions in the selection mask, in
+ascending order, are `p[0]`, `p[1]`, ... `p[k-1]`, where `k` is the
+population count of the selection mask, result bit `j` is _vs2_ bit `p[j]` for
+`0 <= j < k`, and all result bits `j` for `k <= j < SEW` are zero.#
+
+[NOTE]
+====
+For example, compressing `0b10101010` with the selection mask
+`0b11001100` produces `0b00001010`.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (VBCOMPRESS(vs2, vs1, vd, suffix)) = {
+  foreach (i from vstart to vl-1) {
+    let input = get_velem(vs2, SEW, i);
+    let selection_mask = match suffix {
+      "vv" => get_velem(vs1, SEW, i),
+      "vx" => sext_or_truncate_to_sew(X(vs1))
+    };
+    var output : bits(SEW) = zeros();
+    var j : int = 0;
+    foreach (bit from 0 to (SEW - 1)) {
+      if selection_mask[bit] == 0b1 then {
+        output[j] = input[bit];
+        j = j + 1;
+      };
+    };
+    set_velem(vd, EEW=SEW, i, output);
+  }
+  RETIRE_SUCCESS
+}
+--
+
+[[insns-vbexpand, Vector Bit Expand]]
+==== insn:vbexpand.vv[] and insn:vbexpand.vx[]
+
+Synopsis::
+Expand packed bits within each vector element
+
+Mnemonic::
+insn:vbexpand.vv[vd,vs2,vs1,vm] +
+insn:vbexpand.vx[vd,vs2,rs1,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110011'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110011'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vbexpand_sew_rsv]#SEW is any value other than 8, 16, 32, or 64#
+* [#norm:vbexpand_sew64_rsv]#SEW=64 when ext:zve64x[] is not supported#
+
+Vector-Vector Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_ | input  | Per-element selection masks
+| _vs2_ | input  | Packed data elements
+| _vd_  | output | Expanded results
+|===
+
+Vector-Scalar Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _rs1_ | input  | Shared selection mask
+| _vs2_ | input  | Packed data elements
+| _vd_  | output | Expanded results
+|===
+
+Description::
+An element-wise bit-expansion operation is performed.
+
+[#norm:vbexpand_mask]#In the vector-vector form, the selection mask is the
+corresponding element of _vs1_.
+In the vector-scalar form, the selection mask is the sign-extended or truncated
+value in integer register _rs1_.#
+
+[#norm:vbexpand_op]#For each active element, contiguous least-significant bits
+of the corresponding _vs2_ element are copied, in increasing bit position
+order, to the result bit positions selected by the selection mask.
+If the set bit positions in the selection mask, in
+ascending order, are `p[0]`, `p[1]`, ... `p[k-1]`, where `k` is the
+population count of the selection mask, result bit `p[j]` is _vs2_ bit `j` for
+`0 <= j < k`, and all result bits at positions not selected by the mask are
+zero.#
+
+[NOTE]
+====
+For example, expanding `0b00001010` with the selection mask `0b11001100`
+produces `0b10001000`.
+====
+
+Operation::
+[source,sail]
+--
+function clause execute (VBEXPAND(vs2, vs1, vd, suffix)) = {
+  foreach (i from vstart to vl-1) {
+    let input = get_velem(vs2, SEW, i);
+    let selection_mask = match suffix {
+      "vv" => get_velem(vs1, SEW, i),
+      "vx" => sext_or_truncate_to_sew(X(vs1))
+    };
+    var output : bits(SEW) = zeros();
+    var j : int = 0;
+    foreach (bit from 0 to (SEW - 1)) {
+      if selection_mask[bit] == 0b1 then {
+        output[bit] = input[j];
+        j = j + 1;
+      };
+    };
+    set_velem(vd, EEW=SEW, i, output);
+  }
+  RETIRE_SUCCESS
+}
+--
