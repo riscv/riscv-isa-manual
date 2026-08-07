@@ -1,5 +1,5 @@
 [[ext:zvabd]]
-=== ext:zvabd[] Vector Extension for Integer Vector Absolute Difference Instructions
+=== ext:zvabd[] Vector Extension for Integer Absolute Difference
 
 ==== Introduction
 This document describes the Zvabd extension for instructions that compute the element-wise absolute difference of vectors. That is, given two vectors v and u, compute the vector y such that stem:[y_i = abs(v_i - u_i)] and stem:[y_i += abs(v_i - u_i)].
@@ -7,8 +7,6 @@ This document describes the Zvabd extension for instructions that compute the el
 These operations are widely utilized in image registration, object recognition, motion estimation and loop filters for video workloads.
 
 ==== Extension Overview
-The Zvabd extension follows the vector arithmetic instruction specification in "V" Standard Extension.
-
 Below is a list of all of the instructions that are included in the extension.
 [%autowidth]
 [%header,cols="2,4"]
@@ -26,9 +24,7 @@ Below is a list of all of the instructions that are included in the extension.
 
 NOTE: Since the targeted use cases are mostly based on 8-bit and 16-bit integer, `vabd/vabdu/vwabda/vwabdau` are designed for only SEW=8 and SEW=16. Additionally, `vabs` is considered to support all the element sizes as it is quite common used and simple to implement.
 
-[#norm:Zvabd_dependent_Zve32x]#The Zvabd extension depend on ext:zve32x[].#
-
-[#norm:Zvabd_eew]#If ext:zve32x[] is supported then vabs provide support for SEW of 8, 16, and 32.# [#norm:Zvabd_eew_Zve64x]#If ext:zve64x[] is supported then vabs also add support for SEW 64.#
+[#norm:Zvabd_dependent_Zve32x]#The Zvabd extension depend upon ext:zve32x[].#
 
 ==== Pseudocode for instruction semantics
 The semantics of each instruction is expressed in a SAIL-like syntax, following the link:https://github.com/riscv/sail-riscv/tree/master/model/extensions/V[RISC-V Vector Sail Model].
@@ -61,14 +57,15 @@ Encoding::
 Description::
 [#norm:vabs_op]#An absolute value operation is performed on each element of vs2#
 
+[#norm:Zvabd_eew]#vabs provide support for SEW of 8, 16, and 32.# [#norm:Zvabd_eew_Zve64x]#If ext:zve64x[] is supported then vabs also add support for SEW 64.#
+
 Operation::
 [source,sail]
 --
 let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
 foreach (i from 0 to (num_elem - 1)) {
-    if mask[i] == bitone then {
-        result[i] = abs(signed(vs2_val[i]));
-    }
+    if mask[i] == 0b1 then
+        result[i] = to_bits(SEW, abs_int(signed(vs2_val[i])));
 }
 write_vreg(num_elem, SEW, LMUL_pow, vd, result);
 set_vstart(zeros());
@@ -111,8 +108,8 @@ Operation::
 --
 let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
 foreach (i from 0 to (num_elem - 1)) {
-    if mask[i] == bitone then {
-        result[i] = max(vs2_val[i], vs1_val[i]) - min(vs2_val[i], vs1_val[i]);
+    if mask[i] == 0b1 then {
+        result[i] = to_bits(SEW, abs_int(signed(vs2_val[i]) - signed(vs1_val[i])));
     }
 }
 write_vreg(num_elem, SEW, LMUL_pow, vd, result);
@@ -156,10 +153,16 @@ Operation::
 --
 let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
 foreach (i from 0 to (num_elem - 1)) {
-    if mask[i] == bitone then {
-        result[i] = maxu(vs2_val[i], vs1_val[i]) - minu(vs2_val[i], vs1_val[i]);
-    }
-}
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let abs_diff = if unsigned(vs2_val[i]) >= unsigned(vs1_val[i])
+                           then unsigned(vs2_val[i] - vs1_val[i])
+                           else unsigned(vs1_val[i] - vs2_val[i]);
+            to_bits(SEW, abs_diff);
+        } 
+        
+    };
+};
 write_vreg(num_elem, SEW, LMUL_pow, vd, result);
 set_vstart(zeros());
 RETIRE_SUCCESS
@@ -203,8 +206,11 @@ let SEW_widen = SEW * 2;
 let LMUL_pow_widen = LMUL_pow + 1;
 let (result, mask) = init_masked_result(num_elem, SEW_widen, LMUL_pow_widen, vd_val, vm_val);
 foreach (i from 0 to (num_elem - 1)) {
-    if mask[i] == bitone then {
-        result[i] = to_bits_unsafe(SEW_widen, max(vs2_val[i], vs1_val[i]) - min(vs2_val[i], vs1_val[i]) ) + vd_val[i];
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let diff = signed(vs2_val[i]) - signed(vs1_val[i]);
+            to_bits_unsafe(SEW_widen, signed(vd_val[i]) + abs_int(diff));
+        }
     }
 }
 write_vreg(num_elem, SEW_widen, LMUL_pow_widen, vd, result);
@@ -250,8 +256,13 @@ let SEW_widen = SEW * 2;
 let LMUL_pow_widen = LMUL_pow + 1;
 let (result, mask) = init_masked_result(num_elem, SEW_widen, LMUL_pow_widen, vd_val, vm_val);
 foreach (i from 0 to (num_elem - 1)) {
-    if mask[i] == bitone then {
-        result[i] = to_bits_unsafe(SEW_widen, maxu(vs2_val[i], vs1_val[i]) - minu(vs2_val[i], vs1_val[i]) ) + vd_val[i];
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let abs_diff = if unsigned(vs2_val[i]) >= unsigned(vs1_val[i])
+                           then unsigned(vs2_val[i] - vs1_val[i])
+                           else unsigned(vs1_val[i] - vs2_val[i]);
+            to_bits_unsafe(SEW_widen, unsigned(vd_val[i]) + abs_diff);
+        }
     }
 }
 write_vreg(num_elem, SEW_widen, LMUL_pow_widen, vd, result);
