@@ -1,0 +1,271 @@
+[[ext:zvabd]]
+=== ext:zvabd[] Vector Extension for Integer Absolute Difference
+
+==== Introduction
+This document describes the Zvabd extension for instructions that compute the element-wise absolute difference of vectors. That is, given two vectors v and u, compute the vector y such that stem:[y_i = abs(v_i - u_i)] and stem:[y_i += abs(v_i - u_i)].
+
+These operations are widely utilized in image registration, object recognition, motion estimation and loop filters for video workloads.
+
+==== Extension Overview
+Below is a list of all of the instructions that are included in the extension.
+[%autowidth]
+[%header,cols="2,4"]
+|===
+|Mnemonic
+|Instruction
+
+| vabs.v             | <<insns-vabs>>
+| vabd.vv            | <<insns-vabd>>
+| vabdu.vv           | <<insns-vabdu>>
+| vwabda.vv        | <<insns-vwabda>>
+| vwabdau.vv       | <<insns-vwabdau>>
+
+|===
+
+NOTE: Since the targeted use cases are mostly based on 8-bit and 16-bit integer, `vabd/vabdu/vwabda/vwabdau` are designed for only SEW=8 and SEW=16. Additionally, `vabs` is considered to support all the element sizes as it is quite common used and simple to implement.
+
+[#norm:Zvabd_dependent_Zve32x]#The Zvabd extension depend upon ext:zve32x[].#
+
+==== Pseudocode for instruction semantics
+The semantics of each instruction is expressed in a SAIL-like syntax, following the link:https://github.com/riscv/sail-riscv/tree/master/model/extensions/V[RISC-V Vector Sail Model].
+
+==== Instructions
+
+[[insns-vabs, Vector Signed Integer Absolute]]
+===== insn:vabs.v[]
+
+Synopsis::
+Vector Single-Width Signed Integer Absolute
+
+Mnemonic::
+vabs.v _vd_, _vs2_, _vm_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 0x10},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 'VXUNARY0', attr: 'funct6'},
+]}
+....
+
+Description::
+[#norm:vabs_op]#An absolute value operation is performed on each element of vs2#
+
+[#norm:Zvabd_eew]#vabs provide support for SEW of 8, 16, and 32.# [#norm:Zvabd_eew_Zve64x]#If ext:zve64x[] is supported then vabs also add support for SEW 64.#
+
+Operation::
+[source,sail]
+--
+let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then
+        result[i] = to_bits(SEW, abs_int(signed(vs2_val[i])));
+}
+write_vreg(num_elem, SEW, LMUL_pow, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+[[insns-vabd, Vector Signed Integer Absolute Difference]]
+===== insn:vabd.vv[]
+
+Synopsis::
+Vector Single-Width Signed Integer Absolute Difference
+
+Mnemonic::
+vabd.vv _vd_, _vs2_, _vs1_, _vm_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x11, attr: 'funct6'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vabd_sew_rsv]#`SEW` is neither 8 nor 16.#
+
+Description::
+[#norm:vabd_op]#This instruction computes the absolute difference between the elements of two signed integer SEW-bit source operands vs1 and vs2.#
+
+[#norm:vabd_sew_defined]#This instruction is defined for SEW=8 and SEW=16, otherwise the instruction encoding is reserved.#
+
+Operation::
+[source,sail]
+--
+let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        result[i] = to_bits(SEW, abs_int(signed(vs2_val[i]) - signed(vs1_val[i])));
+    }
+}
+write_vreg(num_elem, SEW, LMUL_pow, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+[[insns-vabdu, Vector Unsigned Integer Absolute Difference]]
+===== insn:vabdu.vv[]
+
+Synopsis::
+Vector Single-Width Unsigned Integer Absolute Difference
+
+Mnemonic::
+vabdu.vv _vd_, _vs2_, _vs1_, _vm_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x13, attr: 'funct6'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vabdu_sew_rsv]#`SEW` is neither 8 nor 16.#
+
+Description::
+[#norm:vabdu_op]#This instruction computes the absolute difference between the elements of two unsigned integer SEW-bit source operands vs1 and vs2.#
+
+[#norm:vabdu_sew_defined]#This instruction is defined for SEW=8 and SEW=16, otherwise the instruction encoding is reserved.#
+
+Operation::
+[source,sail]
+--
+let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let abs_diff = if unsigned(vs2_val[i]) >= unsigned(vs1_val[i])
+                           then unsigned(vs2_val[i] - vs1_val[i])
+                           else unsigned(vs1_val[i] - vs2_val[i]);
+            to_bits(SEW, abs_diff);
+        } 
+        
+    };
+};
+write_vreg(num_elem, SEW, LMUL_pow, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+[[insns-vwabda, Vector Signed Integer Absolute Difference And Accumulate]]
+===== insn:vwabda.vv[]
+
+Synopsis::
+    Vector Widening Signed Integer Absolute Difference and Accumulate, Overwrite Addend
+
+Mnemonic::
+vwabda.vv _vd_, _vs2_, _vs1_, _vm_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x15, attr: 'funct6'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vwabda_sew_rsv]#`SEW` is neither 8 nor 16.#
+
+Description::
+[#norm:vwabda_op]#This instruction computes the absolute difference between the elements of two signed integer SEW-bit source operands vs1 and vs2, and accumulates the results into the elements of a 2*SEW-bit integer operand vd.#
+
+[#norm:vwabda_sew_defined]#This instruction is defined for SEW=8 and SEW=16, otherwise the instruction encoding is reserved.#
+
+Operation::
+[source,sail]
+--
+let SEW_widen = SEW * 2;
+let LMUL_pow_widen = LMUL_pow + 1;
+let (result, mask) = init_masked_result(num_elem, SEW_widen, LMUL_pow_widen, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let diff = signed(vs2_val[i]) - signed(vs1_val[i]);
+            to_bits_unsafe(SEW_widen, signed(vd_val[i]) + abs_int(diff));
+        }
+    }
+}
+write_vreg(num_elem, SEW_widen, LMUL_pow_widen, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+[[insns-vwabdau, Vector Unsigned Integer Absolute Difference And Accumulate]]
+===== insn:vwabdau.vv[]
+
+Synopsis::
+Vector Widening Unsigned Integer Absolute Difference and Accumulate, Overwrite Addend.
+
+Mnemonic::
+vwabdau.vv _vd_, _vs2_, _vs1_, _vm_
+
+Encoding::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x16, attr: 'funct6'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vwabdau_sew_rsv]#`SEW` is neither 8 nor 16.#
+
+Description::
+[#norm:vwabdau_op]#This instruction computes the absolute difference between the elements of two unsigned integer SEW-bit source operands vs1 and vs2, and accumulates the results into the elements of a 2*SEW-bit integer operand vd.#
+
+[#norm:vwabdau_sew_defined]#This instruction is defined for SEW=8 and SEW=16, otherwise the instruction encoding is reserved.#
+
+Operation::
+[source,sail]
+--
+let SEW_widen = SEW * 2;
+let LMUL_pow_widen = LMUL_pow + 1;
+let (result, mask) = init_masked_result(num_elem, SEW_widen, LMUL_pow_widen, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let abs_diff = if unsigned(vs2_val[i]) >= unsigned(vs1_val[i])
+                           then unsigned(vs2_val[i] - vs1_val[i])
+                           else unsigned(vs1_val[i] - vs2_val[i]);
+            to_bits_unsafe(SEW_widen, unsigned(vd_val[i]) + abs_diff);
+        }
+    }
+}
+write_vreg(num_elem, SEW_widen, LMUL_pow_widen, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
