@@ -1269,6 +1269,26 @@
     "norm:vclmul_op": "Each 64-bit element in the vs2 vector register is carry-less multiplied by\neither each 64-bit element in vs1 (vector-vector), or the 64-bit value\nfrom integer register rs1 (vector-scalar). The result is the least\nsignificant 64 bits of the carry-less product.",
     "norm:vclmulh_sewn64_rsv": "SEW is any value other than 64",
     "norm:vclmulh_op": "Each 64-bit element in the vs2 vector register is carry-less multiplied by\neither each 64-bit element in vs1 (vector-vector), or the 64-bit value\nfrom integer register rs1 (vector-scalar). The result is the most\nsignificant 64 bits of the carry-less product.",
+    "norm:Zvmatch_dependent_V": "The ext:zvmatch[] extension depends upon the\next:v[] extension.",
+    "norm:Zvmatch_sew": "The instructions in ext:zvmatch[] are defined only for\nSEW=8 and SEW=16.",
+    "norm:Zvmatch_lmul": "Any LMUL that is legal under the base vector register-group\nrules is permitted.\nThe vs1 and vs2 operands have EEW=SEW and EMUL=LMUL, and the vd\noperand is a mask register with EEW=1.",
+    "norm:Zvmatch_bit_pattern": "The instructions compare SEW-bit patterns for\nequality.\nThe comparison does not sign-extend either operand.",
+    "norm:vmmatch-vx_sew_rsv": "SEW is any value other than 8 or 16",
+    "norm:vmmatch-vx_key_extraction": "Packed key j, for\n0 &lt;= j &lt; SLOTS, is the SEW-bit field\nx[rs1][SEW*j +: SEW].\nThis extraction is independent of memory endianness.",
+    "norm:vmmatch-vx_op": "For each active element i, destination mask bit\nvd.mask[i] is set if the query element vs2[i] equals any of the SLOTS\npacked keys, and is cleared otherwise.",
+    "norm:vmmatch-vx_all_slots": "All SLOTS packed keys participate in every\nactive comparison.\nIf the logical key set contains fewer than SLOTS values, software must fill\nevery unused slot by duplicating any valid key from the logical key set.",
+    "norm:vmmatch-vx_x0": "When rs1 is x0, every packed key is zero, so the\ninstruction matches zero; this encoding does not represent an empty key set.",
+    "norm:vmmatch-vv_sew_rsv": "SEW is any value other than 8 or 16",
+    "norm:vmmatch-vv_key_domain": "The key domain is every element\nvs1[j], for 0 &lt;= j &lt; VLMAX.\nThe key domain always begins at element zero and is not shortened by csr:vl[],\ncsr:vstart[], or the execution mask.",
+    "norm:vmmatch-vv_op": "For each active element i, destination mask bit\nvd.mask[i] is set if the query element vs2[i] equals any element in the\ncomplete key domain vs1[0:VLMAX), and is cleared otherwise.",
+    "norm:vmmatch-vv_all_keys": "Elements in vs1[vl:VLMAX) are source-key data,\nnot destination tail elements, and participate in every active comparison.\nSoftware must initialize all VLMAX key elements.\nIf the logical key set contains fewer than VLMAX values, software must fill\nevery remaining key element by duplicating any valid key from the logical key\nset.",
+    "norm:vmmatch-vv_no_empty_set": "The instruction has no encoding for an empty\nkey set.\nEvery legal csr:vtype[] setting has VLMAX &gt;= 1, and setting csr:vl[] to zero\ndoes not make the key domain empty.",
+    "norm:vmmatch_execution": "For both instructions, csr:vl[], csr:vstart[], and\nthe execution mask control the query elements and destination mask bits only.\nPrestart destination bits remain undisturbed.\nWhen vm=0, inactive destination bits follow the mask policy selected by\ncsr::[vma], except that a legal overlap between vd and vs2 makes the\ninstruction mask-agnostic under the base vector overlap rules.\nDestination tail bits follow the base vector mask-destination tail-agnostic\nrule, irrespective of csr::[vta].\nNormal completion writes zero to csr:vstart[].",
+    "norm:vmmatch_no_empty_set": "Software must not use either instruction to\nrepresent an empty logical key set.",
+    "norm:vmmatch-vx_overlap": "For insn:vmmatch.vx[], vd may overlap vs2 only\nwhen vd is the lowest-numbered register in the vs2 register group.\nWhen masked execution is enabled, an encoding in which the vs2 register\ngroup contains v0 is reserved.\nThe destination mask register may be v0.",
+    "norm:vmmatch-vv_overlap": "For insn:vmmatch.vv[], vd must not overlap vs1.\nThe vd register may overlap vs2 only when vd is the lowest-numbered\nregister in the vs2 register group.\nWhen masked execution is enabled, an encoding in which either the vs1 or\nvs2 register group contains v0 is reserved.\nThe destination mask register may be v0, and the vs1 and vs2 register\ngroups may overlap each other.",
+    "norm:vmmatch_exceptions": "The instructions access only vector and integer\nregister state and cause no data-dependent memory, address, or arithmetic\nexception.\nAn attempt to execute either instruction with disabled vector state,\ncsr::[vill]=1, a reserved SEW, an illegal register group, or a reserved overlap\nraises an illegal-instruction exception.",
+    "norm:vmmatch_restart": "An active result depends only on its query element, the\ncomplete key domain of the instruction, and its execution-mask bit.\nThere is no architectural state shared between destination elements.\nRestart behavior follows the base vector rules; csr:vstart[] skips destination\nelements only and does not shorten the insn:vmmatch.vv[] key domain.",
     "norm:zk_scalar_xreg_op": "All instructions described herein use the general-purpose x\nregisters, and obey the 2-read-1-write register access constraint.",
     "norm:zknd_shared_instr": "The insn:aes64ks1i[] and insn:aes64ks2[] instructions\nare present in both the extlink:zknd[] and extlink:zkne[] extensions.",
     "norm:zkne_shared_instr": "The insn:aes64ks1i[] and insn:aes64ks2[] instructions\nare present in both the extlink:zknd[] and extlink:zkne[] extensions.",
@@ -7729,6 +7749,75 @@
                 "tags": [
                   "norm:Zvbc_dependent_Zve64x",
                   "norm:Zvbc_sew64only"
+                ]
+              },
+              {
+                "title": "ext:zvmatch[] Vector Extension for Element-Set Matching, Version 0.1",
+                "id": "ext:zvmatch",
+                "children": [
+                  {
+                    "title": "insn:vmmatch.vx[]",
+                    "id": "insns-vmmatch-vx",
+                    "children": [],
+                    "tags": [
+                      "norm:vmmatch-vx_sew_rsv",
+                      "norm:vmmatch-vx_key_extraction",
+                      "norm:vmmatch-vx_op",
+                      "norm:vmmatch-vx_all_slots",
+                      "norm:vmmatch-vx_x0"
+                    ]
+                  },
+                  {
+                    "title": "insn:vmmatch.vv[]",
+                    "id": "insns-vmmatch-vv",
+                    "children": [],
+                    "tags": [
+                      "norm:vmmatch-vv_sew_rsv",
+                      "norm:vmmatch-vv_key_domain",
+                      "norm:vmmatch-vv_op",
+                      "norm:vmmatch-vv_all_keys",
+                      "norm:vmmatch-vv_no_empty_set"
+                    ]
+                  },
+                  {
+                    "title": "Vector Execution Semantics",
+                    "id": "_vector_execution_semantics",
+                    "children": [],
+                    "tags": [
+                      "norm:vmmatch_execution",
+                      "norm:vmmatch_no_empty_set"
+                    ]
+                  },
+                  {
+                    "title": "Register Overlap",
+                    "id": "_register_overlap",
+                    "children": [],
+                    "tags": [
+                      "norm:vmmatch-vx_overlap",
+                      "norm:vmmatch-vv_overlap"
+                    ]
+                  },
+                  {
+                    "title": "Exceptions and Restart",
+                    "id": "_exceptions_and_restart",
+                    "children": [],
+                    "tags": [
+                      "norm:vmmatch_exceptions",
+                      "norm:vmmatch_restart"
+                    ]
+                  },
+                  {
+                    "title": "Programming Example",
+                    "id": "_programming_example",
+                    "children": [],
+                    "tags": []
+                  }
+                ],
+                "tags": [
+                  "norm:Zvmatch_dependent_V",
+                  "norm:Zvmatch_sew",
+                  "norm:Zvmatch_lmul",
+                  "norm:Zvmatch_bit_pattern"
                 ]
               },
               {

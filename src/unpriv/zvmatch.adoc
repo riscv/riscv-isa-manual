@@ -1,0 +1,266 @@
+[[ext:zvmatch]]
+=== ext:zvmatch[] Vector Extension for Element-Set Matching, Version 0.1
+
+[NOTE]
+====
+This extension is an unratified draft.
+The OP-V _funct6_ assignment shown in this version is provisional and must be
+coordinated with the RISC-V Vector SIG before ratification.
+====
+
+The ext:zvmatch[] extension provides vector element-set matching.
+It is intended for workloads that classify byte or 16-bit values against a
+small set, such as tokenizer boundary detection and symbol classification.
+The instructions produce an ordinary vector mask that can be consumed by
+vector mask instructions such as insn:vfirst.m[] and insn:vcompress.vm[].
+
+The insn:vmmatch.vx[] instruction interprets a general-purpose register as
+`XLEN/SEW` packed keys.
+The insn:vmmatch.vv[] instruction uses all `VLMAX` elements in a vector
+register group as keys.
+Neither instruction accesses memory or combines matching with first-index
+extraction.
+
+[#norm:Zvmatch_dependent_V]#The ext:zvmatch[] extension depends upon the
+ext:v[] extension.#
+
+[#norm:Zvmatch_sew]#The instructions in ext:zvmatch[] are defined only for
+SEW=8 and SEW=16.#
+
+[#norm:Zvmatch_lmul]#Any LMUL that is legal under the base vector register-group
+rules is permitted.
+The _vs1_ and _vs2_ operands have EEW=SEW and EMUL=LMUL, and the _vd_
+operand is a mask register with EEW=1.#
+
+[#norm:Zvmatch_bit_pattern]#The instructions compare SEW-bit patterns for
+equality.
+The comparison does not sign-extend either operand.#
+
+The term _query element_ denotes the SEW-bit value in `vs2[i]`.
+The term _logical key set_ denotes the nonempty set of values that software
+intends to match.
+The instructions do not encode the number of elements in the logical key set;
+software must fill every architectural key position as described below.
+
+[[insns-vmmatch-vx, Vector Match Against Packed Scalar Keys]]
+==== insn:vmmatch.vx[]
+
+Synopsis::
+Match each vector element against packed scalar keys
+
+Mnemonic::
+insn:vmmatch.vx[vd,vs2,rs1,vm]
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVX'},
+{bits: 5, name: 'rs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110100'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vmmatch-vx_sew_rsv]#SEW is any value other than 8 or 16#
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2,4"]
+|===
+|Register
+|Direction
+|EEW
+|Definition
+
+| _rs1_ | input  | XLEN | Packed keys
+| _vs2_ | input  | SEW  | Query elements
+| _vd_  | output | 1    | Match result mask
+|===
+
+Description::
+Let `SLOTS=XLEN/SEW`.
+[#norm:vmmatch-vx_key_extraction]#Packed key `j`, for
+`0 <= j < SLOTS`, is the SEW-bit field
+`x[rs1][SEW*j +: SEW]`.
+This extraction is independent of memory endianness.#
+
+[#norm:vmmatch-vx_op]#For each active element `i`, destination mask bit
+`vd.mask[i]` is set if the query element `vs2[i]` equals any of the `SLOTS`
+packed keys, and is cleared otherwise.#
+
+[#norm:vmmatch-vx_all_slots]#All `SLOTS` packed keys participate in every
+active comparison.
+If the logical key set contains fewer than `SLOTS` values, software must fill
+every unused slot by duplicating any valid key from the logical key set.#
+
+[#norm:vmmatch-vx_x0]#When _rs1_ is `x0`, every packed key is zero, so the
+instruction matches zero; this encoding does not represent an empty key set.#
+
+Operation::
+[source]
+....
+SLOTS = XLEN / SEW
+for i from vstart to vl - 1:
+    if vm == 1 or v0.mask[i] == 1:
+        vd.mask[i] = OR over j in [0, SLOTS):
+                         vs2[i] == x[rs1][SEW*j +: SEW]
+....
+
+[[insns-vmmatch-vv, Vector Match Against Vector Keys]]
+==== insn:vmmatch.vv[]
+
+Synopsis::
+Match each vector element against a complete vector key group
+
+Mnemonic::
+insn:vmmatch.vv[vd,vs2,vs1,vm]
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg:[
+{bits: 7, name: 'OP-V'},
+{bits: 5, name: 'vd'},
+{bits: 3, name: 'OPIVV'},
+{bits: 5, name: 'vs1'},
+{bits: 5, name: 'vs2'},
+{bits: 1, name: 'vm'},
+{bits: 6, name: '110100'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vmmatch-vv_sew_rsv]#SEW is any value other than 8 or 16#
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2,4"]
+|===
+|Register
+|Direction
+|EEW
+|Definition
+
+| _vs1_ | input  | SEW | Key elements
+| _vs2_ | input  | SEW | Query elements
+| _vd_  | output | 1   | Match result mask
+|===
+
+Description::
+`VLMAX` is derived from the current SEW and LMUL settings in csr:vtype[].
+
+[#norm:vmmatch-vv_key_domain]#The key domain is every element
+`vs1[j]`, for `0 <= j < VLMAX`.
+The key domain always begins at element zero and is not shortened by csr:vl[],
+csr:vstart[], or the execution mask.#
+
+[#norm:vmmatch-vv_op]#For each active element `i`, destination mask bit
+`vd.mask[i]` is set if the query element `vs2[i]` equals any element in the
+complete key domain `vs1[0:VLMAX)`, and is cleared otherwise.#
+
+[#norm:vmmatch-vv_all_keys]#Elements in `vs1[vl:VLMAX)` are source-key data,
+not destination tail elements, and participate in every active comparison.
+Software must initialize all `VLMAX` key elements.
+If the logical key set contains fewer than `VLMAX` values, software must fill
+every remaining key element by duplicating any valid key from the logical key
+set.#
+
+[#norm:vmmatch-vv_no_empty_set]#The instruction has no encoding for an empty
+key set.
+Every legal csr:vtype[] setting has `VLMAX >= 1`, and setting csr:vl[] to zero
+does not make the key domain empty.#
+
+Operation::
+[source]
+....
+for i from vstart to vl - 1:
+    if vm == 1 or v0.mask[i] == 1:
+        vd.mask[i] = OR over j in [0, VLMAX):
+                         vs2[i] == vs1[j]
+....
+
+==== Vector Execution Semantics
+
+[#norm:vmmatch_execution]#For both instructions, csr:vl[], csr:vstart[], and
+the execution mask control the query elements and destination mask bits only.
+Prestart destination bits remain undisturbed.
+When `vm=0`, inactive destination bits follow the mask policy selected by
+csr::[vma], except that a legal overlap between _vd_ and _vs2_ makes the
+instruction mask-agnostic under the base vector overlap rules.
+Destination tail bits follow the base vector mask-destination tail-agnostic
+rule, irrespective of csr::[vta].
+Normal completion writes zero to csr:vstart[].#
+
+[#norm:vmmatch_no_empty_set]#Software must not use either instruction to
+represent an empty logical key set.#
+
+[NOTE]
+====
+An unmasked empty-set result can be produced with insn:vmclr.m[].
+For a nonempty logical key set larger than `SLOTS` or `VLMAX`, software can
+execute multiple match instructions and combine their result masks using
+insn:vmor.mm[].
+Each instruction must still receive a completely filled key domain.
+====
+
+==== Register Overlap
+
+[#norm:vmmatch-vx_overlap]#For insn:vmmatch.vx[], _vd_ may overlap _vs2_ only
+when _vd_ is the lowest-numbered register in the _vs2_ register group.
+When masked execution is enabled, an encoding in which the _vs2_ register
+group contains `v0` is reserved.
+The destination mask register may be `v0`.#
+
+[#norm:vmmatch-vv_overlap]#For insn:vmmatch.vv[], _vd_ must not overlap _vs1_.
+The _vd_ register may overlap _vs2_ only when _vd_ is the lowest-numbered
+register in the _vs2_ register group.
+When masked execution is enabled, an encoding in which either the _vs1_ or
+_vs2_ register group contains `v0` is reserved.
+The destination mask register may be `v0`, and the _vs1_ and _vs2_ register
+groups may overlap each other.#
+
+==== Exceptions and Restart
+
+[#norm:vmmatch_exceptions]#The instructions access only vector and integer
+register state and cause no data-dependent memory, address, or arithmetic
+exception.
+An attempt to execute either instruction with disabled vector state,
+csr::[vill]=1, a reserved SEW, an illegal register group, or a reserved overlap
+raises an illegal-instruction exception.#
+
+[#norm:vmmatch_restart]#An active result depends only on its query element, the
+complete key domain of the instruction, and its execution-mask bit.
+There is no architectural state shared between destination elements.
+Restart behavior follows the base vector rules; csr:vstart[] skips destination
+elements only and does not shorten the insn:vmmatch.vv[] key domain.#
+
+[NOTE]
+====
+The instructions do not guarantee data-independent execution latency.
+Software that requires constant-time execution must establish that property
+for the target implementation.
+====
+
+==== Programming Example
+
+The following RV64 example matches ASCII space, tab, line feed, and carriage
+return.
+The four keys are duplicated to fill all eight e8 packed-key slots.
+
+[source,asm]
+--
+li          t0, 0x0d0a09200d0a0920
+vsetvli     t1, a2, e8, m1, ta, ma
+vle8.v      v8, (a0)
+vmmatch.vx  v1, v8, t0
+vfirst.m    a3, v1
+--
+
+//
