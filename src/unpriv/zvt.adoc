@@ -1,5 +1,5 @@
 [[zvt]]
-=== Zvt Family of Vector Matrix Extensions, Version 0.3
+=== Zvt Family of Vector Matrix Extensions, Version 0.4
 
 ==== Overview
 
@@ -327,19 +327,14 @@ in two CSRs: `tk` and `tm` are fields in the `mtype` register; `tn`
 is derived from the `vl` register.  These CSRs are set using configuration
 instructions.
 ----
-Encoding of vector and matrix configuration instructions
+Encoding of matrix configuration instructions
 
- 31 30    25 24       23 22 20 19        15  14 12 11    7 6     0
- 0 |        zimm[10:0]        |    rs1     | 111 |  rd   |1010111| vsetvli
- 1 | 1|     zimm[ 9:0]        | uimm[4:0]  | 111 |  rd   |1010111| vsetivli
- 1 | 000000 |       rs2       |    rs1     | 111 |  rd   |1010111| vsetvl
-
- 1 | 000001 |       rs2       |    rs1     | 111 | 00000 |1010111| msetmtype
- 1 | 000010 |    00     | 000 |    rs1     | 111 |  rd   |1010111| msettn
- 1 | 000010 |    00     | 001 |    rs1     | 111 |  rd   |1010111| msettm
- 1 | 000010 |    00     | 010 |    rs1     | 111 |  rd   |1010111| msettk
- 1 | 000010 | vsew[1:0] | 011 | mtype[4:0] | 111 | 00000 |1010111| msetmtypei
- 1      6         2        3        5         3      5       7
+31 29    28    27 25 24  23 22 20 19 17 16     15 14 12 11    7 6     0
+ 100 |   0    | 100 |  00  | 000 |       rs1     | 111 |  rd   |1010111| msettn
+ 100 |   0    | 100 |  00  | 001 |       rs1     | 111 |  rd   |1010111| msettm
+ 100 |   0    | 100 |  00  | 010 |       rs1     | 111 |  rd   |1010111| msettk
+ 100 | altfmt | 100 | vsew | 100 | 000 | mtwiden | 111 | 00000 |1010111| msetmtypei
+ 100 |   0    | 010 |     rs2    |       rs1     | 111 | 00000 |1010111| msetmtype
 ----
 
 The existing `vset[i]vl[i]` instructions write zero to the `mtype` CSR.
@@ -353,12 +348,25 @@ Finally, if the new `mtype`.`mtwiden` != 0, then `vma` and `vta` are set to 1,
 `vill` is set if the resulting TEW is unsupported,
 and `vlmul` is set as follows:
 
+The `msetmtypei` instruction is defined similarly, except the new `mtype`.`mtwiden`,
+`vtype`.`vsew`, and `vtype`.`altfmt` fields are supplied by immediates.
+
 ----
-msetmtype behavior:
+msetmtype[i] behavior:
 
 vl = 0
-mtype = rs1
-vtype = rs2 (following vsetvl semantics)
+if msetmtypei:
+  mtype = 0
+  mtype.mtwiden = insn.mtwiden
+  vtype = 0
+  vtype.vsew = insn.vsew
+  vtype.altfmt = insn.altfmt
+else:
+  mtype = rs1
+  vtype = rs2
+
+if vtype is invalid per vsetvl semantics:
+  vtype.vill = 1
 
 if mtype.mtwiden != 0:
   let TWIDEN = 1 << (mtype.mtwiden - 1)
@@ -388,14 +396,10 @@ if vtype.vill:
   vtype.vill = 1
 ----
 
-The `msetmtypei` instruction is defined similarly, except the new `mtype` CSR
-value is supplied by a zero-extended immediate, the new `vtype`.`vsew` field
-value is supplied by a zero-extended immediate, and all other `vtype` fields
-are zeroed.
-
 NOTE: The recommended assembly syntax for the `msetmtypei` instruction is
-`msetmtypei eM, wN`, where `M` gives SEW (8, 16, 32, 64) and `N` gives TWIDEN
-(0, 1, 2, 4), with `mtype[4:2]` implicitly 0 in this form.
+`msetmtypei eM[alt], wN`, where `M` gives SEW (8, 16, 32, 64), `alt` sets
+altfmt=1 when present, and `N` gives TWIDEN (0, 1, 2, 4), with `mtype[4:2]`
+implicitly 0 in this form.
 
 These instructions are included in the Zvtbase extension.
 
@@ -435,17 +439,19 @@ The new value of `tm` or `tk` is also written to the scalar destination
 register `rd`.
 
 ----
-msettm rd, rs1  // rd = tm = ((mtwiden == 0) ? 0 : min(rs1, LMUL*EVE, ETE))
+msettm rd, rs1  // rd = tm = min(rs1, LMUL*EVE, ETE)
 ----
 
 The `msettm` instruction sets `tm` to be the lesser of `rs1`,
 `LMUL`*`EVE`, and `ETE`.
 
 ----
-msettk rd, rs1  // rd = tk = ((mtwiden == 0) ? 0 : min(rs1, KMAX))
+msettk rd, rs1  // rd = tk = min(rs1, KMAX)
 ----
 
 The `msettk` instruction sets `tk` to the lesser of `rs1` and KMAX.
+
+The `msettm` and `msettk` instructions raise an illegal-instruction exception when `mtwiden`=0.
 
 These instructions are included in the Zvtbase extension.
 
