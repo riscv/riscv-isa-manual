@@ -100,7 +100,6 @@ endif
 
 SRC_DIR := src
 BUILD_DIR := build
-REF_DIR := ref
 NORM_RULE_DEF_DIR := normative_rule_defs
 DOC_NORM_TAG_SUFFIX := -norm-tags.json
 
@@ -108,7 +107,6 @@ DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
 DOCS_HTML := $(addprefix $(BUILD_DIR)/, $(addsuffix .html, $(DOCS)))
 DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
 DOCS_NORM_TAGS := $(addprefix $(BUILD_DIR)/, $(addsuffix $(DOC_NORM_TAG_SUFFIX), $(DOCS)))
-REF_NORM_TAGS := $(addprefix $(REF_DIR)/, $(addsuffix $(DOC_NORM_TAG_SUFFIX), $(DOCS)))
 NORM_RULES_JSON := $(BUILD_DIR)/norm-rules.json
 NORM_RULES_HTML := $(BUILD_DIR)/norm-rules.html
 
@@ -144,7 +142,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-sail
 
 .PHONY: all build clean build-container build-no-container build-docs build-pdf build-html build-epub build-tags docker-pull-latest submodule-check
-.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html update-ref check-ref check-xref-fallbacks build-changebar-pdf
+.PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-xref-fallbacks build-changebar-pdf
 
 all: build
 
@@ -174,36 +172,6 @@ build-tags: $(DOCS_NORM_TAGS)
 check-xrefs: $(addprefix $(BUILD_DIR)/, $(addsuffix .check-xrefs, $(DOCS)))
 check-xref-fallbacks: $(DOCS_HTML)
 	@python3 ./scripts/check_xref_fallbacks.py $(DOCS_HTML)
-
-# Regenerate the checked-in normative tags JSON in $(REF_DIR) from the sources.
-#
-# The tags backend (docs-resources/converters/tags.rb) emits a trailing newline
-# as of riscv/docs-resources#246, so no newline fix-up is needed here.
-update-ref: $(DOCS_NORM_TAGS)
-	cp -f $(DOCS_NORM_TAGS) $(REF_DIR)
-
-# Fail if the checked-in normative tags are out of date with respect to the
-# sources.
-#
-# This regenerates them and then asks git whether anything changed, so the check
-# can never drift from the updater the way a separate comparison would. Note
-# that it rewrites the files in place: on failure the working tree already holds
-# the correct content, ready to review and commit.
-#
-# Only the generated files are examined, not all of $(REF_DIR) -- the hand-written
-# documentation living alongside them must not affect this check.
-check-ref: update-ref
-	@if git diff --quiet -- $(REF_NORM_TAGS); then \
-	  echo "Normative tag reference files are up to date."; \
-	else \
-	  echo "ERROR: normative tag reference files were out of date:"; \
-	  echo; \
-	  git diff --stat -- $(REF_NORM_TAGS); \
-	  echo; \
-	  echo "They have been regenerated in your working tree."; \
-	  echo "Review the diff above and commit the result."; \
-	  exit 1; \
-	fi
 
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
