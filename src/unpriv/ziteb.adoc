@@ -1,0 +1,240 @@
+[[ext:ziteb]]
+=== ext:ziteb[] Extension for Transient-Execution Barriers
+
+High-performance microarchitectures use various forms of speculation to
+improve performance by revealing more instruction-level parallelism.
+Alas, these techniques make microarchitectures vulnerable to
+transient-execution attacks, including those described in cite:[spectre].
+
+This section defines the ext:ziteb[] extension, which adds transient-execution
+barrier instructions to mitigate these vulnerabilities.
+Informally, certain instructions that follow a transient-execution barrier in
+program order cannot be speculatively executed before certain instructions (or
+parts of instructions) preceding the barrier in program order have executed.
+
+==== Operational Model of Speculative Execution
+
+The following operational model forms part of the semantics of the
+transient-execution barrier instructions, which are defined in the next
+section.
+This model is not intended to apply in other contexts.
+
+An instruction executes when it produces its register and memory results, i.e.,
+the values that will be written into architectural registers or memory.
+For a control-transfer instruction, execution includes determining the next
+instruction in program order.
+For an explicit memory access instruction, execution includes performing
+address translation to determine the physical address of the memory location
+accessed by the instruction.
+
+The program order is the order of instructions resulting from running
+a program on a simple in-order hart.
+_Older_ instructions appear in program order before _younger_ instructions,
+and program dependencies may exist from older instructions to younger
+instructions.
+Due to various prediction mechanisms, a hart may execute instructions in any
+order relative to program order as long as these program dependencies appear
+to be preserved.
+Additionally, in the course of executing instructions out-of-order, a younger
+instruction has a _speculative dependency_ on an older instruction when at
+least one of the following is true:
+
+* A younger instruction has a _speculative control dependency_ on an older
+control transfer instruction if the older instruction has _not_ executed and
+its execution affects the execution of the younger instruction.
+
+* A younger instruction has a _speculative register dependency_ on an older
+instruction if the older instruction has _not_ executed and its predicted
+register results affect the execution of the younger instruction.
+
+* A younger explicit memory access instruction has a _speculative memory
+dependency_ on an older explicit memory access instruction if the physical
+address of the older instruction has _not_ been determined.
+
+NOTE: If a hart predicts the register results of an older instruction, every
+younger instruction that is dependent on those results--either directly or
+indirectly through a chain of dependencies--has a speculative register
+dependency on the older instruction.
+However, a younger instruction that has a speculative register dependency on
+an older instruction does _not_ have a speculative register dependency on an
+intermediate instruction whose register results were produced as a result of
+executing the intermediate instruction, even if the intermediate instruction
+had a speculative register dependency on the older instruction.
+As a result, a speculative register dependency transfers through an
+intermediate instruction to a younger dependent instruction but does not by
+itself create a speculative dependency between the intermediate instruction
+and the younger instruction.
+
+If the younger instruction is executed while it has a speculative dependency
+on an older instruction, the younger instruction has been _speculatively
+executed_.
+
+As a part of executing an instruction, a hart validates any associated
+predictions.
+If a prediction is incorrect, the hart discards the results of any younger
+instructions that had a speculative dependency on the executed instruction,
+and may reexecute the instructions whose results were discarded.
+
+NOTE: Architecturally, a hart may preserve the results of any speculatively
+executed instructions that did _not_ have a speculative dependency on the
+instruction whose predictions were incorrect.
+
+An instruction is _transiently executed_ if the instruction is speculatively
+executed and its results are discarded.
+An instruction that is transiently executed may leave evidence of that
+execution in implementation structures, such as caches, and this evidence may
+introduce a covert timing channel through which secrets can be communicated.
+A _signaling instruction_ is an instruction whose transient execution may
+signal information through a covert timing channel.
+An instruction is considered a signaling instruction only if its execution
+affects the timing of a subsequently executed instruction, either by affecting
+when the subsequent instruction executes or by affecting how long the
+subsequent instruction takes to execute.
+
+NOTE: What constitutes a signaling instruction is heavily dependent on the
+implementation.
+As such, this operational model cannot precisely prescribe the set of
+instructions whose transient execution may or may not open a covert timing
+channel.
+In addition, an implementation can break instruction execution into
+non-signaling and signaling phases and may safely perform the non-signaling
+phases at any time.
+In the context of transient-execution barriers, however, an implementation
+_must_ defer the signaling phases of any instruction until the appropriate
+conditions have been met.
+
+NOTE: For example, a speculative store may become a signaling instruction if
+an implementation allocates a cache line after the physical address of the
+store has been determined, but before the memory results of the store are
+discarded.
+
+==== Transient-Execution Barrier Instructions
+
+Transient-execution barrier instructions order the execution of a younger
+signaling instruction after the execution of older instructions on which the
+signaling instruction has any speculative dependencies.
+The three instructions defined below correspond to the three types of
+speculative dependencies defined in the execution model above.
+
+===== Control-transfer dependency transient-execution barrier (insn:teb.ct[])
+
+If a signaling instruction appears in program order after a insn:teb.ct[] and
+has a speculative control dependency on any control transfer instruction that
+appears in program order before the insn:teb.ct[], the older control transfer
+instruction _must_ execute before the younger signaling instruction executes.
+
+[NOTE]
+====
+Consider the following C function and corresponding RISC-V assembly code:
+
+```
+uint8_t bounds_check_bypass(size_t x, uint8_t* arr1, size_t len1, uint8_t* arr2)
+{
+  if (x < len1)
+    return arr2[arr1[x] * 4096];
+  return 0;
+}
+
+bounds_check_bypass:
+  li a0, 0
+  bgeu a0, a2, out
+  add a0, a0, a1
+  lbu a0, (a0)
+  slliw a0, a0, 12
+  add a0, a0, a3
+  lbu a0, (a0)
+out:
+  ret
+```
+
+If the branch instruction is predicted not-taken but is actually taken,
+speculative execution of the first load instruction may access a
+memory address beyond the array bounds.
+Speculative execution of the second load instruction may leak the
+contents of that memory address by performing a TLB or cache allocation.
+Inserting a insn:teb.ct[] anywhere between the branch and the second load
+suffices to prevent this leak.
+====
+
+===== Register dependency transient-execution barrier (insn:teb.rd[])
+
+If a signaling instruction appears in program order after a insn:teb.rd[] and
+has a speculative register dependency on any instruction that appears in
+program order before the insn:teb.rd[], the older instruction _must_ execute
+before the younger signaling instruction executes.
+
+[NOTE]
+====
+Consider the following C function and corresponding RISC-V assembly code:
+
+```
+uint8_t data_speculation_example(bool* mask, uint8_t* x, uint8_t* arr)
+{
+  uint8_t idx = *x;
+  if (*mask)
+    idx = 0;
+  return arr[idx * 4096];
+}
+
+data_speculation_example:
+  lbu t0, (a0)
+  lbu t1, (a1)
+  czero.nez t0, t1, t0
+  slliw t0, t0, 12
+  add a2, a2, t0
+  lbu a0, (a2)
+  ret
+```
+
+If the first load instruction, which dereferences `mask`, is predicted to
+return a nonzero value, then speculative execution of the third load
+instruction can leak the value pointed to by `x`.
+Inserting a insn:teb.rd[] anywhere between the first and third loads
+suffices to prevent this leak.
+====
+
+===== Memory dependency transient-execution barrier (insn:teb.md[])
+
+If a signaling explicit memory access instruction appears in program order
+after a insn:teb.md[] and has a speculative memory dependency on any store
+instruction that appears in program order before the insn:teb.md[], the older
+store instruction _must_ determine its physical address before the signaling
+explicit memory access instruction executes.
+
+An older signaling load instruction _must not_ obtain memory results from
+a younger store instruction.
+
+NOTE: An implementation may safely execute a younger signaling load
+instruction that obtains memory results from an older store instruction,
+regardless of an intervening insn:teb.md[], as long as the physical addresses
+for the store, the load, and any intervening stores have been determined.
+
+[NOTE]
+====
+Consider the following C function and corresponding RISC-V assembly code:
+
+```
+uint8_t mem_dep_speculation_example(uint8_t* secret, uint8_t* p, uint8_t* arr)
+{
+  *secret = 0;
+  uint8_t idx = *p;
+  return arr[idx * 4096];
+}
+
+mem_dep_speculation_example:
+  sb x0, (a0)
+  lbu t0, (a1)
+  slliw t0, t0, 12
+  add t0, t0, a2
+  lbu a0, (t0)
+  ret
+```
+
+Suppose `secret` and `p` point to the same byte in memory.
+If the first load instruction speculatively executes before the store,
+it might read the value originally pointed to by `secret`, rather than
+reading zero.
+Speculative execution of the second load may then leak this value.
+Inserting a insn:teb.md[] anywhere between the store and the second load
+suffices to prevent this leak.
+====
