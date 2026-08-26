@@ -1,0 +1,225 @@
+[[core_debug]]
+== Sdext (ISA Extension)
+
+This chapter describes the Sdext ISA extension. It must be implemented
+to make external debug work, and is only useful in conjunction with
+external debug.
+
+Modifications to the RISC-V core to support debug are kept to a minimum.
+There is a special execution mode (Debug Mode) and a few extra CSRs. The
+DM takes care of the rest.
+
+In order to be compatible with this specification an implementation must
+implement everything described in this chapter that is not explicitly
+listed as optional.
+
+If Sdext is implemented and Sdtrig is not implemented, then accessing
+any of the Sdtrig CSRs must raise an illegal instruction exception.
+
+[[debugmode]]
+=== Debug Mode
+
+Debug Mode is a special processor mode used only when a hart is halted
+for external debugging. Because the hart is halted, there is no forward
+progress in the normal instruction stream. How Debug Mode is implemented
+is not specified here.
+
+When executing code due to an abstract command, the hart stays in Debug
+Mode and the following apply:
+
+. All implemented instructions operate just as they do in M-mode, unless
+an exception is mentioned in this list.
+. All operations are executed with machine mode privilege, except that
+additional Debug Mode CSRs are accessible and `mprv` in `mstatus` may be ignored
+according to {dcsr-mprven}. Full permission checks, or a relaxed set of permission
+checks, will apply according to {abstractcs-relaxedpriv}.
+. All interrupts (including NMI) are masked.
+. Traps don't take place. Instead, they end execution of the program
+buffer and the hart remains in Debug Mode. Because they do not trap to
+M-mode, they do not update registers such as , `mepc`, `mcause`,
+`mtval`, `mtval2`, and `mtinst`. The same is true for the equivalent
+privileged registers that are updated when trapping to other modes.
+Registers that may be updated as part of execution before the exception
+are allowed to be updated. For example, vector load/store instructions
+which raise exceptions may partially update the destination register and
+set `vstart` appropriately.
+. Triggers don't match or fire.
+. If {dcsr-stopcount} is 0 then counters continue. If it is 1 then counters are stopped.
+. If {dcsr-stoptime} is 0 then `time` continues to update. If it is 1 then `time` will not update. It will resynchronize with `time` after leaving Debug Mode.
+. Instructions that place the hart into a stalled state act as a `nop`.
+This includes `wfi`, `wrs.sto`, and `wrs.nto`.
+. Almost all instructions that change the privilege mode have UNSPECIFIED behavior.
+This includes `ecall`, `mret`, `sret`, and `uret`. (To change the
+privilege mode, the debugger can write {dcsr-prv} and {dcsr-v} in {csr-dcsr}). The only exception is
+`ebreak`, which ends execution of the Program Buffer when executed.
+. All control transfer instructions may act as illegal instructions if
+their destination is in the Program Buffer. If one such instruction acts
+as an illegal instruction, all such instructions must act as illegal
+instructions.
+. All control transfer instructions may act as illegal instructions if
+their destination is outside the Program Buffer. If one such instruction
+acts as an illegal instruction, all such instructions must act as
+illegal instructions.
+. Instructions that depend on the value of the PC (e.g. `auipc`) may act
+as illegal instructions.
+. When the Zicfilp extension is implemented, the `ELP` state is
+  `NO_LP_EXPECTED` and is not updated by any instructions. LPAD instruction
+  executes as a no-op.
+. Effective XLEN is DXLEN.
+. Forward progress is guaranteed.
+
+[NOTE]
+====
+When {dcsr-mprven}, the external debugger can set MPRV and MPP appropriately to have
+hardware perform memory accesses with the appropriate endianness,
+address translation, permission checks, and PMP/PMA checks (subject to {abstractcs-relaxedpriv}). This is also the only way to access all of physical memory when
+34-bit physical addresses are supported on a Sv32 hart. If hardware ties {dcsr-mprven} to 0 then the external debugger is expected to simulate all the effects
+of MPRV, including any extensions that affect memory accesses. For these
+reasons it is recommended to tie {dcsr-mprven} to 1.
+====
+
+=== Load-Reserved/Store-Conditional Instructions
+
+The reservation registered by an `lr` instruction on a memory address
+may be lost when entering Debug Mode or while in Debug Mode. This means
+that there may be no forward progress if Debug Mode is entered between
+`lr` and `sc` pairs.
+
+[NOTE]
+====
+This is a behavior that debug users must be aware of. If they have a
+breakpoint set between a `lr` and `sc` pair, or are stepping through
+such code, the `sc` may never succeed. Fortunately in general use there
+will be very few instructions in such a sequence, and anybody debugging
+it will quickly notice that the reservation is not occurring. The
+solution in that case is to set a breakpoint on the first instruction
+after the `sc` and run to it. A higher level debugger may choose to
+automate this.
+====
+
+=== Wait for Interrupt Instruction
+
+If halt is requested while `wfi` is executing, then the hart must leave
+the stalled state, completing this instruction's execution, and then
+enter Debug Mode.
+
+=== Wait-on-Reservation-Set Instructions
+
+If halt is requested while `wrs.sto` or `wrs.nto` is executing, then the
+hart must leave the stalled state, completing this instruction's
+execution, and then enter Debug Mode.
+
+=== Single Step
+
+[[stepbit]]
+==== Step Bit In Dcsr
+
+This method is only available to external debuggers, and is the
+preferred way to single step.
+
+An external debugger can cause a halted hart to execute a single
+instruction or trap and then re-enter Debug Mode by setting {dcsr-step} before
+resuming. If {dcsr-step} is set when a hart resumes then it will single step,
+regardless of the reason for resuming.
+
+If control is transferred to a trap handler while executing the
+instruction, then Debug Mode is re-entered immediately after the PC is
+changed to the trap handler, and the appropriate `tval` and `cause`
+registers are updated. In this case none of the trap handler is
+executed, and if the cause was a pending interrupt no instructions might
+be executed at all.
+
+If executing or fetching the instruction causes a trigger to fire with
+action=1, Debug Mode is re-entered immediately after that trigger has
+fired. In that case {dcsr-cause} is set to 2 (trigger) instead of 4 (single step).
+Whether the instruction is executed or not depends on the specific
+configuration of the trigger.
+
+If the instruction that is executed causes the PC to change to an
+address where an instruction fetch causes an exception, that exception
+does not occur until the next time the hart is resumed. Similarly, a
+trigger at the new address does not fire until the hart actually
+attempts to execute that instruction.
+
+If the instruction being stepped over would normally stall the hart,
+then instead the instruction is treated as a `nop`. This includes `wfi`,
+`wrs.sto`, and `wrs.nto`.
+
+[[stepicount]]
+==== Icount Trigger
+
+Native debuggers won't have access to {csr-dcsr}, but can use the {csr-icount} trigger by setting {icount-count} to 1.
+
+This approach does have some limitations:
+
+. Interrupts will fire as usual. Debuggers that want to disable interrupts
+while stepping must disable them by changing `mstatus`, and specially handle
+instructions that read `mstatus`.
+. `wfi` instructions are not treated specially and might take a very long
+time to complete.
+
+This mechanism cleanly supports a system which supports multiple
+privilege levels, where the OS or a debug stub runs in M-Mode while the
+program being debugged runs in a less privileged mode. Systems that only
+support M-Mode can use {csr-icount} as well, but {icount-count} must be able to count
+several instructions (depending on the software implementation). See
+xref:nativestep[].
+
+=== Reset
+
+If the halt signal (driven by the hart's halt request bit in the Debug
+Module) or {dmstatus-hasresethaltreq} are asserted when a hart comes out of reset, the hart must
+enter Debug Mode before executing any instructions, but after performing
+any initialization that would usually happen before the first
+instruction is executed.
+
+=== Halt
+
+When a hart halts:
+
+. {dcsr-cause} is updated.
+. {dcsr-prv} and {dcsr-v} are set to reflect current privilege mode and virtualization mode.
+. If the Zicfilp extension is implemented, {dcsr-pelp} is set to the current
+  `ELP` state and `ELP` is set to `NO_LP_EXPECTED`
+. {csr-dpc} is set to the next instruction that should be executed.
+. If the current instruction can be partially executed and should be
+restarted to complete, then the relevant state for that is updated. E.g.
+if a halt occurs during a partially executed vector instruction, then
+`vstart` is updated, and {csr-dpc} is updated to the address of the partially
+executed instruction. This is analogous to how vector instructions behave for exceptions.
+. The hart enters Debug Mode.
+
+=== Resume
+
+When a hart resumes:
+
+. `pc` changes to the value stored in {csr-dpc}.
+. The current privilege mode and virtualization mode are changed to that
+specified by {dcsr-prv} and {dcsr-v}.
+. If the Zicfilp extension is enabled at the new privilege mode, the current
+  `ELP` state is changed to that specified by {dcsr-pelp} else it is set to
+  `NO_LP_EXPECTED`. {dcsr-pelp} is set to `NO_LP_EXPECTED`.
+. If the new privilege mode is less privileged than M-mode, `MPRV` in `mstatus` is cleared.
+. If the Smdbltrp extension is implemented and the new privilege mode is not M,
+  then the `MDT` bit is set to 0.
+. If the Ssdbltrp extension is implemented and the new privilege mode is U, VS,
+  or VU, then `sstatus.SDT` is set to 0. Additionally, if it is VU, then
+  `vsstatus.SDT` is also set to 0.
+. The hart is no longer in debug mode.
+
+[[debreg]]
+=== Core Debug Registers
+
+The supported Core Debug Registers must be implemented for each hart
+that can be debugged. They are CSRs, accessible using the RISC-V `csr`
+opcodes and optionally also using abstract debug commands.
+
+Attempts to access an unimplemented Core Debug Register raise an illegal
+instruction exception.
+
+include::build/core_registers.adoc[]
+
+[[virtreg]]
+=== Virtual Debug Registers
+
+include::build/sw_registers.adoc[]

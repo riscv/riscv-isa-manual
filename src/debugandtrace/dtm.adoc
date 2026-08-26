@@ -1,0 +1,191 @@
+[[dtm]]
+== Debug Transport Module (DTM) (non-ISA extension)
+
+Debug Transport Modules provide access to the DM over one or more
+transports (e.g. JTAG or USB).
+
+There may be multiple DTMs in a single hardware platform. Ideally every
+component that communicates with the outside world includes a DTM,
+allowing a hardware platform to be debugged through every transport it
+supports. For instance a USB component could include a DTM. This would
+trivially allow any hardware platform to be debugged over USB. All that
+is required is that the USB module already in use also has access to the
+Debug Module Interface.
+
+Using multiple DTMs at the same time is not supported. It is left to the
+user to ensure this does not happen.
+
+This specification defines a JTAG DTM in <<sec:jtagdtm>>.
+Additional DTMs may be added in future versions of this specification.
+
+An implementation can be compatible with this specification without
+implementing any of this section. In that case it must be advertised as
+conforming to "RISC-V Debug Specification, with custom DTM." If the
+JTAG DTM described here is implemented, it must be advertised as
+conforming to the "RISC-V Debug Specification, with JTAG DTM.""
+
+[[sec:jtagdtm]]
+=== JTAG Debug Transport Module
+
+This Debug Transport Module is based around a normal JTAG Test Access
+Port (TAP). The JTAG TAP allows access to arbitrary JTAG registers by
+first selecting one using the JTAG instruction register (IR), and then
+accessing it through the JTAG data register (DR).
+
+==== JTAG Background
+
+JTAG refers to IEEE Std 1149.1-2013. It is a standard that defines test
+logic that can be included in an integrated circuit to test the
+interconnections between integrated circuits, test the integrated
+circuit itself, and observe or modify circuit activity during the
+component’s normal operation. This specification uses the latter
+functionality. The JTAG standard defines a Test Access Port (TAP) that
+can be used to read and write a few custom registers, which can be used
+to communicate with debug hardware in a component.
+
+==== JTAG DTM Registers
+
+JTAG TAPs used as a DTM must have an IR of at least 5 bits. When the TAP
+is reset, IR must default to 00001, selecting the IDCODE instruction. A
+full list of JTAG registers along with their encoding is in
+<<tab:jtag_registers>>. If the IR
+actually has more than 5 bits, then the encodings in
+<<tab:jtag_registers>> should be
+extended with 0's in their most significant bits, except for the 0x1f
+encoding of BYPASS, which must be extended with 1's in the most
+significant bits. The only regular JTAG registers a debugger might use
+are BYPASS and IDCODE, but this specification leaves IR space for many
+other standard JTAG instructions. Unimplemented instructions must select
+the BYPASS register.
+
+.JTAG DTM TAP Registers
+include::build/jtag_registers.adoc[]
+
+==== JTAG Connector
+
+===== Recommended JTAG Connector
+
+To make it easy to acquire debug hardware, this spec recommends a
+connector that is compatible with the MIPI-10 .05 inch connector
+specification, as described in MIPI Debug & Trace Connector
+Recommendations, Version 1.20, 2 July 2021.
+
+The connector has .05 inch spacing, gold-plated male header with .016
+inch thick hardened copper or beryllium bronze square posts (SAMTEC FTSH
+or equivalent). Female connectors are compatible latexmath:[$20\mu m$]
+gold connectors.
+
+Viewing the male header from above (the pins pointing at your eye), a
+target's connector looks as it does in <<tab:mipiten>>. The
+function of each pin is described in <<tab:pinout>>.
+
+[[tab:mipiten]]
+.MIPI 10-pin JTAG + nRESET Connector Diagram
+[%autowidth,align="center",float="center",cols=">,^,^,<"]
+|===
+|VREF DEBUG |1 |2 |TMS
+|GND |3 |4 |TCK
+|GND |5 |6 |TDO
+|GND or KEY |7 |8 |TDI
+|GND |9 |10 |nRESET
+|===
+
+If a hardware platform requires nTRST then it is permissible to reuse
+the nRESET pin as the nTRST signal, resulting in a MIPI 10-pin JTAG +
+nTRST connector.
+
+===== Alternate JTAG Connector
+
+The MIPI-10 connector should provide plenty of signals for all modern
+hardware. If a design does need legacy JTAG signals, then the MIPI-20
+connector should be used. Pins whose functionality isn't needed may be
+left unconnected.
+
+Its physical connector is virtually identical to MIPI-10, except that
+it's twice as long, supporting twice as many pins. Its pinout is shown
+in <<tab:mipitwenty>>. The function of each pin is described in
+<<tab:pinout>>.
+
+[[tab:pinout]]
+.JTAG Connector Pin Functions
+[%autowidth,align="center",float="center",cols="^,^,^"]
+|===
+.6+| Essential | GND | Connected to ground.
+|TCK | JTAG TCK signal, driven by the debug adapter.
+|TDI |JTAG TDI signal, driven by the debug adapter.
+|TDO | JTAG TDO signal, driven by the target.
+|TMS | JTAG TMS signal, driven by the debug adapter.
+|VREF DEBUG |Reference voltage for logic high.
+.2+|Recommended | nRESET | Open drain active low reset signal, usually
+driven by the debug adapter. The signal may be used bi-directional to
+drive or sense the target reset signal. +
+Asserting reset should reset any RISC-V cores as well as any other
+peripherals on the PCB. It should not reset the debug logic. This pin is
+optional but strongly encouraged. +
+nRESET should never be connected to the TAP reset, otherwise the
+debugger might not be able to debug through a reset to discover the
+cause of a crash or to maintain execution control after the reset.
+|KEY | This pin may be cut on the male and plugged on the female header
+to ensure the header is always plugged in correctly. It is, however,
+recommended to use this pin as an additional ground, to allow for
+fastest TCK speeds. A shrouded connector should be used to prevent the
+cable from being plugged in incorrectly.
+.3+|Advanced | EXT | Reserved for custom use. Could be an input or an
+output.
+| TRIGIN | Not used by this specification, to be driven by debug
+adapter. (Can be used for extended functions like UART or boot mode
+selection by some debug adapters).
+| TRIGOUT | Not used by this specification, driven by the target.
+|Specialized | nTRST | Test reset, driven by the debug adapter. Asserting
+nTRST initializes the JTAG DTM asynchronously. It is used in systems
+where the JTAG DTM is not ready to be used after a normal power up. This
+signal is sometimes called TRST*.
+.2+|Legacy | RTCK | Return test clock, driven by the target. A target may
+relay the TCK signal here once it has processed it, allowing a debugger
+to adjust its TCK frequency in response. +
+This signal should only be used to support legacy components that rely
+on this functionality.
+| nTRST_PD | Test reset pull-down, driven by the debug adapter. Same
+function as nTRST, but with pull-down resistor on target. +
+This signal should only be used to support legacy components that rely
+on this functionality.
+|===
+
+[[tab:mipitwenty]]
+.MIPI 20-pin JTAG Connector Diagram
+[%autowidth,align="center",float="center",cols=">,^,^,<"]
+|===
+|VREF DEBUG |1 |2 |TMS
+|GND |3 |4 |TCK
+|GND |5 |6 |TDO
+|GND or KEY |7 |8 |TDI
+|GND |9 |10 |nRESET
+|GND |11 |12 |GND or RTCK
+|GND |13 |14 |NC or nTRST_PD
+|GND |15 |16 |nTRST or NC
+|GND |17 |18 |TRIGIN or NC
+|GND |19 |20 |TRIGOUT or GND
+|===
+
+==== cJTAG
+
+This spec does not have specific recommendations on how to use the cJTAG
+protocol.
+
+When implementing cJTAG access to a JTAG DTM, the MIPI 10-pin Narrow
+JTAG connector should be used. Pins whose functionality isn't needed may
+be left unconnected.
+
+Viewing the male header from above (the pins pointing at your eye), a
+target's connector looks as it does in <<tab:mipicjtag>>.
+
+[[tab:mipicjtag]]
+.MIPI 10-pin Narrow JTAG Connector Diagram
+[%autowidth,align="center",float="center",cols=">,^,^,<"]
+|===
+|VREF DEBUG |1 |2 |TMSC
+|GND |3 |4 |TCKC
+|GND |5 |6 |EXT or NC
+|GND or KEY |7 |8 |NC or nTRST_PD
+|GND |9 |10 |nRESET
+|===
