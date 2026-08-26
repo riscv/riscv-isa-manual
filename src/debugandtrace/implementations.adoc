@@ -1,0 +1,122 @@
+[appendix]
+[[sec:implementations]]
+== Hardware Implementations
+
+Below are two possible implementations. A designer could choose one, mix
+and match, or come up with their own design.
+
+=== Abstract Command Based
+
+Halting happens by stalling the hart execution pipeline.
+
+Muxes on the register file(s) allow for accessing GPRs and CSRs using
+the Access Register abstract command.
+
+Memory is accessed using the Abstract Access Memory command or through
+System Bus Access.
+
+This implementation could allow a debugger to collect information from
+the hart even when that hart is unable to execute instructions.
+
+[[execution_based]]
+=== Execution Based
+
+This implementation only implements the Access Register abstract command
+for GPRs on a halted hart, and relies on the Program Buffer for all
+other operations. It uses the hart's existing pipeline and ability to
+execute from arbitrary memory locations to avoid modifications to a
+hart's datapath.
+
+When the halt request bit is set, the Debug Module raises a special
+interrupt to the selected harts. This interrupt causes each hart to
+enter Debug Mode and jump to a defined memory region that is serviced by
+the DM and is only accessible to the harts in Debug Mode. Accesses to
+this memory should be uncached to avoid side effects from debugging
+operations. When taking this jump, `pc` is saved to {csr-dpc} and {dcsr-cause} is updated in {csr-dcsr}. This
+jump is similar to a trap but it is not architecturally considered a
+trap, so for instance doesn't count as a trap for trigger behavior.
+
+The code in the Debug Module causes the hart to execute a "park loop."
+In the park loop the hart writes its `mhartid` to a memory location within the
+Debug Module to indicate that it is halted. To allow the DM to
+individually control one out of several halted harts, each hart polls
+for flags in a DM-controlled memory location to determine whether the
+debugger wants it to execute the Program Buffer or perform a resume.
+
+To execute an abstract command, the DM first populates some internal
+words of program buffer according to {dm-command}. When {accessregister-transfer} is set, the DM populates
+these words with `lw <gpr>, 0x400(zero)` or `sw <gpr>, 0x400(zero)`. 64-
+and 128-bit accesses use `ld`/`sd` and `lq`/`sq` respectively. If {accessregister-transfer} is not
+set, the DM populates these instructions as `nop's`. If {accessregister-postexec} is set, execution
+continues to the debugger-controlled Program Buffer, otherwise the DM
+causes an `ebreak` to execute immediately.
+
+When `ebreak` is executed (indicating the end of the Program Buffer
+code) the hart returns to its park loop. If an exception is encountered,
+the hart jumps to an address within the Debug Module. The code there
+causes the hart to write to the Debug Module indicating an exception.
+Then the hart jumps back to the park loop. The DM infers from the write
+that there was an exception, and sets {abstractcs-cmderr} appropriately. Typically the hart
+will execute a `fence` instruction before entering the park loop, to
+ensure that any effects from the abstract command, such as a write to {dm-data0},
+take effect before the DM returns {abstractcs-busy} to 0.
+
+To resume execution, the debug module sets a flag which causes the hart
+to execute a `dret`. `dret` is an instruction that only has meaning
+while in Debug Mode and not executing from the Program Buffer. Its
+recommended encoding is 0x7b200073. When `dret` is executed, `pc` is restored
+from {csr-dpc} and normal execution resumes at the privilege set by {dcsr-prv} and {dcsr-v},
+and the ELP state set by {dcsr-pelp}.
+
+{dm-data0} etc. are mapped into regular memory at an address relative to with only
+a 12-bit `imm`. The exact address is an implementation detail that a
+debugger must not rely on. For example, the `data` registers might be
+mapped to `0x400`.
+
+For additional flexibility, {dm-progbuf0}, etc. are mapped into regular memory
+immediately preceding {dm-data0}, in order to form a contiguous region of memory
+which can be used for either program execution or data transfer.
+
+The PMP must not disallow fetches, loads, or stores in the address range
+associated with the Debug Module when the hart is in Debug Mode,
+regardless of how the PMP is configured. The same is true of PMA.
+Without this guarantee, the park loop would enter an infinite loop of
+traps and debug would not be possible.
+
+[[dmi_signals]]
+=== Debug Module Interface Signals
+
+As stated in section <<dmi>> the details of the DMI are left to
+the system designer. It is quite often the case that only one DTM and
+one DM is implemented. In this case it might be useful to comply with
+the signals suggested in <<tab:dmi_signals>>, which is the
+implementation used in the open-source
+https://github.com/chipsalliance/rocket-chip/blob/375045a7db1bdc7b4f7851f1a59b3f10a2b922ff/src/main/scala/devices/debug/Debug.scala#L170[rocket-chip]
+RISC-V core.
+
+The DTM can start a request when the DM sets REQ_READY to 1. When this
+is the case REQ_OP can be set to 1 for a read or 2 for a write request.
+The desired address is driven with the REQ_ADDRESS signal. Finally
+REQ_VALID is set high, indicating to the DM that a valid request is
+pending.
+
+The DM must respond to a request from the DTM when RSP_READY is high.
+The status of the response is indicated by the RSP_OP signal (see {dmi-op}). The
+data of the response is driven to RSP_DATA. A pending response is
+signalled by setting RSP_VALID.
+
+[[tab:dmi_signals]]
+.Signals for the suggested DMI between one DTM and one DM
+[%autowidth,align="center",float="center",cols="<,<,<,<",options="header",frame=ends]
+|===
+|Signal |Width |Source |Description
+|REQ_VALID |1 |DTM |Indicates that a valid request is pending
+|REQ_READY |1 |DM |Indicates that the DM is able to process a request
+|REQ_ADDRESS |{dtmcs-abits} |DTM |Requested address
+|REQ_DATA |32 |DTM |Requested data
+|REQ_OP |2 |DTM |Same meaning as the {dmi-op} field
+|RSP_VALID |1 |DM |Indicates that a valid respond is pending
+|RSP_READY |1 |DTM |Indicates that the DTM is able to process a respond
+|RSP_DATA |32 |DM |Response data
+|RSP_OP |2 |DM |Same meaning as the {dmi-op} field
+|===

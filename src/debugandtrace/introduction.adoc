@@ -1,0 +1,394 @@
+[[intro]]
+== Introduction
+
+When a design progresses from simulation to hardware implementation, a
+user's control and understanding of the system's current state drops
+dramatically. To help bring up and debug low level software and
+hardware, it is critical to have good debugging support built into the
+hardware. When a robust OS is running on a core, software can handle
+many debugging tasks. However, in many scenarios, hardware support is
+essential.
+
+This document outlines a standard architecture for debug support on
+RISC-V hardware platforms. This architecture allows a variety of
+implementations and tradeoffs, which is complementary to the wide range
+of RISC-V implementations. At the same time, this specification defines
+common interfaces to allow debugging tools and components to target a
+variety of hardware platforms based on the RISC-V ISA.
+
+System designers may choose to add additional hardware debug support,
+but this specification defines a standard interface for common
+functionality.
+
+=== Terminology
+
+*advanced feature*:: An advanced feature for advanced users. Most users will not be able to take advantage of it.
+
+*AMO*:: Atomic Memory Operation.
+
+*BYPASS*:: JTAG instruction that selects a single bit data register, also called BYPASS.
+
+*component*:: A RISC-V core, or other part of a hardware platform. Typically all components will be connected to a single system bus.
+
+*CSR*:: Control and Status Register.
+
+*DM*:: Debug Module (see <<dm>>).
+
+*DMI*:: Debug Module Interface (see <<dmi>>).
+
+*DR*:: JTAG Data Register.
+
+*DTM*:: Debug Transport Module (see <<dtm>>).
+
+*DXLEN*:: Debug XLEN, which is the widest XLEN a hart supports, ignoring the
+current value of `mxl` in `misa`.
+
+*ELP*:: Expected landing pad state, define by the Zicfilp extension.
+
+*essential feature*:: An essential feature must be present in order for debug to work correctly.
+
+*GPR*:: General Purpose Register.
+
+*hardware platform*:: A single system consisting of one or more _components_.
+
+*hart*:: A hardware thread in a RISC-V core.
+
+*IDCODE*:: 32-bit Identification CODE, and a JTAG instruction that returns the IDCODE value.
+
+*IR*:: JTAG Instruction Register.
+
+*JTAG*:: Refers to work done by IEEE's Joint Test Action Group, described in IEEE 1149.1.
+
+*legacy feature*:: A legacy feature should only be implemented to support legacy hardware that is present in a system.
+
+*Minimal RISC-V Debug Specification*:: A subset of the full Debug Specification that allows for very small implementations. See <<dm>>.
+
+*NAPOT*:: Naturally Aligned Power-Of-Two.
+
+*NMI*:: Non-Maskable Interrupt.
+
+*physical address*:: address that is directly usable on the system bus.
+
+*recommended feature*:: A recommended feature is not required for debug to work correctly, but  it is so useful that it should not be omitted without good reason.
+
+*SBA*:: System Bus Access (see <<systembusaccess>>).
+
+*specialized feature*:: A specialized feature, that only makes sense in the context of some specific hardware.
+
+*TAP*:: Test Access Port, defined in IEEE 1149.1.
+
+*TM*:: Trigger Module (see <<trigger>>).
+
+*virtual address*:: An address as a hart sees it. If the hart is using address translation this may be different from the physical address. If there is no translation then it will be the same.
+
+*xepc*:: The exception program counter CSR (e.g. `mepc`) that is appropriate for the mode being trapped to.
+
+=== Context
+
+This specification attempts to support all RISC-V ISA extensions that
+have, roughly, been ratified through the first half of 2023. In
+particular, though, this specification specifically addresses features
+in the following extensions:
+
+. A
+. C
+. D
+. F
+. H
+. Sm1p13
+. Smstateen
+. Ss1p13
+. V
+. Zawrs
+. Zcmp
+. Zicbom
+. Zicbop
+. Zicboz
+. Zicsr
+
+==== Versions
+
+Version 0.13 of this document was ratified by the RISC-V Foundation’s
+board. Versions 0.13.latexmath:[$x$] are bug fix releases to that
+ratified specification.
+
+Version 0.14 was a working version that was never officially ratified.
+
+Version 1.0 is almost entirely forwards and backwards compatible with
+Version 0.13.
+
+===== Bugfixes from 0.13 to 1.0
+
+Changes that fix a bug in the spec:
+
+. Fix order of operations described in {dm-sbdata0}.
+https://github.com/riscv/riscv-debug-spec/pull/392[#392]
+. Resume ack is set after resume, in <<runcontrol>>.
+https://github.com/riscv/riscv-debug-spec/pull/400[#400]
+. {textra32-sselect} applies to {textra32-svalue} . https://github.com/riscv/riscv-debug-spec/pull/402[#402]
+. {tcontrol-mte} only applies when action=0.
+https://github.com/riscv/riscv-debug-spec/pull/411[#411]
+. {accessmemory-aamsize} does not affect Argument Width.
+https://github.com/riscv/riscv-debug-spec/pull/420[#420]
+. Clarify that harts halt out of reset if {dmcontrol-haltreq} =1.
+https://github.com/riscv/riscv-debug-spec/pull/419[#419]
+
+===== Incompatible Changes from 0.13 to 1.0
+
+Changes that are not backwards-compatible. Debuggers or hardware
+implementations that implement 0.13 will have to change something in
+order to implement 1.0:
+
+. Make haltsum0 optional if there is only one hart.
+https://github.com/riscv/riscv-debug-spec/pull/505[#505]
+. System bus autoincrement only happens if an access actually takes place.
+({dm-sbdata0}) https://github.com/riscv/riscv-debug-spec/pull/507[#507]
+. Bump {tinfo-version} to 3. https://github.com/riscv/riscv-debug-spec/pull/512[#512]
+. Require debugger to poll {dmcontrol-dmactive} after lowering it.
+https://github.com/riscv/riscv-debug-spec/pull/566[#566]
+. Add {icount-pending} to {csr-icount} . https://github.com/riscv/riscv-debug-spec/pull/574[#574]
+. When a selected trigger is disabled, {csr-tdata2} and {csr-tdata3} can be written with any value supported by any of the types this trigger supports.
+https://github.com/riscv/riscv-debug-spec/pull/721[#721]
+. {csr-tcontrol} fields only apply to breakpoint traps, not any trap.
+https://github.com/riscv/riscv-debug-spec/pull/723[#723]
+. If {tinfo-version} is greater than 0, then {mcontrol6-hit0} (previously called {csr-mcontrol6}.``hit``) now contains 0 when a trigger fires more than one instruction after the
+instruction that matched. (This information is now reflected in {mcontrol6-hit1}.)
+https://github.com/riscv/riscv-debug-spec/pull/795[#795]
+. If {tinfo-version} is greater than 0, then bit 20 of {csr-mcontrol6} is no longer used for timing information. (Previously the bit was called {csr-mcontrol6}.``timing``.)
+https://github.com/riscv/riscv-debug-spec/pull/807[#807]
+. If {tinfo-version} is greater than 0, then the encodings of {mcontrol6-size} for sizes greater than 64 bit have changed.
+https://github.com/riscv/riscv-debug-spec/pull/807[#807]
+
+===== Minor Changes from 0.13 to 1.0
+
+Changes that slightly modify defined behavior. Technically backwards
+incompatible, but unlikely to be noticeable:
+
+. {dcsr-stopcount} only applies to hart-local counters.
+https://github.com/riscv/riscv-debug-spec/pull/405[#405]
+. {dmstatus-version} may be invalid when {dmcontrol-dmactive}=0.
+https://github.com/riscv/riscv-debug-spec/pull/414[#414]
+. Address triggers ({csr-mcontrol}) may fire on any accessed address.
+https://github.com/riscv/riscv-debug-spec/pull/421[#421]
+. All Trigger Module registers (<<tab:trigger>>) are optional. https://github.com/riscv/riscv-debug-spec/pull/431[#431]
+. When extending IR, {dtm-bypass} still is all ones.
+https://github.com/riscv/riscv-debug-spec/pull/437[#437]
+. {dcsr-ebreaks} and {dcsr-ebreaku} are WARL. https://github.com/riscv/riscv-debug-spec/pull/458[#458]
+. NMIs are disabled by {dcsr-stepie}.
+https://github.com/riscv/riscv-debug-spec/pull/465[#465]
+. R/W1C fields should be cleared by writing every bit high.
+https://github.com/riscv/riscv-debug-spec/pull/472[#472]
+. Specify trigger priorities in <<tab:priority>> relative to exceptions.
+https://github.com/riscv/riscv-debug-spec/pull/478[#478]
+. Time may pass before {dmcontrol-dmactive} becomes high.
+https://github.com/riscv/riscv-debug-spec/pull/500[#500]
+. Clear MPRV when resuming into lower privilege mode.
+https://github.com/riscv/riscv-debug-spec/pull/503[#503]
+. Halt state may not be preserved across reset.
+https://github.com/riscv/riscv-debug-spec/pull/504[#504]
+. Hardware should clear trigger action when {tdata1-dmode} is cleared and action is 1.
+https://github.com/riscv/riscv-debug-spec/pull/501[#501]
+. Change quick access exceptions to halt the target in <<ac-quickaccess>>.
+https://github.com/riscv/riscv-debug-spec/pull/585[#585]
+. Writing 0 to {csr-tdata1} forces a state where {csr-tdata2} and {csr-tdata3} are writable.
+https://github.com/riscv/riscv-debug-spec/pull/598[#598]
+. Solutions to deal with reentrancy in <<nativetrigger>> prevent triggers from
+_matching_, not merely _firing_. This primarily affects {csr-icount} behavior.
+https://github.com/riscv/riscv-debug-spec/pull/722[#722]
+. Attempts to access an unimplemented CSR raise an illegal instruction
+exception. https://github.com/riscv/riscv-debug-spec/pull/791[#791]
+
+===== New Features from 0.13 to 1.0
+
+New backwards-compatible feature that did not exist before:
+
+. Add halt groups and external triggers in <<hrgroups>>.
+https://github.com/riscv/riscv-debug-spec/pull/404[#404]
+. Reserve some DMI space for non-standard use. See {dm-custom}, and {dm-custom0} through `custom15`.
+https://github.com/riscv/riscv-debug-spec/pull/406[#406]
+. Reserve trigger {tdata1-type} values for non-standard use.
+https://github.com/riscv/riscv-debug-spec/pull/417[#417]
+. Add {itrigger-nmi} bit to {csr-itrigger}. https://github.com/riscv/riscv-debug-spec/pull/408[#408]
+and https://github.com/riscv/riscv-debug-spec/pull/709[#709]
+. Recommend matching on every accessed address.
+https://github.com/riscv/riscv-debug-spec/pull/449[#449]
+. Add resume groups in <<hrgroups>>.
+https://github.com/riscv/riscv-debug-spec/pull/506[#506]
+. Add {abstractcs-relaxedpriv} . https://github.com/riscv/riscv-debug-spec/pull/536[#536]
+. Move {csr-scontext}, renaming original to {csr-mscontext}, and create {csr-hcontext}.
+https://github.com/riscv/riscv-debug-spec/pull/535[#535]
+. Add {csr-mcontrol6}, deprecating {csr-mcontrol}.
+https://github.com/riscv/riscv-debug-spec/pull/538[#538]
+. Add hypervisor support: {dcsr-ebreakvs}, {dcsr-ebreakvu}, {dcsr-v}, {csr-hcontext}, {csr-mcontrol}, {csr-mcontrol6}, and {virt-priv}.
+https://github.com/riscv/riscv-debug-spec/pull/549[#549]
+. Optionally make {dmstatus-anyunavail} and {dmstatus-allunavail} sticky, controlled by {dmstatus-stickyunavail}.
+https://github.com/riscv/riscv-debug-spec/pull/520[#520]
+. Add {csr-tmexttrigger} to support trigger module external trigger inputs.
+https://github.com/riscv/riscv-debug-spec/pull/543[#543]
+. Describe {csr-mcontrol} and {csr-mcontrol6} behavior with atomic instructions.
+https://github.com/riscv/riscv-debug-spec/pull/561[#561]
+. Trigger hit bits must be set on fire, may be set on match.
+https://github.com/riscv/riscv-debug-spec/pull/593[#593]
+. Add {textra32-sbytemask} and {textra32-sbytemask} to {csr-textra32} and {csr-textra64}.
+https://github.com/riscv/riscv-debug-spec/pull/588[#588]
+. Allow debugger to request harts stay alive with keepalive bit in
+{dmcontrol-setkeepalive}.
+https://github.com/riscv/riscv-debug-spec/pull/592[#592]
+. Add {dmstatus-ndmresetpending} to allow a debugger to determine when ndmreset is complete.
+https://github.com/riscv/riscv-debug-spec/pull/594[#594]
+. Add {tmexttrigger-intctl} to support triggers from an interrupt controller.
+https://github.com/riscv/riscv-debug-spec/pull/599[#599]
+
+===== Incompatible Changes During 1.0 Stable
+
+Backwards-incompatible changes between two versions that are both called
+1.0 stable.
+
+. {itrigger-nmi} was moved from {csr-etrigger} to {csr-itrigger}, and is now subject to the mode bits in that trigger.
+
+. https://github.com/riscv/riscv-debug-spec/pull/728[#728] introduced
+Message Registers, which were later removed in
+https://github.com/riscv/riscv-debug-spec/pull/878[#878].
+. It may not be possible to read the contents of the Program Buffer using
+the `progbuf` registers.
+https://github.com/riscv/riscv-debug-spec/pull/731[#731]
+. {csr-tcontrol} fields apply to all traps, not just breakpoint traps. This reverts
+https://github.com/riscv/riscv-debug-spec/pull/723[#723].
+https://github.com/riscv/riscv-debug-spec/pull/880[#880]
+
+===== Incompatible Changes Between 1.0.0-rc1 and 1.0.0-rc2
+
+Backwards-incompatible changes between 1.0.0-rc1 and 1.0.0-rc2.
+
+. https://github.com/riscv/riscv-debug-spec/pull/981[#981] made
+{csr-scontext}.{scontext-data}, {csr-mcontext}.{mcontext-hcontext},
+{textra64-sbytemask}, and {csr-textra64}.`svalue` narrower. This avoids confusion
+about the contents of {csr-scontext} and {csr-mcontext} when XLEN is reduced and
+increased again.
+
+=== About This Document
+
+==== Structure
+
+This document contains two parts. The main part of the document is the
+specification, which is given in the numbered chapters. The second part
+of the document is a set of appendices. The information in the
+appendices is intended to clarify and provide examples, but is not part
+of the actual specification.
+
+==== ISA vs. non-ISA
+
+This specification contains both ISA and non-ISA parts. The ISA parts
+define self-contained ISA extensions. The other parts of the document
+describe the non-ISA external debug extension. Chapters whose contents
+are solely one or the other are labeled as such in their title. Chapters
+without such a label apply to both ISA and non-ISA.
+
+==== Register Definition Format
+
+All register definitions in this document follow the format shown below.
+A simple graphic shows which fields are in the register. The upper and
+lower bit indices are shown to the top left and top right of each field.
+The total number of bits in the field are shown below it.
+
+After the graphic follows a table which for each field lists its name,
+description, allowed accesses, and reset value. The allowed accesses are
+listed in <<tab:access>>. The reset value is either a constant or "Preset." The latter means it is an implementation-specific legal value.
+
+Parts of the register which are currently unused are labeled with the
+number 0. Software must only write 0 to those fields, and ignore their
+value while reading. Hardware must return 0 when those fields are read,
+and ignore the value written to them.
+
+[NOTE]
+====
+This behavior enables us to use those fields later without having to
+increase the values in the version fields.
+====
+
+Names of registers and their fields are hyperlinks to their definition,
+and are also listed in the <<index>>.
+
+include::build/sample_registers.adoc[]
+
+[[tab:access]]
+.Register Access Abbreviations
+[width=75%,align="center",float="center",cols="<,^"]     
+|===
+|R | Read-only.
+|R/W | Read/Write.
+|R/W1C | Read/Write Ones to Clear. Writing 0 to every bit has no effect. Writing 1 to every bit clears the field. The result of other writes is        undefined.
+|WARZ | Write any, read zero. A debugger may write any value. When read this field returns 0.
+|W1 | Write-only. Only writing 1 has an effect. When read the returned value should be 0.
+|WARL | Write any, read legal. A debugger may write any value. If a value is unsupported, the implementation converts the value to one that is supported. 
+|===
+
+=== Background
+
+There are several use cases for dedicated debugging hardware, both in
+native debug and external debug. Native debug (sometimes called
+self-hosted debug) refers to debug software running on a RISC-V platform
+which debugs the same platform. The optional Trigger Module provides
+features that are useful for native debug. External debug refers to
+debug software running somewhere else, debugging the RISC-V platform via
+a debug transport like JTAG. The entire document provides features that
+are useful for external debug.
+
+This specification addresses the use cases listed below. Implementations
+can choose not to implement every feature, which means some use cases
+might not be supported.
+
+* Accessing hardware on a hardware platform without a working CPU.
+(External debug.)
+* Bootstrapping a hardware platform to test, configure, and program
+components before there is any executable code path in the hardware
+platform. (External debug.)
+* Debugging low-level software in the absence of an OS or other
+software. (External debug.)
+* Debugging issues in the OS itself. (External or native debug.)
+* Debugging processes running on an OS. (Native or external debug.)
+
+=== Supported Features
+
+The debug interface described in this specification supports the
+following features:
+
+. All hart registers (including CSRs) can be read/written.
+. Memory can be accessed either from the hart's point of view, through
+the system bus directly, or both.
+. RV32, RV64, and future RV128 are all supported.
+. Any hart in the hardware platform can be independently debugged.
+. A debugger can discover almost footnote:[Notable exceptions include
+information about the memory map and peripherals.] everything it needs
+to know itself, without user configuration.
+. Each hart can be debugged from the very first instruction executed.
+. A RISC-V hart can be halted when a software breakpoint instruction is
+executed.
+. Hardware single-step can execute one instruction at a time.
+. Debug functionality is independent of the debug transport used.
+. The debugger does not need to know anything about the
+microarchitecture of the harts it is debugging.
+. Arbitrary subsets of harts can be halted and resumed simultaneously.
+(Optional)
+. Arbitrary instructions can be executed on a halted hart. That means no
+new debug functionality is needed when a core has additional or custom
+instructions or state, as long as there exist programs that can move
+that state into GPRs. (Optional)
+. Registers can be accessed without halting. (Optional)
+. A running hart can be directed to execute a short sequence of
+instructions, with little overhead. (Optional)
+. A system bus manager allows memory access without involving any hart.
+(Optional)
+. A RISC-V hart can be halted when a trigger matches the PC, read/write
+address/data, or an instruction opcode. (Optional)
+. Harts can be grouped, and harts in the same group will all halt when
+any of them halts. These groups can also react to or notify external
+triggers. (Optional)
+
+This document does not suggest a strategy or implementation for hardware
+test, debugging or error detection techniques. Scan, built-in self test
+(BIST), etc. are out of scope of this specification, but this
+specification does not intend to limit their use in RISC-V systems.
+
+It is possible to debug code that uses software threads, but there is no
+special debug support for it.
