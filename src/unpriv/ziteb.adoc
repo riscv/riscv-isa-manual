@@ -136,15 +136,16 @@ uint8_t bounds_check_bypass(size_t x, uint8_t* arr1, size_t len1, uint8_t* arr2)
 }
 
 bounds_check_bypass:
-  li a0, 0
-  bgeu a0, a2, out
-  add a0, a0, a1
-  lbu a0, (a0)
-  slliw a0, a0, 12
-  add a0, a0, a3
-  lbu a0, (a0)
+    bgeu  a0, a2, out     # if (x >= len1), return 0
+    add   a0, a1, a0      # &arr1[x]
+    lbu   a0, (a0)        # arr1[x]
+    slli  a0, a0, 12      # arr1[x] * 4096
+    add   a0, a3, a0      # &arr2[arr1[x] * 4096]
+    lbu   a0, (a0)        # arr2[arr1[x] * 4096]
+    ret
 out:
-  ret
+    li    a0, 0
+    ret
 ```
 
 If the branch instruction is predicted not-taken but is actually taken,
@@ -177,13 +178,13 @@ uint8_t data_speculation_example(bool* mask, uint8_t* x, uint8_t* arr)
 }
 
 data_speculation_example:
-  lbu t0, (a0)
-  lbu t1, (a1)
-  czero.nez t0, t1, t0
-  slliw t0, t0, 12
-  add a2, a2, t0
-  lbu a0, (a2)
-  ret
+    lbu       t0, (a0)      # *mask
+    lbu       t1, (a1)      # *x
+    czero.nez t1, t1, t0    # *mask ? 0 : t1
+    slli      t1, t1, 12    # idx * 4096
+    add       t1, a2, t1    # &arr[idx * 4096]
+    lbu       a0, (t1)      # arr[idx * 4096]
+    ret
 ```
 
 If the first load instruction, which dereferences `mask`, is predicted to
@@ -222,12 +223,12 @@ uint8_t mem_dep_speculation_example(uint8_t* secret, uint8_t* p, uint8_t* arr)
 }
 
 mem_dep_speculation_example:
-  sb x0, (a0)
-  lbu t0, (a1)
-  slliw t0, t0, 12
-  add t0, t0, a2
-  lbu a0, (t0)
-  ret
+    sb   x0, (a0)         # *secret = 0
+    lbu  t0, (a1)         # *p
+    slli t0, t0, 12       # idx * 4096
+    add  t0, t0, a2       # &arr[idx * 4096]
+    lbu  a0, (t0)         # arr[idx * 4096]
+    ret
 ```
 
 Suppose `secret` and `p` point to the same byte in memory.
