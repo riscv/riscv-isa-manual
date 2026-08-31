@@ -73,6 +73,7 @@ ifneq ($(SKIP_DOCKER),true)
             -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
             -v ${PWD}/src:/src:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/normative_rule_defs:/normative_rule_defs:ro${DOCKER_EXTRA_VOL_SUFFIX} \
+            -v ${PWD}/$(GENERATED_DIR):/$(GENERATED_DIR):ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/docs-resources:/docs-resources:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -w /build \
             $(DOCKER_USER_ARG) \
@@ -84,14 +85,19 @@ else
         cd $@.workdir &&
 endif
 
+# Build inputs generated from other build outputs (e.g. the normative rules
+# appendix). Symlinked into the asciidoctor workdir and mounted into the
+# container just like the checked-in source directories.
+GENERATED_DIR := generated
+
 ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
-WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
+WORKDIR_SETUP = mkdir -p $(GENERATED_DIR) $@.workdir && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources ../../$(GENERATED_DIR) $@.workdir/
 WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
 else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
-    mkdir -p $@.workdir && \
-    ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
+    mkdir -p $(GENERATED_DIR) $@.workdir && \
+    ln -sfn ../../src ../../normative_rule_defs ../../docs-resources ../../$(GENERATED_DIR) $@.workdir/
 
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
@@ -109,6 +115,28 @@ DOCS_EPUB := $(addprefix $(BUILD_DIR)/, $(addsuffix .epub, $(DOCS)))
 DOCS_NORM_TAGS := $(addprefix $(BUILD_DIR)/, $(addsuffix $(DOC_NORM_TAG_SUFFIX), $(DOCS)))
 NORM_RULES_JSON := $(BUILD_DIR)/norm-rules.json
 NORM_RULES_HTML := $(BUILD_DIR)/norm-rules.html
+
+# Normative rules appendix (generated AsciiDoc table rows included by
+# src/unpriv/norm-rules-appendix.adoc).
+#
+# PROTOTYPE SCOPE: rv64 only. Set NORM_RULES_APPENDIX_DEFS to widen it, e.g.
+#   make build-html NORM_RULES_APPENDIX=1 NORM_RULES_APPENDIX_DEFS="$(wildcard $(NORM_RULE_DEF_DIR)/*.yaml)"
+NORM_RULES_APPENDIX_DIR := $(GENERATED_DIR)/norm-rule-appendix
+NORM_RULES_APPENDIX_MAIN := $(NORM_RULES_APPENDIX_DIR)/all_norm_rules_by_chapter.adoc
+NORM_RULES_APPENDIX_TOOL := scripts/create_norm_rule_tables.py
+NORM_RULES_APPENDIX_TABLE := scripts/default_norm_rule_table.yaml
+NORM_RULES_APPENDIX_DEFS ?= $(NORM_RULE_DEF_DIR)/rv64.yaml
+
+# Set NORM_RULES_APPENDIX=1 to include the appendix in the built manual. It is
+# off by default so that a plain build does not require the extra tags pass.
+NORM_RULES_APPENDIX ?= 0
+ifeq ($(NORM_RULES_APPENDIX),1)
+  NORM_RULES_APPENDIX_OPT := -a norm-rules-appendix-dir=../../$(NORM_RULES_APPENDIX_DIR)
+  NORM_RULES_APPENDIX_DEP := $(NORM_RULES_APPENDIX_MAIN)
+else
+  NORM_RULES_APPENDIX_OPT :=
+  NORM_RULES_APPENDIX_DEP :=
+endif
 
 ENV := LANG=C.utf8
 XTRA_ADOC_OPTS :=
@@ -134,6 +162,7 @@ OPTIONS_TAGS := --trace \
            -D build \
            --failure-level=WARN
 OPTIONS := $(OPTIONS_TAGS) \
+           $(NORM_RULES_APPENDIX_OPT) \
            -r ./src/lib/volume-xrefs.rb \
            -r ./src/lib/macros.rb
 REQUIRES := --require=asciidoctor-bibtex \
@@ -143,6 +172,7 @@ REQUIRES := --require=asciidoctor-bibtex \
 
 .PHONY: all build clean build-pdf build-html build-epub build-tags docker-pull-latest
 .PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-xref-fallbacks build-changebar-pdf
+.PHONY: build-norm-rules-appendix
 
 all: build
 
@@ -176,6 +206,7 @@ check-xref-fallbacks: $(DOCS_HTML)
 build-norm-rules-json: $(NORM_RULES_JSON)
 build-norm-rules-html: $(NORM_RULES_HTML)
 build-norm-rules: build-norm-rules-json build-norm-rules-html
+build-norm-rules-appendix: $(NORM_RULES_APPENDIX_MAIN)
 build: build-pdf build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
@@ -195,7 +226,19 @@ NORM_RULE_DOC2URL_ARGS := $(foreach doc_name,$(DOCS),-tag2url /$(BUILD_DIR)/$(do
 # Temporarily make errors warnings. Don't check this in uncommented.
 # NORM_RULE_DEF_ARGS := $(NORM_RULE_DEF_ARGS) -w
 
-$(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+# Pass 1 (build-tags) produces the tag JSON; this rule turns it plus the rule
+# definition files into AsciiDoc table rows; pass 2 (build-pdf/build-html with
+# NORM_RULES_APPENDIX=1) includes them. This terminates because the generated
+# appendix contains only xrefs and defines no new "norm:" tags, so it cannot
+# change the tag JSON that produced it.
+$(NORM_RULES_APPENDIX_MAIN): $(DOCS_NORM_TAGS) $(NORM_RULES_APPENDIX_DEFS) $(NORM_RULES_APPENDIX_TOOL) $(NORM_RULES_APPENDIX_TABLE)
+	python3 $(NORM_RULES_APPENDIX_TOOL) \
+	    $(foreach f,$(DOCS_NORM_TAGS),-t $(f)) \
+	    $(foreach f,$(NORM_RULES_APPENDIX_DEFS),-d $(f)) \
+	    --rule-table $(NORM_RULES_APPENDIX_TABLE) \
+	    --output-dir $(NORM_RULES_APPENDIX_DIR)
+
+$(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS) $(NORM_RULES_APPENDIX_DEP)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
@@ -208,13 +251,13 @@ $(CHANGEBAR_PDF): $(SRC_DIR)/$(DOCS).adoc $(ALL_SRCS)
 	mv $@.workdir/$(BUILD_DIR)/$(DOCS).pdf $@ && rm -rf $@.workdir
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
-$(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+$(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS) $(NORM_RULES_APPENDIX_DEP)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) -a revremark='$(RELEASE_DESCRIPTION_HTML)' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
-$(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
+$(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS) $(NORM_RULES_APPENDIX_DEP)
 	$(WORKDIR_SETUP)
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
