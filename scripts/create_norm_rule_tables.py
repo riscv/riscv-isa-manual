@@ -292,6 +292,14 @@ def render_location_cell(rule: Dict[str, Any], tag_index: Dict[str, Dict[str, An
     would render as the fallback "[norm:x]", which scripts/check_xref_fallbacks.py
     treats as a build failure.  Section xrefs are left bare on purpose so that
     :xrefstyle: short renders them as "Section N.N".
+
+    Tag xrefs are suppressed for the EPUB backend.  Most normative tags use the
+    inline span form ([#norm:x]#...#), and asciidoctor-epub3 does not register
+    those ids in its catalog, so referencing one raises "invalid reference to
+    unknown anchor" and --failure-level=WARN fails the build.  Block anchors
+    ([[norm:x]]) do resolve under EPUB, but the tag files do not record which
+    form a tag used, so the fallback is applied uniformly.  Section xrefs are
+    unaffected and still work in every backend.
     """
     lines = ["a|"]
     for tag_name in rule["tags"]:
@@ -300,9 +308,15 @@ def render_location_cell(rule: Dict[str, Any], tag_index: Dict[str, Dict[str, An
             error(f"Rule {rule['name']!r} references unknown tag {tag_name!r}")
             lines.append(f"* {literal(tag_name)} (tag not found)")
             continue
-        lines.append(
-            f"* <<{tag_name},{literal(tag_name)}>> in <<{entry['section_id']}>>"
-        )
+        section_ref = f"<<{entry['section_id']}>>"
+        lines += [
+            "ifndef::backend-epub3[]",
+            f"* <<{tag_name},{literal(tag_name)}>> in {section_ref}",
+            "endif::[]",
+            "ifdef::backend-epub3[]",
+            f"* {literal(tag_name)} in {section_ref}",
+            "endif::[]",
+        ]
     if len(lines) == 1:
         lines.append("* (no tags)")
     return "\n".join(lines)
