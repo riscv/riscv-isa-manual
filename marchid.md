@@ -61,13 +61,15 @@ ApogeoRV      | Gabriele Tripi                  | [Gabriele Tripi](mailto:tripi.
 MicroRV32      | AGRA, Group of Computer Architecture, University of Bremen | [RISC-V @ AGRA](mailto:riscv@informatik.uni-bremen.de)       | 41               | https://github.com/agra-uni-bremen/microrv32
 QEMU          | qemu.org                        | [QEMU Mailing List](mailto:qemu-riscv@nongnu.org)           | 42               | https://qemu.org
 KianV         | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 43               | https://github.com/splinedrive/kianRiscV
-Coreblocks    | Kuźnia Rdzeni, University of Wrocław | [Coreblocks Team](mailto:coreblocks@cs.uni.wroc.pl)    | 44               | https://github.com/kuznia-rdzeni/coreblocks
+Coreblocks    | Coreforge Foundation            | [Coreforge Foundation contact](mailto:org@kuznia-rdzeni.org) | 44              | https://github.com/kuznia-rdzeni/coreblocks
 rrv32         | Solra Bizna                     | [Solra Bizna](mailto:solra@bizna.name)                      | 45               | https://github.com/SolraBizna/rrv32
 VexiiRiscv    | SpinalHDL                       | [Charles Papon](mailto:charles.papon.90@gmail.com)          | 46               | https://github.com/SpinalHDL/VexiiRiscv
 Wildcat       | Technical University of Denmark | [Martin Schoeberl](mailto:masca@dtu.dk)                     | 47               | https://github.com/schoeberl/wildcat
 CVA5          | OpenHW Group                    | [Lesley Shannon](mailto:lesley_shannon@sfu.ca)              | 48               | https://github.com/openhwgroup/cva5
-River         | Midstall Software               | [Inquiry](mailto:inquire@midstall.com)                      | 49               | https://github.com/MidstallSoftware/river
+River         | Midstall                        | [Hello](mailto:hello@midstall.com)                          | 49               | https://github.com/Midstall/river
 Raptor        | Yu Jin                          | [Yu Jin](mailto:lambda.jinyu@gmail.com)                     | 50               | https://github.com/Kingfish404/raptor-chip
 Sargantana    | BSC-LOCA                        | [Narcís Rodas](mailto:narcis.rodaquiroga@bsc.es)            | 51               | https://github.com/bsc-loca/sargantana
 KianV Stealth | Hirosh Dabui                    | [Hirosh Dabui](mailto:hirosh@dabui.de)                      | 52               | https://github.com/splinedrive/kianRiscV
 RVController  | April Kolwey (cheapie)          | [April Kolwey](mailto:cheapiephp@gmail.com)                 | 53               | https://cheapiesystems.com/git/rvcontroller/
+aRVern        | Arvern Silicon                  | [Arvern Silicon](mailto:arvernsilicon@gmail.com)            | 54               | https://github.com/Arvern-Silicon
+SARV          | Amirreza Torabi                 | [Amirreza Torabi](mailto:sayyidtorabi@gmail.com)            | 55               | https://github.com/Sarst04/SARV

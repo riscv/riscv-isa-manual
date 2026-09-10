@@ -389,14 +389,13 @@ further delegated to VS-mode if the corresponding `hideleg` bit is set.#
 standard VS-level interrupts) are writable, and bits 12, 9, 5, and 1
 (corresponding to the standard S-level interrupts) are read-only zeros.#
 
-[[norm:hideleg_trans]]
-When a virtual supervisor external interrupt (code 10) is delegated to
+[#norm:hideleg_trans]#When a virtual supervisor external interrupt (code 10) is delegated to
 VS-mode, it is automatically translated by the machine into a supervisor
 external interrupt (code 9) for VS-mode, including the value written to
 `vscause` on an interrupt trap. Likewise, a virtual supervisor timer
 interrupt (6) is translated into a supervisor timer interrupt (5) for
 VS-mode, and a virtual supervisor software interrupt (2) is translated
-into a supervisor software interrupt (1) for VS-mode. Similar
+into a supervisor software interrupt (1) for VS-mode.# Similar
 translations may or may not be done for platform interrupt
 causes (codes 16 and above).
 
@@ -1328,7 +1327,7 @@ include::images/bytefield/vsscratchreg.edn[]
 
 ==== Virtual Supervisor Exception Program Counter (`vsepc`) Register
 
-[[norm:vspec_sz_acc_op]]
+[[norm:vsepc_sz_acc_op]]
 The `vsepc` register is a VSXLEN-bit read/write register that is
 VS-mode’s version of supervisor register `sepc`, formatted as shown in
 <<vsepcreg>>. When V=1, `vsepc` substitutes for the
@@ -1417,6 +1416,9 @@ A bits to be set.
 ignored as it is for `satp`, or the fields of `vsatp` are treated as *WARL* in
 the normal way.# [#norm:vsatp_mode_unsupported_v1]#However, when V=1, a write to `satp` with an unsupported
 MODE value _is_ ignored and no write to `vsatp` is effected.#
+
+[#norm:vsatp_asidlen]#The ASID field in the `vsatp` register has the same number of implemented bits
+as that of the `satp` register, i.e., it is ASIDLEN bits wide.#
 
 [[norm:vsatp_v0]]
 When V=0, `vsatp` does not directly affect the behavior of the machine,
@@ -1509,9 +1511,13 @@ instructions, rather than raising fetch exceptions instead.
 ====
 
 [[norm:hlvx-wu_valid32]]
-HLVX.WU is valid for RV32, even though LWU and HLV.WU are not. (For
-RV32, HLVX.WU can be considered a variant of HLV.W, as sign extension is
-irrelevant for 32-bit values.)
+HLVX.WU is valid for RV32, even though LWU and HLV.WU are not.
+
+[NOTE]
+====
+For RV32, HLVX.WU can be considered a variant of HLV.W, as sign extension is
+irrelevant for 32-bit values.
+====
 
 The memory accesses performed by the `HLVX.*` instructions are not subject to
 pointer masking (see <<Zpm>>).
@@ -1845,7 +1851,7 @@ the instruction as indicated by the virtual address in `mtval`.
 capable of holding only an arbitrary subset of other 2-bit-shifted guest
 physical addresses, if any.
 
-[[norm:mtval2_Ssdbltrap]]
+[[norm:mtval2_Ssdbltrp]]
 The Ssdbltrap extension (See <<ssdbltrp>>) requires the implementation of
 the `mtval2` CSR.
 
@@ -1870,15 +1876,14 @@ the implementation may automatically write to it on a trap.
 [[two-stage-translation]]
 === Two-Stage Address Translation
 
-[[norm:H_vm_twostage]]
-Whenever the current virtualization mode V is 1, two-stage address
+[#norm:H_vm_twostage]#Whenever the current virtualization mode V is 1, two-stage address
 translation and protection is in effect. For any virtual memory access,
 the original virtual address is converted in the first stage by VS-level
 address translation, as controlled by the `vsatp` register, into a
 _guest physical address_. The guest physical address is then converted
 in the second stage by guest physical address translation, as controlled
 by the `hgatp` register, into a supervisor physical address. The two
-stages are known also as VS-stage and G-stage translation. Although
+stages are known also as VS-stage and G-stage translation.# Although
 there is no option to disable two-stage address translation when V=1,
 either stage of translation can be effectively disabled by zeroing the
 corresponding `vsatp` or `hgatp` register.
@@ -2082,7 +2087,7 @@ When V=1, the virtual-address argument to SFENCE.VMA is a guest virtual
 address within the current virtual machine, and the ASID argument is a
 VS-level ASID within the current virtual machine. The current virtual
 machine is identified by the VMID field of CSR `hgatp`, and the
-effective ASID can be considered to be the combination of this VMID with
+effective ASID is the combination of this VMID with
 the VS-level ASID. The SFENCE.VMA instruction orders stores only to the
 VS-level address-translation structures with subsequent VS-stage address
 translations for the same virtual machine, i.e., only when `hgatp`.VMID
@@ -2135,6 +2140,9 @@ supervisor physical addresses. When running with virtualization in VS/VU mode
 with csr:vsatp[mode]=Bare, this means that those qty:2[bits] may be subject to
 pointer masking, depending on csr:hgatp[mode] and csr:senvcfg[pmm] or csr:henvcfg[pmm] (for
 VU/VS mode). If csr:vsatp[mode]{ne}Bare, this issue does *not* apply.
+Those qty:2[bits] may likewise be subject to pointer masking according to
+csr:hstatus[hupmm] for explicit memory accesses made by `HLV.\*` or `HSV.*`
+instructions in U-mode as though in VU-mode.
 
 [NOTE]
 ====
@@ -2149,8 +2157,9 @@ entries.
 
 To support implementations where (XLEN-PMLEN) can be less than the GPA width
 supported by `hgatp.MODE`, hypervisors should execute an `HFENCE.GVMA` with
-_rs1_=`x0` if the `henvcfg.PMM` is changed from or to a value where (XLEN-PMLEN)
-is less than GPA width supported by the `hgatp` translation mode of that guest.
+_rs1_=`x0` if either `henvcfg.PMM` or `hstatus.HUPMM` is changed from or to a
+value where (XLEN-PMLEN) is less than GPA width supported by the `hgatp`
+translation mode of that guest.
 Specifically, these cases are:
 
 * `PMLEN=7` and `hgatp.MODE=sv57x4`
@@ -2484,7 +2493,7 @@ or access fault
 |===
 
 [[norm:H_exception_priority]]
-If an instruction may raise multiple synchronous exceptions, the
+If an instruction raises multiple synchronous exceptions, the
 decreasing priority order of <<HSyncExcPrio>>
 indicates which exception is taken and reported in `mcause` or `scause`.
 
@@ -2791,11 +2800,11 @@ For a standard virtual-machine load/store instruction (HLV, HLVX, or HSV), the t
 .Transformed virtual-machine load/store instruction (HLV, HLVX, HSV). All fields are the same as the trapping instruction except bits 19:15, Addr. Offset
 include::images/wavedrom/transformedvmaccessinst.edn[]
 
-In all the transformed instructions above, the Addr. Offset field that
+[#norm:H_tinst_addr_offset]#In all the transformed instructions above, the Addr. Offset field that
 replaces the instruction’s rs1 field in bits 19:15 is the positive
 difference between the faulting virtual address (written to `mtval` or
 `stval`) and the original virtual address. This difference can be
-nonzero only for a misaligned memory access. Note also that, for basic
+nonzero only for a misaligned memory access.# Note also that, for basic
 loads and stores, the transformations replace the instruction’s
 immediate offset fields with zero.
 
