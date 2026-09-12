@@ -1,0 +1,134 @@
+[[ext:zibi]]
+=== ext:zibi[] Extension for Branch with Immediate
+
+This section describes version 0.7 of the ext:zibi[] extension, which adds
+conditional branch instructions that compare an integer register with a small
+immediate constant.
+
+[NOTE]
+====
+Existing conditional branch instructions, such as insn:beq[] and insn:bne[],
+compare two integer registers.
+When a branch compares against a constant, software must otherwise materialize
+that constant in an integer register before branching, which can increase
+register pressure and potentially cause register spills and reloads.
+====
+
+The ext:zibi[] extension adds the following instructions:
+
+[%header,cols="^1,^1,4,8"]
+|===
+|RV32
+|RV64
+|Mnemonic
+|Instruction
+
+|{check}
+|{check}
+|insn:beqi[rs1,comparand,offset]
+|<<#insns-beqi>>
+
+|{check}
+|{check}
+|insn:bnei[rs1,comparand,offset]
+|<<#insns-bnei>>
+
+|===
+
+[#norm:zibi_btype_offset]#The insn:beqi[] and insn:bnei[] instructions use
+the B-type instruction format. The 12-bit B-immediate encodes signed offsets
+in multiples-of-two bytes. The offset is sign-extended and added to the address
+of the branch instruction to give the target address.# The conditional branch
+range is {pm}4{nbsp}KiB.
+
+[#norm:zibi_enc]#In the insn:beqi[] and insn:bnei[] encodings, the
+instruction bits that would otherwise carry _rs2_ in a B-type branch carry the
+5-bit _cimm_ field.#
+
+[[zibi-encoding]]
+.Branch-with-immediate instruction encoding
+[wavedrom, ,svg]
+....
+{reg: [
+  {bits: 7,  name: 0x63,            attr: ['BRANCH'] },
+  {bits: 5,  name: 'imm[4:1|11]',   attr: ['offset[4:1|11]'] },
+  {bits: 3,  name: 'funct3',        attr: ['BEQI:010', 'BNEI:011'] },
+  {bits: 5,  name: 'rs1',           attr: ['src'] },
+  {bits: 5,  name: 'cimm',          attr: ['comparand'] },
+  {bits: 7,  name: 'imm[12|10:5]',  attr: ['offset[12|10:5]'] },
+], config:{fontsize: 10}}
+....
+
+[#norm:zibi_cimm_decode]#All _cimm_ encodings are valid. The _cimm_ field
+encodes the XLEN-bit _comparand_ used in the comparison: pattern 0 encodes the
+value -1, whereas patterns 1 through 31 encode the values 1 through 31,
+respectively.#
+
+[stem]
+++++
+\small
+comparand =
+\left\{
+\begin{array}{ll}
+  \mathrm{zext}(cimm) & \text{if } cimm \neq 0 \\
+  -1 & \text{if } cimm = 0
+\end{array}
+\right.
+++++
+
+[NOTE]
+====
+Profiling general benchmarks shows that positive immediate values occur more
+frequently than negative immediate values.
+Comparison with zero can be performed using insn:beq[rs1,x0,offset] or
+insn:bne[rs1,x0,offset].
+====
+
+[#norm:zibi_no_state]#The insn:beqi[] and insn:bnei[] instructions do not
+write any integer register and do not access memory.#
+
+[#norm:zibi_misaligned_exception]#The insn:beqi[] and insn:bnei[] instructions
+follow the same instruction-address-misaligned exception behavior as other
+conditional branch instructions: an instruction-address-misaligned exception is
+generated only when the branch condition evaluates to true and the target
+address is not IALIGN-bit aligned.#
+
+==== Instructions
+
+[#insns-beqi,reftext="Branch if equal immediate"]
+===== insn:beqi[]
+
+Synopsis::
+Branch if equal immediate
+
+Mnemonic::
+beqi _rs1_, _comparand_, _offset_
+
+Description::
+[[norm:zibi_beqi_op]]
+The insn:beqi[] instruction compares the value in integer register _rs1_ with
+the XLEN-bit _comparand_ encoded by _cimm_.
+If the two values are equal, the branch is taken.
+Otherwise, execution continues at the next sequential instruction.
+
+Included in: ext:zibi[]
+
+[#insns-bnei,reftext="Branch if not equal immediate"]
+===== insn:bnei[]
+
+Synopsis::
+Branch if not equal immediate
+
+Mnemonic::
+bnei _rs1_, _comparand_, _offset_
+
+Description::
+[[norm:zibi_bnei_op]]
+The insn:bnei[] instruction compares the value in integer register _rs1_ with
+the XLEN-bit _comparand_ encoded by _cimm_.
+If the two values are not equal, the branch is taken.
+Otherwise, execution continues at the next sequential instruction.
+
+Included in: ext:zibi[]
+
+//
