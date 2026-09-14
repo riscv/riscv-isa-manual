@@ -21,6 +21,9 @@ on:
   pull_request:
     branches:
       - main
+  # Weekly run of the experimental Ubuntu 26.04 build (see build-ubuntu2604).
+  schedule:
+    - cron: 0 3 * * 2
 
 # Jobs only need to read the repository. The release step authenticates with the
 # GHTOKEN secret, and deploy sets the Pages permissions it needs.
@@ -157,6 +160,47 @@ jobs:
           echo "build-html: ${{ needs.build-html.result }}"
           test "${{ needs.build-pdf.result }}" = success
           test "${{ needs.build-html.result }}" = success
+
+  # Experimental: build the manual with the Ubuntu 26.04 LTS container image, to catch
+  # source changes that break on newer tools before latest moves to it. It is allowed
+  # to fail, does not run on pull requests, and its outputs are never released or
+  # deployed.
+  build-ubuntu2604:
+    name: Build with experimental Ubuntu 26.04 image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      EXPERIMENTAL_IMG: ghcr.io/riscv/riscv-docs-base-container-image:experimental-ubuntu2604
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+
+      - name: Cache rendered diagrams
+        uses: actions/cache@v6
+        with:
+          path: .diagram-cache
+          key: isa-diagrams-ubuntu2604-${{ hashFiles('src/**') }}
+          restore-keys: isa-diagrams-ubuntu2604-
+
+      - name: Pull build container
+        run: make docker-pull-latest DOCKER_IMG=$EXPERIMENTAL_IMG
+
+      - name: Build all outputs
+        run: make -j$(nproc) DOCKER_IMG=$EXPERIMENTAL_IMG
+
+      - name: Upload riscv-spec.pdf
+        uses: actions/upload-artifact@v7
+        with:
+          name: riscv-spec-${{ env.SHORT_SHA }}-ubuntu2604.pdf
+          path: ${{ github.workspace }}/build/riscv-spec.pdf
+          retention-days: 7
 
   # Create the release and the GitHub Pages content from the outputs of both build jobs.
   publish:
