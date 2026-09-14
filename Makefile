@@ -43,6 +43,12 @@ endif
 
 RELEASE_DESCRIPTION_HTML := $(RELEASE_DESCRIPTION).  © RISC-V International, $(YEAR).
 
+# Persistent asciidoctor-diagram cache. Each target keeps its own subdirectory,
+# so targets built in parallel never write the same cache files, and the cache
+# survives the per-target workdirs being deleted. Rendered diagrams are reused as
+# long as their source is unchanged. CI saves this directory between runs.
+DIAGRAM_CACHE_DIR ?= .diagram-cache
+
 DOCKER_BIN ?= docker
 DOCKER_INTERACTIVE=--init $(shell [ -t 0 ] && echo "-t")
 SKIP_DOCKER ?= $(shell if command -v ${DOCKER_BIN}  >/dev/null 2>&1 ; then echo false; else echo true; fi)
@@ -74,23 +80,29 @@ ifneq ($(SKIP_DOCKER),true)
             -v ${PWD}/src:/src:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/normative_rule_defs:/normative_rule_defs:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/docs-resources:/docs-resources:ro${DOCKER_EXTRA_VOL_SUFFIX} \
+            -v ${PWD}/$(DIAGRAM_CACHE_DIR):/diagram-cache${DOCKER_VOL_SUFFIX} \
             -w /build \
             $(DOCKER_USER_ARG) \
             ${DOCKER_IMG} \
             /bin/sh -c
     DOCKER_QUOTE := "
+    DIAGRAM_CACHE_ROOT := /diagram-cache
 else
     DOCKER_CMD = \
         cd $@.workdir &&
+    DIAGRAM_CACHE_ROOT := $(abspath $(DIAGRAM_CACHE_DIR))
 endif
 
+# Recursively expanded so that $@ is the target being built.
+DIAGRAM_CACHE_OPTS = -a diagram-cachedir=$(DIAGRAM_CACHE_ROOT)/$(notdir $@) -a diagram-cache-images-option
+
 ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
-WORKDIR_SETUP = mkdir -p $@.workdir && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
+WORKDIR_SETUP = mkdir -p $@.workdir $(DIAGRAM_CACHE_DIR)/$(notdir $@) && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
 WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
 else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
-    mkdir -p $@.workdir && \
+    mkdir -p $@.workdir $(DIAGRAM_CACHE_DIR)/$(notdir $@) && \
     ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
 
 WORKDIR_TEARDOWN = \
@@ -141,7 +153,7 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-lists \
             --require=asciidoctor-sail
 
-.PHONY: all build clean build-pdf build-html build-epub build-tags docker-pull-latest
+.PHONY: all build clean clean-diagram-cache build-pdf build-html build-epub build-tags docker-pull-latest
 .PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-xref-fallbacks build-changebar-pdf
 
 all: build
@@ -197,32 +209,32 @@ NORM_RULE_DOC2URL_ARGS := $(foreach doc_name,$(DOCS),-tag2url /$(BUILD_DIR)/$(do
 
 $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(DIAGRAM_CACHE_OPTS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(CHANGEBAR_PDF): $(SRC_DIR)/$(DOCS).adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
 	bash ./scripts/gen-changebar-diff.sh "$(CHANGEBAR_BASE)" > "$@.workdir/$(CHANGEBAR_DIFF_JSON)"
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(CHANGEBAR_OPTS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_PDF) $(OPTIONS) $(DIAGRAM_CACHE_OPTS) $(CHANGEBAR_OPTS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	mv $@.workdir/$(BUILD_DIR)/$(DOCS).pdf $@ && rm -rf $@.workdir
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.html: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) -a revremark='$(RELEASE_DESCRIPTION_HTML)' $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) $(OPTIONS) $(DIAGRAM_CACHE_OPTS) -a revremark='$(RELEASE_DESCRIPTION_HTML)' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_EPUB) $(OPTIONS) $(DIAGRAM_CACHE_OPTS) $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 	@printf '\n  Built \033]8;;file://%s\033\\%s\033]8;;\033\\\n\n' "$(abspath $@)" "$@"
 
 $(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/converters/tags.rb
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS_TAGS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS_TAGS) $(DIAGRAM_CACHE_OPTS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 $(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL)
@@ -241,7 +253,7 @@ $(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_
 
 $(BUILD_DIR)/%.check-xrefs: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) -v $(OPTIONS) $(REQUIRES) $< 2>&1 | grep 'possible invalid reference' && exit 1 || [ $$? -eq 0 ] $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_HTML) -v $(OPTIONS) $(DIAGRAM_CACHE_OPTS) $(REQUIRES) $< 2>&1 | grep 'possible invalid reference' && exit 1 || [ $$? -eq 0 ] $(DOCKER_QUOTE)
 	@[ ! -f $@.workdir/$(BUILD_DIR)/$(notdir $*).html ] && exit 0 || python3 scripts/check_xref_fallbacks.py $@.workdir/$(BUILD_DIR)/$(notdir $*).html
 
 # Update docker image to latest
@@ -252,3 +264,6 @@ clean:
 	@echo "Cleaning up generated files..."
 	rm -rf $(BUILD_DIR)
 	@echo "Cleanup completed."
+
+clean-diagram-cache:
+	rm -rf $(DIAGRAM_CACHE_DIR)
