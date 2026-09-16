@@ -30,6 +30,16 @@ on:
 permissions:
   contents: read
 
+# GitHub Pages rejects a deployment while another is in progress, so runs for
+# back-to-back pushes to main must not overlap. Runs in a group wait for the one
+# in progress and start in the order they were triggered, so the newest commit
+# deploys last. Only the newest waiting run is kept; older waiting ones are
+# cancelled. The event name keeps scheduled and manual runs on main out of the
+# push queue, so a push can't cancel a waiting release run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
 # The PDF is by far the slowest output, so it builds in its own job, in parallel
 # with the HTML, EPUB and normative rule files. Each job keeps a persistent
 # asciidoctor-diagram cache (.diagram-cache, see the Makefile), so diagrams whose
@@ -272,13 +282,6 @@ jobs:
 
     needs: publish
 
-    # GitHub Pages rejects a deployment while another is in progress, so run
-    # deploys one at a time. Don't cancel a running deploy; a newer queued run
-    # replaces any older one still waiting.
-    concurrency:
-      group: github-pages-deploy
-      cancel-in-progress: false
-
     permissions:
       pages: write
       id-token: write
@@ -289,20 +292,6 @@ jobs:
 
     runs-on: ubuntu-latest
     steps:
-    # Runs for back-to-back pushes can finish out of order, so skip the deploy
-    # if main has moved on; otherwise an older build could overwrite a newer one.
-      - name: Check that this commit is still the head of main
-        id: check-head
-        run: |
-          head_sha=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/main | cut -f1)
-          if [ "$head_sha" = "$GITHUB_SHA" ]; then
-            echo "latest=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "latest=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping deploy: main is at $head_sha, this run built $GITHUB_SHA."
-          fi
-
       - name: Deploy to GitHub Pages
-        if: steps.check-head.outputs.latest == 'true'
         id: deployment
         uses: actions/deploy-pages@v5
