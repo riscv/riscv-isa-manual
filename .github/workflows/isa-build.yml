@@ -272,6 +272,13 @@ jobs:
 
     needs: publish
 
+    # GitHub Pages rejects a deployment while another is in progress, so run
+    # deploys one at a time. Don't cancel a running deploy; a newer queued run
+    # replaces any older one still waiting.
+    concurrency:
+      group: github-pages-deploy
+      cancel-in-progress: false
+
     permissions:
       pages: write
       id-token: write
@@ -282,6 +289,20 @@ jobs:
 
     runs-on: ubuntu-latest
     steps:
+    # Runs for back-to-back pushes can finish out of order, so skip the deploy
+    # if main has moved on; otherwise an older build could overwrite a newer one.
+      - name: Check that this commit is still the head of main
+        id: check-head
+        run: |
+          head_sha=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/main | cut -f1)
+          if [ "$head_sha" = "$GITHUB_SHA" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deploy: main is at $head_sha, this run built $GITHUB_SHA."
+          fi
+
       - name: Deploy to GitHub Pages
+        if: steps.check-head.outputs.latest == 'true'
         id: deployment
         uses: actions/deploy-pages@v5
