@@ -92,6 +92,49 @@ blocks and draw the bars.
 - Sign off your commit with `git commit -s` or add `git config --global format.signOff true` to your global git config.
 - Open a pull request with a short summary of what changed and why.
 
+## Pull request titles
+
+Pull request titles become merge commit subjects and release note entries, so every title follows one form, checked by the `PR Title Check` workflow:
+
+```
+area: summary
+```
+
+- `area` is one of the areas below. Combine two with a slash, e.g. `priv/unpriv:`.
+- A new extension uses its volume (`priv`, `unpriv`) or its family (`vector`, `crypto`, `hypervisor`, `debug`).
+- Every normative rule change uses `norm-rules`, whichever volume it touches.
+- `summary` says what the change does, in the imperative ("add", "clarify", "fix"), with no trailing period.
+- Keep the whole title to 72 characters or fewer. Put detail, context and linked issues in the description.
+- When a change is one of a series, make each title distinct, e.g. name the extension or chapter it touches.
+
+| Area | Use for |
+|---|---|
+| `priv` | Privileged specification (`src/priv`), except the hypervisor extension |
+| `unpriv` | Unprivileged specification (`src/unpriv`) |
+| `hypervisor` | Hypervisor extension (H) |
+| `vector` | Vector extensions |
+| `crypto` | Scalar and vector cryptography extensions |
+| `debug` | Debug and trace content |
+| `profiles` | Profiles (`src/profiles`) |
+| `norm-rules` | Any normative rule change: tags, keywords and definitions (`normative_rule_defs/`), in either volume |
+| `editorial` | Typos, wording and formatting fixes that change no requirement |
+| `marchid` | `marchid.md` registrations |
+| `docs` | Contributor documentation, README, build instructions |
+| `ci` | Workflows, build scripts, container and tooling changes |
+| `deps` | Dependency and submodule updates |
+
+Examples:
+
+```
+priv: clarify that sip can contain machine interrupts
+editorial: fix typos in the atomics chapter
+unpriv: add Zibi extension for branch with immediate
+norm-rules: apply CSC WG keyword changes to Zicsr
+ci: cache rendered diagrams and build the PDF in its own job
+```
+
+If the check fails, edit the title on GitHub; the check re-runs automatically. Titles GitHub generates for reverts (`Revert "..."`) are accepted as they are.
+
 ## PR checklist (as applicable)
 
 - Run the relevant build target(s), such as `make build`, `make build-pdf`, or `make build-html`.
