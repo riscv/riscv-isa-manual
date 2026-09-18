@@ -1,0 +1,431 @@
+[[dataTracePackets]]
+== Data Trace Encoder Output Packets
+
+Data trace packets must be differentiated from instruction trace
+packets, and the means by which this is accomplished is dependent on the
+trace transport infrastructure. Several possibilities exist: One option
+is for instruction and data trace to be issued using different IDs (for
+example, if using ATB transport, different *ATID* values).
+Alternatively, an additional field as part of the packet encapsulation
+can be used (Siemens uses a 2-bit *msg_type* field to differentiate
+different trace types from the same source).
+
+By default, all data trace packets include both address and data.
+However, provision is made for run-time configuration options to exclude
+either the address or the data, in order to minimize trace bandwidth.
+For example, if filtering has been configured to only trace from a
+specific data access address there is no need to report the address in
+the trace. Alternatively, the user may want to know which locations are
+accessed but not care about the data value. Information about whether
+address or data are omitted is not encoded in the packets themselves as
+it does not change dynamically, and to do so would reduce encoding
+efficiency. The run-time configuration should be reported in the Format
+3, subformat 3 support packet (see <<sec:format33>>). The following sections include examples for all three cases.
+
+As outlined in <<sec:DataInterfaceRequirements>>, two different signaling protocols between the RISC-V hart and the encoder are supported: _unified_ and _split_. Accordingly, both unified and split trace packets are defined.
+
+[NOTE]
+====
+In the following tables, "clog2" is an abbreviation for "ceiling
+of log2".
+====
+
+[[sec:data-loadstore]]
+=== Load and Store
+
+[[sec:loadstore-format]]
+==== format field
+
+Types of data trace packets are differentiated by the *format* field.
+This field is 2 bits wide if only unified loads and stores are
+supported, or 3 bits otherwise.
+
+Unified loads and split load request phase share the same code because
+the encoder will support one or the other, indicated by a discoverable
+parameter.
+
+Data accesses aligned to their size (e.g. 32-bit loads aligned to 32-bit
+word boundaries) are expected to be commonplace, and in such cases,
+encoding efficiency can be improved by not reporting the redundant LSBs
+of the address.
+
+.Packet format for Unified load or store, with address and data
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 2 or 3 | Transaction type: +
+000: Unified load or split load address, aligned +
+001: Unified load or split load address, unaligned +
+010: Store, aligned address +
+011: Store, unaligned address +
+(other codes select other packet formats)
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*diff* | 2 | 00: Full address and data (sync) +
+01: Differential address, XOR-compressed data +
+10: Differential address, full data +
+11: Differentail address, differential data
+|*data_len* | *size* | Number of bytes of data is *data_len* + 1
+|*data* | 8 * (*data_len* + 1) | Data
+|*address* | _daddress_width_p_ | Byte address if format is unaligned,
+otherwise shift left by *size* to recover byte address
+|===
+
+.Packet format for Unified load or store, with address only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 2 or 3 | Transaction type +
+000: Unified load or split load address, aligned +
+001: Unified load or split load address, unaligned +
+010: Store, aligned address +
+011: Store, unaligned address +
+(other codes select other packet formats)
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*diff* | 1 | 0: Full address (sync) +
+1: Differential address
+|*address* | _daddress_width_p_ | Byte address if format is unaligned,
+otherwise shift left by *size* to recover byte address
+|===
+
+[[tab:te_datadx0y2]]
+.Packet format for Unified load or store, with data only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 2 or 3 | Transaction type +
+000: Unified load or split load address, aligned +
+001: Unified load or split load address, unaligned +
+010: Store, aligned address +
+011: Store, unaligned address +
+(other codes select other packet formats)
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*diff* | 1 or 2 | 00: Full data (sync) +
+01: Compressed data (XOR if 2 bits) +
+10: reserved +
+11 : Differential data
+|*data* | _data_width_p_ | Data
+|===
+
+.Packet format for Split load - Address only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+000: Unified load or split load address, aligned +
+001: Unified load or split load address, unaligned +
+(other codes select other packet formats)
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*lrid* | _lrid_width_p_ | Load request ID
+|*diff* | 1 | 0: Full address (sync) +
+1: Differential address
+|*address* | _daddress_width_p_ | Byte address if format is unaligned,
+otherwise shift left by *size* to recover byte address
+|===
+
+.Packet format for Split load - Data only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+100: split load data +
+(other codes select other packet formats)
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*lrid* | _lrid_width_p_ | Load request ID
+|*resp* | 2 | 00: Error (no data) +
+01: XOR-compressed data +
+10: Full data +
+11: Differential data
+|*data* | _data_width_p_ | Data
+|===
+
+[[sec:loadstore-size]]
+==== size field
+
+The width of this field is 2 bits if max size is 64-bits (_data_width_p_
+< 128), 3 bits if wider.
+
+[[sec:loadstore-diff]]
+==== diff field
+
+Unlike instruction trace, compression options for data trace are
+somewhat limited. Following a synchronization instruction trace packet,
+the first data trace packet for a given access size must include the
+full (unencoded) data access address. Thereafter, the address may be
+reported differentially (i.e. address of this data access, minus the
+address of the previous data access of the same size).
+
+Similarly, following a synchronization instruction trace packet, the
+first data trace packet for a given access size must include the full
+(unencoded) data value. Beyond this, data may be encoded or unencoded
+depending on whichever results in the most efficient represenation.
+Implementors may chose to offer one of XOR or differential compression,
+or both. XOR compression will be simpler to implement, and avoids the
+need for performing subtraction of large values.
+
+If only one data compression type is offered, the *diff* field can be 1
+bit wide rather than 2 for <<tab:te_datadx0y2>>.
+
+[[sec:loadstore-datalen]]
+==== data_len field
+
+However the data is compressed, upper bytes that are all the same value
+do not need to be included in the packet; the decoder can recreate the
+full-width value by sign extending from the most significant received
+bit. In cases where *data* is not the final field in the packet, the
+width of *data* is indicated by this field.
+
+[[sec:data-atomic]]
+=== Atomic
+
+[[sec:atomic-size]]
+==== size field
+
+Strictly, *size* could be just one bit as atomics are currently either
+32 or 64 bits. Defining as per regular loads and stores provisions for
+future extensions (proprietary or otherwise) that support smaller
+atomics.
+
+.Packet format for Unified atomic with address and data
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+110: Unified atomic or split atomic address +
+(other codes other packet formats)
+|*subtype* | 3 | Atomic sub-type +
+000: Swap +
+001: ADD +
+010: AND +
+011: OR +
+100: XOR +
+101: MAX +
+110: MIN +
+111: reserved
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*diff* | 2 | 00: Full address and data (sync) +
+01: Differential address, XOR-compressed data +
+10: Differential address, full data +
+11: Differential address, differential data
+|*op_len* | *size* | Number of bytes of operand is *op_len* + 1
+|*operand* | 8 * (*op_len* + 1) | Operand. Value from rs2 before operator
+applied
+|*data_len* | *size* | Number of bytes of data is *data_len* + 1
+|*data* | 8 * (*data_len* + 1) | Data
+|*address* | _daddress_width_p_ | Address, aligned and encoded as per
+size
+|===
+
+.Packet format for Unified atomic with address only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+110: Unified atomic or split atomic address +
+(other codes other packet formats)
+|*subtype* | 3 | Atomic sub-type +
+000: Swap +
+001: ADD +
+010: AND +
+011: OR +
+100: XOR +
+101: MAX +
+110: MIN +
+111: conditional store failure
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*diff* | 1 | 0: Full address +
+1: Differential address
+|*address* | _daddress_width_p_ | Address, aligned and encoded as per
+size
+|===
+
+.Packet format for Unified atomic with data only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+110: Unified atomic or split atomic address +
+(other codes other packet formats)
+|*subtype* | 3 | Atomic sub-type +
+000: Swap +
+001: ADD +
+010: AND +
+011: OR +
+100: XOR +
+101: MAX +
+110: MIN +
+111: reserved
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*diff* | 1 or 2 | 00: Full data (sync) +
+01: Compressed data (XOR if 2 bits) +
+10: reserved +
+11: Differential data
+|*op_len* | *size* | Number of bytes of operand is *op_len* + 1
+|*operand* | 8 * (*op_len* + 1) | Operand. Value from rs2 before operator
+applied
+|*data* | _data_width_p_ | Data
+|===
+
+[[sec:atomic-diff]]
+==== diff field
+
+See <<sec:loadstore-diff>>.
+
+[[sec:atomic-operand]]
+==== operand field
+
+The operand value for the atomic operation. Uncompressed, although upper
+bytes that are all the same value do not need to be included in the
+packet; the decoder can recreate the full-width value by sign extending
+from the most significant received bit; see <<sec:atomic-datalen>>.
+
+[[sec:atomic-datalen]]
+==== data_len and op_len fields
+
+Width of *data and *operand* fields respectively. See  *<<sec:loadstore-datalen>>.*
+
+.Packet format for Split atomic with operand only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+110: Unified atomic or split atomic address +
+(other codes other packet formats)
+|*subtype* | 3 | Atomic sub-type +
+000: Swap +
+001: ADD +
+010: AND +
+011: OR +
+100: XOR +
+101: MAX +
+110: MIN +
+111: reserved
+|*size* | max(1, clog2(clog2( _data_width_p_/8 + 1))) | Transfer size is
+2^*size*^ bytes
+|*lrid* | _lrid_width_p_ | Load request ID
+|*diff* | 1 or 2 | 00: Full address and data (sync) +
+01: Differential address, XOR-compressed data +
+10: Differential address, full data +
+11: Differential address, differential data
+|*op_len* | *size* | Number of bytes of operand is *op_len* + 1
+|*operand* | 8 * (*op_len* + 1) | Operand. Value from rs2 before operator
+applied
+|*address* | _daddress_width_p_ |Address, aligned and encoded as per
+size
+|===
+
+.Packet format for Split atomic load data only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+110: Split atomic data other codes other packet formats
+|*lrid* | _lrid_width_p_ | Load request ID
+|*resp* | 2 | 00: Error (no data) +
+01: XOR-compressed data +
+10: full data +
+11: differential data
+|*data_len* | *size* | Number of bytes of operand is _data_len + 1_. Not
+included if resp indicates an error (sign-extend *resp* MSB)
+|*data* | 8 * (*data_len* + 1) | Data. Not included if resp indicates an
+error (sign-extend *resp* MSB)
+|===
+
+
+[[sec:data-csr]]
+=== CSR
+
+.Packet format for Unified CSR, with address, data and operand
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+101: CSR +
+(other codes other packet formats)
+|*subtype* | 2 | CSR sub-type +
+00: RW +
+01: RS +
+10: RC +
+11: reserved
+|*diff* | 1 or 2 | 00: Full data (sync) +
+01: Compressed data (XOR if 2 bits) +
+10: reserved +
+11 : Differential data
+|*data_len* | 2 or 3 | Number of bytes of data is *data_len* + 1
+|*data* | 8 * (*data_len* 1) | Data
+|*addr_msbs* | 6 | Address[11:6]
+|*op_len* | 2 or 3 | Number of bytes of operand is *op_len* + 1
+|*operand* | 8 * (*op_len* + 1) | Operand. Value from rs1 before operator
+applied
+|*addr_lsbs* | 6 | Address[5:0]
+|===
+
+[[sec:csr-diff]]
+==== diff field
+
+See <<sec:loadstore-diff>>.
+
+[[sec:csr-operand]]
+==== operand field
+
+See <<sec:atomic-operand>>.
+
+[[sec:csr-datalen]]
+==== data_len and op_len fields
+
+2 bits wide if hart has 32-bit CSRs, 3 bits if 64-bit. Width of *data*
+and *operand* fields respectively. See <<sec:loadstore-datalen>>.
+
+[[sec:csr-addr]]
+==== addr fields
+
+The address is split into two parts, with the 6 LSBs output last as
+these are more likely to compress away.
+
+.Packet format for Unified CSR, with address and read-only data (as determined by addr[11:10] = 11)
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+101: CSR +
+ other codes other packet formats
+|*subtype* | 2 | CSR sub-type +
+00: RW +
+01: RS +
+10: RC +
+11: reserved
+|*diff* | 1 or 2 | 00: Full data (sync) +
+01: Compressed data (XOR if 2 bits) +
+10: reserved +
+11 : Differential data
+|*data_len* | 2 or 3 | Number of bytes of data is *data_len* + 1
+|*data* | 8 * (*data_len* + 1) | Data
+|*addr_msbs* | 6 | Address[11:6]
+|*addr_lsbs* | 6 | Address[5:0]
+|===
+
+.Packet format for Unified CSR, with address only
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name* | *Bits* | *Description*
+|*format* | 3 | Transaction type +
+101: CSR +
+other codes other packet formats
+|*subtype* | 3 | CSR sub-type +
+00: RW +
+01: RS +
+10: RC +
+11: reserved
+|*diff* | 0 or 1 | 0: Full address +
+1: Differential address
+|*addr_msbs* | 6 | Address[11:6]
+|*addr_lsbs* | 6 | Address[5:0]
+|===
+

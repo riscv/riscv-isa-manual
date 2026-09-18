@@ -1,0 +1,788 @@
+[[packets]]
+== Instruction Trace Encoder Output Packets
+
+The bulk of this section describes the payload of packets output from
+the Instruction Trace Encoder. The infrastructure used to transport
+these packets is outside the scope of this chapter, and as such the
+manner in which packets are encapsulated for transport is not specified.
+However, the following information must be provided to the encapsulator:
+
+* The packet type;
+* The packet length, in bytes;
+* The packet payload.
+
+Two example transport schemes are the Siemens Messaging Infrastructure,
+and the Arm Trace Bus. <<fig:packet-format>> shows the
+encapsulation used for the Siemens infrastructure:
+
+* The header byte contains a 5-bit field specifying the payload length
+in bytes, a 2-bit field indicating the "flow" (destination routing
+indicator), and a bit to indicate whether an optional 16-bit timestamp
+is present;
+* The index field indicates the source of the packet. The number of bits
+is system dependent, And the initial value emitted by the trace encoder
+is zero (it gets adjusted as it propagates through the infrastructure);
+* An optional 2-byte timestamp;
+* The packet payload.
+
+[[fig:packet-format]]
+.Example encapsulated packet format
+image::newPacket.jpg[newPacket,width=340,height=37,align="center"]
+
+Alternatively, for ATB, the source of the packet is indicated by the
+*ATID* bus field, and there is no equivalent of "flow", so an example
+encapsulation might be:
+
+* A 5-bit field specifying the payload length in bytes
+* A bit to indicate whether an optional 16-bit timestamp is present;
+* An optional 2-byte timestamp;
+* The packet payload.
+
+It may be desirable for packets to start aligned to an ATB word, in
+which the *ATBYTES* bus field in the last beat of a packet can be used
+to indicate the number of valid bytes.
+
+The remainder of this section describes the contents of the payload
+portion which should be independent of the infrastructure. In each
+table, the fields are listed in transmission order: first field in the
+table is transmitted first, and multi-bit fields are transmitted LSB
+first.
+
+This packet payload format is used to output encoded instruction trace.
+Three different formats are used according to the needs of the encoding
+algorithm. The following tables show the format of the payload - i.e.
+excluding any encapsulation.
+
+In order to achieve best performance, actual packet lengths may be
+adjusted using 'sign based compression'. At the very minimum this should
+be applied to the address field of format 1 and 2 packets, but ideally
+will be applied to the whole packet, regardless of format. This
+technique eliminates identical bits from the most significant end of the
+packet, and adjusts the length of the packet accordingly. A decoder
+receiving this shortened packet can reconstruct the original full-length
+packet by sign-extending from the most significant received bit.
+
+Where the payload length given in the following tables, or after
+applying sign-based compression, is not a multiple of whole bytes in
+length, the payload must be sign-extended to the nearest byte boundary.
+
+Whilst offering maximum encoding efficiency, variable length packets can
+present some challenges, specifically in terms of identifying where the
+boundaries between packets occur either when packed packets are written
+to memory, or when packets are streamed offchip via a communications
+channel. Two potential solutions to this are as follows:
+
+* If the maximum packet payload length is 2^N^-1 (for example, if N is
+5, then the maximum length is 31 bytes), and the minimum packet payload
+length is 1, then a sequence of at least 2^N^ zero bytes cannot occur
+within a packet payload, and therefore the first non-zero byte seen
+after a sequence of at least 2^N^ zero bytes must be the first byte of a
+packet. This approach can be used for alignment in either memory or a
+data stream;
+* An alternative approach suitable for packets written to memory is to
+divide memory into blocks of M bytes (e.g. 1kbyte blocks), and write
+packets to memory such that the first byte in every block is always the
+first byte of a packet. This means packets cannot span block boundaries,
+and so zero bytes must be used to pad between the end of the last
+message in a block and the block boundary.
+
+[[sec:format3]]
+=== Format 3 packets
+
+Format 3 packets are used for synchronization, traps, reporting context
+and supporting information. There are 4 sub-formats.
+
+Throughout the trace chapters, the term "synchronization packet" is used.
+This refers specifically to format 3, subformat 0 and subformat 1
+packets.
+
+[[sec:format30]]
+=== Format 3 subformat 0 - Synchronisation
+
+This packet contains all the information the decoder needs to fully
+identify an instruction. It is sent for the first traced instruction
+(unless that instruction also happens to be the first in a trap
+handler), and when resynchronization has been scheduled by expiry of the
+resynchronisation timer.
+
+.Packet format 3, subformat 0
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 11 (sync): synchronisation
+|*subformat*| 2| 00 (start): Start of tracing, or resync
+|*branch*| 1| Set to 0 if the address points to a branch instruction,
+and the branch was taken. Set to 1 if the instruction is not a branch or
+if the branch is not taken.
+|*privilege*| _privilege_width_p_| The privilege level of the reported
+instruction
+|*time*| _time_width_p_ or 0 if _notime_p_ is 1| The time value.
+|*context*| _context_width_p_, or 0 if _nocontext_p_ is 1| The
+instruction context.
+|*address*| _iaddress_width_p - iaddress_lsb_p_| Full instruction
+address. Address alignment is determined by _iaddress_lsb_p_ Address
+must be left shifted in order to recreate original byte address.
+|===
+
+==== Format 3 *branch* field
+
+This bit indicates the taken/not taken status in the case where the
+reported address points to a branch instruction. Overall efficiency
+would be slightly improved if this bit was removed, and the branch
+status was instead "carried over" and reported in the next _te_inst_
+packet. This was considered, but there are several pathological cases
+where this approach fails. Consider for example the situation where the
+first traced instruction is a branch, and this is then followed
+immediately by an exception. This results in format 3 packets being
+generated on two consecutive instructions. The second packet does not
+contain a branch map, so there is no way to report the branch status of
+the 1st branch, apart from by inserting a format 1 packet in between.
+There are two issues with this:
+
+* It would require the generation of 2 packets on the same cycle, which
+adds significant additional complexity to the encoder;
+* It would complicate the algorithm shown in
+<<fig:algo>>.
+
+[[sec:format31]]
+=== Format 3 subformat 1 - Trap
+
+This packet also contains all the information the decoder needs to fully
+identify an instruction. It is sent following an exception or interrupt,
+and includes the cause, the 'trap value' (for exceptions), and the
+address of the trap handler, or of the exception itself - <<sec:thaddr>>.
+
+If the implicit exception mode is enabled (see
+<<sec:implicit-exception>>), the trap
+handler address is omitted if *thaddr* is 1.
+
+.Packet format 3, subformat 1
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 11 (sync): synchronisation
+|*subformat*| 2| 01 (trap): Exception or interrupt cause and trap
+handler address.
+|*branch*| 1| Set to 0 if the address points to a branch instruction,
+and the branch was taken. Set to 1 if the instruction is not a branch or
+if the branch is not taken.
+|*privilege*| _privilege_width_p_| The privilege level of the reported
+instruction.
+|*time*| _time_width_p_ or 0 if _notime_p_ is 1| The time value.
+|*context*| _context_width_p_, or 0 if _nocontext_p_ is 1| The
+instruction context
+|*ecause*| _ecause_width_p_| Exception or interrupt cause.
+|*interrupt*| 1| Interrupt.
+|*thaddr*| 1| When set to 1, *address* points to the trap handler
+address. When set to 0, *address* points to the EPC for an exception at
+the target of an updiscon, and is undefined for other exceptions and
+interrupts.
+|*address*| _iaddress_width_p - iaddress_lsb_p_| Full instruction
+address. Address alignment is determined by _iaddress_lsb_p_ Address
+must be left shifted in order to recreate original byte address.
+|*tval*| _iaddress_width_p_| Value from appropriate
+*utval/stval/vstval/mtval* CSR. Field omitted for interrupts
+|===
+
+[[sec:thaddr]]
+==== Format 3 *thaddr* and *address* fields
+
+If an exception occurs at the target of an uninferable PC discontinuity,
+the value of the EPC cannot be infered from the program binary, and so
+*address* contains the EPC and *thaddr* is set to 0. In this case, the
+trap handler address will be reported via a subsequent format 3,
+subformat 0 packet.
+
+Usually when an exception or interrupt occurs, the cause is reported
+along with the 1st address of the trap handler, when that instruction
+retires. In this case, *thaddr* is 1. However, if a second interrupt or
+exception occurs immediately, details of this must still be reported,
+even though the 1st instruction of the handler hasn't retired. In this
+situation, *thaddr* is 0, and *address* is undefined (unless it contains
+the EPC as outlined in the previous paragraph).
+
+(The reason for not reporting the EPC for all exceptions when *thaddr*
+is 0 is that it may be at either the address of the next instruction or
+current instruction depending on the exception cause, which can be
+inferred by the decoder without adding complexity to the encoder.)
+
+==== Format 3 *tval* field
+
+This field reports the "trap value" from the appropriate
+*utval/stval/vstval/mtval* CSR, the meaning of which is dependent on the
+nature of the exception. It is omitted from the packet for interrupts.
+
+[[sec:format32]]
+=== Format 3 subformat 2 - Context
+
+This packet contains only the context and/or the timestamp, and is
+output when the context value changes and can be reported imprecisely
+(see <<tab:context-type>>).
+
+.Packet format 3, subformat 2
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 11 (sync): synchronisation
+|*subformat*| 2| 10 (context): Context change
+|*privilege*| _privilege_width_p_| The privilege level of the new
+context.
+|*time*| _time_width_p_ or 0 if _notime_p_ is 1| The time value
+|*context*| _context_width_p_, or 0 if _nocontext_p_ is 1| The
+instruction context.
+|===
+
+[[sec:format33]]
+=== Format 3 subformat 3 - Support
+
+This packet provides supporting information to aid the decoder. It is
+issued when
+
+* Trace is enabled or disabled;
+* The operating mode changes;
+* One or more trace packets cannot be sent (for example, due
+back-pressure from the packet transport infrastructure).
+
+The *options* field is a placeholder that must be replaced by an
+implementation specific set of individual bits - one for each of the
+optional modes supported by the encoder.
+
+.Packet format 3, subformat 3
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 11 (sync): synchronisation
+|*subformat*| 2| 11 (support): Supporting information for the decoder
+|*ienable*| 1| Indicates if the instruction trace encoder is enabled
+|*encoder_mode*| N| Identifies trace algorithm Details and number of
+bits implementation dependent. Currently Branch trace is the only mode
+defined, indicated by the value 0.
+|*qual_status*| 2| Indicates qualification status (no_change): No
+change to filter qualification (ended_rep): Qualification ended,
+preceding *te_inst* sent explicitly to indicate last qualification
+instruction (trace_lost): One or more instruction trace packets lost.
+(ended_ntr): Qualification ended, preceding *te_inst* would have been
+sent anyway due to an updiscon, even if it wasn't the last qualified
+instruction)
+|*ioptions*| N| Values of all instruction trace run-time configuration
+bits Number of bits and definitions implementation dependent. Examples
+might be - 'sequentially inferred jumps' Don't report the targets of
+sequentially inferable jumps - 'implicit return' Don't report function
+return addresses - 'implicit exception' Exclude address from format 3,
+sub-format 1 _te_inst_ packets if trap vector can be determined from
+_ecause_ - 'branch prediction' Branch predictor enabled - 'jump target
+cache' Jump target cache enabled - 'full address' Always output full
+addresses (SW debug option)
+|*denable*| 1| Indicates if the data trace is enabled (if supported)
+|*dloss*| 1| One of more data trace packets lost (if supported)
+|*doptions*| M| Values of all data trace run-time configuration bits
+Number of bits and definitions implementation dependent. Examples might
+be - 'no data' Exclude data (just report addresses) - 'no addr' Exclude
+address (just report data)
+|===
+
+[[sec:qual-status]]
+==== Format 3 subformat 3 *qual_status* field
+
+When tracing ends, the encoder reports the address of the last traced
+instruction, and follows this with a format 3, subformat 3 (supporting
+information) packet. Two codes are provided for indicating that tracing
+has ended: *ended_rep* and *ended_ntr*. This relates to exactly the same
+ambiguous case described in detail in <<sec:updiscon>>, and
+in principle, the mechanism described in that section can be used to
+disambiguate when the last traced instruction is at looplabel. However,
+that mechanism relies on knowing when creating the format 1/2 packet,
+that a format 3 packet will be generated from the next instruction. This
+is possible because the encoding algorithm uses a 3-stage pipe with
+access to the previous, current and next instructions. However, decoding
+that the next instruction is a privilege change or exception is
+straightforward, but determining whether the next instruction meets the
+filtering criteria is much more involved, and this information won't
+typically be available, at least not without adding an additional
+pipeline stage, which is expensive. This means a different mechanism is
+required, and that is provided by having two codes to indicate that
+tracing has ended:
+
+* *ended_rep* indicates that the preceding packet would not have been
+issued if tracing hadn't ended, which means that tracing stopped after
+executing looplabel in the 1st loop iteration;
+* *ended_ntr* indicates that the preceding packet would have been issued
+anyway because of an uninferable PC discontinuity, which means that
+tracing stopped after executing looplabel in the 2nd loop iteration;
+
+If the encoder implementation does have early access to the filtering
+results, and the designer chooses to use the *updiscon* bit when the
+last qualified instruction is also the instruction following an
+uninferable PC discontinuity, loss of qualification should always be
+indicated using *ended_rep*.
+
+[[sec:format2]]
+=== Format 2 packets
+
+This packet contains only an instruction address, and is used when the
+address of an instruction must be reported, and there is no unreported
+branch information. The address is in differential format unless full
+address mode is enabled (see <<sec:full-address>>).
+
+.Packet format 2
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 10 (addr-only): differential address and no branch
+information
+|*address*| _iaddress_width_p - iaddress_lsb_p_| Differential
+instruction address.
+|*notify*| 1| If the value of this bit is different from the MSB of
+*address*, it indicates that this packet is reporting an instruction
+that is not the target of an uninferable discontinuity because a
+notification was requested via *trigger[2]* (see <<sec:trigger>>).
+|*updiscon*| 1| If the value of this bit is different from *notify*, it
+indicates that this packet is reporting the instruction following an
+uninferable discontinuity and is also the instruction before an
+exception, privilege change or resync (i.e. it will be followed
+immediately by a format 3 _te_inst_).
+|*irreport*| 1| If the value of this bit is different from *updiscon*,
+it indicates that this packet is reporting an instruction that is
+either: following a return because its address differs from the
+predicted return address at the top of the implicit_return return
+address stack, or the last retired before an exception, interrupt,
+privilege change or resync because it is necessary to report the current
+address stack depth or nested call count.
+|*irdepth*| _return_stack_size_p (return_stack_size_p > 0 ? 1 : 0)
+call_counter_size_p_| If the value of *irreport* is different from
+*updiscon*, this field indicates the number of entries on the return
+address stack (i.e. the entry number of the return that failed) or
+nested call count. If *irreport* is the same value as *updiscon*, all
+bits in this field will also be the same value as *updiscon*.
+|===
+
+[[sec:notify]]
+==== Format 2 *notify* field
+
+This bit is encoded so that most of the time it will take the same value
+as the MSB of the *address* field, and will therefore compress away,
+having no impact on the encoding efficiency. It is required in order to
+cover the case where an address is reported as a result of a
+notification request, signalled by setting the *trigger[2]* input to 1.
+
+[[sec:updiscon]]
+==== Format 2 *notify* and *updiscon* fields
+
+These bits are encoded so that most of the time they will compress away,
+having no impact on efficiency, by taking on the same value as the
+preceding bit in the packet (*notify* is normally the same value as the
+MSB of the *address* field, and *updiscon* is normally the same value as
+*notify*). They are required in order to cover a pathological case where
+otherwise the decoding software would not be able to reconstruct the
+program execution unambiguously. Consider the following code fragment:
+
+ looplabel -4: *_opcode A_* 
+ looplabel   : *_opcode B_* 
+ looplabel +4: *_opcode C_*
+ :
+ looplabel +N *_JALR_* # Jump to looplabel
+
+This is a loop with an indirect jump back to the next iteration. This is
+an uninferable discontinuity, and will be reported via a format 1 or 2
+packet. Note however that the initial entry into the loop is
+fall-through from the instruction at looplabel - 4, and will not be
+reported explicitly. This means that when reconstructing the execution
+path of the program, the looplabel address is encountered twice. On
+first glance, it appears that the decoder can determine when it reaches
+the loop label for the 1st time that this is not the end of execution,
+because the preceding instruction was not one that can cause an
+uninferable discontinuity. It can therefore continue reconstructing the
+execution path until it reaches the *_JALR_*, from where it can deduce
+that *_opcode B_* at looplabel is the final retired instruction.
+However, there are circumstances where this approach does not work. For
+example, consider the case where there is an exception at looplabel 4.
+In this case, the decoder cannot tell whether this occurred during the
+1st or 2nd loop iterations, without additional information from the
+encoder. This is the purpose of the *updiscon* field. In more detail:
+
+There are four scenarios to consider:
+
+. Code executes through to the end of the 1st loop iteration, and the
+encoder reports looplabel using format 1/2 following the *_JALR_*, then
+carries on executing the 2nd pass of the loop. In this case *updiscon*
+== *notify*. The next packet will be a format 1/2;
+. Code executes through to the end of the 1st loop iteration and jumps
+back to looplabel, but there is then an exception, privilege change or
+resync in the second iteration at looplabel 4. In this case, the
+encoder reports looplabel using format 1/2 following the *_JALR_*, with
+*updiscon* == !*notify*, and the next packet is a format 3;
+. An exception occurs immediately after the 1st execution of looplabel.
+In this case, the encoder reports looplabel using format 0/1/2 with
+*updiscon* == *notify*, and the next packet is a format 3;
+. The hart requests the encoder to notify retirement of the instruction
+at looplabel. In this case, the encoder reports the 1st execution of
+looplabel with *notify* == !*address[MSB]*, and subsequent executions
+with *notify* == *address[MSB]* (because they would have been reported
+anyway as a result of the *_JALR_*).
+
+Looking at this from the perspective of the decoder, the decoder
+receives a format 1/2 reporting the address of the 1st instruction in
+the loop (looplabel). It follows the execution path from the last
+reported address, until it reaches looplabel. Because looplabel is not
+preceded by an uninferable discontinuity, it must take the value of
+*notify* and *updiscon* into consideration, and may need to wait for the
+next packet in order to determine whether it has reached the final
+retired instruction:
+
+* If *updiscon* == !*notify*, this indicates case 2. The decoder must
+continue until it encounters looplabel a 2nd time;
+* If *updiscon* == *notify*, the decoder cannot yet distinguish cases 1
+and 3, and must wait for the next packet.
+** If the next packet is a format 3, this is case 3. The decoder has
+already reached the correct instruction;
+** If the next packet is a format 1/2, this is case 1. The decoder must
+continue until it encounters looplabel a 2nd time.
+* If *notify* == !*address[MSB]*, this indicates case 4, 1st iteration.
+The decoder has reached the correct instruction.
+
+This example uses an exception at looplabel 4, but anything that could
+cause a format 3 for looplabel 4 would result in the same behavior: a
+privilege change, or the expiry of the resync timer. It could also occur
+if looplabel was the last traced instruction (because tracing was
+disabled for some reason). See <<sec:qual-status>> for
+further discussion of this point.
+
+[NOTE]
+====
+Correct decoder behavior could have been achieved by
+implementing the *notify* bit only, setting it to the inverse of
+*address[MSB]* whenever an address is reported and it is not the
+instruction following an uninferable discontinuity. However, this would
+have been much less efficient, as this would have required *notify* to
+be different from *address[MSB]* the majority of the time when
+outputting a format 1/2 before an exception, interrupt or resync (as the
+probability of this instruction being the target of an uninferable jump
+is low). Using 2 separate bits results in superior compression.
+====
+
+[[sec:irxx]]
+==== Format 2 *irreport* and *irdepth*
+
+These bits are encoded so that most of the time they will take the same
+value as the *updiscon* field, and will therefore compress away, having
+no impact on the encoding efficiency. If implicit_return mode is
+enabled, the encoder keeps track of the number of traced nested calls,
+either as a simple count (_call_counter_size_p_ non-zero) or a stack of
+predicted return addresses (_return_stack_size_p_ non-zero).
+
+Where a stack of predicted return addresses is implemented, the
+predicted return addresses are compared with the actual return
+addresses, and a _te_inst_ packet will be generated with *irreport* set
+to the opposite value to *updiscon* if a misprediction occurs.
+
+In some cases it is also necessary to report the current stack depth or
+call count if the packet is reporting the last instruction before an
+exception, interrupt, privilege change or resync. There are two cases of
+concern:
+
+* If the reported address is the instruction following a return, and it
+is not mis-predicted, the encoder must report the current stack depth or
+call count if it is non-zero. Without this, the decoder would attempt to
+follow the execution path until it encountered the reported address from
+the outermost nested call;
+* If the reported address is not the instruction following a return, the
+encoder must report the current stack depth or call count unless:
+** There have been no returns since the last call (in which case the
+decoder will correctly stop in the innermost call), or
+** There has been at least one branch since the last return (in which
+case the decoder will correctly stop in the call where there are no
+unprocessed branches).
++
+Without this, the decoder would follow the execution path until it
+encountered the reported address, and in most cases this would be the
+correct point. However, this cannot be guaranteed for recursive
+functions, as the reported address will occur multiple times in the
+execution path.
+
+[[sec:format1]]
+=== Format 1 packets
+
+This packet includes branch information, and is used when either the
+branch information must be reported (for example because the branch map
+is full), or when the address of an instruction must be reported, and
+there has been at least one branch since the previous packet. If
+included, the address is in differential format unless full address mode
+is enabled (see <<sec:full-address>>).
+
+.Packet format 1 - address, branch map
+[align="center",float="center",cols="<1,<1,<3",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 01 (diff-delta): includes branch information and may
+include differential address
+|*branches*| 5| Number of valid bits *branch_map*. The number of bits
+of *branch_map* is determined as follows: : (cannot occur for this
+format) : 1 bit -3: 3 bits -7: 7 bits -15: 15 bits -31: 31 bits For
+example if branches = 12, *branch_map* is 15 bits long, and the 12 LSBs
+are valid.
+|*branch_map*| Determined by *branches* field.| An array of bits
+indicating whether branches are taken or not. Bit 0 represents the
+oldest branch instruction executed. For each bit: : branch taken :
+branch not taken
+|*address*| _iaddress_width_p - iaddress_lsb_p_| Differential
+instruction address.
+|*notify*| 1| If the value of this bit is different from the MSB of
+*address*, it indicates that this packet is reporting an instruction
+that is not the target of an uninferable discontinuity because a
+notification was requested via *trigger[2]* (see <<sec:trigger>>).
+|*updiscon*| 1| If the value of this bit is different from the MSB of
+*notify*, it indicates that this packet is reporting the instruction
+following an uninferable discontinuity and is also the instruction
+before an exception, privilege change or resync (i.e. it will be
+followed immediately by a format 3 _te_inst_).
+|*irreport*| 1| If the value of this bit is different from *updiscon*,
+it indicates that this packet is reporting an instruction that is
+either: following a return because its address differs from the
+predicted return address at the top of the implicit_return return
+address stack, or the last retired before an exception, interrupt,
+privilege change or resync because it is necessary to report the current
+address stack depth or nested call count.
+|*irdepth*| _return_stack_size_p (return_stack_size_p > 0 ? 1 : 0)
+call_counter_size_p_| If the value of *irreport* is different from
+*updiscon*, this field indicates the number of entries on the return
+address stack (i.e. the entry number of the return that failed) or
+nested call count. If *irreport* is the same value as *updiscon*, all
+bits in this field will also be the same value as *updiscon*.
+|===
+
+.Packet format 1 - no address, branch map
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 01 (diff-delta): includes branch information and may
+include differential address
+|*branches*| 5| Number of valid bits in *branch_map*. The length of
+*branch_map* is determined as follows: : 31 bits, no *address* in packet
+-31: (cannot occur for this format)
+|*branch_map*| 31| An array of bits indicating whether branches are
+taken or not. Bit 0 represents the oldest branch instruction executed.
+For each bit: : branch taken : branch not taken
+|===
+
+==== Format 1 *updiscon* field
+
+See <<sec:updiscon>>.
+
+==== Format 1 *branch_map* field
+
+When the branch map becomes full it must be reported, but in most cases
+there is no need to report an address. This is indicated by setting
+*branches* to 0. The exception to this is when the instruction
+immediately prior to the final branch causes an uninferable
+discontinuity, in which case *branches* is set to 31.
+
+The choice of sizes (1, 3, 7, 15, 31) is designed to minimize efficiency
+loss. On average there will be some 'wasted' bits because the number of
+branches to report is less than the selected size of the *branch_map*
+field. Using a tapered set of sizes means that the number of wasted bits
+will on average be less for shorter packets. If the number of branches
+between updiscons is randomly distributed then the probability of
+generating packets with large branch counts will be lower, in which case
+increased waste for longer packets will have less overall impact.
+Furthermore, the rate at which packets are generated can be higher for
+lower branch counts, and so reducing waste for this case will improve
+overall bandwidth at times where it is most important.
+
+==== Format 1 *irreport* and *irdepth* fields
+
+See <<sec:irxx>>.
+
+[[sec:format0]]
+=== Format 0 packets
+
+This format is intended for optional efficiency extensions. Currently
+two extensions are defined, for reporting counts of correctly predicted
+branches, and for reporting the jump target cache index.
+
+If branch prediction is supported and is enabled, then there is a choice
+of whether to output a full branch map (via format 1), or a count of
+correctly predicted branches. The count format is used if the number of
+correctly predicted branches is at least 31. If there are 31 unreported
+branches (i.e. the branch map is full), but not all of them were
+predicted correctly, then the branch map will be output. A branch count
+will be output under the following conditions:
+
+* A branch is mis-predicted. The count value will be the number of
+correctly predicted branches, minus 31. No address information is
+provided - it is implicitly that of the branch which failed prediction;
+* An updiscon, interrupt or exception requires the encoder to output an
+address. In this case the encoder will output the branch count (number
+of correctly predicted branches, minus 31);
+* The branch count reaches its maximum value. Strictly speaking an
+address isn't required for this case, but is included to avoid having to
+distinguish the packet format from the case above. It will occur so
+rarely that the bandwidth impact can be ignored.
+
+If a jump target cache is supported and enabled, and the address to
+report following an updiscon is in the cache then the encoder can output
+the cache index using format 0, subformat 1. However, the encoder may
+still choose to output the differential address using format 1 or 2 if
+the resulting packet is shorter. This may occur if the differential
+address is zero, or very small.
+
+.Packet format 0, subformat 0 - no address, branch count
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 00 (opt-ext): formats for optional efficiency
+extensions
+|*subformat*| See <<sec:f0s>>| 0 (correctly predicted
+branches)
+|*branch_count*| 32| Count of the number of correctly predicted
+branches, minus 31.
+|*branch_fmt*| 2| 00 (no-addr): Packet does not contain an *address*,
+and the branch following the last correct prediction failed. -11:
+(cannot occur for this format)
+|===
+
+.Packet format 0, subformat 0 - address, branch count
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 00 (opt-ext): formats for optional efficiency
+extensions
+|*subformat*| See <<sec:f0s>>| 0 (correctly predicted
+branches)
+|*branch_count*| 32| Count of the number of correctly predicted
+branches, minus 31.
+|*branch_fmt*| 2| 10 (addr): Packet contains an *address*. If this
+points to a branch instruction, then the branch was predicted correctly.
+(addr-fail): Packet contains an *address* that points to a branch which
+failed the prediction. ,01: (cannot occur for this format)
+|*address*| _iaddress_width_p - iaddress_lsb_p_| Differential
+instruction address.
+|*notify*| 1| If the value of this bit is different from the MSB of
+*address*, it indicates that this packet is reporting an instruction
+that is not the target of an uninferable discontinuity because a
+notification was requested via *trigger[2]* (see
+<<sec:trigger>>).
+|*updiscon*| 1| If the value of this bit is different from *notify*, it
+indicates that this packet is reporting the instruction following an
+uninferable discontinuity and is also the instruction before an
+exception, privilege change or resync (i.e. it will be followed
+immediately by a format 3 _te_inst_).
+|*irreport*| 1| If the value of this bit is different from *updiscon*,
+it indicates that this packet is reporting an instruction that is
+either: following a return because its address differs from the
+predicted return address at the top of the implicit_return return
+address stack, or the last retired before an exception, interrupt,
+privilege change or resync because it is necessary to report the current
+address stack depth or nested call count.
+|*irdepth*| _return_stack_size_p (return_stack_size_p > 0 ? 1 : 0)
+call_counter_size_p_| If the value of *irreport* is different from
+*updiscon*, this field indicates the number of entries on the return
+address stack (i.e. the entry number of the return that failed) or
+nested call count. If *irreport* is the same value as *updiscon*, all
+bits in this field will also be the same value as *updiscon*.
+|===
+
+.Packet format 0, subformat 1 - jump target index, branch map
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 00 (opt-ext): formats for optional efficiency
+extensions
+|*subformat*| See <<sec:f0s>>| 1 (jump target cache)
+|*index*| __cache_size_p__| Jump target cache index of entry containing
+target address.
+|*branches*| 5| Number of valid bits in *branch_map*. The length of
+*branch_map* is determined as follows: : (cannot occur for this format)
+: 1 bit -3: 3 bits -7: 7 bits -15: 15 bits -31: 31 bits For example if
+branches = 12, *branch_map* is 15 bits long, and the 12 LSBs are
+valid.
+|*branch_map*| Determined by *branches* field.| An array of bits
+indicating whether branches are taken or not. Bit 0 represents the
+oldest branch instruction executed. For each bit: : branch taken :
+branch not taken
+|*irreport*| 1| If the value of this bit is different from
+*branch_map[MSB]*, it indicates that this packet is reporting an
+instruction that is either: following a return because its address
+differs from the predicted return address at the top of the
+implicit_return return address stack, or the last retired before an
+exception, interrupt, privilege change or resync because it is necessary
+to report the current address stack depth or nested call count.
+|*irdepth*| _return_stack_size_p (return_stack_size_p > 0 ? 1 : 0)
+call_counter_size_p_| If the value of *irreport* is different from
+*branch_map[MSB]*, this field indicates the number of entries on the
+return address stack (i.e. the entry number of the return that failed)
+or nested call count. If *irreport* is the same value as
+*branch_map[MSB]*, all bits in this field will also be the same value as
+*branch_map[MSB]*.
+|===
+
+.Packet format 0, subformat 1 - jump target index, no branch map
+[%autowidth,align="center",float="center",cols="<,<,<",options="header"]
+|===
+| *Field name*| *Bits*| *Description*
+|*format*| 2| 00 (opt-ext): formats for optional efficiency
+extensions
+|*subformat*| See <<sec:f0s>>| 1 (jump target cache)
+|*index*| __cache_size_p__| Jump target cache index of entry containing
+target address.
+|*branches*| 5| Number of valid bits in *branch_map*. The length of
+*branch_map* is determined as follows: : no *branch_map* in packet -31:
+(cannot occur for this format)
+|*irreport*| 1| If the value of this bit is different from
+*branches[MSB]*, it indicates that this packet is reporting an
+instruction that is either: following a return because its address
+differs from the predicted return address at the top of the
+implicit_return return address stack, or the last retired before an
+exception, interrupt, privilege change or resync because it is necessary
+to report the current address stack depth or nested call count.
+|*irdepth*| _return_stack_size_p (return_stack_size_p > 0 ? 1 : 0)
+call_counter_size_p_| If the value of *irreport* is different from
+*branches[MSB]*, this field indicates the number of entries on the
+return address stack (i.e. the entry number of the return that failed)
+or nested call count. If *irreport* is the same value as
+*branches[MSB]*, all bits in this field will also be the same value as
+*branches[MSB]*.
+|===
+
+[[sec:f0s]]
+==== Format 0 subformat field
+
+The width of this field depends on the number of optional formats
+supported. Currently, two optional formats are defined (correctly
+predicted branches and jump target cache). The width is specified by the
+_f0s_width_ discovery field (see <<sec:disco>>). If
+multiple optional formats are supported, the field width must be
+non-zero. However, if only one optional format is supported, the field
+can be omitted, and the value of the field inferred from the *options*
+field in the support packet (see <<sec:format33>>. This
+provision allows additional formats to be added in future without
+reducing the efficiency of the existing formats.
+
+==== Format 0 *branch_fmt* field
+
+This is encoded so that when no address is required it will be zero,
+allowing the upper bits of the *branch_count* field to be compressed
+away.
+
+When a branch count is reported without an address it is because a
+branch has failed the prediction. However, when an address is reported
+along with a branch count, it will be because the packet was initiated
+by an uninferable discontinuity, an exception, or because a branch has
+been encountered that increments *branch_count* to 0xffff_ffff. For the
+latter case, the reported address will always be for a branch, and in
+the former cases it may be. If it is a branch, it is necessary to be
+explicit about whether or not the prediction was met or not. If it is
+met, then the reported address is that of the last correctly predicted
+branch.
+
+==== Format 0 *irreport* and *irdepth* fields
+
+These bits are encoded so that most of the time they will take the same
+value as the immediately preceding bit (*updiscon*, *branch_map[MSB]* or
+*branches[MSB]* depending on the specific packet format). Purpose and
+behavior is as described in <<sec:irxx>>.
+
+For the jump target cache (subformat 1), they are included to allow
+return addresses that fail the implicit return prediction but which
+reside in the jump target cache to be reported using this format. An
+implementation could omit these if all implicit return failures are
+reported using format 1.
