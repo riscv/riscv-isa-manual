@@ -21,9 +21,37 @@ on:
   pull_request:
     branches:
       - main
+  # Weekly run of the experimental Ubuntu 26.04 build (see build-ubuntu2604).
+  schedule:
+    - cron: 0 3 * * 2
+
+# Jobs only need to read the repository. The release step authenticates with the
+# GHTOKEN secret, and deploy sets the Pages permissions it needs.
+permissions:
+  contents: read
+
+# GitHub Pages rejects a deployment while another is in progress, so runs for
+# back-to-back pushes to main must not overlap. Runs in a group wait for the one
+# in progress and normally start in the order they reached the group, so the
+# newest commit deploys last (GitHub doesn't guarantee this order when runs
+# arrive almost at once). Only the newest waiting run is kept; older waiting
+# ones are cancelled. The event name keeps scheduled and manual runs on main out of the
+# push queue, so a push can't cancel a waiting release run. For pull requests,
+# a new commit cancels the run in progress, since only the latest commit's
+# results matter.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The PDF is by far the slowest output, so it builds in its own job, in parallel
+# with the HTML, EPUB and normative rule files. Each job keeps a persistent
+# asciidoctor-diagram cache (.diagram-cache, see the Makefile), so diagrams whose
+# source did not change are not rendered again. Releases and GitHub Pages wait
+# for both jobs.
 
 jobs:
-  build:
+  build-pdf:
+    name: Build PDF
     runs-on: ubuntu-latest
 
     steps:
@@ -37,14 +65,20 @@ jobs:
       - name: Set short SHA
         run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
 
-    # Get the current date
-      - name: Get current date
-        run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+    # Restore rendered diagrams from previous runs, and save them after this one
+      - name: Cache rendered diagrams
+        uses: actions/cache@v6
+        with:
+          path: .diagram-cache
+          key: isa-diagrams-pdf-${{ hashFiles('src/**') }}
+          restore-keys: isa-diagrams-pdf-
 
-    # Build PDF and HTML ISA manual versions and normative rule files using the container
-      - name: Build Files
+      - name: Pull build container
+        run: make docker-pull-latest
+
+      - name: Build PDF
         id: build_files
-        run: make -j$(nproc)
+        run: make -j$(nproc) build-pdf
 
     # Upload the riscv-spec PDF file
       - name: Upload riscv-spec.pdf
@@ -54,6 +88,37 @@ jobs:
           name: riscv-spec-${{ env.SHORT_SHA }}.pdf
           path: ${{ github.workspace }}/build/riscv-spec.pdf
           retention-days: 7
+
+  build-html:
+    name: Build HTML, EPUB and normative rules
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+    # Set the short SHA for use in artifact names
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+
+    # Restore rendered diagrams from previous runs, and save them after this one
+      - name: Cache rendered diagrams
+        uses: actions/cache@v6
+        with:
+          path: .diagram-cache
+          key: isa-diagrams-html-${{ hashFiles('src/**') }}
+          restore-keys: isa-diagrams-html-
+
+      - name: Pull build container
+        run: make docker-pull-latest
+
+    # Build HTML and EPUB ISA manual versions and normative rule files using the container
+      - name: Build HTML, EPUB and normative rules
+        id: build_files
+        run: make -j$(nproc) build-html build-epub build-tags build-norm-rules-json build-norm-rules-html
 
     # Upload the riscv-spec HTML file
       - name: Upload riscv-spec.html
@@ -91,8 +156,92 @@ jobs:
           path: ${{ github.workspace }}/build/norm-rules.json
           retention-days: 7
 
+  # Branch protection on main requires a status check named "build". This job keeps
+  # that name and passes only when both build jobs succeeded. It runs even when one
+  # of them fails, because a skipped required check counts as passing.
+  build:
+    if: always()
+
+    needs: [build-pdf, build-html]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check build job results
+        run: |
+          echo "build-pdf: ${{ needs.build-pdf.result }}"
+          echo "build-html: ${{ needs.build-html.result }}"
+          test "${{ needs.build-pdf.result }}" = success
+          test "${{ needs.build-html.result }}" = success
+
+  # Experimental: build the manual with the Ubuntu 26.04 LTS container image, to catch
+  # source changes that break on newer tools before latest moves to it. It is allowed
+  # to fail, does not run on pull requests, and its outputs are never released or
+  # deployed.
+  build-ubuntu2604:
+    name: Build with experimental Ubuntu 26.04 image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      EXPERIMENTAL_IMG: ghcr.io/riscv/riscv-docs-base-container-image:experimental-ubuntu2604
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+
+      - name: Cache rendered diagrams
+        uses: actions/cache@v6
+        with:
+          path: .diagram-cache
+          key: isa-diagrams-ubuntu2604-${{ hashFiles('src/**') }}
+          restore-keys: isa-diagrams-ubuntu2604-
+
+      - name: Pull build container
+        run: make docker-pull-latest DOCKER_IMG=$EXPERIMENTAL_IMG
+
+      - name: Build all outputs
+        run: make -j$(nproc) DOCKER_IMG=$EXPERIMENTAL_IMG
+
+      - name: Upload riscv-spec.pdf
+        uses: actions/upload-artifact@v7
+        with:
+          name: riscv-spec-${{ env.SHORT_SHA }}-ubuntu2604.pdf
+          path: ${{ github.workspace }}/build/riscv-spec.pdf
+          retention-days: 7
+
+  # Create the release and the GitHub Pages content from the outputs of both build jobs.
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+
+    needs: [build-pdf, build-html]
+
+    runs-on: ubuntu-latest
+
+    steps:
+    # Set the short SHA for use in artifact names
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+
+    # Get the current date
+      - name: Get current date
+        run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+    # Download the files built by both jobs into build/
+      - name: Download build outputs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*-${{ env.SHORT_SHA }}.*'
+          path: ${{ github.workspace }}/build
+          merge-multiple: true
+
       - name: Create Release
-        if: steps.build_files.outcome == 'success' && github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
         #uses: softprops/action-gh-release@v2.2.2
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
@@ -124,19 +273,17 @@ jobs:
           cp build/riscv-spec.html dist/snapshot/norm-rules/riscv-spec.html
           # Add root redirect
           printf '<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="utf-8">\n  <meta http-equiv="refresh" content="0; url=snapshot/spec/">\n  <link rel="canonical" href="snapshot/spec/">\n  <title>RISC-V ISA Manual</title>\n</head>\n<body>\n  <p>Redirecting to <a href="snapshot/spec/">RISC-V ISA Manual</a>…</p>\n</body>\n</html>\n' > dist/index.html
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
           path: dist
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
 
   # Deploy HTML to GitHub pages.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    needs: build
+    needs: publish
 
     permissions:
       pages: write
