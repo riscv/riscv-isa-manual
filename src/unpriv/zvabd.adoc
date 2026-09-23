@@ -1,0 +1,358 @@
+[[ext:zvabd]]
+=== ext:zvabd[] Vector Extension for Integer Absolute Difference
+
+==== Introduction
+This document describes the Zvabd extension for instructions that compute the element-wise absolute difference of vectors. That is, given two vectors v and u, compute the vector y such that stem:[y_i = abs(v_i - u_i)] and stem:[y_i += abs(v_i - u_i)].
+
+These operations are widely utilized in image registration, object recognition, motion estimation and loop filters for video workloads.
+
+==== Extension Overview
+Below is a list of all of the instructions that are included in the extension.
+[%autowidth]
+[%header,cols="2,4"]
+|===
+|Mnemonic
+|Instruction
+
+| vabd.vv / vabd.vx         | <<insns-vabd>>
+| vabdu.vv / vabdu.vx       | <<insns-vabdu>>
+| vwabda.vv / vwabda.vx     | <<insns-vwabda>>
+| vwabdau.vv / vwabdau.vx   | <<insns-vwabdau>>
+
+|===
+
+NOTE: Since the targeted use cases are mostly based on 8-bit and 16-bit integers, vwabda/vwabdau are designed for only SEW=8 and SEW=16.
+
+[#norm:Zvabd_dependent_Zve32x]#The Zvabd extension depends upon ext:zve32x[].#
+
+==== Pseudocode for instruction semantics
+The semantics of each instruction is expressed in a SAIL-like syntax, following the link:https://github.com/riscv/sail-riscv/tree/master/model/extensions/V[RISC-V Vector Sail Model].
+
+==== Instructions
+
+[[insns-vabd, Vector Signed Integer Absolute Difference]]
+===== insn:vabd.vv[] and insn:vabd.vx[]
+
+Synopsis::
+Vector Single-Width Signed Integer Absolute Difference
+
+Mnemonic::
+vabd.vv _vd_, _vs2_, _vs1_, _vm_ +
+vabd.vx _vd_, _vs2_, _rs1_, _vm_
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x15, attr: 'funct6'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVX'},
+  {bits: 5, name: 'rs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x15, attr: 'funct6'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_/_rs1_ | input  | Op1
+| _vs2_       | input  | Op2
+| _vd_        | output | Absolute difference
+|===
+
+Description::
+[#norm:vabd_op]#This instruction computes the absolute difference between the signed integer SEW-bit `Op1` and `Op2` elements, writing the result into the SEW-bit elements in _vd_.#
+
+[#norm:vabd_sew_defined]#vabd provides support for SEW of 8, 16, and 32. If ext:zve64x[] is supported, then vabd also adds support for SEW 64.#
+
+Operation::
+[source,sail]
+--
+let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        let op1 = match suffix {
+            "vv" => vs1_val[i],
+            "vx" => sext_or_truncate_to_sew(X(rs1))
+        };
+        result[i] = to_bits(SEW, abs_int(signed(vs2_val[i]) - signed(op1)));
+    }
+}
+write_vreg(num_elem, SEW, LMUL_pow, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+NOTE: A vector of integer values can have its absolute value computed using an
+absolute-difference instruction with a scalar operand of `x0`. An
+assembly pseudoinstruction insn:vabs.v[vd,vs2] = insn:vabd.vx[vd,vs2,x0] is provided.
+
+[[insns-vabdu, Vector Unsigned Integer Absolute Difference]]
+===== insn:vabdu.vv[] and insn:vabdu.vx[]
+
+Synopsis::
+Vector Single-Width Unsigned Integer Absolute Difference
+
+Mnemonic::
+vabdu.vv _vd_, _vs2_, _vs1_, _vm_ +
+vabdu.vx _vd_, _vs2_, _rs1_, _vm_
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x16, attr: 'funct6'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPMVX'},
+  {bits: 5, name: 'rs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x16, attr: 'funct6'},
+]}
+....
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_/_rs1_ | input  | Op1
+| _vs2_       | input  | Op2
+| _vd_        | output | Absolute difference
+|===
+
+Description::
+[#norm:vabdu_op]#This instruction computes the absolute difference between the unsigned integer SEW-bit `Op1` and `Op2` elements, writing the result into the SEW-bit elements in _vd_.#
+
+[#norm:vabdu_sew_defined]#vabdu provides support for SEW of 8, 16, and 32. If ext:zve64x[] is supported, then vabdu also adds support for SEW 64.#
+
+Operation::
+[source,sail]
+--
+let (result, mask) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let op1 = match suffix {
+                "vv" => vs1_val[i],
+                "vx" => sext_or_truncate_to_sew(X(rs1))
+            };
+            let abs_diff = if unsigned(vs2_val[i]) >= unsigned(op1)
+                           then unsigned(vs2_val[i] - op1)
+                           else unsigned(op1 - vs2_val[i]);
+            to_bits(SEW, abs_diff);
+        }
+    };
+};
+write_vreg(num_elem, SEW, LMUL_pow, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+[[insns-vwabda, Vector Signed Integer Absolute Difference And Accumulate]]
+===== insn:vwabda.vv[] and insn:vwabda.vx[]
+
+Synopsis::
+    Vector Widening Signed Integer Absolute Difference and Accumulate, Overwrite Addend
+
+Mnemonic::
+vwabda.vv _vd_, _vs2_, _vs1_, _vm_ +
+vwabda.vx _vd_, _vs2_, _rs1_, _vm_
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPIVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x3D, attr: 'funct6'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPIVX'},
+  {bits: 5, name: 'rs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x3D, attr: 'funct6'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vwabda_sew_rsv]#`SEW` is neither 8 nor 16.#
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_/_rs1_ | input        | Op1
+| _vs2_       | input        | Op2
+| _vd_        | input/output | Accumulator and result (2*SEW-bit)
+|===
+
+Description::
+[#norm:vwabda_op]#This instruction computes the absolute difference between the signed integer SEW-bit `Op1` and `Op2` elements, and accumulates the results into the 2*SEW-bit accumulator elements in _vd_.#
+
+[#norm:vwabda_sew_defined]#This instruction is defined for SEW=8 and SEW=16, otherwise the instruction encoding is reserved.#
+
+Operation::
+[source,sail]
+--
+let SEW_widen = SEW * 2;
+let LMUL_pow_widen = LMUL_pow + 1;
+let (result, mask) = init_masked_result(num_elem, SEW_widen, LMUL_pow_widen, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let op1 = match suffix {
+                "vv" => vs1_val[i],
+                "vx" => sext_or_truncate_to_sew(X(rs1))
+            };
+            let diff = signed(vs2_val[i]) - signed(op1);
+            to_bits_truncate(SEW_widen, signed(vd_val[i]) + abs_int(diff));
+        }
+    }
+}
+write_vreg(num_elem, SEW_widen, LMUL_pow_widen, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
+
+[[insns-vwabdau, Vector Unsigned Integer Absolute Difference And Accumulate]]
+===== insn:vwabdau.vv[] and insn:vwabdau.vx[]
+
+Synopsis::
+Vector Widening Unsigned Integer Absolute Difference and Accumulate, Overwrite Addend.
+
+Mnemonic::
+vwabdau.vv _vd_, _vs2_, _vs1_, _vm_ +
+vwabdau.vx _vd_, _vs2_, _rs1_, _vm_
+
+Encoding (Vector-Vector)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPIVV'},
+  {bits: 5, name: 'vs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x3E, attr: 'funct6'},
+]}
+....
+
+Encoding (Vector-Scalar)::
+[wavedrom, , svg]
+....
+{reg: [
+  {bits: 7, name: 'OP-V'},
+  {bits: 5, name: 'vd'},
+  {bits: 3, name: 'OPIVX'},
+  {bits: 5, name: 'rs1'},
+  {bits: 5, name: 'vs2'},
+  {bits: 1, name: 'vm', attr: 'vm'},
+  {bits: 6, name: 0x3E, attr: 'funct6'},
+]}
+....
+
+Reserved Encodings::
+* [#norm:vwabdau_sew_rsv]#`SEW` is neither 8 nor 16.#
+
+Arguments::
+
+[%autowidth]
+[%header,cols="4,2,2"]
+|===
+|Register
+|Direction
+|Definition
+
+| _vs1_/_rs1_ | input        | Op1
+| _vs2_       | input        | Op2
+| _vd_        | input/output | Accumulator and result (2*SEW-bit)
+|===
+
+Description::
+[#norm:vwabdau_op]#This instruction computes the absolute difference between the unsigned integer SEW-bit `Op1` and `Op2` elements, and accumulates the results into the 2*SEW-bit accumulator elements in _vd_.#
+
+[#norm:vwabdau_sew_defined]#This instruction is defined for SEW=8 and SEW=16, otherwise the instruction encoding is reserved.#
+
+Operation::
+[source,sail]
+--
+let SEW_widen = SEW * 2;
+let LMUL_pow_widen = LMUL_pow + 1;
+let (result, mask) = init_masked_result(num_elem, SEW_widen, LMUL_pow_widen, vd_val, vm_val);
+foreach (i from 0 to (num_elem - 1)) {
+    if mask[i] == 0b1 then {
+        result[i] = {
+            let op1 = match suffix {
+                "vv" => vs1_val[i],
+                "vx" => sext_or_truncate_to_sew(X(rs1))
+            };
+            let abs_diff = if unsigned(vs2_val[i]) >= unsigned(op1)
+                           then unsigned(vs2_val[i] - op1)
+                           else unsigned(op1 - vs2_val[i]);
+            to_bits_truncate(SEW_widen, unsigned(vd_val[i]) + abs_diff);
+        }
+    }
+}
+write_vreg(num_elem, SEW_widen, LMUL_pow_widen, vd, result);
+set_vstart(zeros());
+RETIRE_SUCCESS
+--
