@@ -1,0 +1,699 @@
+[[iommu-intro]]
+
+== Introduction
+The Input-Output Memory Management Unit (IOMMU), sometimes referred to as a
+System MMU (SMMU), is a system-level Memory Management Unit (MMU) that connects
+direct-memory-access-capable Input/Output (I/O) devices to system memory.
+
+For each I/O device connected to the system through an IOMMU, software can
+configure at the IOMMU a device context, which associates with the device a
+specific virtual address space and other per-device parameters. By giving
+each device its own separate device context at an IOMMU, each device can be
+individually configured for a separate operating system, which may be a guest OS
+or the main (host) OS. On every memory access initiated by a device, the IOMMU
+identifies the originating device by some form of unique device
+identifier, which the IOMMU then uses to locate the appropriate device context
+within data structures supplied by software. For PCIe cite:[PCI], for example,
+the originating device may be identified by the unique 16-bit triplet of PCI bus
+number (8-bit), device number (5-bit), and function number (3-bit) (collectively
+known as routing identifier or RID) and optionally up to 8-bit segment number
+when the IOMMU supports multiple Hierarchies. This specification refers to such
+unique device identifier as `device_id` and supports up to 24-bit wide
+identifiers.
+
+[NOTE]
+====
+A Hierarchy is a PCI Express I/O interconnect topology, wherein the
+Configuration Space addresses, referred to as the tuple of Bus/Device/Function
+Numbers, are unique. In some contexts, a Hierarchy is also called a Segment, and
+in Flit Mode, the Segment number is sometimes included in the ID of a Function.
+====
+
+Some devices may support shared virtual addressing which is the ability to
+share process address spaces with devices. Sharing process address spaces with
+devices allows to rely on core kernel memory management for DMA, removing some
+complexity from application and device drivers. After binding to a device,
+applications can instruct it to perform DMA on statically or dynamically
+allocated buffers. To support such addressing, software can configure one or
+more process contexts into the device context. Every memory access initiated
+by such a device is accompanied by a unique process identifier, which the IOMMU
+uses in conjunction with the unique device identifier to locate the appropriate
+process context configured by software in the device context. For PCIe, for
+example, the process context may be identified by the unique 20-bit process
+address space identifier (PASID). This specification refers to such unique
+process identifiers as `process_id` and supports up to 20-bit wide identifiers.
+
+The IOMMU employs a two-stage address translation process to translate the IOVA
+to an SPA and to enforce memory protections for the DMA. To perform address
+translation and memory protection the IOMMU uses same page table formats as used
+by the CPU's MMU for the first-stage and second-stage address translation. Using
+the same page table formats as the CPU’s MMU removes some of the memory
+management complexity for DMA. Use of an identical format also allows the same
+page tables to be used simultaneously by both the CPU MMU and the IOMMU.
+
+Although there is no option to disable two-stage address translation, either
+stage may be effectively disabled by configuring the virtual memory scheme for
+that stage to be `Bare` i.e. perform no address translation or memory protection.
+
+The virtual memory scheme employed by the IOMMU may be configured individually
+per device in the IOMMU. Devices perform DMA using an I/O virtual address (IOVA).
+Depending on the virtual memory scheme selected for a device, the IOVA used by
+the device may be a supervisor physical address (SPA), guest physical address
+(GPA), or a virtual address (VA).
+
+If the virtual memory scheme selected for both stages is `Bare` then the IOVA is
+a SPA. There is no address translation or protection performed by the IOMMU.
+
+If the virtual memory scheme selected for first-stage is `Bare` but the scheme
+for the second-stage is not `Bare` then the IOVA is a GPA. The first-stage is
+effectively disabled. The second-stage translates the GPA to SPA and enforces the configured
+memory protections. Such a configuration would be typically employed when the
+device control is passed through to a virtual machine but the Guest OS in the VM
+does not use first-stage address translation to further constrain memory accesses
+from such devices. Comparing to a RISC-V hart, this configuration is analogous
+to two-stage address translation being in effect on a RISC-V hart with the
+G-stage active and the VS-stage set to Bare.
+
+If the virtual memory scheme selected for first-stage is not `Bare` but the
+scheme for the second-stage is `Bare` then IOVA is a VA. The second-stage is
+effectively disabled. The first-stage translates the VA to a SPA and enforces the configured
+memory protections. This configuration would be typically employed when the
+IOMMU is used by a native OS or when the control of the device is retained by
+the hypervisor itself. Comparing to a RISC-V hart, this configuration is
+analogous to single-stage address translation being in effect on a RISC-V hart.
+
+If the virtual memory scheme selected for neither stage is `Bare` then the IOVA
+is a VA. Two-stage address translation is in effect. The first-stage translates
+the VA to a GPA and the second-stage translates the GPA to a SPA. Each stage
+enforces the configured memory protections. Such a configuration would be
+typically be employed when the device control is passed-through to a virtual
+machine and the Guest OS in the VM uses the first-stage address translation to
+further constrain the memory accessed by such devices and associated privileges
+and memory protections. Comparing to a RISC-V hart, this configuration is
+analogous to two-stage address translation being in effect on a RISC-V hart with
+both G-stage and VS-stage active (not Bare).
+
+DMA address translation in the IOMMU has certain performance implications for
+DMA accesses as the access time may be lengthened by the time required to
+determine the SPA using the software provided data structures.
+Similar overheads in the CPU MMU are mitigated typically through the use of a
+translation look-aside buffer (TLB) to cache these address translations such
+that they may be re-used to reduce the translation overhead on subsequent
+accesses. The IOMMU may employ similar address translation caches, referred as
+IOMMU Address Translation Cache (IOATC). The IOMMU provides mechanisms for
+software to synchronize the IOATC with the memory resident data structures used
+for address translation when they are modified. Software may configure the
+device context with a software defined context identifier called guest
+soft-context identifier (`GSCID`) to indicate that a collection of devices are
+assigned to the same VM and thus access a common virtual address space.
+Software may configure the process context with a software defined context
+identifier called process soft-context identifier (`PSCID`) to identify a
+collection of processes that share a common virtual address space.
+The IOMMU may use the `GSCID` and `PSCID` to tag entries in the IOATC to avoid
+duplication and simplify invalidation operations.
+
+Some devices may participate in the translation process and provide a device
+side ATC (DevATC) for its own memory accesses. By providing a DevATC, the
+device shares the translation caching responsibility and thereby reduce
+probability of "thrashing" in the IOATC. The DevATC may be sized by the device
+to suit its unique performance requirements and may also be used by the device
+to optimize DMA latency by prefetching translations. Such mechanisms require
+close cooperation of the device and the IOMMU using a protocol. For PCIe, for
+example, the Address Translation Services (ATS) protocol may be used by the
+device to request translations to cache in the DevATC and to synchronize it
+with updates made by software address translation data structures. The
+device participating in the address translation process also enables the use
+of I/O page faults to avoid the core kernel memory manager from having to make
+all physical memory that may be accessed by the device resident at all times.
+For PCIe, for example, the device may implement the Page Request Interface (PRI)
+to dynamically request the memory manager to make a page resident if it
+discovers the page for which it requested a translation was not available. An
+IOMMU may support specialized software interfaces and protocols with the device
+to enable services such as PCIe ATS and PCIe PRI cite:[PCI].
+
+In systems built with an Incoming Message-Signaled Interrupt Controller (IMSIC),
+the IOMMU may be programmed by the hypervisor to direct message-signaled
+interrupts (MSI) from devices controlled by the guest OS to a guest interrupt
+file in an IMSIC. Because MSIs from devices are simply memory writes, they
+would naturally be subject to the same address translation that an IOMMU
+applies to other memory writes. However, the RISC-V Advanced Interrupt
+Architecture cite:[AIA] requires that IOMMUs treat MSIs directed to virtual
+machines specially, in part to simplify software, and in part to allow optional
+support for memory-resident interrupt files. The device context is configured by
+software with parameters to identify memory accesses to a virtual interrupt file
+and to be translated using a MSI address translation table configured by software
+in the device context.
+
+=== Glossary
+.Terms and definitions
+[width=90%]
+[%header, cols="5,20"]
+|===
+| Term            ^| Definition
+| AIA             | RISC-V Advanced Interrupt Architecture cite:[AIA].
+| ATS / PCIe ATS  | Address Translation Services: A PCIe protocol to support
+                    DevATC cite:[PCI].
+| CXL             | Compute Express Link bus standard.
+| DC /
+  Device Context  | A hardware representation of state that identifies a
+                    device and the VM to which the device is assigned.
+| DDT             | Device-directory-table: A radix-tree structure traversed
+                    using the unique device identifier to locate the Device
+                    Context structure.
+| DDI             | Device-directory-index: A sub-field of the unique device
+                    identifier used as a index into a leaf or non-leaf DDT
+                    structure.
+| Device ID       | An identification number that is up to 24-bits to identify
+                    the source of a DMA or interrupt request. For PCIe devices
+                    this is the routing identifier (RID) cite:[PCI].
+| DevATC          | An address translation cache at the device.
+| DMA             | Direct Memory Access.
+| GPA             | Guest Physical Address: An address in the virtualized
+                    physical memory space of a virtual machine.
+| GSCID           | Guest soft-context identifier: An identification number used
+                    by software to uniquely identify a collection of devices
+                    assigned to a virtual machine. An IOMMU may tag IOATC
+                    entries with the GSCID. Device contexts programmed with the
+                    same GSCID must also be programmed with identical
+                    second-stage page tables.
+| Guest           | Software in a virtual machine.
+| HPM             | Hardware Performance Monitor.
+| Hypervisor      | Software entity that controls virtualization.
+| ID              | Identifier.
+| IMSIC           | Incoming Message-signaled Interrupt Controller.
+| IOATC           | IOMMU Address Translation Cache: cache in IOMMU that caches
+                    data structures used for address translations.
+| IOVA            | I/O Virtual Address: Virtual address for DMA by devices.
+| MSI             | Message Signaled Interrupts.
+| OS              | Operating System.
+| PASID           | Process Address Space Identifier: It identifies the
+                    address space of a process. The PASID value is provided in
+                    the PASID TLP prefix of the request.
+| PBMT            | Page-Based Memory Types.
+| PC              | Process Context.
+| PCIe            | Peripheral Component Interconnect Express bus standard
+                    cite:[PCI].
+| PDI             | Process-directory-index: a sub field of the unique process
+                    identifier used to index into a leaf or non-leaf PDT
+                    structure.
+| PDT             | Process-directory-table: A radix tree data structure
+                    traversed using the unique Process identifier to locate the
+                    process context structure.
+| PMA             | Physical Memory Attributes.
+| PMP             | Physical Memory Protection.
+| PPN             | Physical Page Number.
+| PRI             | Page Request Interface - a PCIe protocol cite:[PCI] that enables
+                    devices to request OS memory manager services to make pages
+                    resident.
+| Process ID      | An identification number that is up to 20-bits to identify
+                    a process context. For PCIe devices this is the PASID
+                    cite:[PCI].
+| PSCID           | Process soft-context identifier: An identification number
+                    used by software to identify a unique address space. The
+                    IOMMU may tag IOATC entries with PSCID.
+| PT              | Page Table.
+| PTE             | Page Table Entry. A leaf or non-leaf entry in a page table.
+| Reserved        | A register or data structure field reserved for future use.
+                    Reserved fields in data structures must be set to 0 by
+                    software. Software must ignore reserved fields in registers
+                    and preserve the value held in these fields when writing
+                    values to other fields in the same register.
+| RID / PCIe RID  | PCIe routing identifier cite:[PCI].
+| RO              | Read-only - Register bits are read-only and cannot be altered
+                    by software. Where explicitly defined, these bits are used
+                    to reflect changing hardware state, and as a result bit
+                    values can be observed to change at run time. +
+                    If the optional feature that would Set the bits is not
+                    implemented, the bits must be hardwired to Zero
+| RW              | Read-Write - Register bits are read-write and are permitted
+                    to be either Set or Cleared by software to the desired
+                    state. +
+                    If the optional feature that is associated with the bits is
+                    not implemented, the bits are permitted to be hardwired to
+                    Zero.
+| RW1C            | Write-1-to-clear status - Register bits indicate status when
+                    read. A Set bit indicates a status event which is Cleared by
+                    writing a 1b. Writing a 0b to RW1C bits has no effect. +
+                    If the optional feature that would Set the bit is not
+                    implemented, the bit must be read-only and hardwired to Zero
+| RW1S            | Read-Write-1-to-set - register bits indicate status when
+                    read. The bit may be Set by writing 1b. Writing a 0b to RW1S
+                    bits has no effect. +
+                    If the optional feature that introduces the bit is not
+                    implemented, the bit must be read-only and hardwired to Zero
+| SOC             | System on a chip, also referred as system-on-a-chip and
+                    system-on-chip.
+| SPA             | Supervisor Physical Address: Physical address used to
+                    to access memory and memory-mapped resources.
+| TLB             | Translation Lookaside Buffer. A cache that stores
+                    virtual-to-physical address translations to reduce
+                    translation latency. On a TLB hit, the translation is
+                    completed without accessing the first-stage and/or
+                    second-stage page tables. On a TLB miss, a page table walk
+                    is performed. Some implementations cache non-leaf levels of
+                    the page tables, reducing the number of walks required.
+| TLP             | Transaction Layer Packet.
+| VA              | Virtual Address.
+| VM              | Virtual Machine: An efficient, isolated duplicate of a real
+                    computer system. In this specification it refers to the
+                    collection of resources and state that is accessible when
+                    a RISC-V hart supporting the hypervisor extension executes
+                    with the virtualization mode set to 1.
+| VMM             | Virtual Machine Monitor. Also referred to as hypervisor.
+| VS              | Virtual Supervisor: Supervisor privilege in virtualization
+                    mode.
+| Walk            | A single memory access by the IOMMU to load a table entry.
+                    Each entry load--leaf or non-leaf--is one walk. The number
+                    of walks required to load the leaf entry depends on the
+                    number of table levels and may be fewer if non-leaf levels
+                    are already cached.
+| WARL            | Write Any values, Reads Legal values: Attribute of a
+                    register field that is only defined for a subset of bit
+                    encodings, but allow any value to be written while
+                    guaranteeing to return a legal value whenever read.
+| WPRI            | Writes Preserve values, Reads Ignore values:
+                    Attribute of a register field that is reserved for future
+                    use.
+|===
+
+
+=== Usage models
+
+
+==== Non-virtualized OS
+
+A non-virtualized OS may use the IOMMU for the following significant system-level
+functionalities:
+
+. Protect the operating system from bad memory accesses from errant devices
+. Support 32-bit devices in 64-bit environment (avoidance of bounce buffers)
+. Support mapping of contiguous virtual addresses to an underlying fragmented
+  physical addresses (avoidance of scatter/gather lists)
+. Support shared virtual addressing
+
+In the absence of an IOMMU a device could access any memory, such as privileged
+memory, and cause malicious or unintended corruptions. This may be due to
+hardware bugs, device driver bugs, or due to malicious software/hardware.
+
+The IOMMU offers a mechanism for the OS to defend against such unintended
+corruptions by limiting the memory that can be accessed by devices.  As depicted
+in <<iommu-fig-device-isolation>> the OS may configure the IOMMU with a page table to
+translate the IOVA and thereby limit the addresses that may be accessed to those
+allowed by the page table.
+
+[[iommu-fig-device-isolation]]
+.Device isolation in non-virtualized OS
+image::non-virt-OS.svg[width=300,height=300, align="center"]
+
+Legacy 32-bit devices cannot access the memory above 4 GiB. The IOMMU, through
+its address remapping capability, offers a simple mechanism for the device to
+directly access any address in the system (with appropriate access permission).
+Without an IOMMU, the OS must resort to copying data through buffers (also
+known as bounce buffers) allocated in memory below 4 GiB. In this scenario the
+IOMMU improves the system performance.
+
+The IOMMU can be useful to perform scatter/gather DMA as it permits to allocate
+large regions of memory for I/O without the need for all of the memory to be
+contiguous. A contiguous virtual address range can map to such fragmented
+physical addresses and the device programmed with the virtual address range.
+
+The IOMMU can be used to support shared virtual addressing which is the ability
+to share a process address space with devices. The virtual addresses used for
+DMA are then translated by the IOMMU to an SPA.
+
+When the IOMMU is used by a non-virtualized OS, the first-stage suffices to
+provide the required address translation and protection function and the
+second-stage may be set to Bare.
+
+
+//["ditaa",shadows=false, separation=false, fontsize: 16]
+//....
+//+----------------+ +--------------+
+//| non−privileged | |  privileged  |
+//|      memory    | |    memory    |
+//|                | |              |
+//|       ^        | |              |
+//+-------|--------+ +--------------+
+//        |
+//+-------|-------------+
+//|       |       IOMMU |
+//| +------------+      |
+//| |   device   |      |
+//| |1st−stage PT|      |
+//| +------------+      |
+//|       ^             |
+//+-------|-------------+
+//        |
+//   +--------+
+//   | Device |
+//   +--------+
+//....
+
+==== Hypervisor
+
+IOMMU makes it possible for a guest operating system, running in a virtual
+machine, to be given direct control of an I/O device with only minimal
+hypervisor intervention.
+
+A guest OS with direct control of a device will program the device with guest
+physical addresses, because that is all the OS knows. When the device then
+performs memory accesses using those addresses, an IOMMU is responsible for
+translating those guest physical addresses into supervisor physical addresses,
+referencing address-translation data structures supplied by the hypervisor.
+
+<<iommu-fig-dma-translation-direct-device-assignment>> illustrates the concept.
+The device D1 is directly assigned to VM-1 and device D2 is directly assigned
+to VM-2. The VMM configures a second-stage page table to be used for each device
+and restricts the memory that can be accessed by D1 to VM-1 associated memory
+and from D2 to VM-2 associated memory.
+
+[[iommu-fig-dma-translation-direct-device-assignment]]
+.DMA translation to enable direct device assignment
+image::hypervisor.svg[width=300,height=300, align="center"]
+//["ditaa",shadows=false, separation=false, fontsize: 16]
+//....
+//+----------------+ +----------------+
+//|      VM−1      | |      VM−2      |
+//|     memory     | |     memory     |
+//|      ^         | |       ^        |
+//+------|---------+ +-------|--------+
+//       |                   |
+//+------|-------------------|--------+
+//|      |       IOMMU       |        |
+//| +------------+     +------------+ |
+//| |  device D1 |     |  device D2 | |
+//| |2nd−stage PT|     |2nd−stage PT| |
+//| +------------+     +------------+ |
+//|      ^                   ^        |
+//+------|-------------------|--------+
+//       |                   |
+//  +-----------+      +-----------+
+//  | Device D1 |      | Device D2 |
+//  +-----------+      +-----------+
+//....
+
+To handle MSIs from a device controlled by a guest OS, the hypervisor configures
+an IOMMU to redirect those MSIs to a guest interrupt file in an IMSIC
+(see <<iommu-msi-redir>>) or to a memory-resident interrupt file. The IOMMU is
+responsible to use the MSI address-translation data structures supplied by the
+hypervisor to perform the MSI redirection. Because every interrupt file, real or
+virtual, occupies a naturally aligned 4-KiB page of address space, the required
+address translation is from a virtual (guest) page address to a physical page
+address, the same as supported by regular RISC-V page-based address translation.
+
+[[iommu-msi-redir]]
+.MSI address translation to direct guest programmed MSI to IMSIC guest interrupt files
+image::msi-imsic.png[width=500,height=400, align="center"]
+//["ditaa",shadows=false, separation=false, font=courier, fontsize: 16]
+//....
+//                                                                +-----------------------+
+//                                                                |IMSIC                  |
+//                                                                | +-------------------+ |
+//                                                                | | M−level int. file | |
+//                                                                | +-------------------+ |
+//                                                                |                       |
+//                                                                | +-------------------+ |
+//                                                                | | S−level int. file | |
+//                                                                | +-------------------+ |
+//                                                                |                       |
+//                                                                | +-------------------+ |
+//                    +----------+                                | | Guest int. file 1 | |
+//                    |   IOMMU  |           +---------------+    | +-------------------+ |
+//                    |          |           |               |    |                       |
+//  +-------+   MSI   | +------+ | MSI       |  IO Bridge    |    | +-------------------+ |
+//  |Device +-----------|MSI PT|----------------------------------->| Guest int. file 2 | |
+//  +-------+  Write  | +------+ | Write     |               |    | +-------------------+ |
+//             (GPA)  |          | (SPA)     +---------------+    |          ,,,          |
+//                    +----------+                                | +-------------------+ |
+//                                                                | | Guest int. file N | |
+//                                                                | +-------------------+ |
+//                                                                +-----------------------+
+//....
+
+==== Guest OS
+
+The hypervisor may provide a virtual IOMMU facility, through hardware
+emulation or by enlightening the guest OS to use a software interface with
+the Hypervisor (also known as para-virtualization). The guest OS may then use
+the facilities provided by the virtual IOMMU to avail the same benefits as
+those discussed for a non-virtualized OS through the use of a first-stage page
+table that it controls. The hypervisor establishes a second-stage page table
+that it controls to virtualize the address space for the virtual machine and to
+contain memory accesses from the devices passed through to the VM to the memory
+associated with the VM.
+
+With two-stage address translations active, the IOVA is first translated to
+a GPA using the first-stage page tables managed by the guest OS and the GPA
+translated to a SPA using the second-stage page tables managed by the
+hypervisor.
+
+<<iommu-fig-iommu-for-guest-os>> illustrates the concept.
+
+[[iommu-fig-iommu-for-guest-os]]
+.Address translation in IOMMU for Guest OS
+image::guest-OS.svg[width=500,height=400, align="center"]
+
+The IOMMU is configured to perform address translation using a first-stage
+and second-stage page table for device D1. The second-stage is typically used by
+the hypervisor to translate GPA to SPA and limit the device D1 to memory
+associated with VM-1. The first-stage is typically configured by the Guest OS to
+translate a VA to a GPA and contain device D1 access to a subset of VM-1 memory.
+
+For device D2 only the second-stage is active and the first-stage is set to Bare.
+
+The host OS or hypervisor may also retain a device, such as D3, for its own use.
+The first-stage suffices to provide the required address translation and
+protection function for device D3 and the second-stage is set to Bare.
+
+//["ditaa",shadows=false, separation=false, fontsize: 16]
+//....
+//+---------------------------------------------------+
+//|      Main memory                                  |
+//|                                                   |
+//|                                                   |
+//|      ^                  ^                 ^       |
+//+------|------------------|-----------------|-------+
+//       |                  |                 |
+//+------|------------------|-----------------|-------+
+//|      |       IOMMU      |                 |       |
+//| +------------+     +------------+         |       |
+//| |  device D1 |     |  device D2 |         |       |
+//| |2nd−stage PT|     |2nd−stage PT|         |       |
+//| +------------+     +------------+         |       |
+//|      ^                  ^                 |       |
+//|      |                  |                 |       |
+//| +------------+          |         +------------+  |
+//| |  device D1 |          |         |  device D3 |  |
+//| |1st−stage PT|          |         |1st−stage PT|  |
+//| +------------+          |         +------------+  |
+//|      ^                  |                 ^       |
+//+------|------------------|-----------------|-------+
+//       |                  |                 |
+//  +-----------+     +-----------+     +-----------+
+//  | Device D1 |     | Device D2 |     | Device D3 |
+//  +-----------+     +-----------+     +-----------+
+//....
+
+=== Placement and data flow
+
+<<iommu-fig-example-soc-with-iommu>> shows an example of a typical system on a chip
+(SOC) with RISC-V hart(s). The SOC incorporates memory controllers and several
+IO devices. This SOC also incorporates two instances of the IOMMU. A device
+may be directly connected to the IO Bridge and the system interconnect or may
+be connected through a Root Port when a IO protocol transaction to system
+interconnect transaction translation is required. In case of PCIe cite:[PCI],
+for example, the Root Port is a PCIe port that maps a portion of a hierarchy
+through an associated virtual PCI-PCI bridge and maps the PCIe IO protocol
+transactions to the system interconnect transactions.
+
+The first IOMMU instance, IOMMU 0 (associated with the IO Bridge 0), interfaces
+a Root Port to the system fabric/interconnect. One or more endpoint devices are
+interfaced to the SoC through this Root Port. In the case of PCIe, the Root Port
+incorporates an ATS interface to the IOMMU that is used to support the PCIe ATS
+protocol by the IOMMU.  The example shows an endpoint device with a device side
+ATC (DevATC) that holds translations obtained by the device from IOMMU 0 using
+the PCIe ATS protocol cite:[PCI].
+
+<<<
+
+When such IO-protocol-to-system-fabric-protocol translation using a Root Port
+is not required, the devices may interface directly with the system fabric.
+The second IOMMU instance, IOMMU 1 (associated with the IO Bridge 1),
+illustrates interfacing devices (IO Devices A and B) to the system fabric
+without the use of a Root Port.
+
+The IO Bridge is placed between the device(s) and the system interconnect to
+process DMA transactions. IO Devices may perform DMA transactions using IO
+Virtual Addresses (VA, GVA or GPA). The IO Bridge invokes the associated IOMMU
+to translate the IOVA to a Supervisor Physical Addresses (SPA).
+
+The IOMMU is not invoked for outbound transactions.
+
+[[iommu-fig-example-soc-with-iommu]]
+.Example of IOMMUs integration in SoC.
+image::placement.png[width=800]
+
+The IOMMU is invoked by the IO Bridge for address translation and protection for
+inbound transactions. The data associated with the inbound transactions is not
+processed by the IOMMU. The IOMMU behaves like a look-aside IP to the IO Bridge
+and has several interfaces (see <<iommu-fig-iommu-interfaces>>):
+
+* Host interface: it is an interface to the IOMMU for the harts to access
+  its memory-mapped registers and perform global configuration and/or
+  maintenance operations.
+* Device Translation Request interface: it is an interface, which receives
+  the translation requests from the IO Bridge. On this interface the IO Bridge
+  provides information about the request such as:
+.. The hardware identities associated with transaction - the `device_id` and
+   if applicable the `process_id` and its validity. The IOMMU uses the hardware
+   identities to retrieve the context information to perform the requested
+   address translations.
+.. The IOVA and the type of the transaction (Translated or Untranslated).
+.. Whether the request is for a read, write, execute, or an atomic operation.
+... Execute requested must be explicitly associated with the request
+    (e.g., using a PCIe PASID). When not explicitly requested, the default must
+    be 0.
+.. The privilege mode associated with the request. When a privilege mode is not
+   explicitly associated with the request (e.g., using a PCIe PASID), the default
+   privilege mode must be User. For requests without a `process_id` the privilege
+   mode must be User.
+.. The number of bytes accessed by the request.
+.. The IO Bridge may also provide some additional opaque information (e.g. tags)
+   that are not interpreted by the IOMMU but returned along with the response
+   from the IOMMU to the IO Bridge. As the IOMMU is allowed to complete
+   translation requests out of order, such information may be used by the IO
+   Bridge to correlate completions to previous requests.
+* Data Structure interface: it is used by the IOMMU for implicit access to
+  memory. It is a requester interface to the IO Bridge and is used to fetch the
+  required data structure from main memory. This interface is used to access:
+.. The device and process directories to get the context information and
+   translation rules.
+.. The first-stage and/or second-stage page table entries to translate the IOVA.
+.. The in-memory queues (command-queue, fault-queue, and page-request-queue)
+   used to interface with software.
+* Device Translation Completion interface: it is an interface which
+  provides the completion response from the IOMMU for previously requested
+  address translations. The completion interface may provide information
+  such as:
+.. The status of the request, indicating if the request completed successfully
+   or a fault occurred.
+.. If the request was completed successfully; the Supervisor Physical Address
+   (SPA).
+.. Opaque information (e.g. tags), if applicable, associated with the request.
+.. The page-based memory types (PBMT), if Svpbmt is supported, obtained from the
+   IOMMU address translation page tables. The IOMMU provides the page-based
+   memory type as resolved between the first-stage and second-stage page table
+   entries.
+* ATS interface: The ATS interface, if the optional PCIe ATS capability is
+  supported by the IOMMU, is used to communicate with ATS capable endpoints
+  through the PCIe Root Port. This interface is used:
+.. To receive ATS translation requests from the endpoints and to return the
+   completions to the endpoints. The Root Port may provide an indication if the
+   endpoint originating the request is a CXL type 1 or type 2 device.
+.. To send ATS "Invalidation Request" messages to the endpoints and to receive
+   the "Invalidation Completion" messages from the endpoints.
+.. To receive "Page Request" and "Stop Marker" messages from the endpoints and
+   to send "Page Request Group Response" messages to the endpoints.
+
+The interfaces related to recording an incoming MSI in a memory-resident
+interrupt file (MRIF) (See RISC-V Advanced Interrupt Architecture cite:[AIA])
+are implementation-specific. The partitioning of responsibility between
+the IOMMU and the IO bridge for recording the incoming MSI in an MRIF and
+generating the associated _notice_ MSI are implementation-specific.
+
+[[iommu-fig-iommu-interfaces]]
+.IOMMU interfaces.
+image::interfaces.png[width=800]
+
+Similar to the RISC-V harts, physical memory attributes (PMA) and physical
+memory protection (PMP) checks must be completed on all inbound IO transactions
+even when the IOMMU is in bypass (`Bare` mode). The placement and integration of
+the PMA and PMP checkers is a platform choice. PMA and PMP checkers reside
+outside the IOMMU. The example above is showing them in the IO Bridge.
+
+Implicit accesses by the IOMMU itself through the Data Structure interface are
+checked by the PMA checker. PMAs are tightly tied to a given physical platform’s
+organization, and many details are inherently platform-specific.
+
+The memory accesses performed by the IOMMU using the Data Structure interface
+need not be ordered in general with the device-initiated memory accesses.
+
+[NOTE]
+====
+The IOMMU may generate implicit memory accesses on the Data Structure interface
+to access data structures needed to perform the address translations. Such
+accesses must not be blocked by the original device-initiated memory access.
+
+The IO bridge may perform ordering of memory accesses on the Data Structure
+interface to satisfy the necessary hazard checks and other rules as defined by
+the IO bridge and the system interconnect.
+====
+
+The IOMMU provides the resolved PBMT (PMA, IO, NC) along with the translated
+address on the device translation completion interface to the IO Bridge. The
+PMA checker in the IO Bridge may use the provided PBMT to override the PMA(s)
+for the associated memory pages.
+
+The PMP checker may use the hardware ID of the bus access initiator to determine
+physical memory access privileges. As the IOMMU itself is a bus access initiator
+for its implicit accesses, the IOMMU hardware ID may be used by the PMP checker
+to select the appropriate access control rules.
+
+[NOTE]
+====
+The IOMMU does not validate the authenticity of the hardware IDs provided by
+the IO bridge.
+
+The IO bridge and/or the root ports must include suitable mechanisms to
+authenticate the hardware IDs. In some SOCs this may be trivially achieved as a
+property of the devices being integrated into the SOC and their IDs being
+immutable. For PCIe, for example, the PCIe defined Access Control Services (ACS)
+Source Validation capabilities may be used to authenticate the hardware IDs.
+Other implementation-specific methods in the IO bridge may be provided to
+perform such authentication.
+====
+
+=== IOMMU features
+Version 1.0 of the RISC-V IOMMU specification supports the following
+features:
+
+* Memory-based device context to locate parameters and address translation
+  structures. The device context is located using the hardware-provided
+  unique `device_id`. The supported `device_id` width may be up to 24 bits.
+
+* Memory-based process context to locate parameters and address translation
+  structures using hardware-provided unique `process_id`. The supported
+  `process_id` may be up to 20 bits.
+
+* 16-bit GSCIDs and 20-bit PSCIDs.
+
+* Two-stage address translation.
+
+* Page based virtual-memory system as specified by the RISC-V Privileged
+  specification <<vol:priv>> to allow software flexibility to either use a
+  common page table for the CPU MMU as well as the IOMMU or to use a
+  separate page table for the IOMMU.
+
+* Up to 57-bit virtual-address width, 56-bit system-physical-address, and
+  59-bit guest-physical-address width.
+
+* Hardware updating of PTE Accessed and Dirty bits.
+
+* Identifying memory accesses to a virtual interrupt file and MSI address
+  translation using MSI page tables specified by the RISC-V Advanced
+  Interrupt Architecture cite:[AIA].
+
+* Svnapot and Svpbmt extensions.
+
+* PCIe ATS and PRI services cite:[PCI]. Support for translating an IOVA to a
+  GPA instead of a SPA in response to a translation request.
+
+* A hardware performance monitor (HPM).
+
+* MSI and wire-signaled interrupts to request service from software.
+
+* A register interface for software to request an address translation to
+  support debug.
+
+Features supported by the IOMMU may be discovered using the `capabilities`
+register <<iommu-cap>>.

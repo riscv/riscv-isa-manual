@@ -1,0 +1,52 @@
+[[plic-claims]]
+
+== Interrupt Claim Process
+
+Sometime after a target receives an interrupt notification, it might decide to
+service the interrupt. The target sends an interrupt claim message to the PLIC
+core, which will usually be implemented as a non-idempotent memory-mapped I/O
+control register read. On receiving a claim message, the PLIC core will atomically
+determine the ID of the highest-priority pending interrupt for the target
+and then clear down the corresponding source’s IP bit. The PLIC core will then
+return the ID to the target. The PLIC core will return an ID of zero, if there
+were no pending interrupts for the target when the claim was serviced. +
+After the highest-priority pending interrupt is claimed by a target and the
+corresponding IP bit is cleared, other lower-priority pending interrupts might
+then become visible to the target, and so the PLIC EIP bit might not be cleared
+after a claim. The interrupt handler can check the local meip/seip/ueip bits
+before exiting the handler, to allow more efficient service of other interrupts
+without first restoring the interrupted context and taking another interrupt trap. +
+It is always legal for a hart to perform a claim even if the EIP is not set. In
+particular, a hart could set the threshold value to maximum to disable interrupt
+notifications and instead poll for active interrupts using periodic claim requests,
+though a simpler approach to implement polling would be to clear the external
+interrupt enable in the corresponding xie register for privilege mode x. +
+
+The PLIC can perform an interrupt claim by reading the `claim/complete`
+register, which returns the ID of the highest priority pending interrupt or
+zero if there is no pending interrupt.  A successful claim will also atomically
+clear the corresponding pending bit on the interrupt source. The PLIC can perform a claim at any time and the claim operation is not affected
+by the setting of the priority threshold register. +
+ +
+The Interrupt Claim Process register is context based and is located at 
+(4K alignment + 4) starts from offset 0x200000.
+[cols="15%,20%,20%,45%"]
+|===
+| *PLIC Register Block Name* | *Function*|*Register Block Size in Byte*| *Description*
+|Interrupt Claim Register
+|Interrupt Claim Process for 15872 contexts
+|4096 * 15872 = 65011712(0x3e00000) bytes
+|This is the register used to acquire interrupt ID for each context
+|===
+
+*PLIC Interrupt Claim Process Memory Map* +
+
+	0x200004: Interrupt Claim Process for context 0
+	0x201004: Interrupt Claim Process for context 1
+	0x202004: Interrupt Claim Process for context 2
+	0x203004: Interrupt Claim Process for context 3
+	...
+	...
+	...
+	0x3FFF004: Interrupt Claim Process for context 15871
+	
