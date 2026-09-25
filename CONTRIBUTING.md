@@ -103,7 +103,6 @@ blocks and draw the bars.
 - `src/` is the canonical AsciiDoc content used by `make` builds. `src/riscv-spec.adoc` is the entry point that includes volume files (e.g. `unpriv.adoc` and `priv.adoc`).
 - `modules/` contains the Antora site sources. `modules/unpriv/pages` and `modules/priv/pages` mirror chapter files for the site, and `modules/*/nav.adoc` controls navigation.
 - `docs-resources/` is a submodule with shared themes, converters, schemas, and tooling.
-- `normative_rule_defs/` contains one YAML definition file per chapter for normative rules.
 - `build/` is generated output.
 
 ## Adding a new extension (AsciiDoc)
