@@ -12,12 +12,14 @@ Informally, certain instructions that follow a transient-execution barrier in
 program order cannot be speculatively executed before certain instructions (or
 parts of instructions) preceding the barrier in program order have executed.
 
+NOTE: The ext:ziteb[] extension is intended to mitigate in-domain transient-execution attacks. Cross-domain attacks may be covered with additional implementation techniques or extensions.
+
 ==== Operational Model of Speculative Execution
 
-The following operational model forms part of the semantics of the
+The following operational model establishes the foundation for the semantics of the
 transient-execution barrier instructions, which are defined in the next
 section.
-This model is not intended to apply in other contexts.
+This model is _not_ intended to apply in other contexts.
 
 An instruction executes when it produces its register and memory results, i.e.,
 the values that will be written into architectural registers or memory.
@@ -27,16 +29,16 @@ For an explicit memory access instruction, execution includes performing
 address translation to determine the physical address of the memory location
 accessed by the instruction.
 
-The program order is the order of instructions resulting from
-executing a program sequentially, one instruction at a time.
-_Older_ instructions appear in program order before _younger_ instructions,
-and program dependencies may exist from older instructions to younger
-instructions.
-Due to various prediction mechanisms, a hart may execute instructions in any
-order relative to program order as long as these program dependencies appear
-to be preserved.
-_Insert predicted program order here._
-Additionally, in the course of executing instructions out-of-order, a younger
+To determine the constraints on the order of execution, a hart sequentially decodes instructions in _predicted program order_. In predicted program order, the next instruction that follows the current instruction is constrained by the following rules:
+
+* If the current instruction is _not_ a control-transfer instruction, the next instruction _must_ be the next instruction in program order after the current instruction
+* If the current instruction is a control-transfer instruction, the next instruction is any instruction that can be fetched from the same execution context as the current instruction (e.g. the same privilege level, ASID, VMID, etc. as applicable)
+
+For a hart to continue decoding and executing instructions, the next instruction in predicted program order _must_ be from the same execution context as the current instruction. If the next instruction is from a different execution context, a hart _must_ decode and execute all instructions in the current execution context before decoding and executing any instructions in the next execution context.
+
+_Older_ instructions appear in predicted program order before _younger_ instructions, and program dependencies may exist from older instructions to younger instructions. Various prediction mechanisms may effectively eliminate these dependencies, enabling a hart to execute instructions in any
+order relative to predicted program order as long as these program dependencies appear
+to be preserved. Furthermore, in the course of executing instructions out-of-order, a younger
 instruction has a _speculative dependency_ on an older instruction when at
 least one of the following is true:
 
@@ -119,9 +121,9 @@ speculative dependencies defined in the execution model above.
 
 ===== Control-transfer dependency transient-execution barrier (insn:teb.ct[])
 
-If a signaling instruction appears in program order after a insn:teb.ct[] and
+If a signaling instruction appears in predicted program order after a insn:teb.ct[] and
 has a speculative control dependency on any control transfer instruction that
-appears in program order before the insn:teb.ct[], the older control transfer
+appears in predicted program order before the insn:teb.ct[], the older control transfer
 instruction _must_ execute before the younger signaling instruction executes.
 
 [NOTE]
@@ -160,9 +162,9 @@ suffices to prevent this leak.
 
 ===== Register dependency transient-execution barrier (insn:teb.rd[])
 
-If a signaling instruction appears in program order after a insn:teb.rd[] and
+If a signaling instruction appears in predicted program order after a insn:teb.rd[] and
 has a speculative register dependency on any instruction that appears in
-program order before the insn:teb.rd[], the older instruction _must_ execute
+predicted program order before the insn:teb.rd[], the older instruction _must_ execute
 before the younger signaling instruction executes.
 
 [NOTE]
@@ -197,9 +199,9 @@ suffices to prevent this leak.
 
 ===== Memory dependency transient-execution barrier (insn:teb.md[])
 
-If a signaling explicit memory access instruction appears in program order
+If a signaling explicit memory access instruction appears in predicted program order
 after a insn:teb.md[] and has a speculative memory dependency on any store
-instruction that appears in program order before the insn:teb.md[], the older
+instruction that appears in predicted program order before the insn:teb.md[], the older
 store instruction _must_ determine its physical address before the signaling
 explicit memory access instruction executes.
 
