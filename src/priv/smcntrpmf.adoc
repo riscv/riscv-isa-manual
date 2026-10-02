@@ -4,18 +4,20 @@
 
 ==== Introduction
 
-The cycle and instret counters serve to support user mode self-profiling usages, wherein a user can read the counter(s) twice and compute the delta(s) to evaluate user software performance and behavior.  By default, these counters are not filtered by privilege mode, and thus they continue to increment while traps (e.g., page faults or interrupts) to more privileged code are handled.  This causes two problems:
+The csr:cycle[] and csr:instret[] counters serve to support user mode self-profiling usages, wherein a user can read the counter(s) twice and compute the delta(s) to evaluate user software performance and behavior.  By default, these counters are not filtered by privilege mode, and thus they continue to increment while traps (e.g., page faults or interrupts) to more privileged code are handled.  This causes two problems:
 
 * It introduces unpredictable noise to the counter values observed by the user.
 * It leaks information about privileged software execution to user mode.
 
-Smcntrpmf remedies these issues by introducing privilege mode filtering for the cycle and instret counters.
+ext:smcntrpmf[] remedies these issues by introducing privilege mode filtering for the csr:cycle[] and csr:instret[] counters.
+
+This extension depends on the extlink:zicntr[] extension.
 
 ==== CSRs
 
-===== Machine Counter Configuration (`mcyclecfg`, `minstretcfg`) Registers
+===== Machine Counter Configuration (csr:mcyclecfg[], csr:minstretcfg[]) Registers
 
-[#norm:mcyclecfg_sz]#mcyclecfg and minstretcfg are 64-bit registers# that [#norm:mcyclecfg_op]#configure privilege mode filtering for the cycle and instret counters, respectively.#
+[#norm:mcyclecfg_sz]#csr:mcyclecfg[] and csr:minstretcfg[] are 64-bit registers# that [#norm:mcyclecfg_op]#configure privilege mode filtering for the csr:cycle[] and csr:instret[] counters, respectively.#
 
 [cols="^1,^1,^1,^1,^1,^1,^5",stripes=even,options="header"]
 |====
@@ -43,17 +45,17 @@ Smcntrpmf remedies these issues by introducing privilege mode filtering for the 
 
 [NOTE]
 ====
-The more natural CSR number for mcyclecfg would be 0x320, but that was allocated to mcountinhibit.
+The more natural CSR number for csr:mcyclecfg[] would be 0x320, but that was allocated to csr:mcountinhibit[].
 
 This register format matches that specified for programmable counters by Sscofpmf.  The bit position for the OF bit (bit 63) is read-only 0, since these counters do not generate local-counter-overflow interrupts on overflow.
 ====
 
 ==== Counter Behavior
 
-[#norm:counter_inhibited_behavior]#The fundamental behavior of cycle and instret is modified in that counting does not occur while executing in an inhibited privilege mode.#
+[#norm:counter_inhibited_behavior]#The fundamental behavior of csr:cycle[] and csr:instret[] is modified in that counting does not occur while executing in an inhibited privilege mode.#
 Further, the following defines how transitions between a non-inhibited privilege mode and an inhibited privilege mode are counted.
 
-[#norm:cycle_counting]#The cycle counter will simply count CPU cycles while the CPU is in a non-inhibited privilege mode.#
+[#norm:cycle_counting]#The csr:cycle[] counter will simply count CPU cycles while the CPU is in a non-inhibited privilege mode.#
 Mode transition operations (traps and trap returns) may take multiple clock cycles, and the change of privilege mode may be reported as occurring in any one of those cycles (possibly different for each occurrence of a trap or trap return).
 
 [NOTE]
@@ -61,12 +63,12 @@ Mode transition operations (traps and trap returns) may take multiple clock cycl
 The RISC-V ISA has no requirement that the number of cycles for a trap or trap return be the same for all occurrences.  Implementations are free to determine the extent to which this number may be consistent and predictable (or not), and the same is true for the specific cycle in which privilege mode changes.
 ====
 
-For the instret counter, most instructions do not affect mode transitions, so for those the behavior is clear: [#norm:instret_non_inhibited]#instructions that retire in a non-inhibited mode increment instret, and instructions that retire in an inhibited mode do not.#
-There are two types of instructions that can affect a privilege mode change: instructions that cause synchronous exceptions to a more privileged mode, and xRET instructions that return to a less privileged mode. [#norm:instret_exception]#The former are not considered to retire, and hence do not increment instret.# [#norm:instret_xret]#The latter do retire, and should increment instret only if the originating privilege mode is not inhibited.#
+For the csr:instret[] counter, most instructions do not affect mode transitions, so for those the behavior is clear: [#norm:instret_non_inhibited]#instructions that retire in a non-inhibited mode increment csr:instret[], and instructions that retire in an inhibited mode do not.#
+There are two types of instructions that can affect a privilege mode change: instructions that cause synchronous exceptions to a more privileged mode, and xRET instructions that return to a less privileged mode. [#norm:instret_exception]#The former are not considered to retire, and hence do not increment csr:instret[].# [#norm:instret_xret]#The latter do retire, and should increment csr:instret[] only if the originating privilege mode is not inhibited.#
 
 [NOTE]
 ====
-The instret definition above is intended to ensure that the counter increments in a predictable fashion.  For example, consider a scenario where minstretcfg is configured such that all modes other than U-mode are inhibited.  A user mode load should increment only once, even if it takes a page fault or other exception.  With this definition, the faulting execution of the load will not increment (it does not retire), the handler instructions will not increment (they execute in an inhibited mode), including the xRET (it arguably retires in a non-inhibited mode, but it originates in an inhibited mode).  Only once the load is re-executed and retires will it increment instret.
+The csr:instret[] definition above is intended to ensure that the counter increments in a predictable fashion.  For example, consider a scenario where csr:minstretcfg[] is configured such that all modes other than U-mode are inhibited.  A user mode load should increment only once, even if it takes a page fault or other exception.  With this definition, the faulting execution of the load will not increment (it does not retire), the handler instructions will not increment (they execute in an inhibited mode), including the xRET (it arguably retires in a non-inhibited mode, but it originates in an inhibited mode).  Only once the load is re-executed and retires will it increment csr:instret[].
 
-In cases where an instruction is emulated by software running in a privilege mode that is inhibited in minstretcfg, the emulation routine must emulate the instret increment.
+In cases where an instruction is emulated by software running in a privilege mode that is inhibited in csr:minstretcfg[], the emulation routine must emulate the csr:instret[] increment.
 ====
