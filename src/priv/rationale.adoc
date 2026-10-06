@@ -78,29 +78,37 @@ Although RLB may be used as a software discovery method for Smepmp while the PMP
 ===== Machine Mode Lockdown
 The base specification's dual meaning of the `pmpcfg.L` bit — marking a rule as both _Locked_ and enforced in all modes — is neither flexible nor clean. With the introduction of Machine Mode Lockdown, the `pmpcfg.L` bit instead distinguishes between rules enforced only in Machine mode (_M-mode-only_) and those enforced only in S/U-modes (_S/U-mode-only_). Rule locking becomes part of the definition of an _M-mode-only_ rule, since a rule added in Machine mode that is not locked could be modified or removed in a few instructions; S/U-modes cannot modify PMP rules in any case, so locking them does not make sense.
 
-* *M-mode-only and S/U-mode-only rules:* [#nonorm:mseccfg_mml_pmpcfg_l_op]#Separating _M-mode-only_ from _S/U-mode-only_ rules lets us distinguish which regions are used by Machine-mode code (`pmpcfg.L == 1`) and which by Supervisor or User mode code (`pmpcfg.L == 0`), in the same way the U bit in a page-table entry marks which virtual-memory pages belong to User mode (U==1) and which to the Supervisor/OS (U==0). With this distinction in place, memory access and execution prevention can be enforced in Machine mode for any physical region that is not _M-mode-only_; this mitigates the confused-deputy scenario mentioned in the threat model.#
+[[nonorm:mseccfg_mml_pmpcfg_l_op]]
+====== M-mode-only and S/U-mode-only rules
+Separating _M-mode-only_ from _S/U-mode-only_ rules lets us distinguish which regions are used by Machine-mode code (`pmpcfg.L == 1`) and which by Supervisor or User mode code (`pmpcfg.L == 0`), in the same way the U bit in a page-table entry marks which virtual-memory pages belong to User mode (U==1) and which to the Supervisor/OS (U==0). With this distinction in place, memory access and execution prevention can be enforced in Machine mode for any physical region that is not _M-mode-only_; this mitigates the confused-deputy scenario mentioned in the threat model.
 
 [NOTE]
 ====
 Although `mstatus.MPRV` can be used in Machine mode to read/write data in an _S/U-mode-only_ region using general-purpose registers, this happens with S/U-mode permissions and honors any MMU restrictions put in place by S-mode. Machine mode can of course still tamper with the page tables or add _S/U-mode-only_ rules to bypass the protections S-mode put in place, but if an attacker has compromised Machine mode to that extent, no security guarantees are possible in any case. *The threat model assumes buggy software in Machine mode, not compromised software.* Disabling `mstatus.MPRV` was considered but deemed excessive and out of scope.
 ====
 
-* *Shared-Region rules:* [[nonorm:mseccfg_mml_shared_rules_op]]Isolating Machine mode from S/U-mode leaves no way to share code or data across the privilege boundary: S/U-mode can reach only regions with a matching _S/U-mode-only_ rule, and Machine mode cannot access such regions at all. Smepmp addresses this with _Shared-Region_ rules. Shared regions come in two flavours that mirror how a region is owned and how long it lives: persistent ones, managed by Machine mode, and per-context ones, which carry the permissions of a particular S/U context and are swapped with it.
-+
+[[nonorm:mseccfg_mml_shared_rules_op]]
+====== Shared-Region rules
+Isolating Machine mode from S/U-mode leaves no way to share code or data across the privilege boundary: S/U-mode can reach only regions with a matching _S/U-mode-only_ rule, and Machine mode cannot access such regions at all. Smepmp addresses this with _Shared-Region_ rules. Shared regions come in two flavours that mirror how a region is owned and how long it lives: persistent ones, managed by Machine mode, and per-context ones, which carry the permissions of a particular S/U context and are swapped with it.
+
 The most common use is Machine mode making data available to the software above it — for example exposing a device tree or ACPI tables to the generic firmware / operating system as a persistent, read-only shared region, or setting up a zero-copy data channel for a particular S/U context.
-+
+
 Sharing _code_ is also possible. The motivating case was letting a generic operating system or firmware — Linux or OpenSBI, say — call vendor-specific code without compiling it into its own image: such projects are typically built with a generic toolchain and, often by policy, will not carry vendor code they cannot build themselves. A _Locked_ shared code region lets the vendor's firmware publish a routine — for instance one that uses a vendor-specific ISA extension — that generic software can then execute directly, much as the Linux vDSO lets user space run kernel-provided code without a system call. In practice, though, this is far less common than data sharing.
-+
+
 It is worth asking why a separate rule type is needed at all, rather than simply having Machine mode drop the relevant _S/U-mode-only_ rule whenever it needs to reach the region. That approach is problematic: it works only with `mseccfg.MMAP` disabled, and it turns every access into a PMP-modifying code path — frequently exercised, easy to misuse, and fragile under re-entrancy, since an interrupt taken while the rule is removed widens the exposure window and leaves it unclear which context must restore it. More fundamentally, it would make a region's permissions an artifact of the momentary PMP state rather than a stable property of the region, blurring the ownership the rest of the design keeps explicit.
-+
+
 A coarser alternative was in fact considered: a global, `sstatus.SUM`-like bypass that would temporarily let Machine mode into S/U regions. The per-rule _Shared-Region_ approach was preferred, because a transient global permission left active on exit from Machine mode would silently void memory-access prevention.
-+
+
 Shared-Region rules reuse the formerly reserved `pmpcfg.RW == 01` encoding. An earlier draft had instead spent one of the two reserved `pmpcfg` bits (bit 5), but since those bits are a very limited resource, that approach was dropped. To keep shared data non-executable and shared code non-writable, the `pmpcfg.X` bit is repurposed: for shared data regions (except the `pmpcfg.LRWX == 1111` encoding) it marks whether S/U-mode may write, so an executable shared data region cannot be expressed; for shared code regions it marks whether Machine mode may read — and since `pmpcfg.RW == 01` already encodes the shared region, a writable shared code region cannot be expressed either.
-+
+
 The `pmpcfg.LRWX == 1111` encoding — a locked, shared, read-only data region — was decided later; its initial meaning was an M-mode-only read/write/execute region. The change was made because the already-defined shared data regions were not locked, so read/write access from Machine mode could not be restricted. Just as there are execute-only shared code regions for both modes, it was decided to also allow a least-privileged shared data region for both modes. This allows, for example, sharing the `.text` section of an ELF as a shared code region and the `.rodata` section as a locked shared data region, without letting Machine mode modify `.rodata`. A locked read/write/execute region in Machine mode was judged to make little sense and to be potentially dangerous, since Machine mode could not add further restrictions there (unlike S/U-mode, where S-mode can further restrict a `pmpcfg.LRWX == 0111` region through the MMU), leaving open the possibility of modifying an executable region in Machine mode. As a side benefit, dropping the locked read/write/execute meaning of this encoding means Machine mode can no longer encode a writable-and-executable region at all — the base PMP could still express one as RWX — giving a W⊕X property for Machine mode essentially for free.
 
-* *Execution prevention:* [#nonorm:mseccfg_mml_exec_code]#Beyond denying Machine mode access to regions owned by S/U-mode, execution in Machine mode is also denied for any region with no matching rule at all, regardless of `mseccfg.MMAP`; this mitigates the second scenario — execution from unmatched or externally-writable memory.#
+[[nonorm:mseccfg_mml_exec_code]]
+====== Execution prevention
+Beyond denying Machine mode access to regions owned by S/U-mode, execution in Machine mode is also denied for any region with no matching rule at all, regardless of `mseccfg.MMAP`; this mitigates the second scenario — execution from unmatched or externally-writable memory.
 
-* *Code-injection prevention:* [#nonorm:mseccfg_mml_x_restrict]#For the same reason, once `mseccfg.MML` is set it must not be possible to introduce a new executable _M-mode-only_ or _Locked_ _Shared-Region_ rule, as that would allow new code to be made executable in Machine mode after lockdown. The restriction can be lifted temporarily with `mseccfg.RLB` during the boot process (see <<nonorm:mseccfg_rlb_op_warl,Rule Locking Bypass>>).#
+[[nonorm:mseccfg_mml_x_restrict]]
+====== Code-injection prevention
+For the same reason, once `mseccfg.MML` is set it must not be possible to introduce a new executable _M-mode-only_ or _Locked_ _Shared-Region_ rule, as that would allow new code to be made executable in Machine mode after lockdown. The restriction can be lifted temporarily with `mseccfg.RLB` during the boot process (see <<nonorm:mseccfg_rlb_op_warl,Rule Locking Bypass>>).
 
 //
