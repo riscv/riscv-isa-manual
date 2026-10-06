@@ -1,47 +1,63 @@
 [[smepmp]]
 === ext:smepmp[] Extension for PMP Enhancements for memory access and execution prevention in Machine mode
 
-Being able to access the memory of a process running at a high privileged execution mode, such as the Supervisor or Machine mode, from a lower privileged mode such as the User mode, introduces an obvious attack vector since it allows for an attacker to perform privilege escalation, and tamper with the code and/or data of that process. A less obvious attack vector exists when the reverse happens, in which case an attacker instead of tampering with code and/or data that belong to a high-privileged process, can tamper with the memory of an unprivileged / less-privileged process and trick the high-privileged process to use or execute it.
+The Smepmp extension enhances the xref:pmp[xrefstyle=basic] mechanism to improve Machine mode's security, by providing stronger memory isolation and privilege separation. It enables preventing the execution of code from memory regions not explicitly marked as executable by Machine mode, and restricts Machine mode's access to memory regions designated for Supervisor and User modes. These capabilities help to mitigate control-flow subversion attacks that exploit execution of unauthorized code with Machine mode privileges, and provide security guarantees consistent with the mechanism described in <<sum>> for memory access and execution prevention between Supervisor and User mode.
 
-Two mechanisms combine to prevent this attack vector.
-The first one prevents the OS from accessing the memory of an unprivileged
-process unless a specific code path is followed, and the second one prevents
-the OS from executing the memory of an unprivileged process at all times.
-RISC-V already includes support for the former through the ``sstatus.SUM`` bit,
-and for the latter by always denying supervisor execution of virtual memory
-pages marked with the U bit.
+Additionally this extension provides a set of mechanisms which allow a more flexible and efficient use of the PMP configuration registers, especially during early boot.
+
+All mechanisms defined in this extension utilize the xref:sec:mseccfg[xrefstyle=basic], and the existing PMP registers. No new CSRs are defined. The rationale that guided development of this extension is included in <<smepmp_rationale>>.
+
+[NOTE]
+.Terms used in this specification for clarity
+====
+* *PMP Entry*: A pair of ``pmpcfg[i]`` / ``pmpaddr[i]`` registers.
+* *PMP Rule*: The contents of a pmpcfg register and its associated pmpaddr register(s), that encode a valid protected physical memory region, according to <<pmpcfg-a>>, where ``pmpcfg[i].A != OFF``, and if ``pmpcfg[i].A == TOR``, ``pmpaddr[i-1] < pmpaddr[i]``.
+* *Locked*: A PMP rule/entry where the ``pmpcfg.L`` bit is set and the locking behavior mandated in <<pmp-locking>> applies.
+====
+
+[[smepmp-mmap]]
+==== Machine-Mode Allowlist Policy (MMAP)
+
+[#norm:mseccfg_mmap_op_warl]#``mseccfg.MMAP`` is a WARL field that changes the default PMP policy for Machine mode when accessing memory regions that don't have a matching PMP rule.#
+[#norm:mseccfg_mmap_sticky]#It is a sticky bit: once set, it cannot be unset until <<reset,reset>>#.
+
+* When ``mseccfg.MMAP`` is clear, Machine mode can access memory regions without a matching PMP rule (default behavior).
+
+* When ``mseccfg.MMAP`` is set, Machine mode cannot access memory regions without a matching PMP rule; any such access raises an access-fault exception.
+
+[[smepmp-rlb]]
+==== Rule Locking Bypass (RLB)
+
+[#norm:mseccfg_rlb_op_warl]#``mseccfg.RLB`` is a WARL field that provides a mechanism to temporarily lift restrictions on the management of _Locked_ PMP rules.#
+
+* When ``mseccfg.RLB`` is set, _Locked_ PMP rules may be removed or modified and _Locked_ PMP entries may be edited.
+
+* When ``mseccfg.RLB`` is clear and ``pmpcfg.L`` is set in any rule or entry (including disabled entries), [#norm:mseccfg_rlb_sticky]#then mseccfg.RLB remains clear and any further modifications to mseccfg.RLB are ignored until <<reset,reset>>#.
+
+[CAUTION]
+====
+``mseccfg.RLB`` is intended for temporary use by vendor-specific early-boot code — for example to let a BootROM finalize, merge, or clean up the PMP ruleset, to register executable _Shared-Region_ rules (see below), or as a debugging aid. While ``mseccfg.RLB`` is set, _Locked_ M-mode rules can be modified at any time, so the guarantees those rules provide no longer hold — a few M-mode instructions can lift any PMP restriction. *It must therefore be disabled and locked before control is handed to the generic firmware or operating system; generic code should never run with ``mseccfg.RLB`` set; doing so must be considered a security vulnerability.* Vendors who do not need this functionality should never set ``mseccfg.RLB``, and should hard-wire it to 0 where possible. The rationale behind ``mseccfg.RLB`` is discussed in more detail in <<nonorm:mseccfg_rlb_op_warl,Rule Locking Bypass>>.
+====
 
 [NOTE]
 ====
-Terms:
-
-* *PMP Entry*: A pair of ``pmpcfg[i]`` / ``pmpaddr[i]`` registers.
-* *PMP Rule*: The contents of a pmpcfg register and its associated pmpaddr register(s), that encode a valid protected physical memory region, where ``pmpcfg[i].A != OFF``, and if ``pmpcfg[i].A == TOR``, ``pmpaddr[i-1] < pmpaddr[i]``.
-* *Ignored*: Any permissions set by a matching PMP rule are ignored, and _all_ accesses to the requested address range are allowed.
-* *Enforced*: Only access types configured in the PMP rule matching the requested address range are allowed; failures will cause an access-fault exception.
-* *Denied*: Any permissions set by a matching PMP rule are ignored, and _no_ accesses to the requested address range are allowed.; failures will cause an access-fault exception.
-* *Locked*: A PMP rule/entry where the ``pmpcfg.L`` bit is set.
-* *PMP reset*: A reset process where all PMP settings of the hart, including locked rules/settings, are re-initialized to a set of safe defaults, before releasing the hart (back) to the firmware / OS / application.
+If ``mseccfg.RLB`` is not used and left unset, it will be locked as soon as a PMP rule/entry with the ``pmpcfg.L`` bit set is configured.
 ====
 
-[[smepmp_threat]]
-==== Threat model
+[[smepmp-mml]]
+==== Machine Mode Lockdown (MML)
 
-The rationale that guided development of this extension is included in
-Section <<smepmp_rationale>>.
+[#norm:mseccfg_mml_op_warl]#``mseccfg.MML`` is a WARL field that changes the interpretation of the ``pmpcfg.L`` bit defined in <<pmp-locking>>.# [#norm:mseccfg_mml_sticky]#It is a sticky bit: once set, it cannot be unset until <<reset,reset>>#.
 
-Without the Smepmp extension, it is not possible for a PMP rule to be *enforced* only on non-Machine modes and *denied* on Machine mode, in order to allow access to a memory region solely by less-privileged modes. It is only possible to have a *locked* rule that will be *enforced* on all modes, or a rule that will be *enforced* on non-Machine modes and be *ignored* by Machine mode. So for any physical memory region which is not protected with a Locked rule, Machine mode has unlimited access, including the ability to execute it.
+* [#norm:mseccfg_mml_clear]#When ``mseccfg.MML`` is clear, PMP operates according to the original specification, where the ``pmpcfg.L`` bit marks a rule as _Locked_ and applicable in all privilege modes.# [#norm:pmp_rw01_rsv]#The combination of ``pmpcfg.RW == 01`` remains reserved for future standard use.#
 
-Without being able to protect less-privileged modes from Machine mode, it is not possible to prevent the mentioned attack vector.  This becomes even more important for RISC-V than on other architectures, since implementations are allowed where a hart only has Machine and User modes available, so the whole OS will run on Machine mode instead of the non-existent Supervisor mode. In such implementations the attack surface is greatly increased, and the same kind of attacks performed on Supervisor mode and mitigated through the virtual-memory system, can be performed on Machine mode without any available mitigations. Even on implementations with Supervisor mode present attacks are still possible against the Firmware and/or the Secure Monitor running on Machine mode.
+* [#norm:mseccfg_mml_set]#When ``mseccfg.MML`` is set, the semantics of PMP rules change as follows:#
 
-==== Smepmp Physical Memory Protection Rules
+** [#norm:mseccfg_mml_pmpcfg_l_op]#``pmpcfg.L`` denotes an _M-mode-only_ rule when set (applies only to accesses from M-mode), or an _S/U-mode-only_ rule when clear (applies only to accesses from S/U-mode). When ``pmpcfg.L`` is set the rule is also _Locked_, unless ``mseccfg.RLB`` is also set.#
 
-To address the threat model outlined in Section <<smepmp_threat>>, [#norm:mseccfg_fields_exist]#this
-extension introduces the `RLB`, `MMWP`, and `MML` fields in the `mseccfg` CSR
-and their associated rules.# See <<norm:mseccfg_enc_img>> for the detailed
-specification of these fields and the corresponding rules.
+** [#norm:mseccfg_mml_shared_rules_op]#The formerly reserved encoding ``pmpcfg.RW == 01`` (with various ``pmpcfg.L`` and ``pmpcfg.X`` settings), and the encoding ``pmpcfg.LRWX == 1111``, now encode _Shared-Region_ rules (that apply to accesses from all privilege modes) with varying permissions.#
 
-The physical memory protection rules when `mseccfg.MML` is set to 1 are summarized in the truth table below.
+The following truth table shows the updated behavior in detail:
 
 [[norm:mml_truth_table]]
 [cols="^1,^1,^1,^1,^3,^3",stripes=even,options="header"]
@@ -56,22 +72,39 @@ The physical memory protection rules when `mseccfg.MML` is set to 1 are summariz
 |0|1|0|1|Access Exception|Read/Execute region
 |0|1|1|0|Access Exception|Read/Write region
 |0|1|1|1|Access Exception|Read/Write/Execute region
-|1|0|0|0 2+|Locked inaccessible region* (Access Exception)
-|1|0|0|1|Locked Execute-only region*|Access Exception
-|1|0|1|0 2+|Locked Shared code region: Execute only on both M and S/U mode.*
-|1|0|1|1 2+|Locked Shared code region: Execute only on S/U mode, read/execute on M mode.*
-|1|1|0|0|Locked Read-only region*|Access Exception
-|1|1|0|1|Locked Read/Execute region*|Access Exception
-|1|1|1|0|Locked Read/Write region*|Access Exception
-|1|1|1|1 2+|Locked Shared data region: Read only on both M and S/U mode.*
+|1|0|0|0 2+|_Locked_ inaccessible region^1^ (Access Exception)
+|1|0|0|1|_Locked_ Execute-only region^1,2^|Access Exception
+|1|0|1|0 2+|_Locked_ Shared code region: Execute only on both M and S/U mode.^1,2^
+|1|0|1|1 2+|_Locked_ Shared code region: Execute only on S/U mode, read/execute on M mode.^1,2^
+|1|1|0|0|_Locked_ Read-only region^1^|Access Exception
+|1|1|0|1|_Locked_ Read/Execute region^1,2^|Access Exception
+|1|1|1|0|_Locked_ Read/Write region^1^|Access Exception
+|1|1|1|1 2+|_Locked_ Shared data region: Read only on both M and S/U mode.^1^
 |===
 
-*: *Locked* rules cannot be removed or modified until a *PMP reset*, unless ``mseccfg.RLB`` is set.
+^1^: _Locked_ rules cannot be removed or modified until <<reset,reset>>, unless ``mseccfg.RLB`` is set.
+
+^2^: Machine mode may fetch and execute instructions from these regions.
+
+Additionally, when ``mseccfg.MML`` is set:
+
+* *Execution prevention*: [#norm:mseccfg_mml_exec_code]#Machine mode may execute only from regions with a matching _M-mode-only_ or _Locked_ _Shared-Region_ rule that grants it execute permission (marked with ^2^ in the truth table above). Execution from any other region raises an access-fault exception — this includes a region covered by an _S/U-mode-only_ rule and, notably, a region with no matching PMP rule at all. This restriction follows from MML alone and applies regardless of ``mseccfg.MMAP``.#
+
+* *Code-injection prevention*: [#norm:mseccfg_mml_x_restrict]#Adding a rule with executable privileges that is either _M-mode-only_ or a _Locked_ _Shared-Region_ is not possible; such pmpcfg writes are ignored, leaving pmpcfg unchanged, unless ``mseccfg.RLB`` is also set.#
 
 A visual representation of these rules is as follows:
 
-image::smepmp-visual-representation.png[]
+image::smepmp-visual-representation.svg[]
 
+[[smepmp-discovery]]
 ==== Smepmp software discovery
 
-Since all fields defined in ``mseccfg`` as part of this extension are locked when set (``MMWP``/``MML``) or locked when cleared (``RLB``), software can't poll them for determining the presence of Smepmp. It is expected that BootROM will set ``mseccfg.MMWP`` and/or ``mseccfg.MML`` during early boot, before jumping to the firmware, so that the firmware will be able to determine the presence of Smepmp by reading ``mseccfg`` and checking the state of ``mseccfg.MMWP`` and ``mseccfg.MML``.
+The fields added by this extension cannot be probed non-destructively: ``mseccfg.MMAP`` and ``mseccfg.MML`` are locked once set, and ``mseccfg.RLB`` is locked once cleared. Software therefore cannot write a field and read it back to test for the presence of Smepmp without risking a permanent, and possibly unwanted, change to the hart's security configuration.
+
+The presence of Smepmp is therefore expected to be discovered through a software-defined mechanism, such as a platform description (for example a device tree or ACPI tables) provided to the firmware and the operating system.
+
+Discovering the extension by reading ``mseccfg`` directly is only possible in narrow cases, each with significant drawbacks:
+
+* The boot code preceding the firmware sets ``mseccfg.MMAP`` and/or ``mseccfg.MML`` before handing over control. This is generally inappropriate: ``mseccfg.MML`` is meant to be set only after the firmware has installed its M-mode code regions, so setting it in early boot would lock the hart down prematurely, and ``mseccfg.MMAP`` is not a suitable default policy for every platform.
+
+* The boot code leaves ``mseccfg.RLB`` set so the firmware can observe it. This is discouraged: leaving RLB set is itself a security weakness, and since the firmware can rebuild the entire PMP ruleset on its own it gains nothing from inheriting an unlocked configuration — although a particular platform may still mandate it.
