@@ -1,0 +1,319 @@
+// Frozen from the RISC-V Debug Specification v1.0 (Ratified, 2025-02-21),
+// generated from xml/abstract_commands.xml in riscv/riscv-debug-spec. Do not regenerate;
+// edit this file directly if an erratum requires a change.
+[[ac-accessregister]]
+===== ((`Access Register`))
+
+This command gives the debugger access to CPU registers
+and allows it to execute the Program Buffer.
+It performs the following sequence of operations:
+
+. If {accessregister-write} is clear and {accessregister-transfer} is set, then copy data from
+the register specified by {accessregister-regno} into the `arg0` region of
+`data`, and perform any side effects that occur when this
+register is read from M-mode.
+. If {accessregister-write} is set and {accessregister-transfer} is set, then copy data from the
+`arg0` region of `data` into the register specified by
+{accessregister-regno}, and perform any side effects that occur when this register
+is written from M-mode.
+. If {accessregister-aarpostincrement} and
+{accessregister-transfer} are set, increment
+{accessregister-regno}. {accessregister-regno} may also be
+incremented if {accessregister-aarpostincrement} is set and
+{accessregister-transfer} is clear.
+. Execute the Program Buffer, if {accessregister-postexec} is set.
+
+If any of these operations fail, {abstractcs-cmderr} is set and none of the
+remaining steps are executed. An implementation may detect an upcoming
+failure early, and fail the overall command before it reaches the step
+that would cause failure. If the failure is that the requested register
+does not exist in the hart, {abstractcs-cmderr} must be set to 3 (exception).
+
+Debug Modules must implement this command
+and must support read and write access to all GPRs when the selected hart is halted.
+Debug Modules may optionally support accessing other registers,
+or accessing registers when the hart is running.
+It is recommended that if one register in a group is accessible, then
+all registers in that group are accessible, but each individual
+register (aside from GPRs) may be supported differently across read,
+write, and halt status.
+
+Registers might not be accessible if they wouldn't be accessible by M
+mode code currently running. (E.g. `fflags` might not be accessible
+when `mstatus.FS` is 0.) If this is the case, the debugger is
+responsible for changing state to make the registers accessible. The
+Core Debug Registers (xref:debreg[]) should be accessible if
+abstract CSR access is implemented.
+
+[[tab:regno]]
+.Abstract Register Numbers
+[%autowidth,align="center",float="center",cols="<,<",options="header"]
+|===
+| Numbers | Group Description
+| 0x0000 -- 0x0fff | CSRs. The ``PC'' can be accessed here through {csr-dpc}.
+| 0x1000 -- 0x101f | GPRs
+| 0x1020 -- 0x103f | Floating point registers
+| 0xc000 -- 0xffff | Reserved for non-standard extensions and internal use.
+|===
+
+[NOTE]
+====
+The encoding of {accessregister-aarsize} was chosen to match {sbcs-sbaccess} in {dm-sbcs}.
+====
+
+This command modifies `arg0` only when a register is read. The
+other `data` registers are not changed.
+
+
+[bytefield]
+----
+(def row-height 45)
+(def row-header-fn nil)
+(def boxes-per-row 34)
+(draw-column-headers {:font-size 15 :height 17 :labels ["31" "" "" "" "24" "23" "22" "" "" "" "20" "" "" "" "19" "" "" "" "" "18" "" "" "17" "" "" "16" "" "15" "" "" "" "" "" "0"]})
+(draw-box (text "cmdtype" {:font-size 20}) {:span 5})
+(draw-box (text "0" {:font-size 20}) {:span 1})
+(draw-box (text "aarsize" {:font-size 20}) {:span 5})
+(draw-box (text "aarpostincrement" {:font-size 20}) {:span 7})
+(draw-box (text "postexec" {:font-size 20}) {:span 3})
+(draw-box (text "transfer" {:font-size 20}) {:span 3})
+(draw-box (text "write" {:font-size 20}) {:span 3})
+(draw-box (text "regno" {:font-size 20}) {:span 7})
+(draw-box "8" {:span 5 :borders {}})
+(draw-box "1" {:span 1 :borders {}})
+(draw-box "3" {:span 5 :borders {}})
+(draw-box "1" {:span 7 :borders {}})
+(draw-box "1" {:span 3 :borders {}})
+(draw-box "1" {:span 3 :borders {}})
+(draw-box "1" {:span 3 :borders {}})
+(draw-box "16" {:span 7 :borders {}})
+----
+[float="center",align="center",cols="<23,<61",options="header"]
+|===
+|Field |Description
+|[[accessregister-cmdtype]] `((cmdtype))`
+a|This is 0 to indicate Access Register Command.
+|[[accessregister-aarsize]] `((aarsize))`
+a|
+
+2 (32bit): Access the lowest 32 bits of the register.
+
+
+3 (64bit): Access the lowest 64 bits of the register.
+
+
+4 (128bit): Access the lowest 128 bits of the register.
+
+If {accessregister-aarsize} specifies a size larger than the register's actual size,
+then the access must fail. If a register is accessible, then reads of {accessregister-aarsize}
+less than or equal to the register's actual size must be supported.
+Writing less than the full register may be supported, but what
+happens to the high bits in that case is UNSPECIFIED.
+
+This field controls the Argument Width as referenced in
+xref:tab:datareg[].
+|[[accessregister-aarpostincrement]] `((aarpostincrement))`
+a|
+
+0 (disabled): No effect. This variant must be supported.
+
+
+1 (enabled): After a successful register access, {accessregister-regno} is
+incremented. Incrementing past the highest supported value
+causes {accessregister-regno} to become UNSPECIFIED.  Supporting
+this variant is optional. It is undefined whether the increment
+happens when {accessregister-transfer} is 0.
+|[[accessregister-postexec]] `((postexec))`
+a|
+
+0 (disabled): No effect. This variant must be supported, and is the only
+supported one if {abstractcs-progbufsize} is 0.
+
+
+1 (enabled): Execute the program in the Program Buffer exactly once after
+performing the transfer, if any. Supporting this variant is
+optional.
+|[[accessregister-transfer]] `((transfer))`
+a|
+
+0 (disabled): Don't do the operation specified by {accessregister-write}.
+
+
+1 (enabled): Do the operation specified by {accessregister-write}.
+
+This bit can be used to just execute the Program Buffer without
+having to worry about placing valid values into {accessregister-aarsize} or {accessregister-regno}.
+|[[accessregister-write]] `((write))`
+a|When {accessregister-transfer} is set:
+
+0 (arg0): Copy data from the specified register into `arg0` portion
+of `data`.
+
+
+1 (register): Copy data from `arg0` portion of `data` into the
+specified register.
+|[[accessregister-regno]] `((regno))`
+a|Number of the register to access, as described in
+xref:tab:regno[].
+{csr-dpc} may be used as an alias for PC if this command is
+supported on a non-halted hart.
+|===
+
+[[ac-quickaccess]]
+===== ((`Quick Access`))
+
+Perform the following sequence of operations:
+
+. If the hart is halted, the command  sets {abstractcs-cmderr} to ``halt/resume'' and does not continue.
+. Halt the hart. If the hart halts for some other reason (e.g. breakpoint), the command
+sets {abstractcs-cmderr} to ``halt/resume'' and does not continue.
+. Execute the Program Buffer.
+If an exception occurs, {abstractcs-cmderr} is set to
+``exception,'' the Program Buffer execution ends, and the hart is
+halted with {dcsr-cause} set to 3.
+. If the Program Buffer executed without an exception, then
+resume the hart.
+
+Implementing this command is optional.
+
+This command does not touch the `data` registers.
+
+
+[bytefield]
+----
+(def row-height 45)
+(def row-header-fn nil)
+(def boxes-per-row 24)
+(draw-column-headers {:font-size 15 :height 17 :labels ["31" "" "" "" "24" "23" "" "" "" "" "" "0" "" "" "" "" "" "" "" "" "" "" "" ""]})
+(draw-box (text "cmdtype" {:font-size 20}) {:span 5})
+(draw-box (text "0" {:font-size 20}) {:span 7})
+(draw-box "" {:span 12 :borders {}})
+(draw-box "8" {:span 5 :borders {}})
+(draw-box "24" {:span 7 :borders {}})
+(draw-box "" {:span 12 :borders {}})
+----
+[float="center",align="center",cols="<23,<61",options="header"]
+|===
+|Field |Description
+|[[quickaccess-cmdtype]] `((cmdtype))`
+a|This is 1 to indicate Quick Access command.
+|===
+
+[[ac-accessmemory]]
+===== ((`Access Memory`))
+
+This command lets the debugger perform memory accesses,
+with the exact same memory view and permissions as performing
+loads/stores on the selected hart.
+This includes access to hart-local memory-mapped
+registers, etc.  The command performs the following sequence of
+operations:
+
+. Copy data from the memory location specified in `arg1` into the
+`arg0` portion of `data`, if {accessregister-write} is clear.
+. Copy data from the `arg0` portion of `data` into the
+memory location specified in `arg1`, if {accessregister-write} is set.
+. If {accessmemory-aampostincrement} is set, increment `arg1`.
+
+If any of these operations fail, {abstractcs-cmderr} is set and none of the
+remaining steps are executed. An access may only fail if the hart,
+running M-mode code, might encounter that same failure when it attempts
+the same access.
+An implementation may detect an upcoming
+failure early, and fail the overall command before it reaches the step
+that would cause failure.
+
+Debug Modules may optionally implement this command
+and may support read and write access to memory locations when the selected hart is running or halted.
+If this command supports memory accesses
+while the hart is running, it must also
+support memory accesses while the hart is halted.
+
+[NOTE]
+====
+The encoding of {accessmemory-aamsize} was chosen to match {sbcs-sbaccess} in {dm-sbcs}.
+====
+
+This command modifies `arg0` only when memory is read. It modifies
+`arg1` only if {accessmemory-aampostincrement} is set.  The other `data`
+registers are not changed.
+
+
+[bytefield]
+----
+(def row-height 45)
+(def row-header-fn nil)
+(def boxes-per-row 40)
+(draw-column-headers {:font-size 15 :height 17 :labels ["31" "" "" "" "24" "" "" "23" "" "" "22" "" "" "" "20" "" "" "" "19" "" "" "" "18" "" "17" "" "16" "" "15" "" "" "" "14" "13" "" "" "" "" "" "0"]})
+(draw-box (text "cmdtype" {:font-size 20}) {:span 5})
+(draw-box (text "aamvirtual" {:font-size 20}) {:span 5})
+(draw-box (text "aamsize" {:font-size 20}) {:span 5})
+(draw-box (text "aampostincrement" {:font-size 20}) {:span 7})
+(draw-box (text "0" {:font-size 20}) {:span 3})
+(draw-box (text "write" {:font-size 20}) {:span 3})
+(draw-box (text "target-specific" {:font-size 20}) {:span 5})
+(draw-box (text "0" {:font-size 20}) {:span 7})
+(draw-box "8" {:span 5 :borders {}})
+(draw-box "1" {:span 5 :borders {}})
+(draw-box "3" {:span 5 :borders {}})
+(draw-box "1" {:span 7 :borders {}})
+(draw-box "2" {:span 3 :borders {}})
+(draw-box "1" {:span 3 :borders {}})
+(draw-box "2" {:span 5 :borders {}})
+(draw-box "14" {:span 7 :borders {}})
+----
+[float="center",align="center",cols="<23,<61",options="header"]
+|===
+|Field |Description
+|[[accessmemory-cmdtype]] `((cmdtype))`
+a|This is 2 to indicate Access Memory Command.
+|[[accessmemory-aamvirtual]] `((aamvirtual))`
+a|An implementation does not have to implement both virtual and
+physical accesses, but it must fail accesses that it doesn't
+support.
+
+0 (physical): Addresses are physical (to the hart they are performed on).
+
+
+1 (virtual): Addresses are virtual, and translated the way they would be from
+M-mode, with `MPRV` set.
+
+Debug Modules on systems without address translation (i.e. virtual addresses equal physical)
+may optionally allow {accessmemory-aamvirtual} set to 1, which would produce the same result as
+that same abstract command with {accessmemory-aamvirtual} cleared.
+|[[accessmemory-aamsize]] `((aamsize))`
+a|
+
+0 (8bit): Access the lowest 8 bits of the memory location.
+
+
+1 (16bit): Access the lowest 16 bits of the memory location.
+
+
+2 (32bit): Access the lowest 32 bits of the memory location.
+
+
+3 (64bit): Access the lowest 64 bits of the memory location.
+
+
+4 (128bit): Access the lowest 128 bits of the memory location.
+|[[accessmemory-aampostincrement]] `((aampostincrement))`
+a|After a memory access has completed, if this bit is 1, increment
+`arg1` (which contains the address used) by the number of bytes
+encoded in {accessmemory-aamsize}.
+
+Supporting this variant is optional, but highly recommended for
+performance reasons.
+|[[accessmemory-write]] `((write))`
+a|
+
+0 (arg0): Copy data from the memory location specified in `arg1` into
+the low bits of `arg0`. The value of the remaining bits of
+`arg0` are UNSPECIFIED.
+
+
+1 (memory): Copy data from the low bits of `arg0` into the memory
+location specified in `arg1`.
+|[[accessmemory-target-specific]] `((target-specific))`
+a|These bits are reserved for target-specific uses.
+|===
