@@ -1,0 +1,126 @@
+[[sec:intro]]
+== Introduction
+
+In complex systems understanding program behavior is not easy.
+Unsurprisingly in such systems, software sometimes does not behave as
+expected. This may be due to a number of factors, for example,
+interactions with other cores, software, peripherals, realtime events,
+poor implementations or some combination of all of the above.
+
+It is not always possible to use a debugger to observe behavior of a
+running system as this is intrusive. Providing visibility of program
+execution is important. This needs to be done without swamping the
+system with vast amounts of data.
+
+One method of achieving this is via a Processor Branch Trace.
+
+This works by tracking execution from a known start address and sending
+messages about the address deltas taken by the program. These deltas are
+typically introduced by jump, call, return and branch type instructions,
+although interrupts and exceptions are also types of deltas.
+
+Conceptually, the system has one or more of the following fundamental
+components:
+
+* A core with an instruction trace interface that outputs all relevant
+information to allow the successful creation of a processor branch trace
+and more. This is a high bandwidth interface: in most implementations,
+it will supply a large amount of data (instruction address, instruction
+type, context information, ...) for each core execution clock cycle;
+* A hardware encoder that connects to this instruction trace interface
+and compresses the information into lower bandwidth trace packets;
+* A transmission channel to transmit or a memory to store these trace
+packets;
+* A decoder, usually software on an external PC, that takes in the trace
+packets and, with knowledge of the program binary that’s running on the
+originating hart, reconstructs the program flow. This decoding step can
+be done off-line or in real-time while the hart is executing.
+
+In RISC-V, all instructions are executed unconditionally or at least
+their execution can be determined based on the program binary. The
+instructions between the deltas can all be assumed to be executed
+sequentially. Because of this, there is no need to report sequential
+instructions in the trace, only whether the branches were taken or not
+and the address of taken indirect branches or jumps. If the program
+counter is changed by an amount that cannot be determined from the
+execution binary, the trace decoder needs to be given the destination
+address (i.e. the address of the next valid instruction). Examples of
+this are indirect branches or jumps, where the next instruction address
+is determined by the contents of a register rather than a constant
+embedded in the program binary.
+
+Interrupts generally occur asynchronously to the program’s execution
+rather than intentionally as a result of a specific instruction or
+event. Exceptions can be thought of in the same way, even though they
+can be typically linked back to a specific instruction address. The
+decoder generally does not know where an interrupt occurs in the
+instruction sequence, so the trace encoder must report the address where
+normal program flow ceased, as well as give an indication of the
+asynchronous destination which may be as simple as reporting the
+exception type. When an interrupt or exception occurs, or the processor
+is halted, the final instruction retired beforehand must be included in
+the trace.
+
+This chapter serves to specify the ingress port (the signals between
+the RISC-V core and the encoder), compressed branch trace algorithm and
+the packet format used to encapsulate the compressed branch trace
+information.
+
+[[sec:terminology]]
+=== Terminology
+
+The following terms have a specific meaning in this chapter.
+
+* *ATB*: Arm trace bus
+* *branch*: an instruction which conditionally changes the execution
+flow
+* *CSR*: control/status register
+* *decoder*: a piece of software that takes the trace packets emitted by
+the encoder and reconstructs the execution flow of the code executed by
+the RISC-V hart
+* *delta*: a change in the program counter that is other than the
+difference between two instructions placed consecutively in memory
+* *discontinuity*: another name for ’delta’ (see above)
+* *ELF*: executable and linkable format
+* *encoder*: a piece of hardware that takes in instruction execution
+information from a RISC-V hart and transforms it into trace packets
+* *EPC*: exception program counter
+* *exception*: an unusual condition occurring at run time associated
+with an instruction in a RISC-V hart
+* *hart*: a RISC-V hardware thread
+* *interrupt*: an external asynchronous event that may cause a RISC-V
+hart to experience an unexpected transfer of control
+* *ISA*: instruction set architecture
+* *jump*: an instruction which unconditionally changes the execution
+flow
+* *direct jump*: an instruction which unconditionally changes the
+execution flow by changing the PC by a constant value
+* *indirect jump*: an instruction which unconditionally changes the
+execution flow by changing the PC to a computed value
+* *inferable jump*: a jump where the target address is supplied via a
+constant embedded within the jump opcode
+* *uninferable jump*: a jump which is not inferable (see above)
+* *LSB*: least significant bit
+* *MSB*: most significant bit
+* *packet*: the atomic unit of encoded trace information emitted by the
+encoder
+* *PC*: program counter
+* *program counter*: a register containing the address of the
+instruction being executed
+* *retire*: the final stage of executing an instruction, when the
+machine state is updated (sometimes referred to as ’commit’ or
+’graduate’)
+* *trap*: the transfer of control to a trap handler caused by either an
+exception or an interrupt
+* *updiscon*: contraction of ’uninferable PC discontinuity’
+
+=== Nomenclature
+
+In the following sections items in *bold* are signals or fields within a
+packet.
+
+Items in *_bold italics_* are mnemonics for instructions or CSRs defined
+in the RISC-V ISA
+
+Items in _italics_ with names ending _’_p’_ refer to parameters either
+built into the hardware or configurable hardware values.
