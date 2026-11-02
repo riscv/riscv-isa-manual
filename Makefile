@@ -78,7 +78,6 @@ ifneq ($(SKIP_DOCKER),true)
             ${DOCKER_INTERACTIVE} \
             -v ${PWD}/$@.workdir:/build${DOCKER_VOL_SUFFIX} \
             -v ${PWD}/src:/src:ro${DOCKER_EXTRA_VOL_SUFFIX} \
-            -v ${PWD}/normative_rule_defs:/normative_rule_defs:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/docs-resources:/docs-resources:ro${DOCKER_EXTRA_VOL_SUFFIX} \
             -v ${PWD}/$(DIAGRAM_CACHE_DIR):/diagram-cache${DOCKER_VOL_SUFFIX} \
             -w /build \
@@ -97,13 +96,13 @@ endif
 DIAGRAM_CACHE_OPTS = -a diagram-cachedir=$(DIAGRAM_CACHE_ROOT)/$(notdir $@) -a diagram-cache-images-option
 
 ifdef UNRELIABLE_BUT_FASTER_INCREMENTAL_BUILDS
-WORKDIR_SETUP = mkdir -p $@.workdir $(DIAGRAM_CACHE_DIR)/$(notdir $@) && ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
+WORKDIR_SETUP = mkdir -p $@.workdir $(DIAGRAM_CACHE_DIR)/$(notdir $@) && ln -sfn ../../src ../../docs-resources $@.workdir/
 WORKDIR_TEARDOWN = mv $@.workdir/$@ $@
 else
 WORKDIR_SETUP = \
     rm -rf $@.workdir && \
     mkdir -p $@.workdir $(DIAGRAM_CACHE_DIR)/$(notdir $@) && \
-    ln -sfn ../../src ../../normative_rule_defs ../../docs-resources $@.workdir/
+    ln -sfn ../../src ../../docs-resources $@.workdir/
 
 WORKDIR_TEARDOWN = \
     mv $@.workdir/$@ $@ && \
@@ -112,7 +111,6 @@ endif
 
 SRC_DIR := src
 BUILD_DIR := build
-NORM_RULE_DEF_DIR := normative_rule_defs
 DOC_NORM_TAG_SUFFIX := -norm-tags.json
 
 DOCS_PDF := $(addprefix $(BUILD_DIR)/, $(addsuffix .pdf, $(DOCS)))
@@ -192,20 +190,11 @@ build: build-pdf build-html build-epub build-tags build-norm-rules-json build-no
 
 ALL_SRCS := $(shell git ls-files $(SRC_DIR))
 
-# All normative rule definition input YAML files.
-NORM_RULE_DEF_FILES := $(wildcard $(NORM_RULE_DEF_DIR)/*.yaml)
-
 # Add -t to each normative tag input filename and add prefix of "/" to make into absolute pathname.
 NORM_TAG_FILE_ARGS := $(foreach relative_pname,$(DOCS_NORM_TAGS),-t /$(relative_pname))
 
-# Add -d to each normative rule definition filename
-NORM_RULE_DEF_ARGS := $(foreach relative_pname,$(NORM_RULE_DEF_FILES),-d $(relative_pname))
-
 # Provide mapping from an ISA manual's norm tags JSON file to a URL that one can link to. Used to create links into ISA manual.
 NORM_RULE_DOC2URL_ARGS := $(foreach doc_name,$(DOCS),-tag2url /$(BUILD_DIR)/$(doc_name)$(DOC_NORM_TAG_SUFFIX) $(doc_name).html)
-
-# Temporarily make errors warnings. Don't check this in uncommented.
-# NORM_RULE_DEF_ARGS := $(NORM_RULE_DEF_ARGS) -w
 
 $(BUILD_DIR)/%.pdf: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 	$(WORKDIR_SETUP)
@@ -237,18 +226,18 @@ $(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/conv
 	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS_TAGS) $(DIAGRAM_CACHE_OPTS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
-$(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL)
+$(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(CREATE_NORM_RULE_TOOL)
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) -j $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
-$(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(NORM_RULE_DEF_FILES) $(CREATE_NORM_RULE_TOOL) $(DOCS_HTML)
+$(NORM_RULES_HTML): $(DOCS_NORM_TAGS) $(CREATE_NORM_RULE_TOOL) $(DOCS_HTML)
 	$(WORKDIR_SETUP)
 	cp -f $(DOCS_NORM_TAGS) $@.workdir
 	mkdir -p $@.workdir/build
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) --html $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DEF_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(CREATE_NORM_RULE_PYTHON) --html $(NORM_TAG_FILE_ARGS) $(NORM_RULE_DOC2URL_ARGS) $@ $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 $(BUILD_DIR)/%.check-xrefs: $(SRC_DIR)/%.adoc $(ALL_SRCS)
