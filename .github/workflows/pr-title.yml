@@ -1,0 +1,59 @@
+---
+name: PR Title Check
+
+# Pull request titles become merge commit subjects and release note entries, so they
+# follow one convention: "area: summary". See "Pull request titles" in CONTRIBUTING.md.
+# The check reads only the title from the event payload and never checks out code.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions: {}
+
+jobs:
+  pr-title:
+    name: Check pull request title
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check title against the area convention
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          areas='priv|unpriv|hypervisor|vector|crypto|debug|profiles|norm-rules|editorial|marchid|docs|ci|deps'
+          max_len=72
+          errors=()
+
+          # Titles GitHub generates for reverts are accepted as they are.
+          if [[ "$TITLE" == Revert\ \"* ]]; then
+            echo "Revert title accepted: $TITLE"
+            exit 0
+          fi
+
+          if ! [[ "$TITLE" =~ ^($areas)(/($areas))*:\ [^[:space:]] ]]; then
+            errors+=("The title must start with an area from the list, a colon and a space, e.g. \"priv: clarify STIP behavior when STCE=1\". Combine areas with a slash, e.g. \"priv/unpriv: ...\".")
+          fi
+          if [[ "$TITLE" =~ [.[:space:]]$ ]]; then
+            errors+=("The title must not end with a period or whitespace.")
+          fi
+          if (( ${#TITLE} > max_len )); then
+            errors+=("The title is ${#TITLE} characters; keep it to $max_len or fewer and put detail in the description.")
+          fi
+
+          if (( ${#errors[@]} == 0 )); then
+            echo "Title OK: $TITLE"
+            exit 0
+          fi
+
+          echo "Title: $TITLE"
+          for e in "${errors[@]}"; do
+            echo "::error title=PR title does not follow the convention::$e"
+          done
+          echo "Allowed areas: ${areas//|/, }"
+          echo "Edit the pull request title to fix this; the check re-runs automatically."
+          exit 1
