@@ -1,0 +1,390 @@
+[appendix]
+[[Decoder]]
+== Decoder
+
+This decoder implementation assumes there is no branch predictor or
+return address stack (_return_stack_size_p_ and _bpred_size_p_ both
+zero).
+
+Reference Python implementations of both the encoder and decoder can be
+found at https://github.com/riscv-non-isa/riscv-trace-spec.
+
+=== Decoder pseudo code
+----
+# global variables
+global       pc                          # Reconstructed program counter
+global       last_pc                     # PC of previous instruction
+global       branches = 0                # Number of branches to process
+global       branch_map = 0              # Bit vector of not taken/taken (1/0) status
+                                         #   for branches
+global bool  stop_at_last_branch = FALSE # Flag to indicate reconstruction is to end at
+                                         #   the final branch
+global bool  inferred_address = FALSE    # Flag to indicate that reported address from
+                                         #   format 0/1/2 was not following an uninferable
+                                         #   jump (and is therefore inferred)
+global bool  start_of_trace = TRUE       # Flag indicating 1st trace packet still
+                                         #   to be processed
+global       address                     # Reconstructed address from te_inst messages
+global       privilege                   # Privilege from te_inst messages
+global       options                     # Operating mode flags
+global array return_stack                # Array holding return address stack
+global       irstack_depth = 0           # Depth of the return address stack
+----
+
+----
+# Process te_inst packet.  Call each time a te_inst packet is received #
+function process_te_inst (te_inst)
+  if (te_inst.format == 3)
+    if (te_inst.subformat == 3) # Support packet
+      process_support(te_inst)
+      return
+    if (te_inst.subformat == 2) # Context packet
+      return
+    if (te_inst.subformat == 1) # Trap packet
+      report_trap(te_inst)
+      if (!te_inst.interrupt) # Exception
+        report_epc(exception_address(te_inst))
+      if (!te_inst.thaddr) # Trap only - nothing retired
+        return
+
+    inferred_address = FALSE
+    address       = (te_inst.address << discovery_response.iaddress_lsb)
+    if (te_inst.subformat == 1 or start_of_trace)
+      branches    = 0
+      branch_map  = 0
+    if (is_branch(get_instr(address))) # 1 unprocessed branch if this instruction is a branch
+      branch_map = branch_map | (te_inst.branch << branches)
+      branches++
+    if (te_inst.subformat == 0 and !start_of_trace)
+      follow_execution_path(address, te_inst)
+    else
+      pc           = address
+      report_pc(pc)
+      last_pc      = pc # previous pc not known but ensures correct
+                        #  operation for is_sequential_jump()
+
+    privilege = te_inst.privilege
+    start_of_trace = FALSE
+    irstack_depth  = 0
+
+  else # Duplicated at top of next page to show continuity
+
+  else # Duplicate of last line from previous page to show continuity
+    if (start_of_trace) # This should not be possible!
+      ERROR: Expecting trace to start with format 3
+      return
+    if (te_inst.format == 2 or te_inst.branches != 0)
+      stop_at_last_branch = FALSE
+      if (options.full_address)
+        address  = (te_inst.address << discovery_response.iaddress_lsb)
+      else
+        address += (te_inst.address << discovery_response.iaddress_lsb)
+    if (te_inst.format == 1)
+      stop_at_last_branch = (te_inst.branches == 0)
+      # Branch map will contain <= 1 branch (1 if last reported instruction was a branch)
+      branch_map = branch_map | (te_inst.branch_map << branches)
+      if (te_inst.branches == 0)
+        branches += 31
+      else
+        branches += te_inst.branches
+
+    follow_execution_path(address, te_inst)
+
+# Follow execution path to reported address #
+function follow_execution_path(address, te_inst)
+
+  local previous_address = pc
+  local stop_here        = FALSE
+  while (TRUE)
+    if (inferred_address) # iterate again from previously reported address to
+                          #   find second occurrence
+      stop_here = next_pc(previous_address)
+      report_pc(pc)
+      if (stop_here)
+        inferred_address = FALSE
+    else
+      stop_here = next_pc(address)
+      report_pc(pc)
+      if (branches == 1 and is_branch(get_instr(pc)) and stop_at_last_branch)
+        # Reached final branch - stop here (do not follow to next instruction as
+        #  we do not yet know whether it retires)
+        stop_at_last_branch = FALSE
+        return
+      if (stop_here)
+        # Reached reported address following an uninferable discontinuity - stop here
+        if (unprocessed_branches(pc))
+          ERROR: unprocessed branches
+        return
+      if (te_inst.format != 3 and pc == address and !stop_at_last_branch and
+        (te_inst.notify != get_preceding_bit(te_inst, "notify")) and
+        !unprocessed_branches(pc))
+          # All branches processed, and reached reported address due to notification,
+          # not as an uninferable jump target
+        return
+      if (te_inst.format != 3 and pc == address and !stop_at_last_branch and
+        !is_uninferable_discon(get_instr(last_pc)) and
+        (te_inst.updiscon == get_preceding_bit(te_inst, "updiscon")) and
+        !unprocessed_branches()) and
+        ((te_inst.irreport == get_previous_bit(te_inst, "irreport")) or
+         te_inst.irdepth == irstack_depth))
+          # All branches processed, and reached reported address, but not as an
+          #   uninferable jump target
+          # Stop here for now, though flag indicates this may not be
+          #  final retired instruction
+        inferred_address = TRUE
+        return
+      if (te_inst.format == 3 and pc == address and !unprocessed_branches(pc) and
+        (te_inst.privilege == privilege or is_return_from_trap(get_instr(last_pc))))
+        # All branches processed, and reached reported address
+        return
+
+# Compute next PC #
+function next_pc (address)
+
+  local instr     = get_instr(pc)
+  local this_pc   = pc
+  local stop_here = FALSE
+
+  if (is_inferable_jump(instr))
+    pc += instr.imm
+  else if (is_sequential_jump(instr, last_pc)) # lui/auipc followed by
+                                               #  jump using same register
+    pc = sequential_jump_target(pc, last_pc)
+  else if (is_implicit_return(instr))
+    pc = pop_return_stack()
+  else if (is_uninferable_discon(instr))
+    if (stop_at_last_branch)
+      ERROR: unexpected uninferable discontinuity
+    else
+      pc        = address
+      stop_here = TRUE
+  else if (is_taken_branch(instr))
+    pc += instr.imm
+  else
+    pc += instruction_size(instr)
+
+  if (is_call(instr))
+    push_return_stack(this_pc)
+
+  last_pc = this_pc
+  return stop_here
+
+# Process support packet #
+function process_support (te_inst)
+
+  local stop_here = FALSE
+
+  options = te_inst.options
+    if (te_inst.qual_status != no_change)
+      start_of_trace = TRUE # Trace ended, so get ready to start again
+    if (te_inst.qual_status == ended_ntr and inferred_address)
+      local previous_address = pc
+      inferred_address       = FALSE
+      while (TRUE)
+        stop_here = next_pc(previous_address)
+        report_pc(pc)
+        if (stop_here)
+          return
+    return
+
+# Determine if instruction is a branch, adjust branch count/map,
+#   and return taken status #
+function is_taken_branch (instr)
+  local bool taken = FALSE
+
+  if (!is_branch(instr))
+    return FALSE
+
+  if (branches == 0)
+    ERROR: cannot resolve branch
+  else
+    taken = !branch_map[0]
+    branches--
+    branch_map >> 1
+
+  return taken
+
+# Determine if instruction is a branch #
+function is_branch (instr)
+
+  if ((instr.opcode == BEQ)    or
+      (instr.opcode == BNE)    or
+      (instr.opcode == BLT)    or
+      (instr.opcode == BGE)    or
+      (instr.opcode == BLTU)   or
+      (instr.opcode == BGEU)   or
+      (instr.opcode == C.BEQZ) or
+      (instr.opcode == C.BNEZ))
+    return TRUE
+
+  return FALSE
+
+# Determine if instruction is an inferable jump #
+function is_inferable_jump (instr)
+
+  if ((instr.opcode == JAL)   or
+      (instr.opcode == C.JAL) or
+      (instr.opcode == C.J)   or
+      (instr.opcode == JALR and instr.rs1 == 0))
+    return TRUE
+
+  return FALSE
+
+# Determine if instruction is an uninferable jump #
+function is_uninferable_jump (instr)
+
+  if ((instr.opcode == JALR and instr.rs1 != 0) or
+      (instr.opcode == C.JALR)                  or
+      (instr.opcode == C.JR))
+    return TRUE
+
+  return FALSE
+
+# Determine if instruction is a return from trap #
+function is_return_from_trap (instr)
+
+    if ((instr.opcode == URET)    or
+      (instr.opcode == SRET)      or
+      (instr.opcode == MRET)      or
+      (instr.opcode == DRET))
+      return TRUE
+
+    return false
+
+# Determine if instruction is an uninferrable discontinuity #
+function is_uninferrable_discon (instr)
+
+  if (is_uninferrable_jump(instr) or
+      is_return_from_trap (instr) or
+      (instr.opcode == ECALL)     or
+      (instr.opcode == EBREAK)    or
+      (instr.opcode == C.EBREAK))
+    return TRUE
+
+  return FALSE
+
+# Determine if instruction is a sequentially inferable jump #
+function is_sequential_jump (instr, prev_addr)
+
+  if (not (is_uninferable_jump(instr) and options.sijump))
+    return FALSE
+
+  local prev_instr = get_instr(prev_addr)
+
+  if((prev_instr.opcode == AUIPC) or
+     (prev_instr.opcode == LUI)   or
+     (prev_instr.opcode == C.LUI))
+    return (instr.rs1 == prev_instr.rd)
+
+  return FALSE
+
+# Find the target of a sequentially inferable jump #
+function sequential_jump_target (addr, prev_addr)
+
+  local instr      = get_instr(addr)
+  local prev_instr = get_instr(prev_addr)
+  local target     = 0
+
+  if (prev_instr.opcode == AUIPC)
+    target = prev_addr
+  target += prev_instr.imm
+  if (instr.opcode == JALR)
+    target += instr.imm
+
+  return target
+
+# Determine if instruction is a call #
+# - excludes tail calls as they do not push an address onto the return stack
+function is_call (instr)
+
+  if ((instr.opcode == JALR and instr.rd == 1) or
+      (instr.opcode == C.JALR)                 or
+      (instr.opcode == JAL  and instr.rd == 1) or
+      (instr.opcode == C.JAL))
+    return TRUE
+
+  return FALSE
+
+# Determine if instruction return address can be implicitly inferred #
+function is_implicit_return (instr)
+
+  if (options.implicit_return == 0) # Implicit return mode disabled
+    return FALSE
+
+  if ((instr.opcode == JALR and instr.rs1 == 1 and instr.rd == 0) or
+      (instr.opcode == C.JR and instr.rs1 == 1))
+    if ((te_inst.irreport != get_preceding_bit(te_inst, "irreport")) and
+         te_inst.irdepth == irstack_depth)
+      return FALSE
+    return (irstack_depth > 0)
+
+  return FALSE
+
+#Check for unprocessed branches #
+function unprocessed_branches (address)
+
+  # Check all branches processed (except 1 if this instruction is a branch)
+    return (branches != (is_branch(get_instr(address)) ? 1 : 0))
+
+# Push address onto return stack #
+function push_return_stack (address)
+
+  if (options.implicit_return == 0) # Implicit return mode disabled
+    return
+
+  local irstack_depth_max = discovery_response.return_stack_size ?
+                             2**discovery_response.return_stack_size :
+                             2**discovery_response.call_counter_size
+  local instr             = get_instr(address)
+  local link              = address
+
+  if (irstack_depth == irstack_depth_max)
+    # Delete oldest entry from stack to make room for new entry added below
+    irstack_depth--
+    for (i = 0; i < irstack_depth; i++)
+      return_stack[i] = return_stack[i+1]
+
+  link += instruction_size(instr)
+
+  return_stack[irstack_depth] = link
+  irstack_depth++
+
+  return
+
+# Pop address from return stack #
+function pop_return_stack ()
+
+  irstack_depth-- # function not called if irstack_depth is 0, so no need
+                  #  to check for underflow
+  local  link = return_stack[irstack_depth]
+
+  return link
+
+# Return the address of an exception #
+function exception_address(te_inst)
+
+  local instr = get_instr(pc)
+
+  if (is_uninferable_discon(instr) and !te_inst.thaddr)
+    return te_inst.address
+
+  if (instr.opcode == ECALL) or (instr.opcode == EBREAK) or (instr.opcode == C.EBREAK))
+    return pc
+
+  return next_pc(pc)
+
+# Report ecause and tval (user to populate if desired) #
+function report_trap(te_inst)
+
+  return
+
+# Report program counter value (user to populate if desired) #
+function report_pc(address)
+
+  return
+
+# Report exception program counter value (user to populate if desired) #
+function report_epc(address)
+
+  return
+----
