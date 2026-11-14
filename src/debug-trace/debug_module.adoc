@@ -7,12 +7,12 @@ following operations:
 
 . Give the debugger necessary information about the implementation.
 (Required)
-. Allow any individual hart to be halted and resumed. (Required)
-. Provide status on which harts are halted. (Required)
+. [#norm:dm_halt_resume_req]#Allow any individual hart to be halted and resumed. (Required)#
+. [#norm:dm_halt_status_req]#Provide status on which harts are halted. (Required)#
 . Provide abstract read and write access to a halted hart's GPRs.
 (Required)
-. Provide access to a reset signal that allows debugging from the very
-first instruction after reset. (Required)
+. [#norm:dm_reset_req]#Provide access to a reset signal that allows debugging from the very
+first instruction after reset. (Required)#
 . Provide a mechanism to allow debugging harts immediately out of reset
 (regardless of the reset cause). (Optional)
 . Provide abstract access to non-GPR hart registers. (Optional)
@@ -27,6 +27,8 @@ time. (Optional)
 (Optional)
 . Signal an external trigger when a hart in a group halts. (Optional)
 
+[[norm:dm_compat_reqs]]
+--
 In order to be compatible with this specification an implementation
 must:
 
@@ -37,11 +39,12 @@ Access Memory command mechanisms.
 .. Implement the Program Buffer.
 .. Implement abstract access to all registers that are visible to software
 running on the hart including all the registers that are present on the
-hart and listed in xref:tab:regno[].
+hart and listed in xref:norm:dm_access_register_regno_enc[].
 .. Implement abstract access to at least all GPRs, {csr-dcsr}, and {csr-dpc}, and advertise the implementation as conforming to the "Minimal RISC-V Debug
 Specification", instead of the "RISC-V Debug Specification".
+--
 
-A single DM can debug up to 2^20^ harts.
+[#norm:dm_max_harts]#A single DM can debug up to 2^20^ harts.#
 
 [[dmi]]
 === Debug Module Interface (DMI)
@@ -53,8 +56,8 @@ subordinate (see <<tab:dmi_signals>>), or use a more
 full-featured bus like TileLink or the AMBA Advanced Peripheral Bus. The
 details are left to the system designer.
 
-The DMI uses between 7 and 32 address bits. Each address points at a
-single 32-bit register that can be read or written. The bottom of the
+[#norm:dm_dmi_addr_bits]#The DMI uses between 7 and 32 address bits.# [#norm:dm_dmi_reg_width]#Each address points at a
+single 32-bit register that can be read or written.# The bottom of the
 address space is used for the first (and usually only) DM. Extra space
 can be used for custom debug devices, other cores, additional DMs, etc.
 If there are additional DMs on this DMI, the base address of the next DM
@@ -69,26 +72,26 @@ space.
 There are two methods that allow a debugger to reset harts. {dmcontrol-ndmreset} resets all
 the harts in the hardware platform, as well as all other parts of the
 hardware platform except for the Debug Modules, Debug Transport Modules,
-and Debug Module Interface. Exactly what is affected by this reset is
+and Debug Module Interface. [#norm:dm_dmcontrol_ndmreset_first_instr]#Exactly what is affected by this reset is
 implementation dependent, but it must be possible to debug programs from
-the first instruction executed. {dmcontrol-hartreset} resets all the currently selected harts.
+the first instruction executed.# [#norm:dm_dmcontrol_hartreset_extra_harts]#{dmcontrol-hartreset} resets all the currently selected harts.
 In this case an implementation may reset more harts than just the ones
-that are selected. The debugger can discover which other harts are reset
+that are selected.# The debugger can discover which other harts are reset
 (if any) by selecting them and checking {dmstatus-anyhavereset} and {dmstatus-allhavereset}.
 
 To perform either of these resets, the debugger first asserts the bit,
 and then clears it. The actual reset may start as soon as the bit is
 asserted, but may start an arbitrarily long time after the bit is
 deasserted. The reset itself may also take an arbitrarily long time.
-While the reset is on-going, harts are either in the running state,
+[#norm:dm_hart_reset_state]#While the reset is on-going, harts are either in the running state,
 indicating it's possible to perform some abstract commands during this
 time, or in the unavailable state, indicating it's not possible to
-perform any abstract commands during this time. Once a hart's reset is
-complete, `havereset` becomes set. When a hart comes out of reset and {dmcontrol-haltreq} or `resethaltreq`
+perform any abstract commands during this time.# Once a hart's reset is
+complete, `havereset` becomes set. [#norm:dm_hart_reset_exit_state]#When a hart comes out of reset and {dmcontrol-haltreq} or `resethaltreq`
 are set, the hart will immediately enter Debug Mode (halted state).
 Otherwise, if the hart was initially running it will execute normally
 (running state) and if the hart was initially halted it should now be
-running but may be halted.
+running but may be halted.#
 
 [NOTE]
 ====
@@ -97,25 +100,25 @@ has actually begun.
 ====
 
 The Debug Module's own state and registers should only be reset at
-power-up and while {dmcontrol-dmactive} in {dm-dmcontrol} is 0. If there is another mechanism to reset the DM, this mechanism must also reset all the harts accessible to the DM.
+power-up and while {dmcontrol-dmactive} in {dm-dmcontrol} is 0. [#norm:dm_self_reset_other_mechanism]#If there is another mechanism to reset the DM, this mechanism must also reset all the harts accessible to the DM.#
 
 Due to clock and power domain crossing issues, it might not be possible
-to perform arbitrary DMI accesses across hardware platform reset. While
+to perform arbitrary DMI accesses across hardware platform reset. [#norm:dm_ndmreset_supported_ops]#While
 {dmcontrol-ndmreset}  or any external reset is asserted, the only supported DM
 operations are reading/writing {dm-dmcontrol} and reading
-{dmstatus-ndmresetpending}. The behavior of other accesses is undefined.
+{dmstatus-ndmresetpending}. The behavior of other accesses is undefined.#
 
-When harts have been reset, they must set a sticky `havereset` state
-bit. The conceptual `havereset` state bits can be read for selected
-harts in {dmstatus-anyhavereset} and {dmstatus-allhavereset} in {dm-dmstatus}. These bits must be set regardless of the cause of the
-reset. The `havereset` bits for the selected harts can be cleared by
+[#norm:dm_havereset_op]#When harts have been reset, they must set a sticky `havereset` state
+bit.# The conceptual `havereset` state bits can be read for selected
+harts in {dmstatus-anyhavereset} and {dmstatus-allhavereset} in {dm-dmstatus}. [#norm:dm_havereset_any_cause]#These bits must be set regardless of the cause of the
+reset.# The `havereset` bits for the selected harts can be cleared by
 writing 1 to {dmcontrol-ackhavereset} in {dm-dmcontrol}. The `havereset` bits might or might not be cleared when {dmcontrol-dmactive} is low.
 
 [[selectingharts]]
 === Selecting Harts
 
 Up to 2^20^ harts can be connected to a single DM.
-Commands issued to the DM only apply to the currently selected harts.
+[#norm:dm_selected_harts_only]#Commands issued to the DM only apply to the currently selected harts.#
 
 To enumerate all the harts, a debugger must first determine `HARTSELLEN`
 by writing all ones to {hartsel} (assuming the maximum size) and reading back the
@@ -128,43 +131,44 @@ configuration structure.
 
 ==== Selecting a Single Hart
 
-All debug modules must support selecting a single hart. The debugger can
-select a hart by writing its index to {hartsel}. Hart indexes start at 0 and are
-contiguous until the final index.
+[#norm:dm_select_single_hart]#All debug modules must support selecting a single hart.# The debugger can
+select a hart by writing its index to {hartsel}. [#norm:dm_hart_index_contiguous]#Hart indexes start at 0 and are
+contiguous until the final index.#
 
 [[hartarraymask]]
 ==== Selecting Multiple Harts
 
-Debug Modules may implement a Hart Array Mask register to allow
-selecting multiple harts at once. The __n__th bit in the Hart
+[#norm:dm_hart_array_mask_optional]#Debug Modules may implement a Hart Array Mask register to allow
+selecting multiple harts at once.# [#norm:dm_hart_array_mask_bit]#The __n__th bit in the Hart
 Array Mask register applies to the hart with index _n_. If
-the bit is 1 then the hart is selected. Usually a DM will have a Hart
+the bit is 1 then the hart is selected.# [#norm:dm_hart_array_mask_maybe_rdonly0]#Usually a DM will have a Hart
 Array Mask register exactly wide enough to select all the harts it
-supports, but it's allowed to tie any of these bits to 0.
+supports, but it's allowed to tie any of these bits to 0.#
 
 The debugger can set bits in the hart array mask register using {dm-hawindowsel} and {dm-hawindow},
-then apply actions to all selected harts by setting {dmcontrol-hasel}. If this feature is
+then apply actions to all selected harts by setting {dmcontrol-hasel}. [#norm:dm_hart_array_mask_actions]#If this feature is
 supported, multiple harts can be halted, resumed, and reset
-simultaneously. The state of the hart array mask register is not
-affected by setting or clearing {dmcontrol-hasel}.
+simultaneously.# [#norm:dm_hart_array_mask_hasel_preserve]#The state of the hart array mask register is not
+affected by setting or clearing {dmcontrol-hasel}.#
 
+[[norm:dm_abstract_cmd_hartsel_only]]
 Execution of Abstract Commands ignores this mechanism and only applies
 to the hart selected by {hartsel}.
 
 === Hart DM States
 
-Every hart that can be selected is in exactly one of the following four
-DM states: non-existent, unavailable, running, or halted. Which state
+[#norm:dm_hart_state_list]#Every hart that can be selected is in exactly one of the following four
+DM states: non-existent, unavailable, running, or halted.# Which state
 the selected harts are in is reflected by {dmstatus-allnonexistent}, {dmstatus-anynonexistent}, {dmstatus-allunavail}, {dmstatus-anyunavail}, {dmstatus-allrunning}, {dmstatus-anyrunning}, {dmstatus-allhalted}, and {dmstatus-anyhalted}.
 
-Harts are nonexistent if they will never be part of this hardware
-platform, no matter how long a user waits. E.g. in a simple single-hart
+[#norm:dm_hart_state_nonexistent]#Harts are nonexistent if they will never be part of this hardware
+platform, no matter how long a user waits.# E.g. in a simple single-hart
 hardware platform only one hart exists, and all others are nonexistent.
-Debuggers may assume that a hardware platform has no harts with indexes
-higher than the first nonexistent one.
+[#norm:dm_hart_state_none_above_nonexistent]#Debuggers may assume that a hardware platform has no harts with indexes
+higher than the first nonexistent one.#
 
-Harts are unavailable if they might exist/become available at a later
-time, or if there are other harts with higher indexes than this one.
+[#norm:dm_hart_state_unavailable]#Harts are unavailable if they might exist/become available at a later
+time, or if there are other harts with higher indexes than this one.#
 Harts may be unavailable for a variety of reasons including being reset,
 temporarily powered down, and not being plugged into the hardware
 platform. That means harts might become available or unavailable at any
@@ -172,17 +176,20 @@ time, although these events should be rare in hardware platforms built
 to be easily debugged. There are no guarantees about the state of the
 hart when it becomes available.
 
+[[norm:dm_hart_disabled_unavailable]]
 Hardware platforms with a very large number of harts may permanently
 disable some during manufacturing, leaving holes in the otherwise
 continuous hart index space. In order to let the debugger discover all
 harts, they must show up as unavailable even if there is no chance of
 them ever becoming available.
 
+[[norm:dm_hart_state_running]]
 Harts are running when they are executing normally, as if no debugger
 was attached. This includes being in a low power mode or waiting for an
 interrupt, as long as a halt request will result in the hart being
 halted.
 
+[[norm:dm_hart_state_halted]]
 Harts are halted when they are in Debug Mode, only performing tasks on
 behalf of the debugger.
 
@@ -195,51 +202,54 @@ or halted, depending on {dmcontrol-haltreq} and `resethaltreq`.
 [[runcontrol]]
 === Run Control
 
-For every hart, the Debug Module tracks 4 conceptual bits of state: halt
+[#norm:dm_hart_ctrl_bits]#For every hart, the Debug Module tracks 4 conceptual bits of state: halt
 request, resume ack, halt-on-reset request, and hart reset. (The hart
-reset and halt-on-reset request bits are optional.) These 4 bits reset
-to 0, except for resume ack, which may reset to either 0 or 1. The DM
-receives halted, running, and havereset signals from each hart. The
+reset and halt-on-reset request bits are optional.)# [#norm:dm_hart_ctrl_bits_rst]#These 4 bits reset
+to 0, except for resume ack, which may reset to either 0 or 1.# [#norm:dm_hart_signals]#The DM
+receives halted, running, and havereset signals from each hart.# The
 debugger can observe the state of resume ack in {dmstatus-allresumeack} and {dmstatus-anyresumeack}, and the state of halted, running, and havereset signals in {dmstatus-allhalted}, {dmstatus-anyhalted}, {dmstatus-allrunning}, {dmstatus-anyrunning}, {dmstatus-allhavereset}, and {dmstatus-anyhavereset}. The state of the other bits cannot be observed directly.
 
 When a debugger writes 1 to {dmcontrol-haltreq}, each selected hart's halt request bit is
-set. When a running hart, or a hart just coming out of reset, sees its
+set. [#norm:dm_halt_request_response]#When a running hart, or a hart just coming out of reset, sees its
 halt request bit high, it responds by halting, deasserting its running
-signal, and asserting its halted signal. Halted harts ignore their halt
-request bit.
+signal, and asserting its halted signal.# [#norm:dm_halt_request_ignored_halted]#Halted harts ignore their halt
+request bit.#
 
 When a debugger writes 1 to {dmcontrol-resumereq}, each selected hart's resume ack bit is
-cleared and each selected, halted hart is sent a resume request. Harts
+cleared and each selected, halted hart is sent a resume request. [#norm:dm_resume_request_response]#Harts
 respond by resuming, clearing their halted signal, and asserting their
-running signal. At the end of this process the resume ack bit is set.
-These status signals of all selected harts are reflected in {dmstatus-allresumeack}, {dmstatus-anyresumeack}, {dmstatus-allrunning}, and {dmstatus-anyrunning}. Resume requests are ignored by running harts.
+running signal. At the end of this process the resume ack bit is set.#
+These status signals of all selected harts are reflected in {dmstatus-allresumeack}, {dmstatus-anyresumeack}, {dmstatus-allrunning}, and {dmstatus-anyrunning}. [#norm:dm_resume_request_ignored_running]#Resume requests are ignored by running harts.#
 
-When halt or resume is requested, a hart must respond in less than one
-second, unless it is unavailable. (How this is implemented is not
+[#norm:dm_halt_resume_latency]#When halt or resume is requested, a hart must respond in less than one
+second, unless it is unavailable.# (How this is implemented is not
 further specified. A few clock cycles will be a more typical latency.)
 
 The DM can implement optional halt-on-reset bits for each hart, which it
 indicates by setting {dmstatus-hasresethaltreq} to 1. This means the DM implements the {dmcontrol-setresethaltreq} and {dmcontrol-clrresethaltreq} bits.  Writing 1 to {dmcontrol-setresethaltreq} sets the halt-on-reset request bit for each selected hart.
-When a hart's halt-on-reset request bit is set, the hart will
+[#norm:dm_resethaltreq_halt_on_reset]#When a hart's halt-on-reset request bit is set, the hart will
 immediately enter debug mode on the next deassertion of its reset. This
-is true regardless of the reset's cause. The hart's halt-on-reset
-request bit remains set until cleared by the debugger writing 1 to {dmcontrol-clrresethaltreq} while the hart is selected, or by DM reset.
+is true regardless of the reset's cause.# [#norm:dm_resethaltreq_clear]#The hart's halt-on-reset
+request bit remains set until cleared by the debugger writing 1 to {dmcontrol-clrresethaltreq} while the hart is selected, or by DM reset.#
 
-If the DM is reset while a hart is halted, it is UNSPECIFIED whether that hart
-resumes. Debuggers should use {dmcontrol-resumereq} to explicitly resume harts before clearing {dmcontrol-dmactive} and disconnecting.
+[#norm:dm_self_reset_halted_hart_resume]#If the DM is reset while a hart is halted, it is UNSPECIFIED whether that hart
+resumes.# Debuggers should use {dmcontrol-resumereq} to explicitly resume harts before clearing {dmcontrol-dmactive} and disconnecting.
 
 [[hrgroups]]
 === Halt Groups, Resume Groups, and External Triggers
 
-An optional feature allows a debugger to place harts into two kinds of
-groups: halt groups and resume groups. It is also possible to add
-external triggers to halt and resume groups. At any given time, each
+[#norm:dm_groups_optional]#An optional feature allows a debugger to place harts into two kinds of
+groups: halt groups and resume groups.# [#norm:dm_groups_ext_triggers]#It is also possible to add
+external triggers to halt and resume groups.# [#norm:dm_groups_membership]#At any given time, each
 hart and each trigger is a member of exactly one halt group and exactly
-one resume group.
+one resume group.#
 
+[[norm:dm_group0]]
 In both halt and resume groups, group 0 is special. Harts in group 0
 halt/resume as if groups aren’t implemented at all.
 
+[[norm:dm_haltgroup_on_hart_halt]]
+--
 When any hart in a halt group halts:
 
 . That hart halts normally, with {dcsr-cause} reflecting the original cause of the
@@ -250,17 +260,24 @@ harts in the halt group that are halted but have started the process of
 resuming must also quickly become halted, even if they do resume
 briefly.
 . Any external triggers in that group are notified.
+--
 
+[[norm:dm_haltgroup_add_no_halt]]
 Adding a hart to a halt group does not automatically halt that hart,
 even if other harts in the group are already halted.
 
+[[norm:dm_haltgroup_on_ext_trig]]
+--
 When an external trigger that's a member of the halt group fires:
 
 . All the harts in the halt group that are running will quickly halt. {dcsr-cause} for
 those harts should be set to 6, but may be set to 3. Other harts in the
 halt group that are halted but have started the process of resuming must
 also quickly become halted, even if they do resume briefly.
+--
 
+[[norm:dm_resumegroup_on_hart_resume]]
+--
 When any hart in a resume group resumes:
 
 . All the other harts in that group that are halted will quickly resume as
@@ -269,10 +286,14 @@ hart in the group sets its resume ack bit as soon as it has resumed.
 Harts that are in the process of halting should complete that process
 and stay halted.
 . Any external triggers in that group are notified.
+--
 
+[[norm:dm_resumegroup_add_no_resume]]
 Adding a hart to a resume group does not automatically resume that hart,
 even if other harts in the group are currently running.
 
+[[norm:dm_resumegroup_on_ext_trig]]
+--
 When an external trigger that's a member of the resume group fires:
 
 . All the harts in that group that are halted will quickly resume as soon
@@ -280,14 +301,15 @@ as any currently executing abstract commands have completed. Each hart
 in the group sets its resume ack bit as soon as it has resumed. Harts
 that are in the process of halting should complete that process and stay
 halted.
+--
 
-External triggers are abstract concepts that can signal the DM and/or
+[#norm:dm_ext_trig_config]#External triggers are abstract concepts that can signal the DM and/or
 receive signals from the DM. This configuration is done through {dm-dmcs2}, where
-external triggers are referred to by a number. Commonly, external
+external triggers are referred to by a number.# Commonly, external
 triggers are capable of sending a signal from the hardware platform into
 the DM, as well as receiving a signal from the DM to take their own
-action on. It is also allowable for an external trigger to be input-only
-or output-only. By convention external triggers 0-7 are bidirectional,
+action on. [#norm:dm_ext_trig_direction]#It is also allowable for an external trigger to be input-only
+or output-only.# By convention external triggers 0-7 are bidirectional,
 triggers 8-11 are input-only, and triggers 12-15 are output-only but
 this is not required.
 
@@ -298,27 +320,27 @@ halting/resuming of all cores in a hardware platform, when not all cores
 are RISC-V cores.
 ====
 
-When the DM is reset, all harts must be placed in the lowest-numbered
-halt and resume groups that they can be in. (This will usually be group
+[#norm:dm_self_reset_groups]#When the DM is reset, all harts must be placed in the lowest-numbered
+halt and resume groups that they can be in.# (This will usually be group
 0.)
 
-Some designs may choose to hardcode hart groups to a group other than
+[#norm:dm_groups_hardcoded]#Some designs may choose to hardcode hart groups to a group other than
 group 0, meaning it is never possible to halt or resume just a single
 hart. This is explicitly allowed. In that case it must be possible to
 discover the groups by using {dm-dmcs2} even if it's not possible to change the
-configuration.
+configuration.#
 
 [[abstractcommands]]
 === Abstract Commands
 
 The DM supports a set of abstract commands, most of which are optional.
-Depending on the implementation, the debugger may be able to perform
-some abstract commands even when the selected hart is not halted.
+[#norm:dm_abstract_cmd_not_halted]#Depending on the implementation, the debugger may be able to perform
+some abstract commands even when the selected hart is not halted.#
 Debuggers can only determine which abstract commands are supported by a
 given hart in a given state (running, halted, or held in reset) by
-attempting them and then looking at {abstractcs-cmderr} in {dm-abstractcs} to see if they were successful. Commands may be supported with some options set, but not with other
-options set. If a command has unsupported options set or if bits that
-are defined as 0 aren't 0, then the DM must set {abstractcs-cmderr} to 2 (not supported).
+attempting them and then looking at {abstractcs-cmderr} in {dm-abstractcs} to see if they were successful. [#norm:dm_abstract_cmd_partial_support]#Commands may be supported with some options set, but not with other
+options set.# [#norm:dm_abstract_cmd_unsupported_cmderr]#If a command has unsupported options set or if bits that
+are defined as 0 aren't 0, then the DM must set {abstractcs-cmderr} to 2 (not supported).#
 
 [NOTE]
 ====
@@ -328,23 +350,23 @@ that case, the command will return "not supported".
 ====
 
 Debuggers execute abstract commands by writing them to {dm-command}. They can
-determine whether an abstract command is complete by reading {abstractcs-busy} in {dm-abstractcs}. If the debugger starts a new command while {abstractcs-busy} is set, {abstractcs-cmderr} becomes 1 (busy), the
+determine whether an abstract command is complete by reading {abstractcs-busy} in {dm-abstractcs}. [#norm:dm_abstract_cmd_busy_cmderr]#If the debugger starts a new command while {abstractcs-busy} is set, {abstractcs-cmderr} becomes 1 (busy), the
 currently executing command still gets to run to completion, but any
-error generated by the currently executing command is lost. After
+error generated by the currently executing command is lost.# After
 completion, {abstractcs-cmderr} indicates whether the command was successful or not.
-Commands may fail because a hart is not halted, not running,
-unavailable, or because they encounter an error during execution.
+[#norm:dm_abstract_cmd_failure_causes]#Commands may fail because a hart is not halted, not running,
+unavailable, or because they encounter an error during execution.#
 
 If the command takes arguments, the debugger must write them to the
-`data` registers before writing to {dm-command}. If a command returns results, the
-Debug Module must ensure they are placed in the `data` registers before {abstractcs-busy}
-is cleared. Which `data` registers are used for the arguments is
-described in <<tab:datareg>>. In all cases the
-least-significant word is placed in the lowest-numbered `data` register.
-The argument width depends on the command being executed, and is DXLEN
-where not explicitly specified.
+`data` registers before writing to {dm-command}. [#norm:dm_abstract_cmd_results_before_busy]#If a command returns results, the
+Debug Module must ensure they are placed in the `data` registers before
+{abstractcs-busy} is cleared.# Which `data` registers are used for the arguments is
+described in <<norm:dm_abstract_cmd_data_regs_tbl>>. [#norm:dm_abstract_cmd_data_lsw]#In all cases the
+least-significant word is placed in the lowest-numbered `data` register.#
+[#norm:dm_abstract_cmd_arg_width]#The argument width depends on the command being executed, and is DXLEN
+where not explicitly specified.#
 
-[[tab:datareg]]
+[[norm:dm_abstract_cmd_data_regs_tbl]]
 .Use of Data Registers
 [%autowidth,float="center",align="center",cols="^,<,<,<",options="header"]
 |===
@@ -375,6 +397,7 @@ appears to be hung, the debugger can try to reset the hart (using {dmcontrol-har
 If that doesn't clear {abstractcs-busy}, then it can try resetting the Debug Module
 (using {dmcontrol-dmactive}).
 
+[[norm:dm_abstract_cmd_unavailable]]
 If an abstract command is started while the selected hart is unavailable
 or if a hart becomes unavailable while executing an abstract command,
 then the Debug Module may terminate the abstract command, setting {abstractcs-busy} low,
@@ -386,10 +409,10 @@ be hung ({abstractcs-busy} never goes low).
 This section describes each of the different abstract commands and how
 their fields should be interpreted when they are written to {dm-command}.
 
-Each abstract command is a 32-bit value. The top 8 bits contain {command-cmdtype} which
-determines the kind of command. <<tab:cmdtype>> lists all commands.
+[#norm:dm_abstract_cmd_width]#Each abstract command is a 32-bit value.# The top 8 bits contain {command-cmdtype} which
+determines the kind of command. <<norm:dm_command_cmdtype_enc>> lists all commands.
 
-[[tab:cmdtype]]
+[[norm:dm_command_cmdtype_enc]]
 .Meaning of `cmdtype`
 [%autowidth,float="center",align="center",cols=">,<",options="header"]
 |===
@@ -406,8 +429,8 @@ include::{debug-registers}abstract_commands.adoc[]
 
 To support executing arbitrary instructions on a halted hart, a Debug
 Module can include a Program Buffer that a debugger can write small
-programs to. DMs that support all necessary functionality using abstract
-commands only may choose to omit the Program Buffer.
+programs to. [#norm:dm_progbuf_optional]#DMs that support all necessary functionality using abstract
+commands only may choose to omit the Program Buffer.#
 
 A debugger can write a small program to the Program Buffer, and then
 execute it exactly once with the Access Register Abstract Command,
@@ -418,11 +441,11 @@ with `ebreak` or `c.ebreak`. An implementation may support an implicit
 Buffer. This is indicated by {dmstatus-impebreak}. With this feature, a Program Buffer of
 just 2 32-bit words can offer efficient debugging.
 
-While these programs are executed, the hart does not leave Debug Mode
-(see <<debugmode>>). If an exception is
+[#norm:dm_progbuf_debug_mode]#While these programs are executed, the hart does not leave Debug Mode
+(see <<debugmode>>).# [#norm:dm_progbuf_exception]#If an exception is
 encountered during execution of the Program Buffer, no more instructions
 are executed, the hart remains in Debug Mode, and {abstractcs-cmderr} is set to 3
-(`exception error`). If the debugger executes a program that doesn’t
+(`exception error`).# If the debugger executes a program that doesn’t
 terminate with an `ebreak` instruction, the hart will remain in Debug
 Mode and the debugger will lose control of the hart.
 
@@ -441,8 +464,8 @@ into the pipeline when halted, instead of having the Program Buffer
 exist in the address space somewhere.
 ====
 
-The Program Buffer may be implemented as RAM which is accessible to the
-hart. A debugger can determine if this is the case by executing small
+[#norm:dm_progbuf_ram]#The Program Buffer may be implemented as RAM which is accessible to the
+hart.# A debugger can determine if this is the case by executing small
 programs that attempt to write and read back relative to `pc` while executing
 from the Program Buffer. If so, the debugger has more flexibility in
 what it can do with the program buffer.
@@ -462,17 +485,17 @@ image::abstract_commands.png[]
 
 A debugger can access memory from a hart's point of view using a Program
 Buffer or the Abstract Access Memory command. (Both these features are
-optional.) A Debug Module may also include a System Bus Access block to
+optional.) [#norm:dm_sba_optional]#A Debug Module may also include a System Bus Access block to
 provide memory access without involving a hart, regardless of whether
-the Program Buffer is implemented. The System Bus Access block uses physical
-addresses.
+the Program Buffer is implemented.# [#norm:dm_sba_physical_addr]#The System Bus Access block uses physical
+addresses.#
 
-The System Bus Access block may support 8-, 16-, 32-, 64-, and 128-bit
-accesses. <<sbdatabits>> shows which bits in `sbdata` are used for each access size.
+[#norm:dm_sba_access_sizes]#The System Bus Access block may support 8-, 16-, 32-, 64-, and 128-bit
+accesses.# <<norm:dm_sba_data_bits_tbl>> shows which bits in `sbdata` are used for each access size.
 
 <<<
 
-[[sbdatabits]]
+[[norm:dm_sba_data_bits_tbl]]
 .System Bus Data Bits
 [%autowidth,align="center",float="center",cols=">,<",options="header"]
 |===
@@ -531,17 +554,19 @@ is technology specific, it is not further addressed in this spec.
 
 Another option is to allow the DM to be unlocked only by users who have
 an access key. Between {dmstatus-authenticated}, {dmstatus-authbusy}, and {dm-authdata} arbitrarily complex authentication
-mechanisms can be supported. When {dmstatus-authenticated} is clear, the DM must not interact with
+mechanisms can be supported. [#norm:dm_auth_isolation]#When {dmstatus-authenticated} is clear, the DM must not interact with
 the rest of the hardware platform, nor expose details about the harts
-connected to the DM. All DM registers should read 0, while writes should
-be ignored, with the following mandatory exceptions:
+connected to the DM.# [#norm:dm_auth_regs_read0]#All DM registers should read 0, while writes should
+be ignored, with the following mandatory exceptions:#
 
+[[norm:dm_auth_regs_read0_exceptions]]
 . {dmstatus-authenticated} in {dm-dmstatus} is readable.
 . {dmstatus-authbusy} in {dm-dmstatus} is readable.
 . {dmstatus-version} in {dm-dmstatus} is readable.
 . {dmcontrol-dmactive} in {dm-dmcontrol} is readable and writable.
 . {dm-authdata} is readable and writable.
 
+[[norm:dm_auth_authdata_omit]]
 Implementations where it's not possible to unlock the DM by using {dm-authdata} should not implement that register.
 
 === Version Detection
@@ -561,8 +586,8 @@ side effects:
 . {dmcontrol-haltreq} is cleared, potentially preventing a halt request made by a previous debugger from taking effect.
 . {dmcontrol-resumereq} is cleared, potentially preventing a resume request made by a previous debugger from taking effect.
 . {dmcontrol-ndmreset} is deasserted, releasing the hardware platform from reset if a previous debugger had set it.
-. {dmcontrol-dmactive} is asserted, releasing the DM from reset. This in itself is not
-observable by any harts.
+. [#norm:dm_dmactive_set_unobservable]#{dmcontrol-dmactive} is asserted, releasing the DM from reset. This in itself is not
+observable by any harts.#
 
 This procedure is guaranteed to work in future versions of this spec.
 The meaning of the {dm-dmcontrol} bits where {dmcontrol-hartreset}, {dmcontrol-hasel}, {dmcontrol-hartsello}, and {dmcontrol-hartselhi} currently reside might change,
@@ -572,9 +597,10 @@ but preserving them will have no side effects. Clearing the bits of {dm-dmcontro
 === Debug Module Registers
 
 The registers described in this section are accessed over the DMI bus.
-Each DM has a base address (which is 0 for the first DM). The register
-addresses below are offsets from this base address.
+[#norm:dm_reg_base_addr]#Each DM has a base address (which is 0 for the first DM). The register
+addresses below are offsets from this base address.#
 
+[[norm:dm_reg_unimplemented]]
 Debug Module DMI Registers that are unimplemented or not mentioned in
 the table below return 0 when read. Writing them has no effect.
 
