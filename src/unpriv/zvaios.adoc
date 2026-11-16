@@ -1,0 +1,624 @@
+[[ext:zvaios]]
+=== ext:zvaios[] Vector Extension for Atomic I/O Stores, Version 0.1
+
+The ext:zvaios[] extension (Vector Atomic I/O Store) provides a family
+of instructions that perform wide, atomic stores from vector registers
+to I/O addresses. The extension enables efficient submission of
+descriptors to hardware accelerators, device work queues, and other
+I/O endpoints that require the entire descriptor to arrive as a
+single, indivisible unit (_I/O-atomic delivery_,
+<<sec:zvaios-atomicity>>). To support multi-tenant use,
+hardware can insert a supervisor-controlled submission
+context identifier into the store payload, so that a device shared by
+mutually distrusting contexts can attribute each submission.
+
+NOTE: This extension is in *Draft* status and has not been ratified.
+The instruction encodings shown in this chapter are provisional,
+pending codepoint allocation, and the CSR addresses are unassigned;
+both are subject to change.
+
+[#norm:zvaios_depends]#The ext:zvaios[] extension depends upon the
+ext:zicsr[], ext:zve32x[], and ext:zvl128b[] extensions.#
+
+Of its vector dependency, ext:zvaios[] uses only the vector register
+file, the whole-register loads and stores, csr:vlenb[] and
+csr:vstart[], and the `VS` context status field.
+
+[[sec:zvaios-enable]]
+==== Enabling Atomic I/O Stores
+
+[#norm:zvaios_aiose]#Execution of a ext:zvaios[] instruction at a
+privilege level below M is governed by the `AIOSE` (Atomic I/O Store
+Enable) bit added to csr:menvcfg[], csr:senvcfg[], and csr:henvcfg[],
+with the same control scope over lower privilege levels as the other
+`envcfg` enable bits. When the `AIOSE` bit controlling the current
+privilege level is clear, executing a ext:zvaios[] instruction raises
+an illegal-instruction exception. When execution is in
+VS-mode or VU-mode and the controlling csr:henvcfg[] bit is clear, a
+virtual-instruction exception is raised instead.#
+
+[#norm:zvaios_aiose_reset]#Each `AIOSE` bit resets to 0, so that
+ext:zvaios[] instructions cannot be executed at any privilege level
+below M until enabled.#
+
+[#norm:zvaios_aiose_rdonly0]#If the ext:zvaios[] extension is not
+implemented, `AIOSE` is read-only zero. For implementations with the
+Hypervisor extension, csr:henvcfg[] `AIOSE` is read-only zero when
+csr:menvcfg[] `AIOSE` is zero.#
+
+[[sec:zvaios-insns]]
+==== Atomic I/O Store Instruction Family
+
+The ext:zvaios[] extension defines four atomic I/O store instructions
+that differ only in the width of the payload transferred.
+[#norm:zvaios_encoding]#The instructions use the STORE-FP major opcode
+(`0x27`), share a common encoding structure with existing vector store
+instructions, and are distinguished from other vector stores by the
+combination `mew=1`, `mop=11`, `vm=1`, and `width=111`. The 3-bit `nf`
+field selects the width variant:#
+
+[cols="^1,^2,^2,^2,^1",options="header"]
+|===
+| `nf[2:0]` | Mnemonic     | Bit width | Bytes | Register group
+
+| `000`     | `vs128io.v`  | 128       | 16    | 1 register
+| `001`     | `vs256io.v`  | 256       | 32    | 2 registers
+| `011`     | `vs512io.v`  | 512       | 64    | 4 registers
+| `111`     | `vs1024io.v` | 1024      | 128   | 8 registers
+|===
+
+include::images/wavedrom/vs-n-io-v.edn[]
+
+[#norm:zvaios_store_op]#The `vs__n__io.v` instructions read the first
+_n_ bits from the vector register group starting at _vs3_, insert a
+supervisor-controlled submission context identifier into the payload
+(<<sec:zvaios-senqid>>), perform an I/O-atomic store of
+the resulting payload to the address in _rs1_. When _rd_ is not `x0`,
+the instruction waits for a completion status word and writes it to
+_rd_. When _rd_ is `x0`, no status is requested, and the instruction
+retires as soon as its store is committed for delivery
+(<<sec:zvaios-status>>).#
+
+[#norm:zvaios_whole_reg]#The source data is read from the vector
+register file using whole-register semantics, independent of the
+current values of csr:vtype[] and csr:vl[]. The number of vector
+registers consumed is equal to
+`max(1, n / VLEN)`. The register group must be aligned such that the
+first register index is a multiple of the group size, following the
+same whole-register semantics and alignment rules as the
+`vs__n__r.v` whole-register store instructions of the base vector
+specification.#
+
+[#norm:zvaios_vstart]#A ext:zvaios[] instruction is reserved if
+csr:vstart[] is non-zero; an illegal-instruction exception is raised
+and no store is performed. A ext:zvaios[] instruction does not write
+csr:vstart[]: delivery is all-or-nothing (<<sec:zvaios-atomicity>>),
+so the instruction is never resumed part-way through.#
+
+NOTE: Like the whole-register stores, a ext:zvaios[] instruction does
+not depend upon csr:vtype[], and so executes normally when
+csr::[vill] is set.
+
+[#norm:zvaios_width_support]#An implementation of ext:zvaios[] must
+support insn:vs128io.v[], insn:vs256io.v[], and insn:vs512io.v[].
+insn:vs1024io.v[] is provided by the ext:zvaios1024[] extension,
+which requires ext:zvaios[]. When ext:zvaios1024[] is not
+implemented, the insn:vs1024io.v[] encoding is reserved.
+<<table:zvaios-vlen>> shows the number of vector registers each
+instruction occupies as a function of VLEN.#
+
+[[table:zvaios-vlen]]
+.ext:zvaios[] register group size by VLEN
+[cols="^1,^1,^1,^1,^1",options="header"]
+|===
+| VLEN | `vs128io.v` | `vs256io.v` | `vs512io.v` | `vs1024io.v`
+
+| 128  | 1 reg       | 2 regs      | 4 regs      | 8 regs
+| 256  | 1 reg       | 1 reg       | 2 regs      | 4 regs
+| 512  | 1 reg       | 1 reg       | 1 reg       | 2 regs
+| 1024 | 1 reg       | 1 reg       | 1 reg       | 1 reg
+|===
+
+NOTE: The payload width is fixed by the opcode, so a descriptor has
+the same width and layout on every implementation; only the number of
+registers that hold it varies with VLEN. Portable code should use the
+register group size and alignment required at VLEN = 128: a group
+aligned for VLEN = 128 also meets the alignment of the smaller group
+used at any larger VLEN.
+
+[#norm:zvaios_operation]#The operation of each instruction is:#
+[source,text]
+----
+  let bytes   = n / 8
+  let nregs   = max(1, bytes * 8 / VLEN)
+  let data    = concat(V[vs3], V[vs3+1], ..., V[vs3+nregs-1])[0 : bytes*8-1]
+  let addr    = X[rs1]
+  if priv != M then {              // M-mode performs no insertion
+    let length  = senqfmt.length   // vsenqfmt when V=1
+    let shift   = senqfmt.shift    // vsenqfmt when V=1
+    let payload = senqid[31:0]     // vsenqid  when V=1
+    // Replace bits [shift+length-1 : shift] of data with payload[length-1:0]
+    if length != 0 then insert_field(data, payload, shift, length)
+  }
+  let status  = io_atomic_store(addr, data, bytes)
+  if rd != 0 then X[rd] = status
+----
+
+[[sec:zvaios-status]]
+===== Completion Status Word
+
+[#norm:zvaios_status_word]#The completion status word is XLEN bits
+wide and corresponds to the specific store issued by this
+instruction. Only when the status is requested (_rd_ is not `x0`) does a
+ext:zvaios[] instruction wait for it: the instruction retires once
+the status word is available in _rd_. When _rd_ is `x0`, the
+instruction does not wait for a status and retires as soon as its
+store is committed for delivery (<<sec:zvaios-atomicity>>), as a
+posted store does.#
+
+[#norm:zvaios_status_vocab]#The following encodings are architecturally
+reserved in the status word:#
+
+* [#norm:zvaios_status_success]#A value of 0 indicates _success_: the
+  implementation has committed the store for delivery
+  (<<sec:zvaios-atomicity>>) and is unable to report any condition
+  that would prevent the target from processing the submission.#
+* [#norm:zvaios_status_retry]#A value of 1 indicates _retry_: the
+  target is temporarily unable to accept the submission, no byte of
+  the payload was delivered, and the target's state is unchanged.
+  Software may reissue the instruction after an
+  implementation-defined backoff delay.#
+* [#norm:zvaios_status_impl]#Values 2 and above are
+  implementation-defined. An implementation must document the
+  meaning of each value it produces, including whether the payload
+  was delivered. Software must not reissue an instruction that
+  reported such a value unless the implementation documents it as
+  delivering no payload.#
+
+NOTE: A _success_ status is not an acknowledgement by the target;
+software that needs one obtains it by device-specific means. An
+implementation that retires a ext:zvaios[] instruction as soon as its
+store is committed for delivery, without obtaining feedback from the
+target, never reports _retry_.
+
+[#norm:zvaios_status_source]#The mechanism by which the implementation
+obtains the status word is not architecturally defined. Software
+must not assume that any particular bus transaction, memory
+location, completion format, or interconnect protocol is involved in
+producing the status word.#
+
+[#norm:zvaios_status_untrusted]#The completion status word is data
+produced by the implementation in response to the target and is not a
+trusted value. Software must validate the status word before using it
+to direct subsequent execution, and must not use it as an address,
+length, or other operand without checking it. On a target shared
+between security contexts, the status-word value and the timing of the
+_retry_ response are potential channels; see <<sec:zvaios-security>>.#
+
+NOTE: Reading a device-specific status register after the
+store, with an ordinary load and a insn:fence[] if the device
+requires one, remains available; there is no atomicity guarantee
+between the ext:zvaios[] store and a subsequent load, so drivers that
+require one rely on the status word in _rd_.
+
+[[sec:zvaios-senqid]]
+==== Submission Context Identifier
+
+The ext:zvaios[] extension defines CSRs that hold a
+supervisor-controlled submission context identifier _value_ and the
+_format_ that selects the bit range of the payload it replaces
+(<<sec:zvaios-payload>>).
+
+===== Identifier Value CSRs
+
+[#norm:zvaios_senqid]#The csr:senqid[] CSR is a supervisor-level
+read-write register of XLEN bits that holds the submission context
+identifier value used by ext:zvaios[] instructions executing in S-mode
+or U-mode. Only the low 32 bits of csr:senqid[] are architecturally
+defined; on RV64, bits [63:32] are reserved and read as zero.#
+
+[#norm:zvaios_establish_before_run]#The csr:senqid[] CSR (and
+csr:vsenqid[] under virtualization) is per-context state. Supervisor
+software must establish the incoming context's identifier before that
+context executes any ext:zvaios[] instruction, and must update it on
+every context switch, so that a context never submits under a
+previously-scheduled context's identifier.#
+
+===== Insertion Format CSRs
+
+[#norm:zvaios_senqfmt]#The csr:senqfmt[] CSR is a supervisor-level
+read-write register that describes the insertion format used by
+ext:zvaios[] instructions executing in S-mode or U-mode. It contains
+two fields:#
+
+[cols="^1,^2,^7",options="header"]
+|===
+| Bits    | Field    | Description
+
+| `[5:0]`   | `length` | Number of payload bits to replace. Valid values are 0 through 32. A value of 0 selects no insertion, as defined in <<sec:zvaios-payload>>. Values 33 through 63 are reserved.
+| `[15:6]`  | `shift`  | Bit offset within the store payload at which the replacement begins, counted from the least-significant bit (bit 0 of byte 0). Valid values are 0 through 1023, subject to the constraint `shift + length` &#8804; store width.
+|===
+
+[#norm:zvaios_senqfmt_res0]#Bits `[XLEN-1:16]` of csr:senqfmt[] are
+reserved and read as zero.#
+
+[#norm:zvaios_senqfmt_reset]#csr:senqfmt[] and csr:vsenqfmt[] reset to
+zero, i.e. with `length` = 0, so that no insertion is performed until a
+format is configured.#
+
+[#norm:zvaios_vs_csrs]#When the Hypervisor extension is implemented,
+the virtual-supervisor read-write CSRs csr:vsenqid[] and
+csr:vsenqfmt[] shadow csr:senqid[] and csr:senqfmt[] when `V=1`,
+following the shadowing mechanism defined in <<hypervisor>>.#
+
+NOTE: In the common case, csr:senqfmt[] is written once, when a
+driver binds to its device, and csr:senqid[] is updated on every
+context switch.
+
+===== Identifier Selection
+
+[#norm:zvaios_id_sel]#A ext:zvaios[] instruction executing in a
+privilege mode below M uses `senqid[31:0]` as the submission context
+identifier value and csr:senqfmt[] as the insertion format. A
+ext:zvaios[] instruction executing in M-mode performs no insertion:
+its payload is delivered unmodified, as if `length` were zero.
+The instruction has no operand for overriding either the identifier
+value or the insertion format.#
+
+NOTE: The identifier value, the insertion format, and the enable
+state that apply to a ext:zvaios[] instruction are the committed
+architectural values at the instruction's program-order position. A
+ext:zvaios[] store has an I/O side effect and is not performed
+speculatively. An implementation that reorders execution must
+therefore not deliver a submission under a stale or more-privileged
+identifier around a privilege transition or a CSR write.
+
+===== CSR Access Control
+
+[#norm:zvaios_smstateen]#When the ext:smstateen[] extension is
+implemented, a single csr:mstateen0[] bit enables access to both
+csr:senqid[] and csr:senqfmt[] from privilege levels below M. When
+the bit is clear, access to either CSR from the affected privilege
+level raises an illegal-instruction exception. A corresponding
+csr:hstateen0[] bit enables access from VS-mode when the Hypervisor
+extension is implemented.#
+
+*[To be allocated]* The CSR addresses and the ext:smstateen[] bit
+positions are to be allocated in the privileged architecture.
+
+[#norm:zvaios_smstateen_scope]#The ext:smstateen[] bits control
+explicit accesses to csr:senqid[] and csr:senqfmt[], not the implicit
+reads a ext:zvaios[] instruction performs. Whether the instruction may
+execute is governed by the `AIOSE` control (<<sec:zvaios-enable>>);
+disabling access to the CSRs does not, by itself, prevent a context
+from submitting under an established identifier.#
+
+[[sec:zvaios-payload]]
+===== Payload Insertion
+
+[#norm:zvaios_payload_insert]#If the `length` field of the applicable
+format CSR is non-zero, the hardware, before the store is issued to
+the I/O system, replaces bits `[shift + length - 1 : shift]` of the
+store payload with bits `[length - 1 : 0]` of the identifier value.#
+
+[#norm:zvaios_payload_nop]#If the `length` field of the applicable
+format CSR is zero, no insertion is performed.#
+
+[#norm:zvaios_payload_bounds]#If the `length` field of the applicable
+format CSR holds a reserved value (33 through 63), or if `length` is
+non-zero and `shift + length` exceeds the width in bits of the store,
+an illegal-instruction exception is raised and no store is
+performed.#
+
+[[sec:zvaios-atomicity]]
+==== Atomicity
+
+===== I/O-Atomic Delivery
+
+[#norm:zvaios_observer_def]#An _observer_ of a ext:zvaios[] store is
+any agent that can read the target address or otherwise observe its
+contents. Observers include other harts, the target device itself,
+and any DMA agent or other device acting on the interconnect.#
+
+[#norm:zvaios_io_atomic_def]#A ext:zvaios[] instruction performs an
+_I/O-atomic store_: each observer observes either none of the payload
+or all of it, and never a partially complete state. A concurrent read
+of the target range returns either the state before the store or the
+state after it. No write by another agent to an address that overlaps
+the target range is interleaved with the store; an observer observes
+the two writes in one order or the other. These guarantees hold for
+every observer, whatever the interconnect topology between the hart
+and the target.#
+
+NOTE: These guarantees bind the implementation and the interconnect
+between the hart and the target. They cannot bind an agent that
+writes the target outside that path, such as a device that modifies
+its own submission portal internally. The ISA does not prescribe how
+an implementation achieves them: a wide interconnect data path, a
+write-combining buffer with an atomic flush, and a dedicated I/O
+store path are all possible.
+
+[#norm:zvaios_io_atomic_allornothing]#A ext:zvaios[] instruction that
+raises any exception delivers no part of the payload to the target.#
+
+===== Commitment for Delivery
+
+[#norm:zvaios_commit_point]#An I/O-atomic store is _committed for
+delivery_ when no subsequent action by the hart can prevent the
+payload from being delivered to the target. Such actions include
+raising an exception, taking an interrupt, executing a insn:fence[],
+and executing any later instruction. Once the store is committed for
+delivery, the payload becomes observable by the target, unless an
+event occurs that would also prevent the delivery of an ordinary
+posted write to the same target. Commitment does not imply that the
+payload has yet been observed by the target.#
+
+NOTE: Events that prevent the delivery of an ordinary posted write
+include loss of power to the hart, the interconnect, or the target;
+reset of any of these; failure of the interconnect; removal or
+power-down of the target; and detection of an uncorrectable error in
+the buffered payload. Congestion or backpressure at the target is not
+such an event: an implementation must complete a committed delivery
+however long the target takes to accept it.
+
+[#norm:zvaios_commit_noexc]#A ext:zvaios[] instruction raises no
+exception after its store is committed for delivery.#
+
+[#norm:zvaios_io_atomic_once]#Each architectural execution of a
+ext:zvaios[] instruction delivers its payload to the target at most
+once. Before the store is committed for delivery, an implementation
+may abandon the instruction, for example to take an interrupt, in
+which case no part of the payload is delivered. After the store is
+committed for delivery, the instruction retires and is not
+re-executed. Re-execution of an abandoned instruction never delivers
+a payload that a previous execution has already delivered.#
+
+NOTE: These rules make a ext:zvaios[] instruction safe to interrupt
+while it is held pending. An implementation that cannot withdraw a
+payload once issued holds the interrupt until the instruction
+retires.
+
+===== Relationship to Single-Copy Atomicity
+
+[#norm:zvaios_sca_relation]#I/O-atomic delivery extends the concept of
+single-copy atomicity, defined in <<memorymodel>>, from the coherence
+domain to external I/O targets. Within the coherence domain, a
+ext:zvaios[] store is observed by other harts as a single-copy-atomic
+store with respect to loads from the target address.#
+
+[#norm:zvaios_single_memop]#A ext:zvaios[] instruction follows RVWMO
+at the instruction level, as do other vector memory instructions.
+Unlike element-wise vector stores, it gives rise to no separate
+element memory operations: the payload is delivered as one
+indivisible unit, as defined in this section.#
+
+NOTE: Ordering with respect to other accesses is governed by the
+rules for I/O writes in <<sec:zvaios-io>>.
+
+[[sec:zvaios-io]]
+==== I/O Classification and Ordering
+
+[#norm:zvaios_io_only]#The target address of a
+ext:zvaios[] instruction must lie in an I/O region, as classified by
+the Physical Memory Attributes (<<pma>>). A ext:zvaios[] store to an
+address in a main-memory region raises a store/AMO access-fault
+exception, regardless of the other attributes of that region.#
+
+[#norm:zvaios_io_writes]#ext:zvaios[] instructions are classified as
+I/O writes for ordering as defined by the insn:fence[]
+instruction (<<base>>). They are ordered with respect to other I/O
+writes by the `PO` and `SO` predecessor and successor bits of
+insn:fence[], and with respect to other memory writes according to the
+`FIOM` bit in csr:menvcfg[] (<<sec:menvcfg>>) and csr:henvcfg[].#
+
+[#norm:zvaios_pma_required]#The target address must additionally have
+Physical Memory Attributes that permit I/O writes of the specified
+width. If the PMAs do not permit the write, a store/AMO access-fault
+exception is raised.#
+
+NOTE: Because Physical Memory Attributes are per-region, a platform
+controls where ext:zvaios[] stores are permitted by advertising or
+withholding support for the corresponding write widths on each I/O
+region.
+
+[[sec:zvaios-exceptions]]
+==== Exceptions
+
+[#norm:zvaios_exceptions]#ext:zvaios[] instructions may raise the
+following exceptions, in order of precedence:#
+
+. [#norm:zvaios_exc_illegal]#_Illegal instruction_ is raised if:#
+.. [#norm:zvaios_exc_vsoff]#the vector context status field `VS` of
+   csr:mstatus[] is `Off`, following the same rule as other
+   instructions that access vector register state,#
+.. [#norm:zvaios_exc_reserved]#the encoding is reserved, including
+   insn:vs1024io.v[] when ext:zvaios1024[] is not implemented,#
+.. [#norm:zvaios_exc_aiose]#the `AIOSE` control for the current
+   privilege level is clear, except that a _virtual instruction_
+   exception is raised instead in the VS/VU-mode case defined in
+   <<sec:zvaios-enable>>,#
+.. [#norm:zvaios_exc_vstart]#csr:vstart[] is non-zero
+   (<<sec:zvaios-insns>>),#
+.. [#norm:zvaios_exc_fmt]#the applicable format CSR is invalid for
+   the store width (<<sec:zvaios-payload>>).#
+. [#norm:zvaios_exc_misaligned]#_Store/AMO address misaligned_ is
+  raised if the target address is not naturally aligned to the store
+  width.#
+. [#norm:zvaios_exc_page]#_Store/AMO page fault_ is raised if address
+  translation is in effect and the translation of the target address
+  fails, following the same rules as any other store.#
+. [#norm:zvaios_exc_gpage]#_Store/AMO guest-page fault_ is raised
+  under virtualization if second-stage translation of the target
+  address fails.#
+. [#norm:zvaios_exc_fault]#_Store/AMO access fault_ is raised if the
+  target address lies in a main-memory region (<<sec:zvaios-io>>) or
+  violates any other PMA or PMP requirement.#
+
+[#norm:zvaios_exc_tval]#csr:mtval[], csr:stval[], and csr:htval[] are
+written as for any other store, with the faulting address taken from
+_rs1_.#
+
+No exception raised by a ext:zvaios[] instruction delivers any part of
+the payload to the target (<<sec:zvaios-atomicity>>).
+
+[[sec:zvaios-software]]
+==== Software Interface
+
+This section is informative.
+
+===== C Intrinsics
+
+A C implementation that supports the
+ext:zvaios[] extension provides the following intrinsic functions,
+declared in the `riscv_vector.h` header. The payload types are the
+`vuint8m1_t`, `vuint8m2_t`, `vuint8m4_t`, and `vuint8m8_t` types of
+the vector intrinsics specification. The intrinsic for
+insn:vs1024io.v[] is provided when the ext:zvaios1024[] extension is
+supported.
+
+[source,c]
+----
+unsigned long __riscv_vs128io_v_u8m1(volatile void *addr, vuint8m1_t payload);
+unsigned long __riscv_vs256io_v_u8m2(volatile void *addr, vuint8m2_t payload);
+unsigned long __riscv_vs512io_v_u8m4(volatile void *addr, vuint8m4_t payload);
+
+#if defined(__riscv_zvaios1024)
+unsigned long __riscv_vs1024io_v_u8m8(volatile void *addr, vuint8m8_t payload);
+#endif
+----
+
+Each call executes exactly one
+corresponding instruction, with the first _n_ bits of the payload
+argument as the store payload and `addr` as the target address, and
+returns the XLEN-bit completion status word. A call has the ordering
+semantics of a volatile access: the C implementation does not
+duplicate, eliminate, or reorder it with respect to other volatile
+accesses.
+
+When the value returned by a call is not used, the C implementation
+may encode `x0` as the destination register, so that the instruction
+does not wait for a status.
+
+NOTE: Toolchains indicate availability with the architecture test
+macros `+__riscv_zvaios+` and `+__riscv_zvaios1024+`, following the
+RISC-V C API convention.
+
+===== Usage Guidance
+
+The payload type of each intrinsic is sized for the smallest
+supported VLEN of 128: it spans exactly the register group the
+instruction reads at VLEN = 128, and more than the instruction reads
+at larger VLEN. The instruction consumes only the first _n_ bits of
+the argument, so the same source code is correct on every VLEN.
+
+Software stages a payload with insn:vle8.v[], using an application
+vector length equal to the payload size in bytes; this reads exactly
+the payload from memory. The whole-register load intrinsics may be
+used instead, but they transfer whole registers: a
+`+__riscv_vl4re8_v_u8m4+` call reads 4 × VLENB bytes, so when VLEN
+exceeds 128 the staging buffer must be readable to that size, not
+merely to the payload size.
+
+When a payload carries secrets, such as cryptographic keys or IVs,
+software should zeroize the payload registers after submission, since
+their contents otherwise persist and are saved to memory on the next
+context switch. The example below handles the status word as
+described in <<sec:zvaios-status>>.
+
+[source,c]
+----
+// Submit a 64-byte descriptor.
+static inline unsigned long
+submit512(volatile void *portal, const uint8_t *slot)
+{
+    vuint8m4_t payload = __riscv_vle8_v_u8m4(slot, 64);
+    return __riscv_vs512io_v_u8m4(portal, payload);
+}
+
+int submit(volatile void *portal, const uint8_t *slot)
+{
+    for (unsigned tries = 0; tries <= MAX_RETRY; tries++) {
+        unsigned long status = submit512(portal, slot);
+        if (status == 0)
+            return 0;          /* committed for delivery */
+        if (status != 1)
+            return -EIO;       /* implementation-defined: do not
+                                  reissue unless documented safe */
+        backoff(tries);        /* retry: nothing was delivered */
+    }
+    return -EBUSY;
+}
+----
+
+Ordering with respect to other device accesses follows the rules for
+I/O writes (<<sec:zvaios-io>>): a insn:fence[] with the appropriate
+predecessor and successor sets is required between a submission and
+any ordinary load or store to the device that must be observed in a
+specific order relative to it. No fence is needed between staging a
+payload and submitting it; the intrinsic consumes the payload
+through a register dependency.
+
+[[sec:zvaios-security]]
+==== Security Considerations (Informative)
+
+This section states the trust model the extension
+assumes and the obligations it places on privileged software and on
+the platform, beyond the normative rules above.
+
+===== Trustworthiness of the Inserted Identifier
+
+The inserted identifier does not, by itself, provide isolation
+between mutually distrusting domains. Like any store to an I/O
+region, a ext:zvaios[] store is subject to the platform's address
+translation and protection on its target address --- PMAs, PMP, and
+any IOMMU --- and the extension adds no way to bypass them. Some
+targets consume the inserted identifier; for example, a device may
+tag its own downstream DMA with it. Even then, the platform's I/O
+mediation of the hardware requester remains the boundary between
+domains, exactly as it is when software writes the identifier into an
+ordinary descriptor. A device must not derive a submission's
+authority from the target address that the executing level chose;
+the address only selects a submission portal.
+
+What hardware insertion adds is a per-context identity that the
+executing level cannot forge. A mediator that operates at the
+granularity of hardware requesters cannot distinguish two U-mode
+processes that share a hart; csr:senqid[] supplies that finer-grained
+identity within a single supervisor domain.
+
+That identity does not extend across domains. csr:vsenqid[] is a
+VS-mode read-write register, so a guest may write any value into it,
+and hardware inserts that value unchanged. The CPU
+neither translates the value nor qualifies it with a namespace. A
+device or fabric must therefore not treat the inserted identifier as
+a globally-trusted identity. A platform that carries submissions
+across a trust boundary must mediate the identifier with
+host-controlled state: either an IOMMU keyed on the hardware
+requester, or a host-programmed limit on the values a guest may
+write, as PASID-based I/O virtualization does by translating a guest
+PASID before it reaches the device.
+
+===== Obligations
+
+* *Enabling.* With `length` = 0 the executing level controls the whole
+  payload, and an unconfigured format does not fault. Enabling `AIOSE`
+  for a context and establishing a non-zero csr:senqfmt[] for any
+  target that relies on the identifier for isolation must therefore
+  be treated as a single step.
+* *Payload contents.* The vector registers are not cleared across a
+  context switch, so a payload that is not fully populated leaks a
+  previous context's data to the device.
+* *Teardown.* A submission that has been committed for delivery
+  (<<sec:zvaios-atomicity>>) cannot be recalled. Clearing `AIOSE`,
+  changing csr:senqid[], unmapping the target, or tearing down the
+  context prevents further submissions, but does not withdraw one
+  already committed, which is delivered under the identifier in
+  effect when it was issued. Privileged software that must ensure no
+  submission remains outstanding quiesces the context before it
+  reclaims the target or reassigns the identifier.
+* *Availability.* Each instruction delivers up to 128 bytes to the
+  target, so a lower-privilege level that is granted ext:zvaios[] can
+  saturate a device queue or an interconnect path. Privileged software
+  grants `AIOSE` only to contexts it is prepared to let do so; the
+  platform accounts for or rate-limits the traffic where the facility
+  is exposed more widely.
