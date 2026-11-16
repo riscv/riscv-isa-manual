@@ -1,0 +1,317 @@
+[appendix]
+[[app:trace-code-fragments]]
+== Code fragment and transport
+
+This appendix shows fragments of code, and associated data from one of
+the architectural tests in the repository. For the individual fragments
+the ingress signals are shown and the corresponding packets generated.
+It further shows how the packets are transported via on-chip transport
+fabric. The fragments shown below are extracted from the test whilst it
+is being executed. In order to give some context to the fragment of
+interest, code prior to and after the fragment is also given.
+
+=== Illegal Opcode test
+
+In this example the test executes an illegal opcode (at line labelled
+14) and traps. We show the output from the patched spike execution in
+line 30. The input signals to the encoder are shown in lines labelled
+38-46. The HART will have set the signals shown in line 42 when the
+illegal instruction is executed and as can be seen it is not retired.
+Lines labelled 53, 56 and 59 show the packets output from the encoder
+for this fragment.
+
+==== Code fragment
+
+....
+1: *************************************************************************************
+2: ****************** Fragment 0x80000222 - 0x80000226:illegal_opcode ******************
+3: *************************************************************************************
+4:   KEY: ">" means pre-fragment execution, "<" means post-fragment execution
+5: ^^^^^^^^^^^^^^^^^^^^^^^^^^ Part 1 of 1 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+6:
+7: elf:
+8:  >  0000000080000104 <j_exception_stimulus>:
+9:  >      80000104:    00000297            auipc   t0,0x0
+10: >      80000108:    11e28293            addi    t0,t0,286 # 80000222 <bad_opcode>
+11: >      8000010c:    8282                    jr  t0
+12: >      80000154:    9282                    jalr    t0
+13:     0000000080000222 <bad_opcode>:
+14:         80000222:   0000                    unimp
+15:         80000224:   0000                    unimp
+16:         80000226:   b709                    j   80000128 <j_target_end_fail>
+17: <  00000000800001b0 <machine_trap_entry>:
+18: <      800001b0:    a805                    j   800001e0 <machine_trap_entry_0>
+19: <  00000000800001e0 <machine_trap_entry_0>:
+20: <      800001e0:    342023f3            csrr    t2,mcause
+21: <      800001e4:    fff0031b            addiw   t1,zero,-1
+22: <      800001e8:    137e                    slli    t1,t1,0x3f
+23:
+24: trace_spike:
+25: ******** Data from br_j_asm.spike_pc_trace line 5029 ********
+26: >  ADDRESS=80000154, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+27: >  ADDRESS=80000104, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+28: >  ADDRESS=80000108, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+29: >  ADDRESS=8000010c, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+30:    ADDRESS=80000222, PRIVILEGE=3, EXCEPTION=1, ECAUSE=2, TVAL=0, INTERRUPT=0
+31: <  ADDRESS=800001b0, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+32: <  ADDRESS=800001e0, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+33: <  ADDRESS=800001e4, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+34: <  ADDRESS=800001e8, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+35:
+36: encoder_input:
+37: ******** Data from br_j_asm.encoder_input line 5029 ********
+38: >  UNINFERABLE_JUMP, cause=0, tval=0, priv=3, iaddr_0=80000154, context=0, ctype=0, ilastsize_0=2
+39: >  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=80000104, context=0, ctype=0, ilastsize_0=4
+40: >  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=80000108, context=0, ctype=0, ilastsize_0=4
+41: >  UNINFERABLE_JUMP, cause=0, tval=0, priv=3, iaddr_0=8000010c, context=0, ctype=0, ilastsize_0=2
+42:    EXCEPTION, cause=2, tval=0, priv=3, iaddr_0=80000222, context=0, ctype=0, ilastsize_0=2,
+                                                                              ----------> NOT RETIRED
+43: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001b0, context=0, ctype=0, ilastsize_0=2
+44: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001e0, context=0, ctype=0, ilastsize_0=4
+45: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001e4, context=0, ctype=0, ilastsize_0=4
+46: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001e8, context=0, ctype=0, ilastsize_0=2
+47:
+48: te_inst:
+49: ******** Data from br_j_asm.te_inst_annotated line 5071 ********
+50: >  next=80000154 curr=80000150 prev=8000014c
+51: >  next=80000104 curr=80000154 prev=80000150
+52: >  next=80000108 curr=80000104 prev=80000154
+53: >  format=1, address=80000104, branches=1, branch_map=0, irreport=0, notify=0, updiscon=0,
+                                                  Reason[prev_updiscon] Payload[05 04 01 00 80 00]
+54: >  next=8000010c curr=80000108 prev=80000104
+55:    next=80000222 curr=8000010c prev=80000108
+56:    format=2, address=8000010c, irreport=0, notify=0, updiscon=0, Reason[exc_only]
+                                                    Payload[32 04 00 00 02]
+57: <  next=800001b0 curr=80000222 prev=8000010c
+58: <  format=3, subformat=TRAP, address=80000222, branch=1, context=0, ecause=2, interrupt=0,
+                                                  privilege=3, thaddr=0, tval=0, Reason[prev_updiscon, curr_exc_only]
+                                                     Payload[77 00 00 00 00 81 88 00 00 20]
+59: <  format=3, subformat=START, address=800001b0, branch=1, context=0,
+                                             privilege=3, Reason[exception_prev, reported]
+                                                  Payload[73 00 00 00 00 6c 00 00 10]
+60: <  next=800001e4 curr=800001e0 prev=800001b0
+61: <  next=800001e8 curr=800001e4 prev=800001e0
+....
+
+==== Packet data
+
+The output from the encoder for the fragment of interest is given in
+line 56. The least significant byte is output first, this means 32 is
+byte 0, 04 is byte 1 and and the final value 02 is byte 4.
+
+==== Siemens transport
+
+The packet format is given in
+<<fig:packet-format>>. So this means the packet
+will be packed as follows:
+
+* Header - 1 byte
+* Index - N bits. As an example use 6 bits and the value of 1.
+* Optional Siemens timestamp - 2 bytes. This example has no timestamp
+* A type field for the packet of 2 bits ’01’ meaning instruction trace
+* Payload - [32 04 00 00 02]
+
+Since the Siemens transport is byte stream based the data seen will be:
+
+`[0x05][0x41][0x32 0x04 0x00 0x00 0x02]`
+
+==== ATB transport
+
+Assuming at 32 bit ATB transport results in the following ATB transfers
+
+`[ATID=1] [ATBYTES = 3] [ATDATA = 0x00043205]` +
+`[ATID=1] [ATBYTES = 1] [ATDATA = 0x00000200]`
+
+=== Timer Long Loop
+
+==== Code fragment
+
+....
+
+1: **************************************************************************************
+2: ****************** Fragment 0x800001a2 - 0x800001b0:timer_long_loop ******************
+3: **************************************************************************************
+4:   KEY: ">" means pre-fragment execution, "<" means post-fragment execution
+5: ^^^^^^^^^^^^^^^^^^^^^^^^^^ Part 443 of 445 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+6:
+7: elf:
+8: >      80000194: fab50ce3            beq a0,a1,8000014c <timer_interrupt_return>
+9: >      80000198: 40430333            sub t1,t1,tp
+10: >      8000019c:    34402473            csrr    s0,mip
+11: >      800001a0:    8c21                    xor s0,s0,s0
+12:         800001a2:   300024f3            csrr    s1,mstatus
+13:         800001a6:   8ca5                    xor s1,s1,s1
+14:         800001a8:   fe0310e3            bnez    t1,80000188 <timer_interrupt_long_loop>
+15:         800001ac:   bfb5                    j   80000128 <j_target_end_fail>
+16:         800001ae:   0001                    nop
+17:    00000000800001b0 <machine_trap_entry>:
+18:         800001b0:   a805                    j   800001e0 <machine_trap_entry_0>
+19: <  00000000800001e0 <machine_trap_entry_0>:
+20: <      800001e0:    342023f3            csrr    t2,mcause
+21: <      800001e4:    fff0031b            addiw   t1,zero,-1
+22: <      800001e8:    137e                    slli    t1,t1,0x3f
+23: <      800001ea:    031d                    addi    t1,t1,7
+24:
+25: trace_spike:
+26: ******** Data from br_j_asm.spike_pc_trace line 5000 ********
+27: >  ADDRESS=80000194, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+28: >  ADDRESS=80000198, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+29: >  ADDRESS=8000019c, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+30: >  ADDRESS=800001a0, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+31:    ADDRESS=800001a2, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+32:    ADDRESS=800001a6, PRIVILEGE=3, EXCEPTION=1, ECAUSE=8000000000000007, TVAL=0, INTERRUPT=1
+33:    ADDRESS=800001b0, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+34: <  ADDRESS=800001e0, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+35: <  ADDRESS=800001e4, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+36: <  ADDRESS=800001e8, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+37: <  ADDRESS=800001ea, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+38:
+39: encoder_input:
+40: ******** Data from br_j_asm.encoder_input line 5000 ********
+41: >  NONTAKEN_BRANCH, cause=0, tval=0, priv=3, iaddr_0=80000194, context=0, ctype=0, ilastsize_0=4
+42: >  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=80000198, context=0, ctype=0, ilastsize_0=4
+43: >  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=8000019c, context=0, ctype=0, ilastsize_0=4
+44: >  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001a0, context=0, ctype=0, ilastsize_0=2
+45:    ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001a2, context=0, ctype=0, ilastsize_0=4
+46:    INTERRUPT, cause=7, tval=0, priv=3, iaddr_0=800001a6, context=0, ctype=0, ilastsize_0=2,
+                                                                              ----------> NOT RETIRED
+47:    ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001b0, context=0, ctype=0, ilastsize_0=2
+48: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001e0, context=0, ctype=0, ilastsize_0=4
+49: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001e4, context=0, ctype=0, ilastsize_0=4
+50: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001e8, context=0, ctype=0, ilastsize_0=2
+51: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=800001ea, context=0, ctype=0, ilastsize_0=2
+52:
+53: te_inst:
+54: ******** Data from br_j_asm.te_inst_annotated line 5038 ********
+55: >  next=80000194 curr=80000192 prev=80000190
+56: >  next=80000198 curr=80000194 prev=80000192
+57: >  next=8000019c curr=80000198 prev=80000194
+58: >  next=800001a0 curr=8000019c prev=80000198
+59:    next=800001a2 curr=800001a0 prev=8000019c
+60:    next=800001a6 curr=800001a2 prev=800001a0
+61:    format=1, address=800001a2, branches=15, branch_map=21845, irreport=0, notify=0, updiscon=0,
+                                                   Reason[exc_only] Payload[bd aa aa 68 00 00 20]
+62:    next=800001b0 curr=800001a6 prev=800001a2
+63: <  next=800001e0 curr=800001b0 prev=800001a6
+64: <  format=3, subformat=TRAP, address=800001b0, branch=1, context=0, ecause=7, interrupt=1,
+                                                   privilege=3, thaddr=1, Reason[prev_exception]
+                                                      Payload[77 00 00 00 80 33 6c 00 00 20]
+65: <  next=800001e4 curr=800001e0 prev=800001b0
+66: <  next=800001e8 curr=800001e4 prev=800001e0
+67: <  next=800001ea curr=800001e8 prev=800001e4
+....
+
+==== Packet data
+
+The output from the encoder for the fragment of interest is given in
+line 61. The least significant byte is output first, this means 77 is
+byte 0, 00 is byte 1 and and the final value 20 is byte 9.
+
+==== Siemens transport
+
+The packet format is given in
+<<fig:packet-format>>. So this means the packet
+will be packed as follows:
+
+* Header - 1 byte
+* Index - N bits. As an example use 6 bits and the value of 0xA
+* Optional Siemens timestamp - 2 bytes. This example has no timestamp
+* A type field for the packet of 2 bits '01' meaning instruction trace
+* Payload - [0xBD 0xAA 0xAA 0x68 0x00 0x00 0x20]
+
+`[0x7][0x29][0xBD 0xAA 0xAA 0x68 0x00 0x00 0x20]`
+
+==== ATB transport
+
+Assuming at 32 bit ATB transport results in the following ATB transfers
+
+`[ATID=0xA] [ATBYTES = 3] [ATDATA = 0xAAAABD07]` +
+`[ATID=0xA] [ATBYTES = 3] [ATDATA = 0x20000068]`
+
+=== Startup xrle
+
+==== Code fragment
+
+....
+
+1: ***********************************************************************************
+2: ****************** Fragment 0x20010522 - 0x20010528:startup_xrle ******************
+3: ***********************************************************************************
+4:   KEY: ">" means pre-fragment execution, "<" means post-fragment execution
+5: ^^^^^^^^^^^^^^^^^^^^^^^^^^ Part 1 of 1 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+6:
+7: elf:
+8:     20010522 <main>:
+9:     20010522:    1141                    addi    sp,sp,-16
+10:    20010524:    c606                    sw  ra,12(sp)
+11:    20010526:    c422                    sw  s0,8(sp)
+12:    20010528:    0800                    addi    s0,sp,16
+13: <  2001052a:    800107b7            lui a5,0x80010
+14: <  2001052e:    6721                    lui a4,0x8
+15: <  20010530:    e8670713            addi    a4,a4,-378 # 7e86 <__heap_size+0x7686>
+16: <  20010534:    1ae7aa23            sw  a4,436(a5) # 800101b4 <_sp+0xfffffbfc>
+17:
+18: trace_spike:
+19: ******** Data from xrle.spike_pc_trace line 2 ********
+20:    ADDRESS=20010522, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+21:    ADDRESS=20010524, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+22:    ADDRESS=20010526, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+23:    ADDRESS=20010528, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+24: <  ADDRESS=2001052a, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+25: <  ADDRESS=2001052e, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+26: <  ADDRESS=20010530, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+27: <  ADDRESS=20010534, PRIVILEGE=3, EXCEPTION=0, ECAUSE=0, TVAL=0, INTERRUPT=0
+28:
+29: encoder_input:
+30: ******** Data from xrle.encoder_input line 2 ********
+31:    ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=20010522, context=0, ctype=0, ilastsize_0=2
+32:    ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=20010524, context=0, ctype=0, ilastsize_0=2
+33:    ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=20010526, context=0, ctype=0, ilastsize_0=2
+34:    ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=20010528, context=0, ctype=0, ilastsize_0=2
+35: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=2001052a, context=0, ctype=0, ilastsize_0=4
+36: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=2001052e, context=0, ctype=0, ilastsize_0=2
+37: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=20010530, context=0, ctype=0, ilastsize_0=4
+38: <  ITYPE_NONE, cause=0, tval=0, priv=3, iaddr_0=20010534, context=0, ctype=0, ilastsize_0=4
+39:
+40: te_inst:
+41: ******** Data from xrle.te_inst_annotated line 2 ********
+42: >  format=3, subformat=SUPPORT, enable=1, encoder_mode=0, options=4, qual_status=0 Payload[1f 04]
+43:    next=20010522
+44:    next=20010524 curr=20010522
+45:    format=3, subformat=START, address=20010522, branch=1, context=0,
+                                             privilege=3, Reason[ppccd]
+                                                  Payload[73 00 00 00 00 91 82 00 10]
+46:    next=20010526 curr=20010524 prev=20010522
+47:    next=20010528 curr=20010526 prev=20010524
+48: <  next=2001052a curr=20010528 prev=20010526
+49: <  next=2001052e curr=2001052a prev=20010528
+50: <  next=20010530 curr=2001052e prev=2001052a
+51: <  next=20010534 curr=20010530 prev=2001052e
+....
+
+==== Packet data
+
+The output from the encoder for the fragment of interest is given in
+line 45. The least significant byte is output first, this means 73 is
+byte 0, 00 is byte 1 and and the final value 10 is byte 8.
+
+==== Siemens transport
+
+The packet format is given in <<fig:packet-format>>. So this means the packet
+will be packed as follows:
+
+* Header - 1 byte
+* Index - N bits. As an example use 6 bits and the value of 0x5
+* Optional timestamp - 2 bytes. This example has no timestamp
+* A type field for the packet of 2 bits '01' meaning instruction trace
+* Payload - [0x73 0x00 0x00 0x00 0x00 0x91 0x82 0x00 0x10]
+
+`[0x9][0x15][0x73 0x00 0x00 0x00 0x00 0x91 0x82 0x00 0x10]`
+
+==== ATB transport
+
+Assuming at 32 bit ATB transport results in the following ATB transfers
+
+`[ATID=0x5] [ATBYTES = 3] [ATDATA = 0x00007309]` +
+`[ATID=0x5] [ATBYTES = 3] [ATDATA=0x82910000]` +
+`[ATID=0x5] [ATBYTES = 1] [ATDATA = 0x00001000]`

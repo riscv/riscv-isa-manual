@@ -1,0 +1,344 @@
+[[BranchTrace]]
+== Branch Trace
+
+Instruction delta tracing, also known as branch tracing, works by
+tracking execution from a known start address by sending information
+about the deltas taken by the program. Deltas are typically introduced
+by jump, call, return and branch type instructions, although interrupts
+and exceptions are also types of deltas.
+
+Instruction delta tracing provides an efficient encoding of an
+instruction sequence by exploiting the deterministic way the processor
+behaves based on the program it is executing.
+
+The approach relies on an offline copy of the program binary being
+available to the decoder, so it is generally unsuitable for either
+dynamic (self-modifying) programs or those where access to the program
+binary is prohibited.
+
+While the program binary is sufficient, access to the assembly or
+higher-level source code will improve the ability of the decoder to
+present the decoded trace in the debugger by annotating the traced
+instructions with source code line numbers and labels, variable names
+etc.
+
+This approach can be extended to cope with small sections of
+deterministically dynamic code by arranging for the decoder to request
+instruction memory from the target. Memory lookups generally lead to a
+prohibitive reduction in performance, although they are suitable for
+examining modest jump tables, such as the exception/interrupt vector
+pointers of an operating system which may be adjusted at boot up and
+when services are registered. Both static and dynamically linked
+programs can be traced using this approach. Statically linked programs
+are straightforward as they generally operate in a known address space,
+often mapping directly to physical memory. Dynamically linked programs
+require the debugger to keep track of memory allocation operations using
+either trace or stop-mode debugging.
+
+[[TraceConcepts]]
+=== Instruction delta trace concepts
+
+[[SequentialInstructions]]
+==== Sequential instructions
+
+For instruction set architectures such as RISC-V where all instructions
+are executed unconditionally or at least their execution can be
+determined based on the program binary, the instructions between the
+deltas are assumed to be executed sequentially. Consequently, there is
+no need to report them in the trace. The trace only needs to contain
+whether branches were taken or not, the addresses of taken indirect
+jumps, or other program counter discontinuities.
+
+[[uninfpc]]
+==== Uninferable PC discontinuities
+
+An uninferable program counter discontinuity is a program counter change
+that can not be inferred from the program binary alone. For these cases,
+the instruction delta trace must include a destination address: the
+address of the next valid instruction.
+
+Indirect jumps are an example of this, where the next instruction
+address is determined by the contents of a register rather than a
+constant embedded in the program binary. In this case, the address of
+the instruction following the jump (also known as the jump target) must
+be traced.
+
+Interrupts and exceptions are another form of uninferable PC
+discontinuity; these are discussed in detail below.
+
+==== Branches
+
+A branch is an instruction where a jump is conditional on the value of a
+register or a flag. For a decoder to able to follow program flow, the
+trace must include whether a branch was taken or not.
+
+For a direct branch, where the destination address is encoded in the
+program binary (either as a constant, or as a constant offset from the
+program counter), no further information is required. Direct branches
+are the only type of branch that is supported by the RISC-V ISA.
+
+[[interruptsexceptions]]
+==== Interrupts and exceptions
+
+Interrupts are a different type of delta that generally occur
+asynchronously to the program's execution rather than intentionally as a
+result of a specific instruction or event. Exceptions can be thought of
+in the same way, even though they can be typically linked back to a
+specific instruction address.
+
+The decoder generally does not know where an interrupt occured in the
+instruction sequence, so the trace must report the address where normal
+program flow ceased, as well as give an indication of the asynchronous
+destination which may be as simple as reporting the exception type. When
+an interrupt or exception occurs, the final instruction retired
+beforehand must be traced. Following this the next valid instruction
+address (the first of the trap handler) must be traced.
+
+Note: not all exceptions and interrupts cause traps (see
+<<sec:terminology>> for definitions). Most
+notably, floating point exceptions and disabled interrupts do not trap.
+If an exception or interrupt doesn't trap, the program counter does not
+change. So, there is no need to trace all exceptions/interrupts, just
+traps. For the purposes of trace, interrupts and exceptions are only
+traced when they cause traps to be taken.
+
+[[sec:synchronization]]
+==== Synchronization
+
+In order to make the trace robust there must be regular synchronization
+points within the trace. Synchronization is accomplished by sending a
+full valued instruction address (and potentially a context identifier).
+The decoder and debugger may also benefit from sending the reason for
+synchronizing. The frequency of synchronization is a trade-off between
+robustness and trace bandwidth.
+
+The instruction trace encoder needs to synchronise fully:
+
+* For the first instruction traced after reset or resume from halt;
+* Any time that an instruction is traced and the previous instruction
+was not traced;
+* If the instruction is the first of an interrupt service routine or
+exception handler;
+* After a prolonged period of time.
+
+[[sec:endoftrace]]
+==== End of trace
+
+If tracing stops for any reason, the address of the final traced
+instruction must be output.
+
+Some examples of why tracing may stop are:
+
+* The hart may be halted (entered debug mode);
+* The hart may be reset;
+* Encoding may be stopped (for example via a _Trace-off_ trigger - see
+<<sec:trigger>>);
+* The matching criteria for any filtering capabilities implemented by
+the encoder may no longer be met;
+* The encoder may be disabled.
+
+[[optional]]
+=== Optional and run-time configurable modes
+
+An instruction trace encoder may support multiple tracing modes. To
+ensure that the decoder treats the incoming packets correctly, it needs
+to be informed of the current active configuration. The configuration is
+reported by a packet that is issued by the encoder whenever the encoder
+configuration is changed.
+
+Here are common examples of such modes:
+
+* delta address mode: program counter discontinuities are encoded as
+differences instead of absolute address values.
+* full address mode: program counter discontinuities are encoded as
+absolute address values.
+* implicit exception mode: the destination address of an exception (i.e.
+the address of the exception trap) is assumed to be known by the
+decoder, and thus not encoded in the trace.
+* Sequentially inferable jump mode: The target of an indirect jump can
+be inferred by considering the combined effect of two instructions.
+* implicit return mode: the destination address of function call returns
+is derived from a call stack, and thus not encoded in the trace.
+* branch prediction mode: branches that are predicted correctly by an
+encoder branch predictor (and an identical copy in the decoder) are not
+encoded as taken/non-taken, but as a more efficient branch count number.
+* Jump target cache mode: Rather than reporting the address of an
+uninferable jump target, efficiency can be improved by caching recent
+jump targets, and reporting the cache entry index instead.
+
+Modes may have associated parameters; see <<tab:iparameters>> for further details.
+
+All modes are optional apart from delta address mode, which must be
+supported.
+
+[[sec:delta-address]]
+==== Delta address mode
+
+Related parameters: None
+
+In delta address mode, addresses are encoded as the difference between
+the actual address of the current instruction and the actual address of
+the instruction reported in the previous packet that contained an
+address. This differential encoding requires fewer bits than the full
+address, and thus results in more efficient trace compression.
+
+[[sec:full-address]]
+==== Full address mode
+
+Related parameters: None
+
+In full address mode, all addresses in the trace are encoded as absolute
+addresses instead of in differential form. This kind of encoding is
+always less efficient, but it can be a useful debugging aid for software
+decoder developers.
+
+[[sec:implicit-exception]]
+==== Implicit exception mode
+
+Related parameters: None
+
+The RISC-V Privileged ISA specification stores exception handler base
+addresses in the *_utvec/stvec/vstvec/mtvec_* CSR registers. In some
+RISC-V implementations, the lower address bits are stored in the
+*_ucause/scause/vscause/mcause_* CSR registers.
+
+By default, both the *_*tvec_* and *_*cause_* values are reported when
+an exception or interrupt occurs.
+
+The implicit exception mode omits *_*tvec_* (the trap handler address),
+from the trace and thus improves efficiency.
+
+This mode can only be used if the decoder can infer the address of the
+trap handler from just the exception cause.
+
+[[sec:si-jump]]
+==== Sequentially inferable jump mode
+
+Related parameters: _sijump_p_.
+
+By default, the target of an indirect jump is always considered an
+uninferable PC discontinuity. However, if the register that specifies
+the jump target was loaded with a constant then it can be considered
+inferable under some circumstances. The hart must identify jumps with
+sequentially inferable targets and provide this information separately
+to the encoder. The final decision as to whether to treat the jump as
+inferable or not must be made by the encoder. Both the constant load and
+the jump must be traced in order for the decoder to be able to infer the
+jump target. See <<JumpClasses>> for details
+of what constitutes a sequentially inferable jump.
+
+[[sec:implicit-return]]
+==== Implicit return mode
+
+Related parameters: _call_counter_size_p_, _return_stack_size_p_,
+_itype_width_p_.
+
+Although a function return is usually an indirect jump, well behaved
+programs return to the point in the program from which the function was
+called using a standard calling convention. For those programs, it is
+possible to determine the execution path without being explicitly
+notified of the destination address of the return. The implicit return
+mode can result in very significant improvements in trace encoder
+efficiency.
+
+Returns can only be treated as inferable if the associated call has
+already been reported in an earlier packet. The encoder must ensure that
+this is the case. This can be accomplished by utilizing a counter to
+keep track of the number of nested calls being traced. The counter
+increments on calls (but not tail calls), and decrements on returns (see
+<<JumpClasses>> for definitions). The counter
+will not over or underflow, and is reset to 0 whenever a synchronization
+packet is sent. Returns will be treated as inferable and will not
+generate a trace packet if the count is non-zero (i.e. the associated
+call was already reported in an earlier packet).
+
+Such a scheme is low cost, and will work as long as programs are "well
+behaved". The encoder does not check that the return address is actually
+that of the instruction following the associated call. As such, any
+program that modifies return addresses cannot be traced using this mode
+with this minimal implementation.
+
+Alternatively, the encoder can maintain a stack of expected return
+addresses, and only treat a return as inferable if the actual return
+address matches the prediction. This is fully robust for all programs,
+but is more expensive to implement. In this case, if a return address
+does not match the prediction, it must be reported explicitly via a
+packet, along with the number of return addresses currently on the
+stack. This ensures that the decoder can determine which return is being
+reported.
+
+[[sec:branch-prediction]]
+==== Branch prediction mode
+
+Related parameters: _bpred_size_p_.
+
+Without branch prediction, the outcome of each executed branch is stored
+in a branch map: a bit vector in which the taken/non-taken status of
+each branch is stored in chronological order.
+
+While this encoding is efficient, at 1 bit per branch, there are some
+cases where this can still result in a relatively large volume of trace
+packets. For example:
+
+* Executing tight loops of code containing no uninferable jumps. Each
+iteration of the loop will add a bit to the branch map;
+* Sitting in an idle loop waiting for an interrupt. This produces large
+amounts of trace when nothing of any interest is actually happening!
+* Breakpoints, which in some implementations also spin in an idle loop.
+
+A significant coding efficiency can be obtained by the addition of a
+branch predictor in the encoder. To keep the encoder and decoder
+synchronized, a predictor with identical behavior will need to be
+implemented in the decoder software.
+
+The predictor shall comprise a lookup table of 2^_bpred_size_p_^
+entries. Each entry is indexed by bits _bpred_size_p_:1 of the
+instruction address (or __bpred_size_p__+1:2 if compressed instructions
+aren't supported), and each contains a 2-bit prediction state:
+
+* 00: predict not taken, transition to 01 if prediction fails;
+* 01: predict not taken, transition to 00 if prediction succeeds, else
+11;
+* 11: predict taken, transition to 10 if prediction fails;
+* 10: predict taken, transition to 11 if prediction succeeds, else 00.
+
+The MSB represents the predicted outcome, the LSB the most recent actual
+outcome. The prediction must fail twice for the predicted value to
+change.
+
+The lookup table entries are initialized to 01 when a synchronization
+packet is sent.
+
+Other predictors, such as the gShare predictor (see Hennessy &
+Patterson), should be considered. Some further experimentation is needed
+to determine the benefits of different lookup table sizes and predictor
+algorithms.
+
+[[sec:jump-cache]]
+==== Jump target cache mode
+
+Related parameters: _cache_size_p_.
+
+By default, the target address of an uninferable jump is output in the
+trace, usually in differential form. If the same function is called
+repeatedly, (for example, in a loop), the same address will be output
+repeatedly.
+
+An efficiency gain can be obtained by the addition of a jump target
+cache to the encoder. To keep the encoder and decoder synchronized, a
+cache with identical behavior will need to be implemented in the decoder
+software. Even a small cache can provide significant improvement.
+
+The cache shall comprise 2^_cache_size_p_^ entries, each of which can
+contain an instruction address. It will be direct mapped, with each
+entry indexed by bits _cache_size_p_:1 of the instruction address (or
+__cache_size_p__+1:2 if compressed instructions aren't supported).
+
+Each uninferable jump target is first compared with the entry at its
+index in the cache. If it is found in the cache, the index number is
+traced rather than the target address. If it is not found in the cache,
+the entry at that index is replaced with the current instruction
+address.
+
+The cache entries are all invalidated when a synchronization packet is
+sent.

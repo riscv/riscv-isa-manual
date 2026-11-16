@@ -1,0 +1,287 @@
+== Debug and Trace Connectors
+
+This specification provides a small, optional extension to connectors described in https://resources.mipi.org/download-mipi-whitepaper-debug-trace-connector[MIPI Debug & Trace Connectors Recommendations White Paper, Version 1.20, 2 July 2021].
+
+These optional extensions are as follows:
+
+* Clarifying dual voltage debug and trace via Mictor 38 connector (re-defining obsolete pin #14).
+
+* Allowing MIPI20 `TRC_DATA[2]` and `TRC_DATA[3]` to be optionally used as TRIGIN/TRIGOUT pins.
+
+* Defining some signal as (optional) serial trace and/or application UART.
+
+MIPI Alliance positively reviewed proposals for above optional extensions and hopefully will adopt them in the future.
+
+Additionally, the following MIPI20 signals are clarified as follows:
+
+* MIPI20 pin#12 RTCK signal is not applicable to RISC-V. If the target is not providing a parallel trace, the target connector must provide GND on this pin. If parallel trace is used, pin#12 must be used as a `TRC_CLK` signal.
+* MIPI20 pin#14 nTRST_PD signal is not applicable for RISC-V. If nTRST is really needed, pin#16 nTRST should be used.
+
+Above two signals were present in older RISC-V Debug Specification but were never implemented/used.
+
+This specification also adds the following option (described in dedicated chapter):
+
+* Defining MIPI20 pins #11 and #13 as optional TgtPwr+Cap pins (to supply 5V to power-up a small, evaluation target board). This option is already supported by several debug and trace probe vendors.
+
+== MIPI20 Debug and Trace Connector
+
+This connector is an extension of a MIPI10 and MIPI20 connectors as defined by ratified
+*RISC-V External Debug Support, Version 0.13.2, Mar 22 2019* or newer.
+
+This connector adds 1-bit/2-bit/4-bit parallel trace and serial trace options on the same physical MIPI20 connector.
+
+* Trace related pins (added by this specification) are `*highlighted*`.
+* All JTAG/cJTAG pins have the same meaning as defined in the Debug Specification.
+* Notation  "A / B" as signal name is used to separate two alternative functions of the same pin.
+
+[#MIPI20 Connector Layout]
+.MIPI20 Connector Layout
+[cols = "~,8%,8%,~", options = header, align=center, width=80%]
+|=========================================================
+|Signal         |Odd Pin#|Even Pin#|Signal
+|VREF           |1 |2 |TMS / TMSC
+|GND         |3 |4 |TCK / TCKC
+|GND         |5 |6 |TDO / `*SerialTrace*` (primary)
+|GND or KEY     |7 |8 |TDI
+|GNDDetect     |9 |10 |nRESET
+|GND / TgtPwr+Cap |11 |12 |`*TRC_CLK*`
+|GND / TgtPwr+Cap |13 |14 |`*TRC_DATA[0]*` / `*SerialTrace*` (secondary)
+|GND         |15 |16 |`*TRC_DATA[1]*` / nTRST
+|GND         |17 |18 |`*TRC_DATA[2]*` / TRIGIN
+|GND         |19 |20 |`*TRC_DATA[3]*` / TRIGOUT
+|=========================================================
+
+NOTE: `*SerialTrace*` via pin #6 (TDO signal) is considered primary but it requires cJTAG interface to be used for debugging. Pin #14 is secondary and can be used when JTAG is used for debugging.
+
+NOTE: Smaller MIPI10 version of this connector (pins #1 .. #10 only) can provide `*SerialTrace*` via pin #6 (TDO signal) when cJTAG is used for debugging.
+
+[#Details of MIPI20 Signals]
+.Details of MIPI20 Signals
+[cols = "6%,25%,~", options = header]
+|=================================================================================
+|Pin# | Pin Name         |Explanation
+| 1 | VREF                 |Reference voltage for all other pins and signals (single voltage for debug and trace).
+| 2 | TMS / TMSC         |JTAG TMS (from probe to target) or cJTAG TMSC (bi-directional) signal.
+| 4 | TCK / TCKC         |JTAG TCK (from probe to target) or cJTAG TCKC (from probe to target) signal.
+| 6 | TDO / `*SerialTrace*` |Either JTAG TDO (from target to probe) or serial trace (from target to probe) available in case cJTAG is used for debugging.
+| 7 | GND or KEY         |May be removed pin (to prevent wrong insertion for non-shrouded connectors and cable with plug in pin#7). In case the pin is not removed, it must be GND on the target side.
+| 8 | TDI                 |JTAG TDI (from probe to target) signal
+| 9 | GNDDetect             |Must be GND on the probe. On-board debug circuitry can use this pin to disable itself when the external debug probe is connected. If not used for that purpose it must be GND on the target side.
+| 10 | nRESET             |Active-low, open-drain SoC reset signal driven and monitored by the debug probe. Some debug probes may monitor this signal to handle and report resets from the target.
+| 11 | GND / TgtPwr+Cap     |In standard, most common configuration, these must be connected to GND. See below for explanation of optional TgtPwr+Cap function.
+| 12 | `*TRC_CLK*`         |Parallel trace clock (from target to probe).
+| 13 | GND / TgtPwr+Cap     |In standard, most common configuration, these must be connected to GND. See below for explanation of optional TgtPwr+Cap function.
+| 14 | `*TRC_DATA[0]*` / `*SerialTrace*` |Either parallel trace signal (from target to probe) or serial trace (from target to probe).
+| 16 | `*TRC_DATA[1]*` / nTRST |Either parallel trace signal (from target to probe) or in case nTRST signal is needed this pin can be used as nTRST. NOTE: Still 1-bit parallel or serial trace is possible.
+| 18 | `*TRC_DATA[2]*` / TRIGIN |Either parallel trace signal (from target to probe) or input debug trigger (from probe to target) or application UART (from probe to target).
+| 20 | `*TRC_DATA[3]*` / TRIGOUT |Either parallel trace signal (from target to probe) or output debug trigger (from target to probe) or application UART (from target to probe).
+|=================================================================================
+
+=== Possible use of TRIGIN/TRIGOUT or TDI/TDO for an application UART
+
+Some debug probes may allow definition of pin functions and provide a virtual UART port/terminal for the target. UART is often needed for testing and production and having both debug and UART on a single connector is desired. Supporting UART over TRIGIN/TRIGOUT pins will limit parallel trace to 1-bit or 2-bit options. Supporting UART over TDI/TDO pins will require 2-pin cJTAG to be used as a debug interface.
+
+=== Explanation of TgtPwr+Cap option for pins#11/#13
+
+NOTE: This chapter explains optional use of MIPI20 pins #11/#13 to power-up small evaluations boards. This optional functionality is already provided by several debug and trace probe vendors. If you are not interested in such a functionality, you may skip reading this chapter and simply connect these pins to GND on the target PCB.
+
+Meaning of optional TgtPwr+Cap function of pins #11/#13 is often misunderstood, so it deserves a more elaborated explanation.
+
+When the target cannot be powered from MIPI20 both these pins must be GND (as most of the pins on the odd side of MIPI20 connector).
+
+Another function of these pins (TgtPwr+Cap) is to provide target power supply voltage into the evaluation target. This way to power-up evaluation target is equivalent to power from the USB connector VBUS, so the expected voltage is around 5V. Target should not assume this voltage is regulated - the same way as voltage provided by USB cable is. Max current taken from these pins should not be larger than 100mA.
+
+NOTE: Some debug probes may provide regulated voltage and dynamically measure total power consumption by the target via TgtPwr pins.
+
+Target boards should use jumper/switch to select board power-source (either from MIPI20 or USB connector). It is recommended to use a jumper/switch layout preventing both sources to be enabled at the same time.
+
+IMPORTANT: It is specifically *FORBIDDEN* to short together 5V power from USB (VBUS) and MIPI20 (pins#11/13) on target PCB. It will allow handling a case when a trace/debug probe or adapter has both pin#11/#13 connected to GND.
+
+It is possible to use two diodes (instead of jumpers) to auto-select the 5V power source and prevent back-feeding voltage from one source to the other, but it is not recommended as diodes will provide additional voltage drop.
+
+Term *TgtPwr+Cap* means that if these pins are used to provide power to the target, it must have a capacitor (as close to the pin as possible) to improve the quality of adjacent TRC_CLK and TRC_DATA pins. Another term for using a capacitor on the supply pin is an "AC ground" or "high frequency ground". We recommend 10pf capacitors placed extremely close to pins#11/#13.
+
+WARNING: Leaving these pins not connected (NC) as can be seen on some schematics, is not a very good option when trace is used. There is simply not enough GND around TRC_CLK and TRC_DATA[0] signals. Some leave it as NC as they perhaps worry that debug probes may provide voltage there and it will create problems. Debug probes which support TgtPwr function provide GND detection and/or current protection and will disable TgtPwr voltage once detecting that target has these pins shorted to GND.
+
+No matter what pins #11 and #13 must be *always* connected - it is NOT possible that one of them will function as GND and second as TgtPwr.
+
+If you are in doubt, your board may have a jumper to either isolate these pins (NC) or connect them to GND or use them as target power. A jumper with 3 pins *A-B-C* should work.
+
+Middle pin *B* should go to MIPI20 pins#11/#13, the left pin *A* should be GND and the right pin *C* should be the 5V rail on the target (via another 3-way jumper allowing to select 5V from MIPI20 or USB VBUS). This allows to select one of three configuration options:
+
+* Jumper between *A-B* => MIPI20 pins #11/#13 are connected to GND.
+
+* Jumper between *B-C* => MIPI20 pins #11/#13 will be able to supply 5V power to the target.
+
+* No jumper => MIPI20 pins #11/#13 are left NC (*this is not a recommended option*).
+
+NOTE: It is not possible to have both GND and 5V connections enabled at the same time as two jumpers cannot physically fit into 3 pins.
+
+== Mictor 38-bit Debug and Trace Connector
+
+Mictor-38 connector as defined by MIPI Alliance has all signals from MIPI20 connector and adds up to 16 bits of parallel trace and defines more trigger pins. Mictor-38 connector is also designed for high-speed trace (it is rated for 400MHz double edge captures).
+
+Mictor-38 connector provides also an option to have different reference voltages for debug and trace.
+
+[#Mictor-38 Connector Layout]
+.Mictor-38 Connector Layout
+[cols = "~,10%,8%,8%,10%,~", options = header, align=center, width=80%]
+|======================================
+|Signal|Ref Voltage|Odd Pin#|Even Pin#|Ref Voltage|Signal
+|NC          |     | 1 | 2 |     | NC
+|NC          |     | 3 | 4 |     | NC
+|GND         |     | 5 | 6 |Trace| `*TRC_CLK*`
+|TRIGIN      |Debug| 7 | 8 |Debug| TRIGOUT
+|nRESET      |Debug| 9 | 10|Trace| `*EXTTRIG*`
+|TDO         |Debug|11 | 12|Trace| `*VREF_TRACE*`
+|GND         |     |13 | 14|Debug| VREF_DEBUG
+|TCK / TCKC  |Debug|15 | 16|Trace| `*TRC_DATA[7]*`
+|TMS / TMSC  |Debug|17 | 18|Trace| `*TRC_DATA[6]*`
+|TDI         |Debug|19 | 20|Trace| `*TRC_DATA[5]*`
+|nTRST       |Debug|21 | 22|Trace| `*TRC_DATA[4]*`
+|`*TRC_DATA[15]*`|Trace|23 | 24|Trace| `*TRC_DATA[3]*`
+|`*TRC_DATA[14]*`|Trace|25 | 26|Trace| `*TRC_DATA[2]*`
+|`*TRC_DATA[13]*`|Trace|27 | 28|Trace| `*TRC_DATA[1]*`
+|`*TRC_DATA[12]*`|Trace|29 | 30|Trace| Logic '0' (GND)
+|`*TRC_DATA[11]*`|Trace|31 | 32|Trace| Logic '0' (GND)
+|`*TRC_DATA[10]*`|Trace|33 | 34|Trace| `*Logic '1'*`
+|`*TRC_DATA[9]*` |Trace|35 | 36|Trace| `*EXT*` / `*TRC_CTL*`
+|`*TRC_DATA[8]*` |Trace|37 | 38|Trace| `*TRC_DATA[0]*`
+|======================================
+
+NOTE: Above table is using names compatible with MIPI specification (however MIPI specification shows rows of pins starting from 38 down to 1).
+
+=== Explanation for additional pins (comparing to MIPI20)
+
+All debug signals share alternate functions as defined for the MIPI20 connector.
+
+[#Micror-38 additional pins]
+.Micror-38 additional pins (comparing to MIPI20 defined above)
+[cols = "6%,20%,~", options = header]
+|=================================================================================
+|Pin# | Pin Name |Explanation (comparing to MIPI20)
+| 7   | TRIGIN     |Same as MIPI20 #18 alternative pin function but not shared with trace.
+| 8   | TRIGOUT     |Same as MIPI20 #20 alternative pin function but not shared with trace.
+| 10  | `*EXTTRIG*` |External trace trigger from target (some trace probes may use it).
+| 21  | nTRST       |Same as MIPI20 #16 alternative pin function but not shared with trace.
+| 36  | `*EXT*` / `*TRC_CTL*` |Not applicable (should be 0). May be also used to denote valid/idle state, but it may not be supported by all trace probes.
+|=================================================================================
+
+=== Dual voltage (different for debug and different for trace) configurations
+
+Sometimes (due to speed reasons) it may be beneficial to drive SoC trace pins with different (usually lower) voltage then the debug signals. Such a configuration may be supported using a single Mictor connector or two connectors (Mictor for trace only and MIPI for debug only). Be aware that two different voltages may not be supported by simpler trace probes.
+
+*Single voltage - single Mictor (Recommended)*
+
+* Mictor #12: VREF_TRACE=VREF_DEBUG (Required)
+
+* Mictor #14: VREF_DEBUG (Recommended, see NOTE *1 below) or NC
+
+*Single voltage - trace via Mictor, debug via extra JTAG connector (NOT Recommended)*
+
+* Mictor #12: VREF_TRACE=VREF_DEBUG (Required)
+
+* Mictor #14: NC (Recommended, see NOTE #1 below) or VREF_DEBUG
+
+* Mictor JTAG pins: Connected or NC (Recommended, see NOTE #2 below)
+
+* JTAG connector VTREF (#1): VREF_DEBUG (Required)
+
+* JTAG connector JTAG pins: Connected (Required)
+
+*Dual voltage - single Mictor (NOT Recommended)*
+
+* Mictor #12: VREF_TRACE (Required)
+
+* Mictor #14: VREF_DEBUG via jumper on PCB (Required, see NOTE #3 below)
+
+*Dual voltage - trace via Mictor, debug via extra connector (Recommended)*
+
+* Mictor #12: VREF_TRACE (Required)
+
+* Mictor #14: NC (Required, see NOTE #3 below)
+
+* Mictor JTAG pins: NC (Required, see NOTE #4 below)
+
+* JTAG connector VTREF (#1): VREF_DEBUG (Required)
+
+* JTAG connector JTAG pins: Connected (Required)
+
+NOTE: *#1* Jumper (on PCB) between Mictor pin#14 and VREF_DEBUG rail on PCB can be used to select NC or VREF_DEBUG. Some trace probes (such as TRACE32 from Lauterbach) require VTREF_DEBUG to be present on pin #14.
+
+NOTE: *#2* If JTAG pins are NC, JTAG quality/speed may be better as there will be no stubs introduced by extra routing on PCB.
+
+NOTE: *#3* Jumper provides extra safety in case a trace probe/adapter which does not support dual voltage is used. Before fitting this jumper, make sure the probe/adapter you are using is NOT shorting Mictor pin#12/#14 internally. If this is the case, two voltage rails may be shorted and the target may be permanently damaged. Some trace probes (such as TRACE32 from Lauterbach) require VTREF_DEBUG to be present on pin #14.
+
+NOTE: *#4* All JTAG pins should be NC for a reason mentioned in NOTE 2. But mainly to make sure that there will be only a single voltage present on this connector.
+
+*EXTRA NOTES (related to debug and trace voltages)*
+
+1. Lower voltage allows faster trace, but it is then more critical to have correct PCB design.
+
+2. Allowed reference voltage ranges (for JTAG and trace) are different for different probes.
+
+3. Lower voltage used for trace may be a good choice with FPGA-based development boards.
+
+* Trace pins may be available on an FPGA bank, which is setup for lower IO voltage.
+
+4. When high-speed trace is important Mictor-38 should be the only debug and trace connector on the PCB.
+
+* In case two connectors are used, trace signals should have routing priority.
+
+* Many probe vendors provide adapters from Mictor to standard JTAG-only connectors, so non-trace probes can be used with target/PCB with Mictor-only connector.
+
+5. Not all trace probes which support the Mictor-38 connector are capable of handling dual voltage tracing.
+
+* At the moment of this writing at least I-jet-Trace-A/R/M (by IAR Systems) and Trace32 (by Lauterbach) probes support such a mode (in both single Mictor and two Mictor + JTAG connectors).
+
+6. It is not recommended to add buffers on PCB to adjust JTAG (usually higher) voltage to trace voltage.
+
+* It not only affects signal quality but also introduces extra delays, which may create problems for simple probes.
+
+* It is very hard to properly handle fast switching of bidirectional signals, so cJTAG and SWD debug protocols may never reliably work.
+
+* It makes PCB more complicated without good reason.
+
+=== Explanation for Mictor-38 pins #30/32/34/36
+
+It may be hard to understand why `*TRC_DATA[0]*` is not together with other `*TRC_DATA[1..15]*` signals and why pins #30/32/34 have specific fixed values (Logic '0' or Logic '1').
+
+This is caused by the desire to provide compatibility with initial versions of Arm trace. These older versions used these 4 pins to denote idle state. Modern trace probes ignore these signals, but just in case they do not, it is better and safer to provide logic level as above. As `*TRC_CTL*` is not used, it should be tied to 0 on PCB but may be optionally used as an extra external trace trigger (from target to probe).
+
+== Adapters, multiple connectors and on-board debug considerations
+
+It is often seen that some evaluation boards provide more than one standard connector. This is not only costly, but also not necessary as most trace and debug probe vendors provide passive adapters or cables to adapt different pinouts as part of standard offering.
+
+In case several connectors must be used, the highest performance connector should be placed as the closest one to trace MCU pins. For example, if you want to have Mictor for high-speed trace and MIPI10 for casual-debug (and/or slow serial trace), Mictor should have all JTAG and trace signals connected. All JTAG signals should go 'through' that Mictor connector and go to the MIPI10 connector. All high-speed trace signals should not go any further than to Mictor connector pins.
+
+In rare cases, when more than one trace connector is desired, it is suggested to place 0R/DNP resistors to reduce fanout on trace lines. Be aware that every PCB trace disruption (via, test-point, resistor) will cause reflections and signal degradation.
+
+It is also very important to provide good GND on all GND pins for high quality high-quality trace. Assure all trace lines on PCB are of similar length and have identical impedance. In case trace pins are shared as functional IO, make sure that it is possible to cut-out devices connected to trace data lines (via 0R resistors or solder bridges - jumpers are not recommended as these provide additional signal degradation).
+
+In case scoping of trace signals is necessary, it is suggested to have a good GND test point (where wire can be soldered) close to where scope can be connected.
+
+MIPI Alliance White Paper (referenced at the beginning) provides extra details as far as routing signal trace on target PCB.
+
+In case when on-board circuitry is used for debugging, that circuitry should monitor the GNDDetect pin (MIPI20/MIPI10 #9). In case GND is detected there, it means that external debug probe is connected to that connector and in such a case on-board debug chip should tri-state all its outputs and disable all pull-up/pull-down on all pins, so external debug probe operation will not be disturbed by on-board debug circuitry.
+
+== Rationale (looking at Nexus standard)
+Nexus standard does NOT define any small connectors with focus on trace as Nexus defines message-based debug interface and it requires more pins than JTAG. Namely:
+
+* S26x 1-104068-2, Low performance trace (1 MDO signal).
+
+* S40x 1-104549-6, Low performance trace (6 MDO signals - labeled as “not recommended”).
+
+* S50x 104549-7, Low performance trace (8 MDO signals).
+
+As the smallest Nexus-recommended connector with reasonable trace bandwidth has 50 pins these are not practical as trace connectors.
+
+So, it was decided that connectors defined by MIPI and Arm will be used for the RISC-V trace.
+
+* There are a lot of hardware trace probes, which are being used for debugging and tracing of Arm cores. Arm defines two standard connectors for trace:
+
+** Based on MIPI 20-pin connector (defined by MIPI) - this is for medium-performance tracing (4-bit, 100+ MHz double edge captures, max trace bandwidth 800Mbps or even higher for some high-performance trace probes).
+
+** Based on Mictor 38-pin connector (defined by MIPI) - this is for high-performance tracing (16-bit, up to 400MHz double edge, max trace bandwidth 12.8Gbps).
+
+* In July 2021 MIPI Alliance (following recommendations by Nexus TG group) released White Paper updating recommendations for debug and trace connectors and allowing 1/2/4-bit trace via MIPI20 connector.
