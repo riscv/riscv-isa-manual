@@ -385,7 +385,9 @@ if mtype.mtwiden != 0:
   vtype.vma = 1
   vtype.vta = 1
 
-  vtype.vill |= (SEW * TWIDEN > ELEN)
+  vtype.vill |= (TEW == 8 && Zvt8e not implemented)
+  vtype.vill |= (TEW == 16 && Zvt16e not implemented)
+  vtype.vill |= (TEW == 64 && Zvt64e not implemented)
 
   mtype.tk = min(mtype.tk, KMAX)
   mtype.tm = min(mtype.tm, LMUL*EVE, ETE)
@@ -534,11 +536,9 @@ taking `pattern` mod 2, and taking the index within the pattern mod ETE.
 =====  Load/Store Tile Subset to Memory
 
 These instructions transfer matrix tile subsets between the tile state and memory.
-`vtle` and `vtse` support TEW values corresponding to all
-supported SEW settings (8..ELEN).
-Implementations must provide vector loads and stores with EEWs corresponding
-to all supported SEW settings (8..ELEN).
-These instructions are included in the Zvtbase extension.
+The Zvtbase instruction provides the TEW=32 loads and stores;
+the Zvt8e, Zvt16e, and Zvt64e extensions provide the TEW=8, TEW=16,
+and TEW=64 loads and stores, respectively.
 
 ----
 // Load tile subset from memory, using TEW=EEW
@@ -582,6 +582,7 @@ index order in memory.
 For these instructions, the body elements are those with indices in the range
 `[vstart, min(vl, ETE) - 1]`, and the tail elements are those with indices
 {ge} `min(vl, ETE)`.
+For loads, the tail elements are updated using a tail-agnostic policy.
 
 NOTE: Since `vl`=`tn` holds the number of columns in the accumulator, i.e. the
 length of a row, these instructions are oriented towards loading and storing
@@ -616,11 +617,12 @@ If `mtwiden`=0, these instructions are reserved.
 
 ===== Move Tile Subset between Tile State and Vector Registers
 
-Tile subset operations transfer elements between a matrix tile and a vector
+These instructions transfer elements between a matrix tile and a vector
 register group.
-These instructions support TEW values corresponding to all
-supported SEW settings (8..ELEN).
-These instructions are included in the Zvtbase extension.
+The Zvtbase instruction provides the TEW=32 variants; the Zvt8e, Zvt16e, and
+Zvt64e extensions provide the TEW=8, TEW=16, and TEW=64 variants,
+respectively.
+These instructions use TEW=SEW.
 
 ----
 // Move tile subset to vector register group, using TEW=SEW
@@ -640,6 +642,7 @@ vtmv.t.v rs1, vs2 // vs2 is source vector register, rs1 is TSS of destination
 For these instructions, the body elements are those with indices in the range
 [`vstart`, `min(vl, ETE) - 1`], and the tail elements are those with indices
 {ge} `min(vl, ETE)`.
+The tail elements are updated using a tail-agnostic policy.
 
 If `mtwiden`=0, these instructions are reserved.
 
@@ -716,10 +719,11 @@ nor is the fixed-point saturation flag.
 For SEW {le} 16, floating-point products are bulk-normalized
 accumulated in fixed-point arithmetic, then converted to FP32, rounding to odd,
 according to the
-https://github.com/riscv/riscv-isa-manual/blob/a38e121306757164cdd664d7ffad158885d8b525/src/unpriv/rvbna.adoc[RVBNA Algorithm].
+https://github.com/riscv/riscv-isa-manual/blob/c05f1725f25526dd8463bac6ca75cfcfbee17d05/src/unpriv/rvbna.adoc[RVBNA Algorithm],
+using _n_=KMAX.
 Finally, they are added to the accumulator in IEEE 754 arithmetic,
 rounding to odd as described in
-https://github.com/riscv/riscv-isa-manual/blob/a38e121306757164cdd664d7ffad158885d8b525/src/unpriv/rvbna.adoc#rounding-to-odd-behavior-in-dot-product-mode[RVBNA Rounding to Odd].
+https://github.com/riscv/riscv-isa-manual/blob/c05f1725f25526dd8463bac6ca75cfcfbee17d05/src/unpriv/rvbna.adoc#RVBNARTO[RVBNA Rounding to Odd].
 
 For SEW {ge} 32, floating-point products are computed in IEEE 754 arithmetic
 then rounded to a TEW-bit value, using the rounding mode specified by `frm`.
@@ -768,8 +772,10 @@ submatrix of the destination matrix tile.
 Any tile elements outside the range [0, tm-1] x [0, tn-1] are
 considered part of the tail and are handled using a tail-agnostic
 policy.
-`vtzero` supports TEW values corresponding to all
-supported SEW settings (8..ELEN).
+The Zvtbase instruction provides `vtzero` for TEW=32;
+the Zvt8e, Zvt16e, and Zvt64e extensions provide `vtzero` for TEW=8, TEW=16,
+and TEW=64, respectively.
+`vtzero` uses TEW=SEW*TWIDEN.
 An illegal-instruction exception is raised if `vstart` is nonzero.
 This instruction is included in the Zvtbase extension.
 
@@ -797,13 +803,17 @@ in `sstatus[30:29]`.  It is defined analogously to the floating-point context
 status field, `FS`.
 
 Attempts to execute any instruction that accesses the matrix tile state raises an
-illegal-instruction exception when `mstatus`.MS is set to Off.
+illegal-instruction exception when `mstatus`.MS=Off.
 Note, the `vset*` and `mset*` instructions do not access the tile state.
 
-When `mstatus`.MS is set to Initial or Clean, executing any instruction that
+When `mstatus`.MS=Initial or `mstatus`.MS=Clean, executing any instruction that
 changes tile state will change `mstatus`.MS to Dirty.
 Implementations may also change `mstatus`.MS from Initial or Clean to Dirty
 at any time, even when there is no change in tile state.
+
+When `mstatus`.MS=Initial or `mstatus`.MS=Clean, it is implementation-defined
+whether an instruction that writes tile state but does not alter its contents
+causes `mstatus`.MS to transition to Dirty.
 
 If `mstatus`.MS is Dirty, `mstatus`.SD is 1;
 otherwise, `mstatus`.SD is set in accordance with existing specifications.
@@ -816,13 +826,18 @@ It is defined analogously to the floating-point context status field, `FS`.
 
 When V=1, both `vsstatus`.MS and `mstatus`.MS are in effect: attempts to
 execute any instruction that accesses matrix tile state raise an illegal-instruction
-exception when either field is set to Off.
+exception when either field contains the value Off.
 
-When V=1 and neither `vsstatus`.MS nor `mstatus`.MS is set to Off, executing
+When V=1 and neither `vsstatus`.MS=Off nor `mstatus`.MS=Off, executing
 any instruction that changes tile state will change both `mstatus`.MS and
 `vsstatus`.MS to Dirty.
 Implementations may also change `mstatus`.MS or `vsstatus`.MS from Initial or
 Clean to Dirty at any time, even when there is no change in tile state.
+
+When V=1 and neither `vsstatus`.MS=Off nor `mstatus`.MS=Off, it is
+implementation-defined whether an instruction that writes tile state but does
+not alter its contents causes `mstatus`.MS and `vsstatus`.MS to transition to
+Dirty.
 
 If `vsstatus`.MS is Dirty, `vsstatus`.SD is 1;
 otherwise, `vsstatus`.SD is set in accordance with existing specifications.
