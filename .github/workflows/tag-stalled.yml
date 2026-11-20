@@ -1,0 +1,130 @@
+---
+name: Tag and untag stalled issues and PRs
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # Daily
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+jobs:
+  tag-stalled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan issues and PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const daysWithoutComments = 30;
+            const ISSUE_LABEL = 'Stalled Issue';
+            const PR_LABEL = 'Stalled PR';
+            const msThreshold = daysWithoutComments * 24 * 60 * 60 * 1000;
+            const thresholdDate = new Date(Date.now() - msThreshold);
+
+            const items = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100,
+              }
+            );
+
+            for (const item of items) {
+              const isPR = !!item.pull_request;
+              const stalledLabel = isPR ? PR_LABEL : ISSUE_LABEL;
+
+              let lastActivity = new Date(item.created_at);
+
+              // Issue comments
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: item.number,
+                  per_page: 100,
+                }
+              );
+              if (comments.length > 0) {
+                const lastComment = comments[comments.length - 1];
+                lastActivity = new Date(Math.max(lastActivity, new Date(lastComment.created_at)));
+              }
+
+              // PR review comments
+              if (isPR) {
+                const reviewComments = await github.paginate(
+                  github.rest.pulls.listReviewComments,
+                  {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: item.number,
+                    per_page: 100,
+                  }
+                );
+                if (reviewComments.length > 0) {
+                  const lastReview = reviewComments[reviewComments.length - 1];
+                  lastActivity = new Date(Math.max(lastActivity, new Date(lastReview.created_at)));
+                }
+
+                // PR commits
+                const commits = await github.paginate(
+                  github.rest.pulls.listCommits,
+                  {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: item.number,
+                    per_page: 100,
+                  }
+                );
+                if (commits.length > 0) {
+                  const lastCommit = commits[commits.length - 1];
+                  lastActivity = new Date(Math.max(lastActivity, new Date(lastCommit.commit.author.date)));
+                }
+              }
+
+              const hasLabel = (item.labels || []).some(
+                l => (typeof l === "string" ? l === stalledLabel : l.name === stalledLabel)
+              );
+
+              // --- CASE 1: Tag and comment if stalled ---
+              if (lastActivity < thresholdDate && !hasLabel) {
+                core.info(`Tagging #${item.number} as ${stalledLabel}`);
+
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: item.number,
+                  labels: [stalledLabel],
+                });
+
+                // Add message
+                const message = isPR
+                  ? `This PR has had no activity in the last **${daysWithoutComments} days** and has been marked as **${PR_LABEL}**. If work resumes, the label will be automatically removed.`
+                  : `This issue has had no activity in the last **${daysWithoutComments} days** and has been marked as **${ISSUE_LABEL}**. If work resumes, the label will be automatically removed.`;
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: item.number,
+                  body: message,
+                });
+              }
+
+              // --- CASE 2: Remove label if revived ---
+              if (lastActivity >= thresholdDate && hasLabel) {
+                core.info(`Removing ${stalledLabel} from #${item.number} due to new activity`);
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: item.number,
+                  name: stalledLabel,
+                }).catch(() => {});
+              }
+            }
