@@ -1,5 +1,5 @@
 [[zvt]]
-=== Zvt Family of Vector Matrix Extensions, Version 0.4
+=== Zvt Family of Vector Matrix Extensions, Version 0.5
 
 ==== Overview
 
@@ -152,29 +152,12 @@ tiles being combined to support wider accumulators. For example,
 4 TEW=8 tiles (mt0..3) are combined to support a single TEW=32 tile
 (mt0).
 
-[NOTE]
-====
-Most software consistently accesses a tile using the same TEW, and so
-is indifferent to the interpretation of the tile under other TEWs.
-However, there are cases where software must access elements in a tile
-without knowing the TEW with which it was most recently written,
-including context switching and debugging.
-In particular, migrating contexts between harts with different
-tile-punning schemes is impractical.
-Hence, it is highly desirable to fix the tile-punning scheme.
-
-Architecturally tagging the tiles with their TEWs has been proposed as an
-alternative to mandating a tile-punning scheme.
-Alas, the fact that tiles can be accessed in both rows and columns makes this
-scheme impractically expensive: every byte would need its own type tag.
-
-We chose this particular layout because it enables efficient access to
-elements by both row and column, supporting consecutive accesses in either
-dimension without overly favoring one over the other.
-====
-
 The following figure illustrates how elements are combined and
 aliased across supported TEWs.
+It shows the case TE=4, in which each tile is a single 4x4 subarray.
+For larger TE, the same pattern applies within each 4x4 subarray (2x2 for
+TEW=64), and the algorithm below gives the assignment of rows and columns
+to subarrays.
 
 image::zvt-punning.svg[Static, title="Tile Punning Aliasing"]
 
@@ -194,14 +177,14 @@ unsigned punning (
   switch (tew) {
     case 8: {
       ptile = tile;
-      minor_offset = (row % 4) * 4 + (col % 4);
-      major_offset = (row / 4) * (TE / 4) + (col / 4);
+      minor_offset = (2 * (row / (TE / 2)) + (row % 2)) * 4 + (col % 4);
+      major_offset = ((row / 2) % (TE / 4)) * (TE / 4) + (col / 4);
       break;
     }
     case 16: {
-      ptile = tile + ((row & 2) >> 1);
+      ptile = tile + (row / (TE / 2));
       minor_offset = (row % 2) * 4 + (col % 2) * 2 + ((col / 2) % 2) * 8;
-      major_offset = (row / 4) * (TE / 4) + (col / 4);
+      major_offset = ((row / 2) % (TE / 4)) * (TE / 4) + (col / 4);
       break;
     }
     case 32: {
