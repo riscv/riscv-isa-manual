@@ -22,6 +22,7 @@ on:
     branches:
       - main
   # Weekly run of the experimental Ubuntu 26.04 build (see build-ubuntu2604).
+  # Scheduled runs build only that job.
   schedule:
     - cron: 0 3 * * 2
 
@@ -52,6 +53,7 @@ concurrency:
 jobs:
   build-pdf:
     name: Build PDF
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     steps:
@@ -91,6 +93,7 @@ jobs:
 
   build-html:
     name: Build HTML, EPUB and normative rules
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     steps:
@@ -158,9 +161,10 @@ jobs:
 
   # Branch protection on main requires a status check named "build". This job keeps
   # that name and passes only when both build jobs succeeded. It runs even when one
-  # of them fails, because a skipped required check counts as passing.
+  # of them fails, because a skipped required check counts as passing. Scheduled runs
+  # skip both build jobs, so they skip this check too.
   build:
-    if: always()
+    if: always() && github.event_name != 'schedule'
 
     needs: [build-pdf, build-html]
 
@@ -176,11 +180,13 @@ jobs:
 
   # Experimental: build the manual with the Ubuntu 26.04 LTS container image, to catch
   # source changes that break on newer tools before latest moves to it. It is allowed
-  # to fail, does not run on pull requests, and its outputs are never released or
-  # deployed.
+  # to fail, and its outputs are never released or deployed. It runs weekly and on
+  # manual runs, not on every push to main: a full build of every output on each
+  # push cost 8-11 runner minutes and delayed the release workflow, which waits for
+  # this whole workflow to complete.
   build-ubuntu2604:
     name: Build with experimental Ubuntu 26.04 image
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     continue-on-error: true
     env:
