@@ -9,20 +9,35 @@ on:
     types:
       - completed
 
+# Releases are created one at a time, in the order the builds completed.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
+  # Release only after a successful build triggered by a push to main. Scheduled and
+  # manual runs of the build workflow also complete on main, but they must not cut a
+  # release here: manual releases use the create_release input of that workflow.
   on-success:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
+    # Build the commit that the triggering run built, not the newest commit on main.
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           submodules: recursive
 
       - run: |
           echo The PR was successfully merged.
 
       - name: Set short SHA
-        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: echo "SHORT_SHA=${HEAD_SHA::7}" >> $GITHUB_ENV
 
       - name: Get current date
         run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
@@ -77,6 +92,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GHTOKEN }}
         with:
           tag_name: riscv-isa-release-${{ env.SHORT_SHA }}-${{ env.CURRENT_DATE }}
+          target_commitish: ${{ github.event.workflow_run.head_sha }}
           name: Release riscv-isa-release-${{ env.SHORT_SHA }}-${{ env.CURRENT_DATE }}
           draft: false
           prerelease: false
