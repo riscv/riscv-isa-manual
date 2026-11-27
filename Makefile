@@ -150,6 +150,8 @@ REQUIRES := --require=asciidoctor-bibtex \
             --require=asciidoctor-diagram \
             --require=asciidoctor-lists \
             --require=asciidoctor-sail
+# Keep diagram source available to the text-only tags converter.
+TAG_REQUIRES := $(filter-out --require=asciidoctor-diagram,$(REQUIRES))
 
 .PHONY: all build clean clean-diagram-cache build-pdf build-html build-epub build-tags docker-pull-latest
 .PHONY: build-norm-rules build-norm-rules-json build-norm-rules-html check-xref-fallbacks build-changebar-pdf
@@ -223,7 +225,7 @@ $(BUILD_DIR)/%.epub: $(SRC_DIR)/%.adoc $(ALL_SRCS)
 
 $(BUILD_DIR)/%-norm-tags.json: $(SRC_DIR)/%.adoc $(ALL_SRCS) docs-resources/converters/tags.rb
 	$(WORKDIR_SETUP)
-	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS_TAGS) $(DIAGRAM_CACHE_OPTS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(REQUIRES) $< $(DOCKER_QUOTE)
+	$(DOCKER_CMD) $(DOCKER_QUOTE) $(ASCIIDOCTOR_TAGS) $(OPTIONS_TAGS) -a tags-match-prefix='norm:' -a tags-output-suffix='-norm-tags.json' $(TAG_REQUIRES) $< $(DOCKER_QUOTE)
 	$(WORKDIR_TEARDOWN)
 
 $(NORM_RULES_JSON): $(DOCS_NORM_TAGS) $(CREATE_NORM_RULE_TOOL)
