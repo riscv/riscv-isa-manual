@@ -1,0 +1,288 @@
+---
+name: Stale Branch Monitor
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      stale_days:
+        description: 'Mark branches as stale if last commit is this many days old.'
+        required: false
+        default: '30'
+      exclude_branches:
+        description: 'Comma-separated branch names to exclude (e.g., main,release/*).'
+        required: false
+        default: 'origin/latex'
+      base_branch:
+        description: 'Primary branch name for deletion instructions (leave blank to use repo default).'
+        required: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Create issues for stale branches
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const inputDays = core.getInput('stale_days') || '30';
+            const staleDays = Number.parseInt(inputDays, 10);
+            if (!Number.isFinite(staleDays) || staleDays <= 0) {
+              throw new Error(`Invalid stale_days: ${inputDays}`);
+            }
+
+            const defaultBranch = context.payload.repository.default_branch;
+            const baseBranchRaw = core.getInput('base_branch') || defaultBranch;
+            const excludeRaw = core.getInput('exclude_branches') || '';
+
+            const normalize = (name) => name.replace(/^origin\//, '').trim();
+            const baseBranch = normalize(baseBranchRaw);
+
+            const excludePatterns = excludeRaw
+              .split(',')
+              .map(normalize)
+              .filter((name) => name.length > 0);
+            const excludeExact = new Set([normalize(defaultBranch), baseBranch]);
+            for (const pattern of excludePatterns) {
+              if (!pattern.includes('*')) {
+                excludeExact.add(pattern);
+              }
+            }
+            const excludeRegex = excludePatterns
+              .filter((pattern) => pattern.includes('*'))
+              .map((pattern) => {
+                const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+                return new RegExp(`^${escaped.replace(/\*/g, '.*')}$`);
+              });
+
+            const isExcluded = (name) => {
+              if (excludeExact.has(name)) {
+                return true;
+              }
+              return excludeRegex.some((regex) => regex.test(name));
+            };
+
+            const now = new Date();
+            const msPerDay = 24 * 60 * 60 * 1000;
+
+            const labelName = 'stale-branch';
+            const issueMarkerPrefix = 'stale-branch-monitor';
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: labelName });
+            } catch (error) {
+              if (error.status === 404) {
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name: labelName,
+                  color: 'd73a4a',
+                  description: 'Branch is stale and should be reviewed for deletion.',
+                });
+              } else {
+                throw error;
+              }
+            }
+
+            const existingIssuesByKey = new Map();
+            const existingOpenByBranch = new Map();
+            const markerRegex = new RegExp(
+              `${issueMarkerPrefix}\\s+branch=([^\\s]+)\\s+oid=([0-9a-f]+)`,
+              'i'
+            );
+            for (let page = 1; page <= 10; page += 1) {
+              const response = await github.rest.search.issuesAndPullRequests({
+                q: `repo:${owner}/${repo} is:issue "${issueMarkerPrefix}"`,
+                per_page: 100,
+                page,
+              });
+              if (response.data.items.length === 0) {
+                break;
+              }
+              for (const issue of response.data.items) {
+                if (!issue.pull_request) {
+                  const body = issue.body || '';
+                  const markerMatch = body.match(markerRegex);
+                  if (markerMatch) {
+                    const branchName = markerMatch[1];
+                    const oid = markerMatch[2];
+                    existingIssuesByKey.set(`${branchName}:${oid}`, issue);
+                    if (issue.state === 'open' && !existingOpenByBranch.has(branchName)) {
+                      existingOpenByBranch.set(branchName, issue);
+                    }
+                  } else {
+                    const titleMatch = issue.title.match(/^Stale branch:\s+(.+)$/);
+                    if (titleMatch) {
+                      const branchName = titleMatch[1];
+                      if (issue.state === 'open' && !existingOpenByBranch.has(branchName)) {
+                        existingOpenByBranch.set(branchName, issue);
+                      }
+                    }
+                  }
+                }
+              }
+              if (response.data.items.length < 100) {
+                break;
+              }
+            }
+
+            const staleBranches = [];
+            let cursor = null;
+            do {
+              const data = await github.graphql(
+                `
+                  query ($owner: String!, $repo: String!, $cursor: String) {
+                    repository(owner: $owner, name: $repo) {
+                      refs(refPrefix: "refs/heads/", first: 100, after: $cursor) {
+                        nodes {
+                          name
+                          target {
+                            __typename
+                            ... on Commit {
+                              oid
+                              committedDate
+                            }
+                            ... on Tag {
+                              target {
+                                __typename
+                                ... on Commit {
+                                  oid
+                                  committedDate
+                                }
+                              }
+                            }
+                          }
+                        }
+                        pageInfo {
+                          endCursor
+                          hasNextPage
+                        }
+                      }
+                    }
+                  }
+                `,
+                { owner, repo, cursor }
+              );
+
+              const refs = data.repository.refs.nodes;
+              for (const ref of refs) {
+                if (isExcluded(ref.name)) {
+                  continue;
+                }
+
+                let committedDate = null;
+                if (ref.target.__typename === 'Commit') {
+                  const { oid } = ref.target;
+                  committedDate = ref.target.committedDate;
+                  if (!oid) {
+                    continue;
+                  }
+                  ref.oid = oid;
+                } else if (
+                  ref.target.__typename === 'Tag' &&
+                  ref.target.target &&
+                  ref.target.target.__typename === 'Commit'
+                ) {
+                  const { oid } = ref.target.target;
+                  committedDate = ref.target.target.committedDate;
+                  if (!oid) {
+                    continue;
+                  }
+                  ref.oid = oid;
+                }
+
+                if (!committedDate) {
+                  continue;
+                }
+
+                const ageDays = Math.floor((now - new Date(committedDate)) / msPerDay);
+                if (ageDays >= staleDays) {
+                  staleBranches.push({
+                    name: ref.name,
+                    oid: ref.oid,
+                    committedDate,
+                    ageDays,
+                  });
+                }
+              }
+
+              cursor = data.repository.refs.pageInfo.hasNextPage
+                ? data.repository.refs.pageInfo.endCursor
+                : null;
+            } while (cursor);
+
+            for (const branch of staleBranches) {
+              const issueTitle = `Stale branch: ${branch.name}`;
+              const issueKey = `${branch.name}:${branch.oid}`;
+              const exactIssue = existingIssuesByKey.get(issueKey);
+              if (exactIssue) {
+                if (exactIssue.state === 'closed') {
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: exactIssue.number,
+                    body: `Branch **${branch.name}** is still stale as of ${now.toISOString()}.`,
+                  });
+                  await github.rest.issues.update({
+                    owner,
+                    repo,
+                    issue_number: exactIssue.number,
+                    state: 'open',
+                  });
+                }
+                const hasLabel = (exactIssue.labels || []).some(
+                  (label) => label.name === labelName
+                );
+                if (!hasLabel) {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number: exactIssue.number,
+                    labels: [labelName],
+                  });
+                }
+                continue;
+              }
+
+              const openIssueForBranch = existingOpenByBranch.get(branch.name);
+              if (openIssueForBranch) {
+                continue;
+              }
+
+              const issueBody = [
+                `<!-- ${issueMarkerPrefix} branch=${branch.name} oid=${branch.oid} -->`,
+                `Branch **${branch.name}** has not been updated in ${branch.ageDays} days.`,
+                '',
+                `Last commit: ${branch.committedDate}`,
+                '',
+                'If this branch is no longer needed, please delete it.',
+                '',
+                'Steps (git):',
+                '```sh',
+                `git fetch origin`,
+                `git checkout ${baseBranch}`,
+                `git branch -D ${branch.name}`,
+                `git push origin --delete ${branch.name}`,
+                '```',
+                '',
+                'Steps (GitHub UI):',
+                '1. Open the branch list for the repository.',
+                `2. Find ${branch.name} and click the trash icon to delete.`,
+                '',
+                'If this branch should be kept, comment on this issue with the reason.',
+              ].join('\n');
+
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title: issueTitle,
+                body: issueBody,
+                labels: [labelName],
+                assignees: ['aswaterman', 'wmat'],
+              });
+            }
